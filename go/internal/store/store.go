@@ -191,6 +191,51 @@ func SetSchemaRepair(on bool) error {
 	return SaveState(s)
 }
 
+// SetTakeoverWanted 记下「用户要不要接管这个 agent」（期望态）。
+// 只改期望态，不碰磁盘——具体怎么接管是 runtime/takeover 的事。
+func SetTakeoverWanted(agent string, want bool) error {
+	s := LoadState()
+	if s.Takeover == nil {
+		s.Takeover = map[string]bool{}
+	}
+	if want {
+		// 默认就是想接管，所以「想要」用删除条目表示，state.json 保持干净
+		delete(s.Takeover, agent)
+	} else {
+		s.Takeover[agent] = false
+	}
+	if len(s.Takeover) == 0 {
+		s.Takeover = nil
+	}
+	return SaveState(s)
+}
+
+// SetSpecialTreatment 开关整个 special_treatment 层。
+func SetSpecialTreatment(on bool) error {
+	s := LoadState()
+	s.SpecialTreatment = &on
+	return SaveState(s)
+}
+
+// SetSpecialPlugin 单独开关一个插件。关 = 记进 SpecialOff，开 = 从里面删掉。
+func SetSpecialPlugin(name string, on bool) error {
+	s := LoadState()
+	out := make([]string, 0, len(s.SpecialOff))
+	for _, n := range s.SpecialOff {
+		if n != name {
+			out = append(out, n)
+		}
+	}
+	if !on {
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		out = nil
+	}
+	s.SpecialOff = out
+	return SaveState(s)
+}
+
 // ---------- 校验 ----------
 
 // Validate 检查所有 profile 引用的 provider 都存在、都有 key。

@@ -20,41 +20,44 @@ var (
 	CommitTime = "unknown"
 )
 
-const usage = `newgate — AI agent 配置的语义命名层
+const usage = `newgate — AI CLI 的语义模型层
 
-用法:
-  newgate start [--force]        启动代理 + 接管已配置的 agent
-  newgate stop                   停代理 + 还原配置（逃生舱）
-  newgate restart
-  newgate status                 当前状态：每个 agent 用哪个 profile
-  newgate reload                 立刻重读配置（平时会自动热更新，无需此命令）
+接管与退出
+  newgate start                 全面接管：起代理 + 接管所有 agent
+  newgate stop                  全面停止：停代理 + 所有 agent 恢复直连
+  newgate on <agent>            只接管一个（同 takeover）
+  newgate off <agent>           只放开一个，且以后 start 也不再管它（同 release）
+  newgate restart               重启代理，接管现场原样保留
+  newgate status                当前状态：谁在走 newgate、用哪个 profile
+  newgate reload                立刻重读配置（平时 1 秒内自动热更新）
 
+切换 profile
   newgate --set-profile <名> [--agent <agent>]
-                                 切某个 agent 的 profile；省略 --agent 设全局默认
-  newgate profiles               列出所有 profile
-  newgate tier <档位>            看这个档位的 fallback 链：每个候选为什么选中/跳过
-  newgate probe [profile]        给每个候选打一次真实请求，出健康报告
+                                设 profile；省略 --agent 设全局默认
+  newgate profiles              列出所有 profile（优先级 / 标志 / 覆盖）
+  newgate tier <档位>           fallback 链：每个候选为什么选中 / 跳过
+  newgate probe [profile]       给候选打真实请求，出健康报告
+  newgate agents                列出已知 agent 及其模型槽位
 
-  newgate shim install|off|on|uninstall|status [agent]
-                                 PATH shim：装上之后直接敲 claude 就走 newgate
-  newgate agents                 列出已知 agent 及其槽位
-
-  newgate init [--force]         铺开默认配置
-  newgate doctor                 体检
-  newgate logs [N] [-f]          代理日志
-  newgate alllogs                完整诊断包
-  newgate debug on|off [分钟]    全量请求日志（默认 30 分钟后自动关）
+维护
+  newgate init [--force]        铺开默认配置
+  newgate doctor                体检
+  newgate logs [N] [-f]         代理日志
+  newgate alllogs               完整诊断包
+  newgate debug on|off [分钟]   全量请求日志（默认 30 分钟自动关）
   newgate schema-repair on|off
-  newgate tui                    menuconfig 风格界面
+  newgate st [on|off] [插件]    special_treatment：上游怪癖补丁的开关与说明
+  newgate shim …                底层逃生口，平时用 on/off 就够了
+  newgate tui                   menuconfig 风格界面
   newgate version
 
-术语:
-  agent        被接管的 CLI —— claude / opencode
-  intra-agent  agent 内部的子 agent —— 西西弗斯 / oracle
-  tier         能力档 —— heavy / mid / light / vision
-  model        真实模型
+术语
+  agent      被接管的 CLI —— claude / opencode
+  tier       能力档 —— heavy / mid / light / vision
+  profile    一套 (tier → provider/model) 绑定
+  st         special_treatment：只对某家上游生效的请求补丁
 
-配置: ~/.config/newgate/{providers.json, mappings/*.json, state.json}
+配置  ~/.config/newgate/{providers.json, mappings/*.json, state.json}
 `
 
 // Run 是 CLI 的唯一入口。
@@ -77,13 +80,27 @@ func Run(args []string) int {
 	}
 
 	switch args[0] {
+	// start / stop 带 agent 名就是单独接管/释放那一个，不带就是全面接管/停止。
+	// 用户不需要知道背后是 PATH shim 还是改配置文件——那是我们的实现细节。
 	case "start":
+		if a := arg(args, 1); a != "" {
+			return cmdTakeover(a)
+		}
 		return cmdStart(has(args, "--force"))
 	case "stop":
+		if a := arg(args, 1); a != "" {
+			return cmdRelease(a)
+		}
+		return cmdStop()
+	case "on", "takeover", "take":
+		return cmdTakeover(arg(args, 1))
+	case "off", "release", "free":
+		if a := arg(args, 1); a != "" {
+			return cmdRelease(a)
+		}
 		return cmdStop()
 	case "restart":
-		cmdStop()
-		return cmdStart(has(args, "--force"))
+		return cmdRestart(has(args, "--force"))
 	case "status":
 		return cmdStatus()
 	case "reload":
@@ -110,6 +127,8 @@ func Run(args []string) int {
 		return cmdDebug(args)
 	case "schema-repair", "schema_repair":
 		return cmdSchemaRepair(len(args) > 1 && truthy(args[1]))
+	case "st", "special", "special-treatment", "special_treatment":
+		return cmdSpecial(args)
 	case "tui", "menuconfig":
 		return cmdTUI()
 	case "version", "--version", "-v":

@@ -23,6 +23,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/gateway/health"
 	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 	schema "github.com/rzbdz/newgate/go/internal/gateway/rewrite/schema"
+	"github.com/rzbdz/newgate/go/internal/gateway/special"
 	"github.com/rzbdz/newgate/go/internal/platform/logx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/store"
@@ -260,6 +261,28 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 						s.logf("[proxy] #%d tools 回写失败，按原样发: %v", reqID, serr)
 					}
 				}
+			}
+		}
+
+		// special_treatment：每家上游的怪癖补丁（gateway/special）。
+		// 与 schema 修补的分工——那边是所有严格校验器都需要的通用修补，
+		// 这边是「只有某家上游才需要」的，由插件自己 Match 认领。
+		if st.SpecialEnabled() {
+			res := special.Apply(newBody, &special.Request{
+				InModel:  inModel,
+				Tier:     tier,
+				Model:    a.Binding.Model,
+				Provider: a.Binding.Provider,
+				BaseURL:  a.Provider.BaseURL,
+				Protocol: a.Provider.Protocol,
+				Path:     suffix,
+				Stream:   stream,
+			}, st.SpecialPluginOff)
+			for _, n := range res.Notes {
+				s.logf("[proxy] #%d special_treatment %s", reqID, n)
+			}
+			if res.Changed {
+				newBody = res.Body
 			}
 		}
 

@@ -160,6 +160,17 @@ type State struct {
 	Port      int  `json:"port"`
 	TakenOver bool `json:"taken_over"`
 
+	// Takeover per-agent 接管意愿（期望态）。没有条目 = 想接管，所以
+	// `newgate start` 默认全面接管；显式 false = 用户 `newgate off <agent>`
+	// 过它，start 也不该再碰它。
+	//
+	// 为什么必须持久化：接管 claude 用的是 PATH shim，而 stop 必须把它摘掉
+	// ——不然 `claude` 还是命中 shim，wrapper 又把代理懒启动回来，等于没停。
+	// 但摘掉之后得记得「用户本来是要接管 claude 的」，否则下次 start 起来了
+	// 却不接管，claude 静默直连——同一个不对称，只是反了个方向。
+	// 期望态让 start = 插上、stop = 拔掉，两边都不丢用户的意图。
+	Takeover map[string]bool `json:"takeover,omitempty"`
+
 	// Chain 链的成本上界。
 	Chain ChainLimits `json:"chain"`
 
@@ -173,6 +184,13 @@ type State struct {
 	// 按 JSON Schema 规范这是语义无操作，所以默认开。
 	// 用指针以区分「没配」和「显式关闭」。
 	SchemaRepair *bool `json:"schema_repair,omitempty"`
+
+	// SpecialTreatment special_treatment 插件层总开关（默认开）。
+	// 插件只对认领的上游生效（gateway/special），所以开着不影响别人。
+	SpecialTreatment *bool `json:"special_treatment,omitempty"`
+	// SpecialOff 单独关掉的插件名。排查「是不是 newgate 改坏了请求」时
+	// 关掉某一个比关掉整层更精确。名字见 `newgate st`。
+	SpecialOff []string `json:"special_treatment_off,omitempty"`
 
 	// TODO(M2): Mood / RoleBudgets / Disabled —— 见 core/policy。
 }
@@ -202,8 +220,32 @@ func (s *State) ActiveFor(agent string) string {
 	return s.DefaultProfile
 }
 
+// TakeoverWanted 用户是否希望接管这个 agent。没表态过就算想要——
+// `newgate start` 的语义是「全面接管」，不该要求用户先逐个登记。
+func (s *State) TakeoverWanted(agent string) bool {
+	if v, ok := s.Takeover[agent]; ok {
+		return v
+	}
+	return true
+}
+
 func (s *State) RepairEnabled() bool {
 	return s.SchemaRepair == nil || *s.SchemaRepair
+}
+
+// SpecialEnabled special_treatment 层是否启用。默认开。
+func (s *State) SpecialEnabled() bool {
+	return s.SpecialTreatment == nil || *s.SpecialTreatment
+}
+
+// SpecialPluginOff 某个插件是否被单独关掉。
+func (s *State) SpecialPluginOff(name string) bool {
+	for _, n := range s.SpecialOff {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 // DebugActive debug 是否仍在有效期内。过期即视为关闭。

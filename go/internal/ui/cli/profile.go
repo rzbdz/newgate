@@ -20,7 +20,7 @@ func cmdSetProfile(agent, name string) int {
 	if err := store.SetActiveProfile(agent, name); err != nil {
 		return die(65, err.Error())
 	}
-	scope := "global default"
+	scope := "全局默认"
 	if agent != "" {
 		scope = "agent " + agent
 	}
@@ -129,7 +129,7 @@ func cmdTier(which string) int {
 
 	for _, head := range headNames {
 		sort.Strings(heads[head])
-		fmt.Printf("\n\033[1mchain head %s\033[0m  (used by: %s)   maxAttempts=%d budget=%dms\n",
+		fmt.Printf("\n\033[1m链头 %s\033[0m  (用于: %s)   最大尝试=%d 预算=%dms\n",
 			head, strings.Join(heads[head], ", "),
 			st.Chain.Attempts(), st.Chain.Budget())
 
@@ -172,20 +172,20 @@ func cmdAgents() int {
 	sort.Strings(names)
 	for _, n := range names {
 		a, _ := agents.Get(n)
-		fmt.Printf("\n\033[1m%s\033[0m  dialect=%s  profile=%s\n",
+		fmt.Printf("\n\033[1m%s\033[0m  协议=%s  当前 profile=%s\n",
 			a.ID, a.Dialect, st.ActiveFor(a.ID))
 		if a.Notes != "" {
 			fmt.Printf("  %s\n", a.Notes)
 		}
 		if len(a.Slots) == 0 {
-			fmt.Printf("  slots: discovered from config files at bootstrap\n")
+			fmt.Printf("  槽位：启动时从配置文件发现\n")
 			continue
 		}
-		fmt.Printf("  %-12s %-8s %-34s %s\n", "SLOT", "TIER", "ENV VAR", "NOTE")
+		fmt.Printf("  %-12s %-8s %-34s %s\n", "槽位", "档位", "环境变量", "说明")
 		for _, s := range a.Slots {
 			fmt.Printf("  %-12s %-8s %-34s %s\n", s.Name, s.Tier, s.EnvVar, s.Desc)
 		}
 	}
-	fmt.Printf("\nSwitch one agent only:  newgate --set-profile <name> --agent <agent>\n")
+	fmt.Printf("\n只切单个 agent:  newgate --set-profile <名> --agent <agent>\n")
 	return 0
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/platform/logx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
-	"github.com/rzbdz/newgate/go/internal/runtime/injection"
+	"github.com/rzbdz/newgate/go/internal/runtime/takeover"
 	"github.com/rzbdz/newgate/go/internal/store"
 )
 
@@ -150,28 +150,16 @@ func cmdStart(force bool) int {
 	fmt.Printf("✓ 代理已启动  pid=%d  127.0.0.1:%d  默认 profile=%s\n",
 		info.PID, st.Port, st.DefaultProfile)
 
-	reps, err := injection.ApplyAll(st.Port)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "newgate: %v\n", err)
-	}
-	for _, r := range reps {
-		if r.Skipped != "" {
-			fmt.Printf("- %s  (跳过: %s)\n", r.File, r.Skipped)
-			continue
-		}
-		fmt.Printf("✓ 接管 %s\n", r.File)
-		for i, rw := range r.Rewrites {
-			if i < 4 {
-				fmt.Printf("    %s\n", rw)
-			}
-		}
-		if len(r.Rewrites) > 4 {
-			fmt.Printf("    … 共 %d 处改写\n", len(r.Rewrites))
-		}
-		if r.Fuzzy > 0 {
-			fmt.Printf("    ⚠ 其中 %d 处没命中精确规则，归到了中档，建议核对\n", r.Fuzzy)
+	// 全面接管：所有没被用户显式 off 掉的 agent，各按自己的机制插上。
+	fmt.Println()
+	rs := takeover.OnAll(st.Port)
+	printResults(rs)
+	for _, r := range rs {
+		if r.Mechanism == takeover.MechShim && r.Err == nil && !r.Skipped && len(r.Lines) > 0 {
+			warnShellEnvConflict(r.Agent)
 		}
 	}
+
 	st.TakenOver = true
 	_ = store.SaveState(st)
 	fmt.Printf("\n配置改动会自动热更新，不需要重启代理。\n")
@@ -179,14 +167,83 @@ func cmdStart(force bool) int {
 	return 0
 }
 
+// printResults 把接管/释放结果打成人话。
+// 三种标记不能混：✓ 真的接管上了，· 有意跳过，✗ 出错了。
+func printResults(rs []takeover.Result) {
+	for _, r := range rs {
+		switch {
+		case r.Err != nil:
+			fmt.Fprintf(os.Stderr, "✗ %-10s %v\n", r.Agent, r.Err)
+		case len(r.Lines) == 0:
+			continue
+		default:
+			mark := "✓"
+			if r.Skipped {
+				mark = "·"
+			}
+			fmt.Printf("%s %-10s %s\n", mark, r.Agent, r.Lines[0])
+			for _, l := range r.Lines[1:] {
+				fmt.Printf("             %s\n", l)
+			}
+		}
+		for _, w := range r.Warn {
+			fmt.Printf("  ⚠ %s\n", w)
+		}
+	}
+}
+
+// cmdTakeover / cmdRelease 单独接管或释放一个 agent。
+//
+// 用户不该关心机制：claude 靠 PATH shim、opencode 靠改配置文件，这是我们的
+// 实现细节。对外只有「接管」和「释放」，机制由 runtime/takeover 挑。
+func cmdTakeover(agent string) int {
+	if agent == "" {
+		return die(64, "要接管谁？例：newgate on claude")
+	}
+	st := store.LoadState()
+	r := takeover.On(agent, st.Port)
+	if r.Err != nil {
+		return die(65, r.Err.Error())
+	}
+	printResults([]takeover.Result{r})
+	if r.Mechanism == takeover.MechShim {
+		warnShellEnvConflict(agent)
+	}
+	if daemon.Running() == nil {
+		fmt.Println("\n注意：代理还没跑。newgate start 起来它才真的能用。")
+	}
+	return 0
+}
+
+func cmdRelease(agent string) int {
+	if agent == "" {
+		return die(64, "要释放谁？例：newgate off claude")
+	}
+	r := takeover.Off(agent)
+	if r.Err != nil {
+		return die(65, r.Err.Error())
+	}
+	if len(r.Lines) == 0 {
+		fmt.Printf("- %s 本来就没被接管\n", agent)
+	} else {
+		printResults([]takeover.Result{r})
+	}
+	fmt.Printf("%s 已恢复直连；以后 newgate start 也不会再接管它（newgate on %s 可恢复）\n",
+		agent, agent)
+	if r.Mechanism == takeover.MechShim {
+		fmt.Println("  当前 shell 可能缓存了路径，`hash -r`（zsh: `rehash`）一下")
+	}
+	return 0
+}
+
 func cmdStop() int {
-	restored, err := injection.RestoreAll()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "newgate: %v\n", err)
-	}
-	for _, f := range restored {
-		fmt.Printf("✓ 已还原 %s\n", f)
-	}
+	// 顺序很重要：先把 PATH shim 摘掉。否则 `claude` 这类命令仍会命中
+	// ~/.config/newgate/bin/claude → newgate，而 wrapper 会**懒启动代理**，
+	// stop 等于没停——这是「stop 了还在走 newgate」的直接原因。
+	//
+	// OffAll 不改接管意愿：下次 start 会把这些原样插回去。
+	printResults(takeover.OffAll())
+
 	pid, err := daemon.Stop()
 	if err != nil {
 		return die(70, err.Error())
@@ -194,12 +251,25 @@ func cmdStop() int {
 	if pid > 0 {
 		fmt.Printf("✓ 代理已停 (pid %d)\n", pid)
 	} else {
-		fmt.Println("代理本来没在跑")
+		fmt.Println("- 代理本来没在跑")
 	}
+
 	st := store.LoadState()
 	st.TakenOver = false
 	_ = store.SaveState(st)
+
+	fmt.Println("\nnewgate 已完全退出，所有工具恢复直连。")
+	fmt.Println("  PATH 里那行仍指向空的 shim 目录，无害；彻底清掉用 `newgate shim uninstall`。")
 	return 0
+}
+
+// cmdRestart 重启代理并保留接管现场。
+// 期望态存在 state.json 里，所以先 stop 再 start 就会原样插回去，
+// 不需要在这里手工快照。
+func cmdRestart(force bool) int {
+	cmdStop()
+	fmt.Println()
+	return cmdStart(force)
 }
 
 // cmdReload 显式触发重载。平时不需要——watcher 会自动发现。

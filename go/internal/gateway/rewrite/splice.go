@@ -54,10 +54,133 @@ func TopLevelRaw(body []byte, key string) ([]byte, bool) {
 	return body[s:e], true
 }
 
+// InsertTopLevelRaw 在顶层对象里**新增**一个 key，插在开头（紧跟 `{`），
+// 其余每个字节原样保留。已经存在同名 key 时报错——调用方要先用
+// TopLevelRaw 判断，然后决定是插入还是 ReplaceTopLevelRaw，
+// 绝不能悄悄产生重复 key。
+//
+// 为什么插在开头而不是末尾：末尾要处理尾随空白、换行、以及「最后一个值
+// 后面到 `}` 之间有什么」，出错概率高；开头只需要判断对象是不是空的。
+func InsertTopLevelRaw(body []byte, key string, raw []byte) ([]byte, error) {
+	if _, _, err := findTopLevelValue(body, key); err == nil {
+		return nil, errDupKey
+	}
+	i := skipWS(body, 0)
+	if i >= len(body) || body[i] != '{' {
+		return nil, errNotObject
+	}
+	j := skipWS(body, i+1)
+	if j >= len(body) {
+		return nil, errNotObject
+	}
+	quoted, err := json.Marshal(key)
+	if err != nil {
+		return nil, err
+	}
+	ins := make([]byte, 0, len(quoted)+len(raw)+2)
+	ins = append(ins, quoted...)
+	ins = append(ins, ':')
+	ins = append(ins, raw...)
+	if body[j] != '}' { // 对象非空，得补逗号
+		ins = append(ins, ',')
+	}
+	out := make([]byte, 0, len(body)+len(ins))
+	out = append(out, body[:i+1]...)
+	out = append(out, ins...)
+	out = append(out, body[i+1:]...)
+	return out, nil
+}
+
+// EnsureArrayItemField 给顶层数组（messages 等）里满足 match 的每个对象元素
+// 补上一个字段——**只在该元素还没有这个字段时**补，已有的一律不动。
+//
+// 依然是纯字节手术：把所有插入点先收集起来，再一次性拼接。除了插入的那几段，
+// 每条消息的 content 块、cache_control、Unicode 转义形式、缩进都逐字节不变。
+// 这一点是硬要求：把整个 body 做一次 JSON 往返会重排 key、把大整数变成
+// float64、压掉空白——转发一个请求就该是转发。
+//
+// match 收到的是这条元素完整的原始字节（一个 JSON 对象），可以直接用
+// TopLevelString(item, "role") 之类去判断。
+// 返回补了几条；数组不存在或元素不是对象时返回 0 而不报错的情况见 err。
+func EnsureArrayItemField(body []byte, arrayKey, field string, rawVal []byte,
+	match func(item []byte) bool) ([]byte, int, error) {
+
+	s, e, err := findTopLevelValue(body, arrayKey)
+	if err != nil {
+		return body, 0, err
+	}
+	arr := body[s:e]
+	if len(arr) == 0 || arr[0] != '[' {
+		return body, 0, errNotArray
+	}
+	quoted, err := json.Marshal(field)
+	if err != nil {
+		return body, 0, err
+	}
+
+	type point struct {
+		off   int  // body 里的绝对偏移（元素 `{` 之后）
+		comma bool // 元素非空时要补逗号
+	}
+	var points []point
+
+	i := 1
+	for {
+		i = skipWS(arr, i)
+		if i >= len(arr) || arr[i] == ']' {
+			break
+		}
+		if arr[i] == ',' {
+			i++
+			continue
+		}
+		vs := i
+		ve, ok := scanValue(arr, i)
+		if !ok {
+			return body, 0, errNotObject
+		}
+		item := arr[vs:ve]
+		i = ve
+
+		if len(item) == 0 || item[0] != '{' {
+			continue // 元素不是对象：不是我们该管的形状，跳过
+		}
+		if _, _, err := findTopLevelValue(item, field); err == nil {
+			continue // 已经有了，一个字节都不碰
+		}
+		if match != nil && !match(item) {
+			continue
+		}
+		j := skipWS(item, 1)
+		points = append(points, point{off: s + vs + 1, comma: j < len(item) && item[j] != '}'})
+	}
+
+	if len(points) == 0 {
+		return body, 0, nil // 没东西要补：调用方保持原字节
+	}
+
+	out := make([]byte, 0, len(body)+len(points)*(len(quoted)+len(rawVal)+2))
+	prev := 0
+	for _, p := range points {
+		out = append(out, body[prev:p.off]...)
+		out = append(out, quoted...)
+		out = append(out, ':')
+		out = append(out, rawVal...)
+		if p.comma {
+			out = append(out, ',')
+		}
+		prev = p.off
+	}
+	out = append(out, body[prev:]...)
+	return out, len(points), nil
+}
+
 var (
 	errNotObject = errors.New("请求体顶层不是 JSON 对象")
 	errNoKey     = errors.New("顶层找不到该字段")
 	errNotString = errors.New("该字段的值不是字符串")
+	errNotArray  = errors.New("该字段的值不是数组")
+	errDupKey    = errors.New("顶层已经有这个字段了")
 )
 
 // findTopLevelStringValue 同 findTopLevelValue，但要求值是字符串。

@@ -161,6 +161,39 @@ newgate use --list
 | `import` / `export` | 配置导入导出（导出默认脱敏，`--with-secrets` 显式解封） |
 | `completion <shell>` | 生成 shell 补全脚本 |
 
+### 4.1 接管动词（M1 已实现）
+
+对外只有两个动词：**接管**和**释放**。用哪种机制（PATH shim / 改配置文件）是
+实现细节，不进用户接口。
+
+| 子命令 | 说明 |
+| --- | --- |
+| `start` | 全面接管：起代理 + 接管所有未被显式关掉的 agent |
+| `stop` | 全面停止：停代理 + 所有 agent 恢复直连（**不改接管意愿**） |
+| `start <agent>` / `on <agent>` / `takeover <agent>` | 只接管一个，并记下「要接管它」 |
+| `stop <agent>` / `off <agent>` / `release <agent>` | 只放开一个，并记下「不要接管它」 |
+| `restart` | 重启代理，接管现场原样保留 |
+| `shim [status\|uninstall]` | 底层逃生口：摊开 shim 目录实况 / 连 rc 里的 PATH 行一起清干净 |
+
+**为什么不暴露 `shim install <agent>`**：那把内部结构泄漏成了用户接口——用户
+得先搞清楚自己的工具是「读环境变量」还是「读配置文件」那一类，才知道该敲哪个
+命令。老名字保留为 `on`/`off` 的别名，不再出现在帮助里。
+
+**期望态与现实态必须分开存**（`state.json` 的 `takeover` 字段记意愿，磁盘是现实）。
+否则会出现两个方向对称的故障：
+
+| 少了哪一半 | 症状 |
+| --- | --- |
+| `stop` 不摘 shim | `claude` 仍命中 shim → wrapper 懒启动代理 → **stop 了还在走 newgate** |
+| `start` 不装回来 | 代理起来了却没接管 → **claude 静默直连**，用户以为在走 newgate |
+
+`stop` 是「暂时全停」，所以不动意愿；`off <agent>` 是「以后别管它」，所以写进意愿。
+只有 `on <agent>` 能把被 off 掉的那个拉回来。回归测试见
+`go/internal/runtime/takeover/takeover_test.go`。
+
+实现分层：`runtime/takeover` 是接管的唯一实现，CLI / TUI / Web 三个壳都只调它
+（docs/02 §2、docs/12 §1）。
+
 ### Shell 补全的特殊性
 
 补全必须知道：第一个非选项 token 之后不要再补 newgate 的选项，而应该**委托给 tool 自己的补全**（如果它有）。至少要做到「不给出误导性的 newgate 选项补全」。

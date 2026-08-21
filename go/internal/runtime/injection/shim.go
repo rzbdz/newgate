@@ -45,11 +45,29 @@ func Install(toolID string) (string, error) {
 	return link, nil
 }
 
+// Uninstall 摘掉一个 shim。两道闸：名字必须是已知 agent，链接必须是我们装的。
+// 同名的真实可执行文件、用户手工留的 claude-bak、自己写的包装脚本一律不动
+// ——宁可留着也不能误删，那是用户的应急手段。想看它们用 Foreign()。
 func Uninstall(toolID string) error {
-	return os.Remove(filepath.Join(Dir(), toolID))
+	if _, ok := agents.Get(toolID); !ok {
+		return fmt.Errorf("%q 不是已知 agent，没动它（shim 目录里的其他东西不属于 newgate）", toolID)
+	}
+	link := filepath.Join(Dir(), toolID)
+	if _, err := os.Lstat(link); err != nil {
+		return err
+	}
+	if !isOurs(link) {
+		return fmt.Errorf("%s 不是 newgate 装的链接，没动它", link)
+	}
+	return os.Remove(link)
 }
 
-// Installed 列出已装的 shim。
+// Installed 列出**我们自己装的** shim。
+//
+// 只认「名字是已知 agent、且是指向 newgate 二进制的符号链接」的条目。
+// 为什么要这么严：这个列表会被 newgate stop 拿去逐个删除。目录里可能有
+// 用户手工重命名的 claude-bak、自己塞的脚本——那些不是我们的东西，
+// 既不能算进「已接管」，更不能被我们删掉。想看它们用 Foreign()。
 func Installed() []string {
 	ents, err := ioutil.ReadDir(Dir())
 	if err != nil {
@@ -57,11 +75,78 @@ func Installed() []string {
 	}
 	var out []string
 	for _, e := range ents {
-		if !e.IsDir() {
-			out = append(out, e.Name())
+		if e.IsDir() {
+			continue
 		}
+		if _, ok := agents.Get(e.Name()); !ok {
+			continue
+		}
+		if !isOurs(filepath.Join(Dir(), e.Name())) {
+			continue
+		}
+		out = append(out, e.Name())
 	}
 	return out
+}
+
+// Foreign 列出 shim 目录里不是我们装的条目。展示给用户，但我们不动它们。
+func Foreign() []string {
+	ents, err := ioutil.ReadDir(Dir())
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if _, ok := agents.Get(name); ok && isOurs(filepath.Join(Dir(), name)) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// isOurs 这个路径是不是**我们装的**符号链接。
+//
+// 两条判据，满足其一即可：
+//   - 指向当前这个可执行文件（刚装的 shim 必然如此，最可靠）
+//   - 目标名里带 newgate（二进制被换了位置/升级过，链接还指向老路径）
+//
+// 为什么不只看名字：用户完全可能把二进制装成别的名字，那时按名字判断会
+// 把自己装的链接认成外人，stop 就摘不掉它——又回到「stop 了还在走 newgate」。
+func isOurs(link string) bool {
+	fi, err := os.Lstat(link)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	dst, err := os.Readlink(link)
+	if err != nil {
+		return false
+	}
+	if self, err := os.Executable(); err == nil && sameFile(dst, self) {
+		return true
+	}
+	return strings.Contains(filepath.Base(dst), "newgate")
+}
+
+// sameFile 两个路径是否指向同一个文件（跟着符号链接走，解决 /var 与
+// /private/var 这类等价路径）。
+func sameFile(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(fa, fb)
 }
 
 // RCFiles 需要加 PATH 的 shell 启动文件（只返回已存在的）。
@@ -79,7 +164,7 @@ func RCFiles() []string {
 
 func block() string {
 	return fmt.Sprintf("%s\n# newgate 的 shim 目录必须在 PATH 最前面，才能拦住 claude 等命令。\n"+
-		"# 删掉这一段（或跑 newgate shim off）即可完全恢复原状。\n"+
+		"# 删掉这一段（或跑 newgate shim uninstall）即可完全恢复原状。\n"+
 		"export PATH=\"%s:$PATH\"\n%s\n", beginMark, Dir(), endMark)
 }
 
