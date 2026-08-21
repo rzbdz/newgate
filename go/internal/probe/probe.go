@@ -11,7 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rzbdz/newgate/go/internal/config"
+	"github.com/rzbdz/newgate/go/internal/core/domain"
+	"github.com/rzbdz/newgate/go/internal/store"
 )
 
 type Result struct {
@@ -70,11 +71,11 @@ func Run(o Options) ([]Result, error) {
 		o.Timeout = 120 * time.Second
 	}
 
-	provs, err := config.LoadProviders()
+	provs, err := store.LoadProviders()
 	if err != nil {
 		return nil, err
 	}
-	names, err := config.ListProfiles()
+	names, err := store.ListProfiles()
 	if err != nil {
 		return nil, err
 	}
@@ -96,11 +97,11 @@ func Run(o Options) ([]Result, error) {
 	uniqSet := map[Target]bool{}
 	var uniq []Target
 	for _, n := range names {
-		pr, err := config.LoadProfile(n)
+		pr, err := store.LoadProfile(n)
 		if err != nil {
 			continue
 		}
-		for _, role := range config.Roles {
+		for _, role := range domain.Roles {
 			b, ok := pr.Resolve(role)
 			if !ok {
 				results = append(results, Result{Profile: n, Role: role, Err: "未绑定"})
@@ -233,7 +234,7 @@ func Light(ok bool, lat time.Duration) string {
 }
 
 // One 对一个 (provider, model) 打一次最小请求。
-func One(p config.Provider, model string, timeout time.Duration) (int, time.Duration, error) {
+func One(p domain.Provider, model string, timeout time.Duration) (int, time.Duration, error) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":      model,
 		"max_tokens": 4,
@@ -288,7 +289,7 @@ func extractErr(raw []byte) string {
 }
 
 func roleIdx(r string) int {
-	for i, x := range config.Roles {
+	for i, x := range domain.Roles {
 		if x == r {
 			return i
 		}
