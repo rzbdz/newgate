@@ -21,6 +21,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/probe"
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
 	"github.com/rzbdz/newgate/go/internal/runtime/injection"
+	"github.com/rzbdz/newgate/go/internal/runtime/takeover"
 	"github.com/rzbdz/newgate/go/internal/store"
 )
 
@@ -39,8 +40,8 @@ func warnShellEnvConflict(toolID string) {
 		return
 	}
 	fmt.Printf("\n提示：你的 shell 里已导出 %s\n", strings.Join(conflict, ", "))
-	fmt.Println("  shim 会在子进程里覆盖它们，所以**不影响** newgate 工作，不用改你的 rc。")
-	fmt.Println("  但如果哪天你 newgate shim off，这些变量会重新生效（回到原来的直连行为）——这正是想要的。")
+	fmt.Println("  接管时会在子进程里覆盖它们，所以**不影响** newgate 工作，不用改你的 rc。")
+	fmt.Printf("  但 newgate off %s 之后这些变量会重新生效（回到原来的直连行为）——这正是想要的。\n", toolID)
 }
 
 func cmdProbe(only string, asJSON bool) int {
@@ -424,45 +425,77 @@ func checkProxyEnv() int {
 
 func cmdStatus() int {
 	st := store.LoadState()
-	fmt.Printf("版本      %s  (构建于 %s)\n", Version, pretty(BuildTime))
-	fmt.Printf("profile   %s\n", st.DefaultProfile)
-	flags := ""
-	if st.DebugActive() {
-		flags += " debug=on"
-	}
-	if !st.RepairEnabled() {
-		flags += " schema-repair=off"
-	}
-	if st.Debug && !st.DebugActive() {
-		flags += " debug=已过期(自动关)"
-	} else if st.DebugActive() && st.DebugUntil != "" {
-		flags += " 到 " + st.DebugUntil
-	}
-	if flags != "" {
-		fmt.Printf("开关     %s\n", flags)
-	}
 
+	fmt.Printf("newgate %s  (构建于 %s)\n", Version, pretty(BuildTime))
+	fmt.Println()
+
+	// 代理（数据面）—— 挂了的话，所有走 newgate 的工具一起挂。
 	if i := daemon.Running(); i != nil {
 		alive := "✓ 可达"
 		if !pingProxy(i.Port) {
 			if httpx.TCPAlive("127.0.0.1", i.Port, time.Second) {
-				alive = "⚠ 端口在听但 HTTP 探活失败（出站代理劫持？newgate doctor）"
+				alive = "⚠ 端口在听但 HTTP 探活失败（出站代理劫持？→ newgate doctor）"
 			} else {
 				alive = "✗ 端口不响应"
 			}
 		}
-		fmt.Printf("代理      运行中 pid=%d 127.0.0.1:%d  %s\n", i.PID, i.Port, alive)
+		fmt.Printf("代理      运行中  pid=%d  %s\n", i.PID, alive)
 	} else {
 		fmt.Printf("代理      未运行  (newgate start)\n")
 	}
+	if flags := statusFlags(st); flags != "" {
+		fmt.Printf("开关      %s\n", flags)
+	}
+
+	// 接管 —— 回答最关键的问题：谁的命令现在会走 newgate。
+	// 期望态（用户 on/off 过什么）和现实态（磁盘上真装了什么）分开显示：
+	// 两者不一致正是「stop 了还在走 newgate」「start 了却没接管」的现场。
+	fmt.Println("\n接管")
+	anyRouted, anyDrift := false, false
+	for _, s := range takeover.List() {
+		mark := "  -"
+		switch {
+		case s.Active:
+			mark = "  ✓"
+			anyRouted = true
+		case !s.Wanted:
+			mark = "  ·"
+		}
+		fmt.Printf("%s %-10s %s\n", mark, s.Agent, s.Detail)
+		if !s.Wanted {
+			fmt.Printf("             你 off 过它（newgate on %s 恢复）\n", s.Agent)
+		} else if !s.Active && daemon.Running() != nil {
+			anyDrift = true
+		}
+	}
+	if fg := injection.Foreign(); len(fg) > 0 {
+		fmt.Printf("  ! %s 里还有 %s —— 不是 newgate 装的，我们不碰它\n",
+			injection.Dir(), strings.Join(fg, ", "))
+	}
+	if !anyRouted {
+		fmt.Println("  所有工具直连 —— newgate 没有接管任何工具。")
+		fmt.Println("  全面接管: newgate start    只管一个: newgate on <agent>")
+	} else if anyDrift {
+		fmt.Println("  ⚠ 代理在跑但有 agent 没接管上，跑 newgate start 补齐")
+	}
+
+	// 配置 —— 用哪个 profile。
+	fmt.Println("\n配置")
+	fmt.Printf("  默认 profile  %s\n", st.DefaultProfile)
+	for _, id := range sortedAgentIDs() {
+		if p := st.Active[id]; p != "" && p != st.DefaultProfile {
+			fmt.Printf("  %-12s %s   (per-agent 覆盖)\n", id, p)
+		}
+	}
+	fmt.Printf("  切换: newgate --set-profile <名> [--agent %s]\n", firstAgent())
 
 	pr, err := store.LoadProfile(st.DefaultProfile)
 	if err != nil {
-		fmt.Printf("⚠ profile 读不出: %v\n", err)
+		fmt.Printf("\n⚠ 默认 profile %q 读不出: %v\n", st.DefaultProfile, err)
 		return 0
 	}
 	provs, _ := store.LoadProviders()
-	fmt.Println("\n档位绑定:")
+	fmt.Printf("\n档位绑定  (profile %s)\n", st.DefaultProfile)
 	for _, role := range domain.Roles {
 		b, ok := pr.Resolve(role)
 		if !ok {
@@ -477,37 +510,68 @@ func cmdStatus() int {
 				note = "  ⚠ 缺 api_key"
 			}
 		}
-		fmt.Printf("  %-8s %s/%s%s\n", role, b.Provider, b.Model, note)
+		fmt.Printf("  %-8s %s%s\n", role, b.String(), note)
 	}
 
 	if snap, err := store.Load(); err == nil {
-		fmt.Println("\nfallback chain (heavy tier; full detail: newgate tier heavy):")
-		steps, _ := resolve.BuildChain("heavy", snap.Profiles, snap.Providers, resolve.Opts{
+		steps, skips := resolve.BuildChain("heavy", snap.Profiles, snap.Providers, resolve.Opts{
 			Active: st.DefaultProfile, Available: health.Default.Available,
 			MaxSteps: st.Chain.Attempts()})
-		for i, stp := range steps {
-			arrow := "  ↓ "
-			if i == 0 {
-				arrow = "  → "
-			}
-			fmt.Printf("%s%s: %s\n", arrow, stp.Profile, stp.Binding)
-		}
+		fmt.Printf("\nfallback 链  (heavy 档)\n")
 		if len(steps) == 0 {
-			fmt.Println("  ⚠ 无可用候选，跑 newgate role heavy 看原因")
+			fmt.Println("  ⚠ 无可用候选（newgate tier heavy 看原因）")
+		} else {
+			for i, s := range steps {
+				arrow := "  ↓ "
+				if i == 0 {
+					arrow = "  → "
+				}
+				fmt.Printf("%s%s: %s\n", arrow, s.Profile, s.Binding.String())
+			}
+			if len(skips) > 0 {
+				fmt.Printf("  （%d 个候选被跳过，newgate tier heavy 看原因）\n", len(skips))
+			}
 		}
-	}
-
-	fmt.Println("\n接管状态:")
-	for _, t := range paths.TargetFiles() {
-		if _, err := os.Stat(t); os.IsNotExist(err) {
-			fmt.Printf("  %-55s 文件不存在\n", t)
-			continue
-		}
-		s := "未接管"
-		if injection.IsTakenOver(t) {
-			s = "✓ 已接管"
-		}
-		fmt.Printf("  %-55s %s\n", t, s)
 	}
 	return 0
 }
+
+// statusFlags 一行列出非默认开关。
+func statusFlags(st *domain.State) string {
+	var f []string
+	if st.DebugActive() {
+		f = append(f, "debug=on")
+		if st.DebugUntil != "" {
+			f[len(f)-1] += "（到 " + st.DebugUntil + "）"
+		}
+	} else if st.Debug {
+		f = append(f, "debug=已过期(自动关)")
+	}
+	if !st.RepairEnabled() {
+		f = append(f, "schema-repair=off")
+	}
+	if !st.SpecialEnabled() {
+		f = append(f, "special_treatment=off")
+	} else if len(st.SpecialOff) > 0 {
+		f = append(f, "special_treatment 关了: "+strings.Join(st.SpecialOff, ","))
+	}
+	return strings.Join(f, "  ")
+}
+
+// sortedAgentIDs 稳定顺序的已知 agent 列表。
+func sortedAgentIDs() []string {
+	ids := agents.Names()
+	sort.Strings(ids)
+	return ids
+}
+
+func firstAgent() string {
+	ids := sortedAgentIDs()
+	if len(ids) == 0 {
+		return "claude"
+	}
+	return ids[0]
+}
+
+// routingOf 已被 runtime/takeover.List() 取代——那里是接管状态的唯一事实源，
+// CLI / TUI / Web 都读同一份，不再各自判断一遍机制。

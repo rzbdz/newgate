@@ -24,12 +24,12 @@ func root() string {
 	return filepath.Join(Home(), ".config", "newgate")
 }
 
-func Config() string      { return root() }
-func Mappings() string    { return filepath.Join(root(), "mappings") }
+func Config() string        { return root() }
+func Mappings() string      { return filepath.Join(root(), "mappings") }
 func ProvidersFile() string { return filepath.Join(root(), "providers.json") }
-func StateFile() string   { return filepath.Join(root(), "state.json") }
-func BackupDir() string   { return filepath.Join(root(), "backups") }
-func LogFile() string     { return filepath.Join(root(), "newgate.log") }
+func StateFile() string     { return filepath.Join(root(), "state.json") }
+func BackupDir() string     { return filepath.Join(root(), "backups") }
+func LogFile() string       { return filepath.Join(root(), "newgate.log") }
 
 // pid / lock 放 $HOME，除非 NEWGATE_HOME 被覆盖（测试时隔离）
 func runtimeDir() string {
