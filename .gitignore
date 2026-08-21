@@ -1,0 +1,24 @@
+# build
+/dist/
+/target/
+/bin/
+
+# deps
+node_modules/
+
+# local
+.DS_Store
+*.log
+.env
+.env.local
+
+# test artifacts
+/coverage/
+*.tmp
+
+# 用户真实配置与密钥，绝不入库
+/tmp/
+*.bak
+providers.json
+/go/bin/
+/go/dist/
