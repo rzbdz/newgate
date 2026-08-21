@@ -111,3 +111,18 @@ func TestSpliceErrors(t *testing.T) {
 		t.Error("值不是字符串该报错")
 	}
 }
+
+func TestRoleOfStripsPrefixAndOneMMarker(t *testing.T) {
+	for in, want := range map[string]string{
+		"heavy":             "heavy",
+		"newgate/heavy":     "heavy",
+		"heavy[1m]":         "heavy",
+		"newgate/heavy[1m]": "heavy",
+		"heavy[1M]":         "heavy",
+		"opus[1m]":          "opus",
+	} {
+		if got := roleOf(in); got != want {
+			t.Errorf("roleOf(%q) = %q，应为 %q", in, got, want)
+		}
+	}
+}
