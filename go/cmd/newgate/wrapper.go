@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -85,6 +86,18 @@ func execReal(a *agents.Agent, argv []string, inject map[string]string) {
 
 	args := append([]string{real}, argv[1:]...)
 	if err := syscall.Exec(real, args, env); err != nil {
+		// 没有 shebang 的脚本（例如 npm 的 claude.exe 兜底脚本、或 CRLF
+		// 行尾损坏的 shebang）会让内核返回 ENOEXEC（exec format error）。
+		// 交给 /bin/sh 执行，让它打印脚本自己那清晰明了的错误信息，
+		// 而不是给用户一个神秘的 "exec format error"。
+		if errors.Is(err, syscall.ENOEXEC) {
+			shArgs := append([]string{"/bin/sh", real}, argv[1:]...)
+			if err2 := syscall.Exec("/bin/sh", shArgs, env); err2 != nil {
+				fmt.Fprintf(os.Stderr, "newgate: 经 /bin/sh 执行 %s 也失败: %v\n", real, err2)
+				os.Exit(70)
+			}
+			return // 不会走到这里：Exec 成功则不返回
+		}
 		fmt.Fprintf(os.Stderr, "newgate: exec %s failed: %v\n", real, err)
 		os.Exit(70)
 	}
