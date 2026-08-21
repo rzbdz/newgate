@@ -1,0 +1,262 @@
+package config
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func mkProvs(names ...string) *Providers {
+	m := map[string]Provider{}
+	for _, n := range names {
+		m[n] = Provider{BaseURL: "http://x/v1", APIKey: "sk-" + n}
+	}
+	return &Providers{Providers: m}
+}
+
+func names(steps []Step) []string {
+	var out []string
+	for _, s := range steps {
+		out = append(out, s.Profile+":"+s.Binding.String())
+	}
+	return out
+}
+
+func eq(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Errorf("链不对\n got:  %v\n want: %v", got, want)
+	}
+}
+
+// ---------- 三种绑定写法 ----------
+
+func TestCandidatesAcceptsThreeForms(t *testing.T) {
+	var p Profile
+	src := `{"name":"x","roles":{
+	  "a": {"provider":"p1","model":"m1"},
+	  "b": "p2/m2",
+	  "c": ["p3/m3", {"provider":"p4","model":"m4"}]
+	}}`
+	if err := json.Unmarshal([]byte(src), &p); err != nil {
+		t.Fatal(err)
+	}
+	for role, want := range map[string][]string{
+		"a": {"p1/m1"}, "b": {"p2/m2"}, "c": {"p3/m3", "p4/m4"},
+	} {
+		got := p.CandidatesFor(role)
+		if len(got) != len(want) {
+			t.Fatalf("%s: 长度 %d 应为 %d", role, len(got), len(want))
+		}
+		for i := range want {
+			if got[i].String() != want[i] {
+				t.Errorf("%s[%d] = %s 应为 %s", role, i, got[i], want[i])
+			}
+		}
+	}
+}
+
+func TestModelNameCanContainSlash(t *testing.T) {
+	b, err := ParseBindingString("prov/org/model-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Provider != "prov" || b.Model != "org/model-1" {
+		t.Errorf("得到 %+v", b)
+	}
+}
+
+func TestBadBindingString(t *testing.T) {
+	for _, bad := range []string{"noslash", "/leading", "trailing/"} {
+		if _, err := ParseBindingString(bad); err == nil {
+			t.Errorf("%q 应该报错", bad)
+		}
+	}
+}
+
+// ---------- 链的顺序 ----------
+
+func TestChainOrder_ActiveFirstThenPriority(t *testing.T) {
+	ps := []*Profile{
+		{Name: "slow", Priority: prio(60), Roles: map[string]Candidates{"h": one("pC", "mC")}},
+		{Name: "fast", Priority: prio(10), Roles: map[string]Candidates{"h": one("pA", "mA")}},
+		{Name: "mid", Priority: prio(30), Roles: map[string]Candidates{"h": one("pB", "mB")}},
+	}
+	steps, _ := BuildChain("h", ps, mkProvs("pA", "pB", "pC"), ChainOpts{Active: "mid"})
+	eq(t, names(steps), "mid:pB/mB", "fast:pA/mA", "slow:pC/mC")
+}
+
+func TestChainOrder_ProfileMajorListMinor(t *testing.T) {
+	ps := []*Profile{
+		{Name: "cheap", Priority: prio(10), Roles: map[string]Candidates{
+			"h": list("pA/m1", "pB/m2")}},
+		{Name: "rich", Priority: prio(20), Roles: map[string]Candidates{
+			"h": list("pC/m3", "pD/m4")}},
+	}
+	steps, _ := BuildChain("h", ps, mkProvs("pA", "pB", "pC", "pD"), ChainOpts{Active: "cheap"})
+	// 先把 cheap 内部走完，才降到 rich
+	eq(t, names(steps), "cheap:pA/m1", "cheap:pB/m2", "rich:pC/m3", "rich:pD/m4")
+}
+
+func TestChainSparseProfileIsSkipped(t *testing.T) {
+	ps := []*Profile{
+		{Name: "onlyheavy", Priority: prio(5), Roles: map[string]Candidates{
+			"heavy": one("pA", "fable")}},
+		{Name: "full", Priority: prio(10), Roles: map[string]Candidates{
+			"heavy": one("pB", "opus"), "light": one("pB", "haiku")}},
+	}
+	provs := mkProvs("pA", "pB")
+	// heavy：稀疏层生效
+	steps, _ := BuildChain("heavy", ps, provs, ChainOpts{Active: "full"})
+	eq(t, names(steps), "full:pB/opus", "onlyheavy:pA/fable")
+	// light：稀疏层整层跳过
+	steps, skips := BuildChain("light", ps, provs, ChainOpts{Active: "full"})
+	eq(t, names(steps), "full:pB/haiku")
+	found := false
+	for _, sk := range skips {
+		if sk.Profile == "onlyheavy" && strings.Contains(sk.Reason, "未定义") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("稀疏层应记录「未定义该档位」的跳过原因")
+	}
+}
+
+func TestChainDedup(t *testing.T) {
+	ps := []*Profile{
+		{Name: "a", Priority: prio(10), Roles: map[string]Candidates{"h": list("pA/m", "pB/m")}},
+		{Name: "b", Priority: prio(20), Roles: map[string]Candidates{"h": list("pA/m", "pC/m")}},
+	}
+	steps, _ := BuildChain("h", ps, mkProvs("pA", "pB", "pC"), ChainOpts{Active: "a"})
+	eq(t, names(steps), "a:pA/m", "a:pB/m", "b:pC/m") // b:pA/m 被去重
+}
+
+// ---------- pinned / excluded ----------
+
+func TestPinnedStopsChain(t *testing.T) {
+	ps := []*Profile{
+		{Name: "strict", Priority: prio(10), Pinned: true,
+			Roles: map[string]Candidates{"h": list("pA/m1", "pA/m2")}},
+		{Name: "other", Priority: prio(20), Roles: map[string]Candidates{"h": one("pB", "m3")}},
+	}
+	steps, _ := BuildChain("h", ps, mkProvs("pA", "pB"), ChainOpts{Active: "strict"})
+	// pinned 仍然走完自己内部的 list，但不降到别的 profile
+	eq(t, names(steps), "strict:pA/m1", "strict:pA/m2")
+}
+
+func TestPinnedOnlyAppliesWhenItIsHead(t *testing.T) {
+	ps := []*Profile{
+		{Name: "strict", Priority: prio(10), Pinned: true,
+			Roles: map[string]Candidates{"h": one("pA", "m1")}},
+		{Name: "head", Priority: prio(20), Roles: map[string]Candidates{"h": one("pB", "m2")}},
+	}
+	steps, _ := BuildChain("h", ps, mkProvs("pA", "pB"), ChainOpts{Active: "head"})
+	// strict 不是链头，它的 pinned 不生效，正常参与
+	eq(t, names(steps), "head:pB/m2", "strict:pA/m1")
+}
+
+func TestExcludedNotAutoSelected(t *testing.T) {
+	ps := []*Profile{
+		{Name: "normal", Priority: prio(20), Roles: map[string]Candidates{"h": one("pA", "m1")}},
+		{Name: "pricey", Priority: prio(5), Excluded: true,
+			Roles: map[string]Candidates{"h": one("pB", "m2")}},
+	}
+	provs := mkProvs("pA", "pB")
+	steps, _ := BuildChain("h", ps, provs, ChainOpts{Active: "normal"})
+	eq(t, names(steps), "normal:pA/m1") // pricey 优先级更高但被 excluded
+
+	// 显式选中时 excluded 不挡链头
+	steps, _ = BuildChain("h", ps, provs, ChainOpts{Active: "pricey"})
+	eq(t, names(steps), "pricey:pB/m2", "normal:pA/m1")
+}
+
+// ---------- 过滤器 ----------
+
+func TestBreakerFiltersStep(t *testing.T) {
+	ps := []*Profile{{Name: "a", Roles: map[string]Candidates{"h": list("pA/m1", "pB/m2")}}}
+	steps, skips := BuildChain("h", ps, mkProvs("pA", "pB"), ChainOpts{
+		Active:    "a",
+		Available: func(p string) bool { return p != "pA" },
+	})
+	eq(t, names(steps), "a:pB/m2")
+	if len(skips) == 0 || !strings.Contains(skips[0].Reason, "熔断") {
+		t.Errorf("应记录熔断跳过，得到 %+v", skips)
+	}
+}
+
+func TestDisabledFiltersStep(t *testing.T) {
+	ps := []*Profile{{Name: "a", Roles: map[string]Candidates{"h": list("pA/m1", "pB/m2")}}}
+	steps, skips := BuildChain("h", ps, mkProvs("pA", "pB"), ChainOpts{
+		Active: "a",
+		Disabled: func(role, target string) (bool, string) {
+			return target == "pA/m1", "你 2h 前禁的"
+		},
+	})
+	eq(t, names(steps), "a:pB/m2")
+	if len(skips) == 0 || !strings.Contains(skips[0].Reason, "2h 前") {
+		t.Errorf("应带上禁用原因，得到 %+v", skips)
+	}
+}
+
+func TestMissingProviderOrKeyIsSkippedNotFatal(t *testing.T) {
+	ps := []*Profile{{Name: "a", Roles: map[string]Candidates{
+		"h": list("ghost/m0", "nokey/m1", "good/m2")}}}
+	provs := &Providers{Providers: map[string]Provider{
+		"nokey": {BaseURL: "http://x"}, // 没 key
+		"good":  {BaseURL: "http://x", APIKey: "sk-ok"},
+	}}
+	steps, skips := BuildChain("h", ps, provs, ChainOpts{Active: "a"})
+	eq(t, names(steps), "a:good/m2")
+	if len(skips) != 2 {
+		t.Errorf("应有 2 条跳过记录，得到 %+v", skips)
+	}
+}
+
+func TestMaxStepsTruncates(t *testing.T) {
+	ps := []*Profile{{Name: "a", Roles: map[string]Candidates{
+		"h": list("pA/m1", "pB/m2", "pC/m3")}}}
+	steps, skips := BuildChain("h", ps, mkProvs("pA", "pB", "pC"),
+		ChainOpts{Active: "a", MaxSteps: 2})
+	eq(t, names(steps), "a:pA/m1", "a:pB/m2")
+	last := skips[len(skips)-1]
+	if !strings.Contains(last.Reason, "maxAttempts") {
+		t.Errorf("应说明因 maxAttempts 被截断，得到 %+v", last)
+	}
+}
+
+func TestTiebreakByNameIsDeterministic(t *testing.T) {
+	ps := []*Profile{
+		{Name: "zeta", Roles: map[string]Candidates{"h": one("pZ", "m")}},
+		{Name: "alpha", Roles: map[string]Candidates{"h": one("pA", "m")}},
+	}
+	for i := 0; i < 20; i++ {
+		steps, _ := BuildChain("h", ps, mkProvs("pA", "pZ"), ChainOpts{Active: "none"})
+		eq(t, names(steps), "alpha:pA/m", "zeta:pZ/m")
+	}
+}
+
+func TestDefaultPriorityWhenAbsent(t *testing.T) {
+	p := &Profile{Name: "x"}
+	if p.Prio() != DefaultPriority {
+		t.Errorf("没写 priority 应为 %d，得到 %d", DefaultPriority, p.Prio())
+	}
+}
+
+// ---------- 兼容：现有格式仍能读 ----------
+
+func TestBackwardCompatOldProfileFormat(t *testing.T) {
+	old := `{"name":"ds","description":"d","roles":{
+	  "heavy":{"provider":"upstream-a","model":"model-large"}}}`
+	var p Profile
+	if err := json.Unmarshal([]byte(old), &p); err != nil {
+		t.Fatal(err)
+	}
+	b, ok := p.Resolve("heavy")
+	if !ok || b.String() != "upstream-a/model-large" {
+		t.Errorf("旧格式读不出来: %+v %v", b, ok)
+	}
+	if p.Prio() != DefaultPriority {
+		t.Error("旧格式没有 priority，应取默认值")
+	}
+}
