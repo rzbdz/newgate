@@ -23,7 +23,9 @@ import (
 	"github.com/rzbdz/newgate/go/internal/paths"
 	"github.com/rzbdz/newgate/go/internal/probe"
 	"github.com/rzbdz/newgate/go/internal/proxy"
+	"github.com/rzbdz/newgate/go/internal/shim"
 	"github.com/rzbdz/newgate/go/internal/takeover"
+	"github.com/rzbdz/newgate/go/internal/tools"
 	"github.com/rzbdz/newgate/go/internal/tui"
 )
 
@@ -51,6 +53,10 @@ const usage = `newgate ` + "" + ` — AI 工具配置的语义命名层 (M0 PoC)
   newgate status               当前状态
   newgate --set-profile <名>   切换档位绑定（立刻生效，不用重启 opencode）
   newgate --set-fallback <名>  设置备用 profile（主上游挂了自动转移；off 关闭）
+  newgate shim install [工具]   装 PATH shim（默认 claude），之后直接敲 claude 就走 newgate
+  newgate shim off / on [工具]  临时停用 / 恢复（只动符号链接，不碰你的 rc）
+  newgate shim uninstall        彻底移除：删链接 + 删 rc 里的 PATH 行
+  newgate shim status
   newgate role <档位>          看这个档位的 fallback 链：每个候选为什么选中/跳过
   newgate probe [名]           给每个 profile 的每个档位打一次真实请求，出健康报告
   newgate profiles             列出所有 profile
@@ -77,6 +83,12 @@ schema-repair: 给缺 required 的 tool schema 补上 "required": []。
 `
 
 func main() {
+	// argv0 分发：如果我们是通过 PATH shim 被当成某个工具调用的，就进 wrapper 模式
+	if t, ok := tools.Get(wrapperName(os.Args[0])); ok {
+		runAsWrapper(t, os.Args)
+		return
+	}
+
 	args := os.Args[1:]
 	if len(args) == 0 {
 		fmt.Print(usage)
@@ -137,6 +149,16 @@ func main() {
 		cmdStatus()
 	case "profiles", "ls":
 		cmdProfiles()
+	case "shim":
+		sub := ""
+		if len(args) > 1 {
+			sub = args[1]
+		}
+		which := "claude"
+		if len(args) > 2 {
+			which = args[2]
+		}
+		cmdShim(sub, which)
 	case "role", "roles":
 		which := ""
 		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
@@ -735,6 +757,121 @@ func cmdRole(which string) {
 	}
 }
 
+func cmdShim(sub, which string) {
+	switch sub {
+	case "install":
+		link, err := shim.Install(which)
+		if err != nil {
+			die(65, err.Error())
+		}
+		fmt.Printf("✓ shim %s → %s\n", link, "newgate")
+
+		var touched []string
+		for _, rc := range shim.RCFiles() {
+			changed, err := shim.AddToRC(rc)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ⚠ %s: %v\n", rc, err)
+				continue
+			}
+			if changed {
+				touched = append(touched, rc)
+				fmt.Printf("✓ 已把 %s 前置到 PATH（写入 %s）\n", shim.Dir(), rc)
+			} else {
+				fmt.Printf("- %s 已有 PATH 行，未重复写\n", rc)
+			}
+		}
+		if len(touched) > 0 {
+			fmt.Printf("  原文件备份在 %s/rc/\n", paths.BackupDir())
+		}
+		if t, ok := tools.Get(which); ok {
+			if real, err := t.FindReal(shim.Dir()); err == nil {
+				fmt.Printf("\n真实 %s: %s\n", which, real)
+			} else {
+				fmt.Printf("\n⚠ 找不到真实的 %s：%v\n", which, err)
+			}
+		}
+		if !shim.InPath() {
+			fmt.Printf("\n\033[1m下一步：重新加载 shell 让 PATH 生效\033[0m\n")
+			fmt.Printf("  exec $SHELL -l          # 或者 source ~/.zshrc\n")
+			fmt.Printf("然后 `which claude` 应该指向 %s/claude\n", shim.Dir())
+		}
+		warnShellEnvConflict(which)
+
+	case "off":
+		if err := shim.Uninstall(which); err != nil {
+			fmt.Fprintf(os.Stderr, "newgate: %v\n", err)
+		}
+		fmt.Printf("✓ 已移除 shim。%s 恢复直连（PATH 行留着，空目录无害）\n", which)
+		fmt.Println("  新开的 shell 立刻生效；当前 shell 可能有 command 缓存，用 `hash -r`（bash）或 `rehash`（zsh）")
+
+	case "on":
+		link, err := shim.Install(which)
+		if err != nil {
+			die(65, err.Error())
+		}
+		fmt.Printf("✓ shim 已恢复 %s\n", link)
+
+	case "uninstall":
+		for _, n := range shim.Installed() {
+			_ = shim.Uninstall(n)
+			fmt.Printf("✓ 删除 shim %s\n", n)
+		}
+		for _, rc := range shim.RCFiles() {
+			changed, err := shim.RemoveFromRC(rc)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ⚠ %s: %v\n", rc, err)
+				continue
+			}
+			if changed {
+				fmt.Printf("✓ 已从 %s 移除 PATH 行\n", rc)
+			}
+		}
+		fmt.Println("\n完全恢复原状。重开 shell 生效。")
+
+	default:
+		fmt.Printf("shim 目录   %s\n", shim.Dir())
+		fmt.Printf("在 PATH 里  %v\n", shim.InPath())
+		inst := shim.Installed()
+		if len(inst) == 0 {
+			fmt.Println("已装 shim   （无）")
+		} else {
+			fmt.Printf("已装 shim   %s\n", strings.Join(inst, ", "))
+		}
+		for _, rc := range shim.RCFiles() {
+			fmt.Printf("  %-40s PATH 行: %v\n", rc, shim.HasBlock(rc))
+		}
+		for _, n := range inst {
+			if t, ok := tools.Get(n); ok {
+				if real, err := t.FindReal(shim.Dir()); err == nil {
+					fmt.Printf("  真实 %-8s %s\n", n, real)
+				}
+			}
+		}
+		fmt.Println("\n用法: newgate shim install|off|on|uninstall|status [工具]")
+	}
+}
+
+// warnShellEnvConflict shell 里已经导出的变量会盖过配置文件，但盖不过 shim。
+// 这里只提示，不自动改用户的 rc。
+func warnShellEnvConflict(toolID string) {
+	t, ok := tools.Get(toolID)
+	if !ok {
+		return
+	}
+	var conflict []string
+	for _, k := range append([]string{t.BaseURLEnv, t.AuthEnv}, t.UnsetEnv...) {
+		if os.Getenv(k) != "" {
+			conflict = append(conflict, k)
+		}
+	}
+	if len(conflict) == 0 {
+		return
+	}
+	fmt.Printf("\n提示：你的 shell 里已导出 %s\n", strings.Join(conflict, ", "))
+	fmt.Println("  shim 会在子进程里覆盖它们，所以**不影响** newgate 工作，不用改你的 rc。")
+	fmt.Println("  但如果哪天你 newgate shim off，这些变量会重新生效（回到原来的直连行为）——这正是想要的。")
+}
+
 func cmdProfiles() {
 	names, err := config.ListProfiles()
 	if err != nil {
@@ -1023,6 +1160,16 @@ func firstLine(s string, n int) string {
 // pingProxy 探活。必须绕过出站代理——否则 HTTP_PROXY 环境变量会让这个
 // 请求被送去公司代理，代理连不上本机 loopback 回 502，我们误判"没起来"，
 // 然后把刚起好的代理杀掉。
+// waitProxy 等代理起来。wrapper 懒启动后要用。
+func waitProxy(port int) {
+	for k := 0; k < 60; k++ {
+		if pingProxy(port) {
+			return
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+}
+
 func pingProxy(port int) bool {
 	resp, err := httpx.LocalClient(1500 * time.Millisecond).
 		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/status", port))

@@ -125,11 +125,20 @@ func resolveIn(profileName, role string) (route, error) {
 	return route{prov: p, provName: b.Provider, model: b.Model}, nil
 }
 
+// oneMMarker Claude Code 用 [1m] 后缀声明 100 万上下文能力。
+// 那是客户端侧的能力标记，上游模型 id 里不该有它。
+const oneMMarker = "[1m]"
+
 func roleOf(model string) string {
-	if i := strings.LastIndex(model, "/"); i >= 0 {
-		return model[i+1:] // 剥掉 "newgate/" 前缀
+	r := model
+	if i := strings.LastIndex(r, "/"); i >= 0 {
+		r = r[i+1:] // 剥掉 "newgate/" 前缀
 	}
-	return model
+	// 剥掉 [1m]：settings.json 写 "opus[1m]" 时，档位名会带上它
+	if lower := strings.ToLower(strings.TrimSpace(r)); strings.HasSuffix(lower, oneMMarker) {
+		r = strings.TrimSpace(r)[:len(r)-len(oneMMarker)]
+	}
+	return strings.TrimSpace(r)
 }
 
 type errPassthrough struct{ role string }
