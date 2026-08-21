@@ -150,6 +150,13 @@ type State struct {
 	// DefaultProfile Active 里没列的 agent 用它。
 	DefaultProfile string `json:"default_profile"`
 
+	// ActiveProfile / FallbackProfile 是 v0 的旧字段，保留只为迁移。
+	// 旧 state.json 用单一 active_profile 表示链头、fallback_profile 表示
+	// 备用。新模型里链头是 default_profile，fallback 由 profile 的 priority
+	// 链表达。Normalize() 会把旧字段迁过来。
+	ActiveProfile   string `json:"active_profile,omitempty"`
+	FallbackProfile string `json:"fallback_profile,omitempty"`
+
 	Port      int  `json:"port"`
 	TakenOver bool `json:"taken_over"`
 
@@ -174,6 +181,10 @@ type State struct {
 func (s *State) Normalize() {
 	if s.Port == 0 {
 		s.Port = ProxyPort
+	}
+	// 迁移：v0 的 active_profile → default_profile。
+	if s.DefaultProfile == "" && s.ActiveProfile != "" {
+		s.DefaultProfile = s.ActiveProfile
 	}
 	if s.DefaultProfile == "" {
 		s.DefaultProfile = "cheap"
