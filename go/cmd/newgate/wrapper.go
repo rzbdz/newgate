@@ -3,74 +3,72 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
+	"strconv"
 	"syscall"
+	"time"
 
-	"github.com/rzbdz/newgate/go/internal/config"
-	"github.com/rzbdz/newgate/go/internal/daemon"
-	"github.com/rzbdz/newgate/go/internal/shim"
-	"github.com/rzbdz/newgate/go/internal/tools"
+	"github.com/rzbdz/newgate/go/internal/agents"
+	"github.com/rzbdz/newgate/go/internal/platform/httpx"
+	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
+	"github.com/rzbdz/newgate/go/internal/runtime/injection"
+	"github.com/rzbdz/newgate/go/internal/store"
 )
 
-// runAsWrapper 当 argv[0] 是某个工具名时（PATH shim），注入 env 后 exec 真正的工具。
+// runWrapper injects env and execs the real agent.
 //
-// 为什么用 PATH shim 而不是写工具的配置文件：用户的 shell rc 里往往已经
-// export 了 ANTHROPIC_BASE_URL / AUTH_TOKEN，而 shell 环境优先级高于
-// settings.json 的 env 块——写配置文件会被静默盖掉。shim 在子进程里显式
-// 设置，能盖过一切，而且不需要改用户 rc 里已有的任何一行。
-func runAsWrapper(t *tools.Tool, argv []string) {
-	// 递归保护：shim 找真实工具时会跳过自己的目录，但万一还是绕回来了
-	depth := 0
-	if v := os.Getenv("NEWGATE_DEPTH"); v != "" {
-		fmt.Sscanf(v, "%d", &depth)
-	}
+// This is the argv0-dispatch path: the shim symlink /config/newgate/bin/claude
+// points at this binary, so when a user types `claude`, we land here, resolve
+// the real claude elsewhere on PATH, set the env, and exec it.
+func runWrapper(a *agents.Agent, argv []string) {
+	depth, _ := strconv.Atoi(os.Getenv("NEWGATE_DEPTH"))
 	if depth >= 2 || os.Getenv("NEWGATE_DISABLE") == "1" {
-		execReal(t, argv, nil) // 完全透传，不注入
+		execReal(a, argv, nil) // fully transparent, no injection
 		return
 	}
 
-	st := config.LoadState()
-	if _, err := t.FindReal(shim.Dir()); err != nil {
+	st := store.LoadState()
+	if _, err := a.FindReal(injection.Dir()); err != nil {
 		fmt.Fprintf(os.Stderr, "newgate: %v\n", err)
 		os.Exit(69)
 	}
 
-	// 代理没在跑就懒启动——否则工具会拿到 connection refused
+	// Start the proxy lazily; otherwise the agent gets a connection refused.
 	if daemon.Running() == nil {
-		fmt.Fprintf(os.Stderr, "newgate: 代理未运行，正在启动…\n")
+		fmt.Fprintf(os.Stderr, "newgate: proxy not running, starting…\n")
 		if _, err := daemon.Spawn(st.Port); err != nil {
-			fmt.Fprintf(os.Stderr, "newgate: 启动代理失败: %v\n（用 NEWGATE_DISABLE=1 可绕过 newgate）\n", err)
+			fmt.Fprintf(os.Stderr, "newgate: failed to start proxy: %v\n"+
+				"  (NEWGATE_DISABLE=1 bypasses newgate entirely)\n", err)
 			os.Exit(69)
 		}
 		waitProxy(st.Port)
 	}
 
-	inject := t.BuildEnv(st.Port, "newgate-local")
-	inject["NEWGATE_DEPTH"] = fmt.Sprint(depth + 1)
-	// per-invocation 覆盖：newgate-<profile> 前缀式调用（见 docs/16 §3）
+	inject := a.BuildEnv(st.Port, "newgate-local")
+	inject["NEWGATE_DEPTH"] = strconv.Itoa(depth + 1)
+	// per-invocation profile override: /p/<profile> is read from the URL path.
 	if p := os.Getenv("NEWGATE_PRESET"); p != "" {
+		// TODO(M1): argv0 preset dispatch (newgate-toy claude) — docs/16 §3.
 		inject["NEWGATE_PRESET"] = p
 	}
-	execReal(t, argv, inject)
+	execReal(a, argv, inject)
 }
 
-func execReal(t *tools.Tool, argv []string, inject map[string]string) {
-	real, err := t.FindReal(shim.Dir())
+func execReal(a *agents.Agent, argv []string, inject map[string]string) {
+	real, err := a.FindReal(injection.Dir())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "newgate: %v\n", err)
 		os.Exit(69)
 	}
 
-	// 从受控白名单构造子进程 env：继承 → 删干扰变量 → 叠加注入
+	// Controlled allow-list env: inherit → drop interference → layer ours.
 	drop := map[string]bool{}
-	for _, k := range t.UnsetEnv {
+	for _, k := range a.UnsetEnv {
 		drop[k] = true
 	}
 	var env []string
 	for _, kv := range os.Environ() {
 		k := kv
-		if i := strings.IndexByte(kv, '='); i >= 0 {
+		if i := indexByte(kv, '='); i >= 0 {
 			k = kv[:i]
 		}
 		if drop[k] {
@@ -85,15 +83,31 @@ func execReal(t *tools.Tool, argv []string, inject map[string]string) {
 		env = append(env, k+"="+v)
 	}
 
-	// exec 而不是 fork：进程直接被替换，信号/退出码/tty 全部天然正确
 	args := append([]string{real}, argv[1:]...)
 	if err := syscall.Exec(real, args, env); err != nil {
-		fmt.Fprintf(os.Stderr, "newgate: exec %s 失败: %v\n", real, err)
+		fmt.Fprintf(os.Stderr, "newgate: exec %s failed: %v\n", real, err)
 		os.Exit(70)
 	}
 }
 
-// wrapperName argv[0] 的 basename 去掉可能的 .exe。
-func wrapperName(argv0 string) string {
-	return strings.TrimSuffix(filepath.Base(argv0), ".exe")
+func indexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
 }
+
+// waitProxy polls the proxy until it responds, or gives up after ~3s.
+func waitProxy(port int) {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if tcpAlive(port) {
+			return
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+}
+
+func tcpAlive(port int) bool { return httpx.TCPAlive("127.0.0.1", port, 500*time.Millisecond) }

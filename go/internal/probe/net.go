@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rzbdz/newgate/go/internal/config"
+	"github.com/rzbdz/newgate/go/internal/core/domain"
+	"github.com/rzbdz/newgate/go/internal/store"
 )
 
 // NetCheck 逐层探测到某个 provider 的连通性。
@@ -28,7 +29,7 @@ type Step struct {
 	Latency time.Duration
 }
 
-func CheckNet(name string, p config.Provider, timeout time.Duration) NetCheck {
+func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 	nc := NetCheck{Provider: name}
 
 	u, err := url.Parse(p.BaseURL)
@@ -109,7 +110,7 @@ func CheckNet(name string, p config.Provider, timeout time.Duration) NetCheck {
 
 // CheckNetAll 对所有 provider 各跑一遍分层探测。
 func CheckNetAll(timeout time.Duration) ([]NetCheck, error) {
-	provs, err := config.LoadProviders()
+	provs, err := store.LoadProviders()
 	if err != nil {
 		return nil, err
 	}
