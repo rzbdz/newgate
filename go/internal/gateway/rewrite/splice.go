@@ -105,12 +105,26 @@ func InsertTopLevelRaw(body []byte, key string, raw []byte) ([]byte, error) {
 func EnsureArrayItemField(body []byte, arrayKey, field string, rawVal []byte,
 	match func(item []byte) bool) ([]byte, int, error) {
 
+	return EnsureArrayItemFieldFunc(body, arrayKey, field,
+		func([]byte) []byte { return rawVal }, match)
+}
+
+// EnsureArrayItemFieldFunc 同 EnsureArrayItemField，但值**逐条算**：
+// val 收到这条元素的原始字节，返回要插的值，返回 nil 表示这条跳过。
+//
+// 为什么需要逐条：推理内容回填时每条 assistant 消息要插的是**它自己那轮**
+// 的推理，不是同一个常量。给所有消息插同一段推理，等于把别人的思考塞给
+// 这一轮，比补空串更糟。
+func EnsureArrayItemFieldFunc(body []byte, arrayKey, field string,
+	val func(item []byte) []byte, match func(item []byte) bool) ([]byte, int, error) {
+
 	s, e, err := findTopLevelValue(body, arrayKey)
 	if err != nil {
 		return body, 0, err
 	}
 	arr := body[s:e]
-	if len(arr) == 0 || arr[0] != '[' {
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
 		return body, 0, errNotArray
 	}
 	quoted, err := json.Marshal(field)
@@ -119,29 +133,14 @@ func EnsureArrayItemField(body []byte, arrayKey, field string, rawVal []byte,
 	}
 
 	type point struct {
-		off   int  // body 里的绝对偏移（元素 `{` 之后）
-		comma bool // 元素非空时要补逗号
+		off   int    // body 里的绝对偏移（元素 `{` 之后）
+		raw   []byte // 这条元素要插的值
+		comma bool   // 元素非空时要补逗号
 	}
 	var points []point
 
-	i := 1
-	for {
-		i = skipWS(arr, i)
-		if i >= len(arr) || arr[i] == ']' {
-			break
-		}
-		if arr[i] == ',' {
-			i++
-			continue
-		}
-		vs := i
-		ve, ok := scanValue(arr, i)
-		if !ok {
-			return body, 0, errNotObject
-		}
-		item := arr[vs:ve]
-		i = ve
-
+	for _, sp := range spans {
+		item := arr[sp[0]:sp[1]]
 		if len(item) == 0 || item[0] != '{' {
 			continue // 元素不是对象：不是我们该管的形状，跳过
 		}
@@ -151,21 +150,29 @@ func EnsureArrayItemField(body []byte, arrayKey, field string, rawVal []byte,
 		if match != nil && !match(item) {
 			continue
 		}
+		raw := val(item)
+		if raw == nil {
+			continue
+		}
 		j := skipWS(item, 1)
-		points = append(points, point{off: s + vs + 1, comma: j < len(item) && item[j] != '}'})
+		points = append(points, point{
+			off:   s + sp[0] + 1,
+			raw:   raw,
+			comma: j < len(item) && item[j] != '}',
+		})
 	}
 
 	if len(points) == 0 {
 		return body, 0, nil // 没东西要补：调用方保持原字节
 	}
 
-	out := make([]byte, 0, len(body)+len(points)*(len(quoted)+len(rawVal)+2))
+	out := make([]byte, 0, len(body)+len(points)*(len(quoted)+16))
 	prev := 0
 	for _, p := range points {
 		out = append(out, body[prev:p.off]...)
 		out = append(out, quoted...)
 		out = append(out, ':')
-		out = append(out, rawVal...)
+		out = append(out, p.raw...)
 		if p.comma {
 			out = append(out, ',')
 		}
@@ -173,6 +180,144 @@ func EnsureArrayItemField(body []byte, arrayKey, field string, rawVal []byte,
 	}
 	out = append(out, body[prev:]...)
 	return out, len(points), nil
+}
+
+// EnsureArrayItemArrayHead 往顶层数组 arrayKey（messages）里满足 match 的每个
+// 对象元素的**子数组**字段 field（content）的**开头**插入 rawVal，
+// 且只在 need(childArr) 为真时插。返回插了几条。
+//
+// 为什么要单独一个原语：EnsureArrayItemField 只能往元素对象上补顶层字段，
+// 够不着元素里面那个 content 数组。而 Anthropic 协议里 thinking 是
+// content[] 的一个**块**，且必须排在 text / tool_use 之前——位置是协议的
+// 一部分，不能随便追加到末尾。
+//
+// 依旧是纯字节手术：先把所有插入点收集齐，再一次拼接。除了插进去的那几段，
+// 每个块的 cache_control、tool_use 的 input、缩进、转义形式逐字节不变。
+//
+// 跳过（不算错，也不算改）：元素不是对象、没有 field 字段、field 的值不是
+// 数组（content 是纯字符串时就是这样）。
+func EnsureArrayItemArrayHead(body []byte, arrayKey, field string, rawVal []byte,
+	match func(item []byte) bool, need func(childArr []byte) bool) ([]byte, int, error) {
+
+	return EnsureArrayItemArrayHeadFunc(body, arrayKey, field,
+		func([]byte) []byte { return rawVal }, match, need)
+}
+
+// EnsureArrayItemArrayHeadFunc 同上，但值逐条算（val 返回 nil = 跳过）。
+// 理由同 EnsureArrayItemFieldFunc：每条 assistant 消息要插的是它自己那轮的
+// thinking 块。
+func EnsureArrayItemArrayHeadFunc(body []byte, arrayKey, field string,
+	val func(item []byte) []byte,
+	match func(item []byte) bool, need func(childArr []byte) bool) ([]byte, int, error) {
+
+	s, e, err := findTopLevelValue(body, arrayKey)
+	if err != nil {
+		return body, 0, err
+	}
+	arr := body[s:e]
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
+		return body, 0, errNotArray
+	}
+
+	type point struct {
+		off   int    // body 里的绝对偏移（子数组 `[` 之后）
+		raw   []byte // 这条元素要插的块
+		comma bool   // 子数组非空时要补逗号
+	}
+	var points []point
+
+	for _, sp := range spans {
+		item := arr[sp[0]:sp[1]]
+		if len(item) == 0 || item[0] != '{' {
+			continue
+		}
+		if match != nil && !match(item) {
+			continue
+		}
+		cs, ce, err := findTopLevelValue(item, field)
+		if err != nil {
+			continue // 没有 content 字段
+		}
+		child := item[cs:ce]
+		if len(child) == 0 || child[0] != '[' {
+			continue // content 是字符串：没有块可插
+		}
+		if need != nil && !need(child) {
+			continue
+		}
+		raw := val(item)
+		if raw == nil {
+			continue
+		}
+		j := skipWS(child, 1)
+		points = append(points, point{
+			off:   s + sp[0] + cs + 1,
+			raw:   raw,
+			comma: j < len(child) && child[j] != ']',
+		})
+	}
+
+	if len(points) == 0 {
+		return body, 0, nil
+	}
+
+	out := make([]byte, 0, len(body)+len(points)*32)
+	prev := 0
+	for _, p := range points {
+		out = append(out, body[prev:p.off]...)
+		out = append(out, p.raw...)
+		if p.comma {
+			out = append(out, ',')
+		}
+		prev = p.off
+	}
+	out = append(out, body[prev:]...)
+	return out, len(points), nil
+}
+
+// ArrayItems 把一个 JSON 数组的原始字节切成各元素的原始字节（只读判断用，
+// 比如「这条 content[] 里有没有 thinking 块」）。切片指向原字节，不拷贝。
+func ArrayItems(arr []byte) ([][]byte, bool) {
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
+		return nil, false
+	}
+	out := make([][]byte, 0, len(spans))
+	for _, sp := range spans {
+		out = append(out, arr[sp[0]:sp[1]])
+	}
+	return out, true
+}
+
+// arrayItemSpans 返回数组里每个元素相对 arr 的 [start,end)。
+// 扫不动（不是数组、或值残缺）时返回 false——调用方一律按「形状不认识，
+// 不动它」处理，绝不去猜。
+func arrayItemSpans(arr []byte) ([][2]int, bool) {
+	if len(arr) == 0 || arr[0] != '[' {
+		return nil, false
+	}
+	var out [][2]int
+	i := 1
+	for {
+		i = skipWS(arr, i)
+		if i >= len(arr) {
+			return nil, false
+		}
+		if arr[i] == ']' {
+			return out, true
+		}
+		if arr[i] == ',' {
+			i++
+			continue
+		}
+		ve, ok := scanValue(arr, i)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, [2]int{i, ve})
+		i = ve
+	}
 }
 
 var (

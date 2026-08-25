@@ -21,9 +21,11 @@ import (
 	"github.com/rzbdz/newgate/go/internal/core/protocol"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
 	"github.com/rzbdz/newgate/go/internal/gateway/health"
+	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
 	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 	schema "github.com/rzbdz/newgate/go/internal/gateway/rewrite/schema"
 	"github.com/rzbdz/newgate/go/internal/gateway/special"
+	"github.com/rzbdz/newgate/go/internal/gateway/thinkcache"
 	"github.com/rzbdz/newgate/go/internal/platform/logx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/store"
@@ -94,6 +96,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := snap.State
+	tc := thinkcache.Default.Stats()
 	writeJSON(w, 200, map[string]interface{}{
 		"ok":              true,
 		"default_profile": st.DefaultProfile,
@@ -103,6 +106,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"failures":        atomic.LoadUint64(&s.failures),
 		"uptime_s":        int(time.Since(s.started).Seconds()),
 		"tiers":           domain.Roles,
+		// 推理内容缓存：只报计数，绝不报内容
+		"thinkcache": map[string]interface{}{
+			"entries":   tc.Entries,
+			"bytes":     tc.Bytes,
+			"max_bytes": tc.MaxBytes,
+			"hits":      tc.Hits,
+			"misses":    tc.Misses,
+			"puts":      tc.Puts,
+			"evictions": tc.Evictions,
+		},
 	})
 }
 
@@ -324,6 +337,21 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		routeStr := fmt.Sprintf("%s -> %s/%s", inModel, a.Binding.Provider, a.Binding.Model)
 
 		if derr != nil {
+			// 客户端自己走了（按 ESC、关窗口、客户端侧超时）不是上游的错。
+			//
+			// 不加这一闸的后果实测过：一次取消会被当成 smt-claude 连接失败 →
+			// 记一次失败 → 沿链走到 smt-deepseek，用的还是那个已经死掉的
+			// context，于是**每个候选都瞬间失败**，一次 ESC 就把整条链上所有
+			// provider 的熔断器全打开（日志里三个 provider 一起「暂时摘掉」）。
+			// 之后真正的请求反而没候选可用，回 502——用户看到的是「取消一下
+			// 之后全挂了」，根本查不到源头。
+			//
+			// 所以：不记失败、不开熔断、不往下走链、也不写 502（对面已经没人了）。
+			if cerr := r.Context().Err(); cerr != nil {
+				s.logf("[proxy] #%d %s 客户端在连接阶段就取消了（%v），停止整条链",
+					reqID, routeStr, cerr)
+				return
+			}
 			opened := health.Default.RecordFailure(a.Binding.Provider)
 			atomic.AddUint64(&s.failures, 1)
 			hint := ""
@@ -350,6 +378,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			atomic.AddUint64(&s.failures, 1)
 			s.logf("[proxy] %s -> %d%s  上游说: %s", routeStr, resp.StatusCode,
 				breakerNote(opened, a.Binding.Provider), trim(string(body)))
+			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, body)
 			s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
 			lastMsg, lastCode = trim(string(body)), resp.StatusCode
 			trail = append(trail, fmt.Sprintf("%s(%d)", a.Binding, resp.StatusCode))
@@ -367,6 +396,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			base := s.saveErrEvidence(reqID, resp.StatusCode, body, newBody, eb,
 				r.Header, resp.Header, routeStr)
 			s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
+			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
 			s.logf("[proxy] #%d 上游原文: %s", reqID, truncate(string(redact(eb)), 2000))
 			s.logf("[proxy] #%d 我们发出的 body(%d字节): %s", reqID, len(newBody),
 				truncate(string(redact(newBody)), 4000))
@@ -415,7 +445,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(resp.StatusCode)
 
 		// 逐块转发。响应体一个字节都不改，也绝不缓冲整个响应。
+		//
+		// 旁路挂一个观测者，把上游吐出来的推理内容记进 thinkcache，供下一轮
+		// 补回去（客户端会把它剥掉，见 gateway/special/st-deepseek.go）。
+		// 它是**纯只读**的：拿到的是已经写给客户端的那一份字节，不参与转发，
+		// 看错了最坏结果是这轮没缓存上。
 		flusher, canFlush := w.(http.Flusher)
+		ob := thinkcache.NewObserver()
+		var nonStream []byte // 非流式：整个 body 才能解析，攒完再看（有上限）
 		buf := make([]byte, 32*1024)
 		var chunks int
 		var bytesOut int64
@@ -427,6 +464,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 						reqID, chunks, bytesOut, werr)
 					return
 				}
+				if stream {
+					ob.Write(buf[:n])
+				} else if len(nonStream) < 8<<20 {
+					nonStream = append(nonStream, buf[:n]...)
+				}
 				chunks++
 				bytesOut += int64(n)
 				if canFlush {
@@ -436,6 +478,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if rderr != nil {
 				switch {
 				case rderr == io.EOF:
+					if !stream && len(nonStream) > 0 {
+						ob.ObserveBody(nonStream)
+					}
+					if nb, nk := ob.Commit(thinkcache.Default); nb > 0 {
+						// 只打字节数和 key 数，绝不打内容
+						s.logf("[proxy] #%d 记下本轮推理内容 %d 字节 / %d 个 key，"+
+							"下一轮替客户端补回去", reqID, nb, nk)
+					}
 					if stream {
 						s.logf("[proxy] #%d 流正常结束：%d 块 / %d 字节 / 总 %dms",
 							reqID, chunks, bytesOut, time.Since(start).Milliseconds())
@@ -449,6 +499,18 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+}
+
+// learnQuirks 从上游的报错里学它的毛病，下次请求自动带上补丁。
+//
+// 只在**新学到**的时候打日志——同一件事每个请求刷一行就没人看了。
+// 学到什么必须说，这是「不静默」的一部分：用户得知道我们从下一个请求开始
+// 会往他的请求里多加东西。
+func (s *Server) learnQuirks(reqID uint64, provider, model string, status int, body []byte) {
+	for _, what := range quirk.Learn(provider, model, status, body) {
+		s.logf("[proxy] #%d 学到：%s/%s %s —— 下次请求自动补上（newgate st 可关）",
+			reqID, provider, model, what)
 	}
 }
 

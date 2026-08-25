@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
+	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
 	"github.com/rzbdz/newgate/go/internal/store"
 )
 
@@ -63,6 +64,7 @@ type Options struct {
 
 // Run 把指定 profile（空 = 全部）的每个档位都打一遍。
 // 同一个 (provider, model) 只真打一次，结果复用——省时间也省额度。
+// 也会附带打一发 CheckQuirks 探上游毛病。
 func Run(o Options) ([]Result, error) {
 	if o.Concurrency <= 0 {
 		o.Concurrency = 8
@@ -177,6 +179,11 @@ func Run(o Options) ([]Result, error) {
 
 			p := provs.Providers[t.Provider]
 			st, lat, err := One(p, t.Model, o.Timeout)
+
+			if err == nil && st < 400 {
+				// 普通探活通过了，顺手探一发怪癖（并发度够，多打一发不慢）
+				_ = CheckQuirks(t.Provider, p, t.Model, o.Timeout)
+			}
 
 			mu.Lock()
 			delete(inflight, t)
@@ -331,4 +338,70 @@ func Summarize(rs []Result) []Summary {
 		out = append(out, *s)
 	}
 	return out
+}
+
+// CheckQuirks 主动探一发「带 tools 的请求」，把上游的毛病提前学出来。
+//
+// 为什么必须单独探这一发：普通探活发的是一句 "hi"，**不带 tools**。而
+// glm-5.3 那个 400 恰恰只在带 tools 时出现——聚合器看见 tools 才会替我们
+// 塞「关闭思考」。于是 `newgate probe` 一片全绿，真实流量却每条都 400，
+// 探活比现实乐观是最坏的一种探活。
+//
+// 只在普通探活通过后再打，且一个 (provider, model) 只打一次：多打一发就多
+// 一次额度和一次撞限流的机会。
+//
+// 返回学到的毛病（人话）。什么都没学到就返回 nil——包括请求本身失败的情况：
+// 探测失败不代表模型有毛病，不能凭猜往注册表里写。
+func CheckQuirks(provName string, p domain.Provider, model string, timeout time.Duration) []string {
+	payload := map[string]interface{}{
+		"model":      model,
+		"max_tokens": 4,
+		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+		"tools": []map[string]interface{}{{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":        "newgate_probe",
+				"description": "probe",
+				"parameters": map[string]interface{}{
+					"type": "object", "properties": map[string]interface{}{}, "required": []string{},
+				},
+			},
+		}},
+	}
+	suffix := "/chat/completions"
+	if p.Protocol == "anthropic" {
+		// Anthropic 方言的 tools 是平铺的，没有 function 包一层
+		payload["tools"] = []map[string]interface{}{{
+			"name": "newgate_probe", "description": "probe",
+			"input_schema": map[string]interface{}{
+				"type": "object", "properties": map[string]interface{}{}, "required": []string{},
+			},
+		}}
+		suffix = "/messages"
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+
+	req, err := http.NewRequest("POST", strings.TrimRight(p.BaseURL, "/")+suffix,
+		bytes.NewReader(body))
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if p.Protocol == "anthropic" {
+		req.Header.Set("x-api-key", p.Key())
+		req.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+p.Key())
+	}
+
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	raw, _ := ioutil.ReadAll(resp.Body) // error body is small
+	return quirk.Learn(provName, model, resp.StatusCode, raw)
 }
