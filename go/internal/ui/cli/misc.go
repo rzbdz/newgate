@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/rzbdz/newgate/go/internal/gateway/special"
+	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
 	"github.com/rzbdz/newgate/go/internal/store"
@@ -116,6 +118,7 @@ func cmdSpecial(args []string) int {
 		}
 		fmt.Println("\n  ✓ 生效   ✗ 已单独关掉   · 整层关着")
 		fmt.Println("  单独关一个: newgate st off <插件>       整层关: newgate st off")
+		printThinkCache()
 		return 0
 	}
 
@@ -166,4 +169,56 @@ func cmdTUI() int {
 		return die(70, err.Error())
 	}
 	return 0
+}
+
+// printThinkCache 展示推理内容缓存的命中情况。
+//
+// 数字必须从**跑着的守护进程**取：缓存在守护进程的内存里，CLI 是另一个进程，
+// 在这边读 thinkcache.Default 只会看到一个空缓存——那比不显示更误导人。
+//
+// 只报计数，永远不报内容。
+func printThinkCache() {
+	i := daemon.Running()
+	if i == nil {
+		return
+	}
+	resp, err := httpx.LocalClient(1500 * time.Millisecond).
+		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/status", i.Port))
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	var s struct {
+		ThinkCache struct {
+			Entries  int   `json:"entries"`
+			Bytes    int64 `json:"bytes"`
+			MaxBytes int64 `json:"max_bytes"`
+			Hits     int64 `json:"hits"`
+			Misses   int64 `json:"misses"`
+		} `json:"thinkcache"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&s) != nil {
+		return
+	}
+	t := s.ThinkCache
+	fmt.Printf("\n推理内容缓存  %d 条 / %s（上限 %s）\n",
+		t.Entries, human(t.Bytes), human(t.MaxBytes))
+	fmt.Printf("              命中 %d   未命中 %d\n", t.Hits, t.Misses)
+	fmt.Println("  客户端会把上游的推理内容丢掉，我们替它记住并在下一轮原样补回去。")
+	if t.Misses > 0 {
+		fmt.Println("  未命中的那些只能补空串 —— 那几轮模型看不到自己上一轮的推理。")
+		fmt.Println("  常见原因：代理重启过、会话太老被淘汰。日志里逐条有记。")
+	}
+	fmt.Println("  只在内存里，不落盘（推理内容属于对话内容）。")
+}
+
+func human(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
 }

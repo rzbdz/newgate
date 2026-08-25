@@ -10,11 +10,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"context"
+
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
+	"github.com/rzbdz/newgate/go/internal/gateway/health"
 )
 
 // 一段有代表性的 SSE：含 tool_call 分片、Unicode、空 data、大整数。
@@ -313,5 +317,86 @@ func TestErrorResponseByteFaithful(t *testing.T) {
 	}
 	if resp.Header.Get("X-Newgate-Evidence") == "" {
 		t.Error("4xx 应该带 X-Newgate-Evidence 指向证据文件")
+	}
+}
+
+// TestClientCancelDuringConnectDoesNotBurnTheChain 断言：客户端在**连接阶段**
+// 就取消时，不沿链重试、不记失败、不开熔断。
+//
+// 现场是这么坏的（10.0.50.11 的日志）：一次取消被当成 smt-claude 连接失败，
+// 沿链换 smt-deepseek——可 context 已经死了，于是每个候选都瞬间失败，一次
+// ESC 把整条链上三个 provider 的熔断器全打开。之后真正的请求没候选可用，
+// 回 502，用户根本查不到源头。
+func TestClientCancelDuringConnectDoesNotBurnTheChain(t *testing.T) {
+	hit := make(chan string, 8)
+	// 上游装死：收到请求就挂住。上限兜底，免得断言失败时整个测试卡死。
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit <- r.URL.Path
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer up.Close()
+
+	provs := []string{"prov-a", "prov-b", "prov-c"}
+	testChain = func(role string) []resolve.Step {
+		var out []resolve.Step
+		for _, p := range provs {
+			out = append(out, resolve.Step{
+				Profile:  "test",
+				Binding:  domain.Binding{Provider: p, Model: "real-model-1"},
+				Provider: testProvider(up.URL),
+			})
+		}
+		return out
+	}
+	defer func() { testChain = nil }()
+
+	for _, p := range provs {
+		health.Default.RecordSuccess(p) // 从干净状态开始
+	}
+
+	srv := &Server{Port: 0}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "POST", front.URL+"/v1/chat/completions",
+		strings.NewReader(`{"model":"newgate/heavy","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	done := make(chan struct{})
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_, _ = io.Copy(ioutil.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		close(done)
+	}()
+
+	select {
+	case <-hit: // 第一个候选已经打上去了
+	case <-time.After(3 * time.Second):
+		t.Fatal("上游没收到请求")
+	}
+	cancel()
+	<-done
+	time.Sleep(150 * time.Millisecond) // 等 handler 收尾
+
+	// 链上后面的候选一个都不该被打
+	select {
+	case p := <-hit:
+		t.Fatalf("客户端都取消了还沿链重试了下一个候选（%s）", p)
+	default:
+	}
+	for _, p := range provs {
+		if !health.Default.Available(p) {
+			t.Errorf("provider %s 被一次客户端取消打开了熔断器", p)
+		}
+	}
+	if n := atomic.LoadUint64(&srv.failures); n != 0 {
+		t.Errorf("客户端取消被记成了 %d 次上游失败", n)
 	}
 }
