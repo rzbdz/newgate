@@ -178,12 +178,14 @@ func Run(o Options) ([]Result, error) {
 			mu.Unlock()
 
 			p := provs.Providers[t.Provider]
-			st, lat, err := One(p, t.Model, o.Timeout)
+			started := time.Now()
+			st, _, err := One(p, t.Model, o.Timeout)
 
 			if err == nil && st < 400 {
-				// 普通探活通过了，顺手探一发怪癖（并发度够，多打一发不慢）
+				// 普通探活通过了，顺手探一发怪癖；这次请求也属于 probe 的等待时间。
 				_ = CheckQuirks(t.Provider, p, t.Model, o.Timeout)
 			}
+			lat := time.Since(started)
 
 			mu.Lock()
 			delete(inflight, t)
