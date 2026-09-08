@@ -27,19 +27,37 @@
 //	纯字节：   一律用 rewrite 包的字节手术，不做整体 JSON 往返。
 package special
 
-// Request 是插件能看到的这次转发的上下文，只读。
+import (
+	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
+)
+
+// Request 是插件能看到的这次转发的上下文。
 //
 // 故意不含 http.Request：插件只该看请求的**语义归属**（发给谁、什么模型），
 // 看不到也改不了头、认证、连接。想动这些的补丁不属于这一层。
+//
+// 链上只有一份事实源：body 字节。r.Model 是它在每一步之后的**视图**——
+// 插件改写了 body 的 model 字段后，由 Apply 框架自动同步（见
+// syncContextModel），排在后面的插件立刻看到新值。插件不需要、也不应该
+// 手动维护它：忘了维护就是「上游切了模型、下游拿旧模型做决定」的失真
+// （2026-09-09 实抓过一次）。其余字段（Provider/Tier/Stream/Agent…）来自
+// 路由和请求形态，不来自 body，链上不变。
 type Request struct {
-	InModel  string // 客户端原本写的 model（语义档位名，如 "heavy"）
-	Tier     string // 归一化后的档位
-	Model    string // 即将发给上游的真实模型名
+	InModel  string // 客户端原本写的 model（档位名如 "heavy"，或真实模型名如 "deepseek-chat"）
+	Tier     string // 归一化后解析出的档位
+	Model    string // 即将发给上游的真实模型名；body 的 model 被改写后由框架自动同步
 	Provider string // provider 名（providers.json 里的 key）
 	BaseURL  string // 上游 base URL
 	Protocol string // "anthropic" / "openai"
 	Path     string // 请求路径后缀，如 /messages
 	Stream   bool
+	Agent    string // 发起方（/a/<agent>/ 路径里的名字，如 "claude"）；空 = 兼容路径
+
+	// light 档的链头（配置里排第一的候选，忽略熔断器）。给「后台小调用
+	// 切轻档」的插件用（如 claude-bg）；没配 light 档时两个都是空串。
+	// 切不切、能不能切由插件按「同 provider / 档位」自己判断，这里只给事实。
+	LightProvider string
+	LightModel    string
 }
 
 // Plugin 一个特殊照顾模块。实现放在 st-<名字>.go，在 init() 里 Register。
@@ -82,6 +100,10 @@ type Result struct {
 
 // Apply 按注册顺序跑一遍所有匹配的插件，串联改写。
 //
+// 装饰器链的完整语义：body 一路传（res.Body = out），上下文跟着 body 走
+// （每步后 syncContextModel）——下一个插件拿到的 body 和 r.Model 都是上
+// 一个插件改过的最新版，不存在「body 已被改、上下文还是旧的」的窗口。
+//
 // off 用来跳过被用户单独关掉的插件（可以传 nil）。
 // 任何一个插件报错都只影响它自己：记一条 note，body 保持上一个插件的结果。
 func Apply(body []byte, r *Request, off func(name string) bool) Result {
@@ -106,6 +128,16 @@ func Apply(body []byte, r *Request, off func(name string) bool) Result {
 		for _, n := range notes {
 			res.Notes = append(res.Notes, p.Name()+": "+n)
 		}
+		syncContextModel(res.Body, r)
 	}
 	return res
+}
+
+// syncContextModel 让上下文跟上 body：从 body 读回顶层 model 写进 r.Model。
+// 这是链上唯一需要维护的派生字段（其余字段不来自 body）。读不出就保持
+// 原值——绝不让一个改坏了的 body 把上下文也带坏。
+func syncContextModel(body []byte, r *Request) {
+	if m, has := rewrite.TopLevelString(body, "model"); has && m != "" && m != r.Model {
+		r.Model = m
+	}
 }

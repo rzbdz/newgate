@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 )
 
 func req(model, provider, baseURL string) *Request {
@@ -74,8 +76,9 @@ func TestDeepseekApply(t *testing.T) {
 		_ = json.Unmarshal(m["role"], &role)
 		rc, has := m["reasoning_content"]
 		if role == "assistant" {
-			if !has || string(rc) != `""` {
-				t.Fatalf("第 %d 条 assistant 缺 reasoning_content: %s", i, out)
+			// 必须非空：空串在最严的 DeepSeek 官方检查下照样 400
+			if !has || string(rc) == `""` || string(rc) == `null` {
+				t.Fatalf("第 %d 条 assistant 缺/空 reasoning_content: %s", i, out)
 			}
 		} else if has {
 			t.Fatalf("第 %d 条 %s 被误补了 reasoning_content", i, role)
@@ -192,11 +195,70 @@ func (boom) Apply(b []byte, r *Request) ([]byte, []string, error) {
 	return []byte(`{"毁了":true}`), []string{"改了"}, errFake
 }
 
+// fakePlugin 测试里临时拼注册表用的小插件。
+type fakePlugin struct {
+	name  string
+	match func(*Request) bool
+	apply func([]byte, *Request) ([]byte, []string, error)
+}
+
+func (f fakePlugin) Name() string                 { return f.name }
+func (f fakePlugin) Why() string                  { return "测试用" }
+func (f fakePlugin) Match(r *Request) bool        { return f.match(r) }
+func (f fakePlugin) Apply(b []byte, r *Request) ([]byte, []string, error) {
+	return f.apply(b, r)
+}
+
 var errFake = &fakeErr{}
 
 type fakeErr struct{}
 
 func (*fakeErr) Error() string { return "故意失败" }
+
+// TestApply_SyncsContextModel 锁死装饰器链的上下文语义：插件改了 body 的
+// model，框架负责让 r.Model 跟上——下一个插件（Match 和 Apply 都拿 r）
+// 看到的必须是改过的最新值。这不再是插件自己的义务：忘了维护就失真
+// （2026-09-09 实抓：分类器被切到 light 后，还是按 mid 模型的 quirk 被翻
+// 了 thinking）。用两个假插件直接验证机制本身。
+func TestApply_SyncsContextModel(t *testing.T) {
+	saved := registry
+	defer func() { registry = saved }()
+
+	seen := ""
+	watcher := fakePlugin{
+		name:  "watcher",
+		match: func(*Request) bool { return true },
+		apply: func(b []byte, r *Request) ([]byte, []string, error) {
+			seen = r.Model
+			return b, nil, nil
+		},
+	}
+	switcher := fakePlugin{
+		name:  "switcher",
+		match: func(*Request) bool { return true },
+		apply: func(b []byte, r *Request) ([]byte, []string, error) {
+			nb, err := rewrite.ReplaceTopLevelString(b, "model", "switched-model")
+			if err != nil {
+				return b, nil, err
+			}
+			return nb, []string{"切了"}, nil
+		},
+	}
+	registry = []Plugin{switcher, watcher}
+
+	r := req("orig-model", "gw", "https://x/v1")
+	res := Apply([]byte(`{"model":"orig-model","messages":[]}`), r, nil)
+
+	if seen != "switched-model" {
+		t.Fatalf("后面的插件看到的还是旧模型 %q，想要 switched-model", seen)
+	}
+	if r.Model != "switched-model" {
+		t.Fatalf("Apply 之后 r.Model 应为 switched-model，实际 %s", r.Model)
+	}
+	if !res.Changed || !strings.Contains(string(res.Body), "switched-model") {
+		t.Fatalf("body 没被切过去: %s", res.Body)
+	}
+}
 
 // TestPluginsHaveWhy 每个插件都必须能说清自己为什么存在——将来判断
 // 「上游修好了没、这段还要不要」全靠这句话。

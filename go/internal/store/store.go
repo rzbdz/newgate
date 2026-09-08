@@ -7,6 +7,8 @@
 package store
 
 import (
+	crand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -14,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
@@ -96,12 +99,16 @@ func LoadProviders() (*domain.Providers, error) {
 	return p, nil
 }
 
-// SaveProviders 写 provider 表。含密钥，0600。
+// SaveProviders 写 provider 表。
 //
+// 0660 而不是 0600：共享部署模型（同一台机器、developer 组的多用户管理
+// 同一个 newgate，见 docs/03）里组员要能读它——`newgate status` / wrapper
+// 都要解析 provider。组边界就是信任边界；单用户部署想收紧，chmod 0600
+// providers.json 即可，代码不会把它改回去（只在写入时用这个 mode）。
 // 注意：不能把 LoadProviders 解析出来的环境变量值写回去，否则密钥就落盘了。
 // 调用方必须传入原始形态。
 func SaveProviders(p *domain.Providers) error {
-	return writeJSON(paths.ProvidersFile(), p, 0o600)
+	return writeJSON(paths.ProvidersFile(), p, 0o660)
 }
 
 // ---------- profiles ----------
@@ -117,8 +124,10 @@ func LoadProfile(name string) (*domain.Profile, error) {
 	return &pr, nil
 }
 
+// SaveProfile 写 profile。不含密钥（只有 provider/model 绑定），组内共享读
+// 没有暴露面：wrapper 启动（launch.Launch）本就要解析它来注入真实模型名。
 func SaveProfile(pr *domain.Profile) error {
-	return writeJSON(filepath.Join(paths.Mappings(), pr.Name+".json"), pr, 0o600)
+	return writeJSON(filepath.Join(paths.Mappings(), pr.Name+".json"), pr, 0o660)
 }
 
 func ListProfiles() ([]string, error) {
@@ -146,7 +155,33 @@ func LoadState() *domain.State {
 	return s
 }
 
-func SaveState(s *domain.State) error { return writeJSON(paths.StateFile(), s, 0o600) }
+func SaveState(s *domain.State) error { return writeJSON(paths.StateFile(), s, 0o660) }
+
+// NewControlToken 生成控制端点令牌（crypto/rand，48 位十六进制）。
+func NewControlToken() string {
+	b := make([]byte, 24)
+	if _, err := crand.Read(b); err != nil {
+		// rand 失败几乎只在早期 boot 的虚拟机里发生；退化到时间熵也比
+		// 空令牌（= 端点永远 403）好
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// EnsureControlToken 幂等地保证 state.json 里有控制令牌，返回最新 state。
+//
+// 必须在 daemon.Spawn **之前**调用（cmdStart / launch.Launch / Serve 各自
+// 兜一次底）：令牌先落盘，daemon 起来时 watcher 的初次加载就能读到，
+// 不存在「daemon 拿着空令牌跑着」的窗口。之后所有 LoadState→SaveState
+// 的调用方（--set-profile 等）都从盘上重新读，令牌不会被冲掉。
+func EnsureControlToken() *domain.State {
+	s := LoadState()
+	if s.ControlToken == "" {
+		s.ControlToken = NewControlToken()
+		_ = SaveState(s)
+	}
+	return s
+}
 
 // SetActiveProfile 设置某个 agent 的链头。agent 为空 = 设全局默认。
 //

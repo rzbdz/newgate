@@ -143,6 +143,20 @@ opencode                      # 用全局默认
 | `claude-opus-5` | **具体模型名**，走「哪些 provider 提供这个确切模型」的链 |
 | 其它 | 默认 400 并列出可用档位；`passthrough` 策略可原样转发 |
 
+> **M1 已实现的具体模型路由**（`resolve.ResolveRequest`）：当具体模型名出现在某档位
+> 的绑定里，代理把它**反解回该档位**，先试这个模型、再按该档位的链 fallback。这正是
+> 「工具界面显示真实模型名」的机制——wrapper 把真实模型名写进槽位 env
+> （`ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-chat`），工具原样发回来，代理反解回 heavy。
+> 下面「绝不替换」的原则针对的是**用户显式点名**（`--model primary=gpt-4o`）的场景，
+> 那需要 `providers.models` 区分「哪些 provider 提供这个确切模型」，仍后置（Q4）。
+
+> **窗口声明**（2026-09 实测补）：真实模型名有个副作用——Claude Code 不认识它，
+> 按「未知模型」默认 200k 窗口，会话 125k 就开始张罗 auto-compact（模型实际 1M）。
+> profile 可声明 `context_window`（真实窗口）与 `auto_compact_window`（compact
+> 目标，客户端取 min），wrapper 启动时注入 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` /
+> `CLAUDE_CODE_AUTO_COMPACT_WINDOW`。字段见 §11，注入逻辑在
+> `runtime/launch`（`buildInject`）。
+
 ### 具体模型名绝不替换成别的模型
 
 `claude-opus-5` 的链是「哪些 provider 有 opus-5」，**不是**「opus-5 挂了给你 sonnet-5」。
@@ -484,6 +498,10 @@ heavy → openai-relay/gpt-5.6-sol        预算 15s (档位 60s × mood impatie
   "description": "省钱优先，可外溢",
   "pinned": false,
   "excluded": false,
+  // 主力模型的真实上下文窗口。注入真实模型名后 Claude Code 不认识它，
+  // 会按「未知模型」默认 200k 提前 compact——声明了才注入对应 env。
+  "context_window": 1000000,      // → CLAUDE_CODE_MAX_CONTEXT_TOKENS
+  "auto_compact_window": 500000,  // → CLAUDE_CODE_AUTO_COMPACT_WINDOW（应 ≤ 上一行）
   "roles": {
     "heavy": ["deepseek-relay/deepseek-v4-pro", "gemini-relay/gemini-3.1-pro-preview"],
     "light": ["deepseek-relay/deepseek-v4-flash"]

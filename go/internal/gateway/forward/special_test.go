@@ -85,8 +85,9 @@ func TestSpecialTreatmentDeepseekOnTheWire(t *testing.T) {
 			continue
 		}
 		assistants++
-		if rc, has := m["reasoning_content"]; !has || string(rc) != `""` {
-			t.Errorf("第 %d 条 assistant 缺 reasoning_content: %s", i, sent)
+		// 必须非空：空串在最严的 DeepSeek 官方检查下照样 400
+		if rc, has := m["reasoning_content"]; !has || string(rc) == `""` || string(rc) == `null` {
+			t.Errorf("第 %d 条 assistant 缺/空 reasoning_content: %s", i, sent)
 		}
 	}
 	if assistants != 2 {

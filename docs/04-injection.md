@@ -71,6 +71,7 @@ plan.env = {
 ### 需要注意
 
 - **清理干扰变量**：用户 shell 里可能已经 `export ANTHROPIC_API_KEY=...`，与我们注入的 `ANTHROPIC_AUTH_TOKEN` 打架。描述符要能声明 `unsetEnv: ['ANTHROPIC_API_KEY']`，从子进程 env 中删除。这是最常见的「为什么切了 provider 还是走老的」故障源。
+- **窗口声明**：注入真实模型名后，Claude Code 不认识这个名字，会按「未知模型」默认 200k 窗口提前 compact。profile 声明的 `context_window` / `auto_compact_window` 由 wrapper 在启动时注入成 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（[18](18-role-preference.md) §5、§11）。
 - 空值语义：值为 `null` = 删除该变量，值为 `''` = 设为空串。两者要区分。
 - 环境变量对某些 tool 的**优先级可能低于其配置文件**。这时 env 注入会静默失效——必须在 tool 描述符里标注 `envBeatsConfig: false`，此时 newgate 应拒绝单用 env 注入，改用 composite。
 

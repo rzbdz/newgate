@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,11 +41,25 @@ func Serve(port int) int {
 		lg = log.New(rot, "", log.LstdFlags)
 	}
 
-	if err := daemon.AcquireLock(); err != nil {
-		lg.Printf("抢锁失败: %v", err)
-		return 69
+	// 优雅交接进来的进程：pid/lock 已由父进程改写到自己名下（AdoptRuntime），
+	// 此时抢锁会读到自己的 pid 而误判「已在运行」。父进程就是担保人，跳过。
+	inherited := os.Getenv("NEWGATE_LISTENER_FD") != ""
+	if !inherited {
+		if err := daemon.AcquireLock(); err != nil {
+			lg.Printf("抢锁失败: %v", err)
+			return 69
+		}
+		defer daemon.RemoveLock()
+	} else {
+		lg.Printf("优雅交接：接管父进程的监听 socket")
 	}
-	defer daemon.RemoveLock()
+
+	// 控制令牌必须先于 watcher 落盘：别的用户 `newgate stop` 发不出信号，
+	// 只能走 /__newgate/stop，daemon 一启动就得能验它。这里是最后兜底
+	// （cmdStart / launch.Launch 在 Spawn 前已经各兜一次，正常早就有）。
+	if st := store.EnsureControlToken(); st.ControlToken != "" {
+		lg.Printf("控制端点 /__newgate/stop 已就绪（跨用户停机可用）")
+	}
 
 	watcher, err := store.NewWatcher(time.Second)
 	if err != nil {
@@ -80,6 +98,11 @@ func Serve(port int) int {
 				watcher.Reload(true)
 				continue
 			}
+			if srv.Draining() {
+				// 排空期被信号打断：pid/lock 已是新进程的，清不得
+				lg.Printf("排空期收到 %v，直接退出（不动 pid/lock）", s)
+				os.Exit(0)
+			}
 			lg.Printf("收到 %v，退出", s)
 			srv.Shutdown()
 			daemon.RemoveLock()
@@ -88,9 +111,35 @@ func Serve(port int) int {
 		}
 	}()
 
+	// 控制端点停机（别的用户 `newgate stop`）：效果和信号一样——
+	// 关 listener、清 pid/lock、退干净。cmdStop 后半段还要 LoadState，
+	// 所以必须 os.Exit 而不是只 return，别让 deferred 副作用拖泥带水。
+	go func() {
+		<-srv.StopRequested()
+		if srv.Draining() {
+			// 排空期收到停机：同样不许动新进程的 pid/lock
+			lg.Printf("排空期收到控制停机，直接退出（不动 pid/lock）")
+			os.Exit(0)
+		}
+		lg.Printf("控制停机（令牌校验通过），退出")
+		srv.Shutdown()
+		daemon.RemoveLock()
+		daemon.RemovePid()
+		os.Exit(0)
+	}()
+
 	lg.Printf("newgate %s (构建于 %s) 启动，默认 profile=%s，配置热更新已开启",
 		Version, pretty(BuildTime), watcher.Current().State.DefaultProfile)
 	if err := srv.Start(); err != nil {
+		// 优雅交接的排空：listener 已移交新进程，Serve 因此返回——但这
+		// 不是退出的时候。等在途请求流完（Drained），再直接退（os.Exit
+		// 跳过 defer 的 RemoveLock：pid/lock 已是 新进程的）。
+		if srv.Draining() {
+			lg.Printf("监听 socket 已移交新进程，等待在途请求排空（上限 10 分钟）")
+			<-srv.Drained()
+			lg.Printf("排空完成，旧进程功成身退")
+			os.Exit(0)
+		}
 		lg.Printf("代理退出: %v", err)
 		return 70
 	}
@@ -109,7 +158,10 @@ func cmdStart(force bool) int {
 		return 0
 	}
 
-	st := store.LoadState()
+	// 令牌先于 Spawn 落盘：daemon 一起来就要能验 /__newgate/stop。
+	// 也是为了防竞态——下面 Spawn 之后 st 还会被 SaveState 写回，
+	// 先确保 st 里带着令牌，写回就不会把 daemon 已生成的令牌冲掉。
+	st := store.EnsureControlToken()
 	// 没 key 就别接管——接管了每个请求都是错误，而用户的配置已经被改了
 	if probs := activeProblems(st); len(probs) > 0 && !force {
 		fmt.Fprintf(os.Stderr, "newgate: 当前配置还不能用，拒绝接管：\n")
@@ -264,12 +316,95 @@ func cmdStop() int {
 }
 
 // cmdRestart 重启代理并保留接管现场。
-// 期望态存在 state.json 里，所以先 stop 再 start 就会原样插回去，
-// 不需要在这里手工快照。
+//
+// 优先走优雅交接（nginx upgrade 语义）：旧 daemon 把监听 socket 移交给
+// 新二进制，在途请求流完为止——正穿行在代理里的会话（比如正在开发
+// newgate 的 Claude Code）完全不受影响，接管状态也不动。
+// 运行中的是旧版 daemon（没有交接能力）时退回 stop+start：有短暂断流
+// 窗口，会提示一句。
 func cmdRestart(force bool) int {
+	if tryHandoff() {
+		return 0
+	}
 	cmdStop()
 	fmt.Println()
 	return cmdStart(force)
+}
+
+// tryHandoff 让运行中的 daemon 把监听 socket 交接给磁盘上的新二进制。
+// 成功（已完全就位）返回 true；不可行时打印原因并返回 false，由调用方
+// 退回 stop+start。
+func tryHandoff() bool {
+	i := daemon.Running()
+	if i == nil {
+		return false // 没在跑，restart 退化为 start
+	}
+	st := store.LoadState()
+	if st.ControlToken == "" {
+		fmt.Println("· daemon 还没有控制令牌（升级前启动的），退回 stop+start")
+		return false
+	}
+	port := i.Port
+	if port <= 0 {
+		port = st.Port
+	}
+	// 先探能力再动手：旧版 daemon 没注册 /__newgate/upgrade，盲发会被
+	// catch-all 转发给上游。status 的 handoff 字段是无副作用的探针。
+	supports, err := handoffSupported(port)
+	if err != nil || !supports {
+		if err != nil {
+			fmt.Printf("· 探测 daemon 交接能力失败（%v），退回 stop+start\n", err)
+		} else {
+			fmt.Println("· 运行中的是旧版 daemon（不支持优雅交接），退回 stop+start")
+		}
+		return false
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d/__newgate/upgrade", port), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+st.ControlToken)
+	// 旧 daemon 要等新进程 ready 才回 200，给足时间
+	resp, err := httpx.LocalClient(20 * time.Second).Do(req)
+	if err != nil {
+		fmt.Printf("· 交接请求发不出去（%v），退回 stop+start\n", err)
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		b, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 512))
+		fmt.Printf("· 交接被拒（HTTP %d: %s），退回 stop+start\n", resp.StatusCode, b)
+		return false
+	}
+	// 200 = 新进程已接上 socket、pid/lock 已改写。这里只确认它完全就位。
+	for k := 0; k < 100; k++ { // 最多 5s
+		if j := daemon.Running(); j != nil && j.PID != i.PID && pingProxy(j.Port) {
+			fmt.Printf("✓ 代理已优雅重启  pid %d → %d  127.0.0.1:%d\n", i.PID, j.PID, j.Port)
+			fmt.Println("  socket 无缝交接：在途请求由旧进程排空，会话不中断；接管状态未动。")
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	fmt.Printf("⚠ 交接已发出，但新进程 5 秒内没就位——看日志 %s\n", paths.LogFile())
+	return false
+}
+
+// handoffSupported 问 daemon 的 status 端点：支持优雅交接吗。
+func handoffSupported(port int) (bool, error) {
+	resp, err := httpx.LocalClient(3 * time.Second).
+		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/status", port))
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Handoff bool `json:"handoff"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return false, err
+	}
+	return out.Handoff, nil
 }
 
 // cmdReload 显式触发重载。平时不需要——watcher 会自动发现。
