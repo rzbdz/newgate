@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,16 +66,15 @@ func cmdProbe(only string, asJSON bool) int {
 		}
 		opts.OnDone = func(t probe.Target, status int, lat time.Duration, err error, done, total int) {
 			light := probe.Light(err == nil && status == 200, lat)
-			msg := ""
-			if err != nil {
-				msg = "  " + firstLine(err.Error(), 60)
-			}
 			st := "  -"
 			if status > 0 {
 				st = fmt.Sprintf("%3d", status)
 			}
-			fmt.Fprintf(os.Stderr, "[%2d/%2d] %s %-42s %s %6dms%s\n",
-				done, total, light, t, st, lat.Milliseconds(), msg)
+			fmt.Fprintf(os.Stderr, "[%2d/%2d] %s %-42s %s %6dms\n",
+				done, total, light, t, st, lat.Milliseconds())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "        错误: %s\n", indentLines(err.Error(), "              "))
+			}
 		}
 		opts.OnWaiting = func(inflight map[probe.Target]time.Duration) {
 			var parts []string
@@ -114,12 +115,11 @@ func cmdProbe(only string, asJSON bool) int {
 		if r.Latency > 0 {
 			lat = fmt.Sprintf("%6dms", r.Latency.Milliseconds())
 		}
-		errMsg := r.Err
-		if len(errMsg) > 44 {
-			errMsg = errMsg[:44] + "…"
+		fmt.Printf("%-9s %-7s %-42s %s %s %8s\n",
+			p, r.Role, r.Provider+"/"+r.Model, r.Light(), status, lat)
+		if r.Err != "" {
+			fmt.Printf("          错误: %s\n", indentLines(r.Err, "                "))
 		}
-		fmt.Printf("%-9s %-7s %-42s %s %s %8s  %s\n",
-			p, r.Role, r.Provider+"/"+r.Model, r.Light(), status, lat, errMsg)
 	}
 
 	sums := probe.Summarize(results)
@@ -186,6 +186,12 @@ func cmdDoctor() int {
 
 	fmt.Println("\n== 出站代理环境变量 ==")
 	bad += checkProxyEnv()
+
+	fmt.Println("\n== WSL / Tailscale subnet ==")
+	bad += checkTailscaleSubnetLoop()
+
+	fmt.Println("\n== 上游网络 ==")
+	bad += checkUpstreamNetwork()
 
 	fmt.Println("\n== 代理 ==")
 	st := store.LoadState()
@@ -371,15 +377,101 @@ func sortedKeys(m map[string]domain.Provider) []string {
 	return out
 }
 
-func firstLine(s string, n int) string {
-	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
-		s = s[:i]
+func indentLines(s, indent string) string {
+	return strings.ReplaceAll(s, "\n", "\n"+indent)
+}
+
+func checkUpstreamNetwork() int {
+	checks, err := probe.CheckNetAll(5 * time.Second)
+	if err != nil {
+		fmt.Printf("  ✗ 无法加载 provider: %v\n", err)
+		return 1
 	}
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n]) + "…"
+
+	bad := 0
+	seen := map[string]bool{}
+	for _, check := range checks {
+		if seen[check.Host] {
+			continue
+		}
+		seen[check.Host] = true
+		fmt.Printf("  %s (%s)\n", check.Host, check.Provider)
+		hostBad := false
+		for _, step := range check.Steps {
+			mark := "✓"
+			if !step.OK {
+				mark = "✗"
+				hostBad = true
+			}
+			fmt.Printf("    %s %-10s %6dms  %s\n", mark, step.Name,
+				step.Latency.Milliseconds(), indentLines(step.Detail, "                              "))
+		}
+		if hostBad {
+			bad++
+		}
 	}
-	return s
+	return bad
+}
+
+func checkTailscaleSubnetLoop() int {
+	osRelease, err := ioutil.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil || !strings.Contains(strings.ToLower(string(osRelease)), "microsoft") {
+		fmt.Println("  - 非 WSL，跳过")
+		return 0
+	}
+
+	out, err := exec.Command("tailscale", "debug", "prefs").Output()
+	if err != nil {
+		fmt.Println("  - WSL 内未检测到运行中的 Tailscale")
+		return 0
+	}
+	var prefs struct {
+		AdvertiseRoutes []string
+	}
+	if err := json.Unmarshal(out, &prefs); err != nil || len(prefs.AdvertiseRoutes) == 0 {
+		fmt.Println("  ✓ WSL 没有对外发布 subnet route")
+		return 0
+	}
+	fmt.Printf("  · WSL 对外发布: %s\n", strings.Join(prefs.AdvertiseRoutes, ", "))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ps := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+		"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "+
+			"Get-NetRoute -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -eq 'Tailscale' } | "+
+			"Select-Object -ExpandProperty DestinationPrefix")
+	routesOut, err := ps.Output()
+	if err != nil {
+		fmt.Println("  ⚠ 无法读取 Windows Tailscale 路由；请确认 Windows 已关闭 accept-routes")
+		return 0
+	}
+
+	var conflicts []string
+	for _, advertised := range prefs.AdvertiseRoutes {
+		for _, accepted := range strings.Fields(string(routesOut)) {
+			if cidrsOverlap(advertised, accepted) {
+				conflicts = append(conflicts, advertised+" ↔ "+accepted)
+			}
+		}
+	}
+	if len(conflicts) == 0 {
+		fmt.Println("  ✓ Windows Tailscale 未接管这些 subnet，不会回灌到 WSL")
+		return 0
+	}
+	fmt.Printf("  ✗ Windows Tailscale 正在接收 WSL 发布的同网段路由: %s\n",
+		strings.Join(conflicts, ", "))
+	fmt.Println("    ↳ 流量会在 Windows 与 WSL 间回灌，表现为 TLS 握手超时或随机丢包")
+	fmt.Println("    修法: 在 Windows 执行 tailscale set --accept-routes=false")
+	return 1
+}
+
+func cidrsOverlap(a, b string) bool {
+	ipA, netA, errA := net.ParseCIDR(strings.TrimSpace(a))
+	ipB, netB, errB := net.ParseCIDR(strings.TrimSpace(b))
+	if errA != nil || errB != nil {
+		return false
+	}
+	return netA.Contains(ipB) || netB.Contains(ipA)
 }
 
 func checkProxyEnv() int {

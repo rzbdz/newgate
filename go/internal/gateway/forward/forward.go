@@ -26,6 +26,7 @@ import (
 	schema "github.com/rzbdz/newgate/go/internal/gateway/rewrite/schema"
 	"github.com/rzbdz/newgate/go/internal/gateway/special"
 	"github.com/rzbdz/newgate/go/internal/gateway/thinkcache"
+	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/platform/logx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/store"
@@ -324,14 +325,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 		// 流式不能设总超时（长响应会被砍断），但必须限制首字节等待时间，
 		// 否则上游装死就永久挂住。ResponseHeaderTimeout 正好只管到响应头。
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.ResponseHeaderTimeout = firstByteTimeout
-		client := &http.Client{Transport: tr, Timeout: func() time.Duration {
+		client := httpx.UpstreamClient(func() time.Duration {
 			if stream {
 				return 0
 			}
 			return totalTimeout
-		}()}
+		}(), firstByteTimeout)
 
 		resp, derr := client.Do(req)
 		routeStr := fmt.Sprintf("%s -> %s/%s", inModel, a.Binding.Provider, a.Binding.Model)
