@@ -19,6 +19,47 @@ from urllib.parse import urlparse, parse_qs
 RECORDED = []
 NEXT_FAIL = {"code": None}
 
+# 模拟 DeepSeek 官方思考模式最严口径的检查：请求带了 tools 且思考开着时，
+# 每条 assistant 消息都必须回传**非空**的推理内容（reasoning_content 字段，
+# 或 Anthropic 方言 content[] 里 thinking 块的文本）。空串 = 没回传，照样 400
+# —— 2026-09 在 new-api 直连官方的部署上实抓到的行为，本仓库
+# gateway/special/st-deepseek.go 的占位符修法就是冲它去的。
+STRICT_REASONING_ERR = {
+    "type": "error",
+    "error": {
+        "type": "invalid_request_error",
+        "message": "The `reasoning_content` in the thinking mode must be "
+                   "passed back to the API. (request id: mock-e2e-strict)",
+    },
+}
+
+
+def strict_reasoning_violation(body):
+    """有违规返回 True。只对「带 tools 且思考开着」的请求生效（官方文档口径）。"""
+    if not isinstance(body, dict):
+        return False
+    if not body.get("tools"):
+        return False
+    thinking = body.get("thinking")
+    if isinstance(thinking, dict) and thinking.get("type") == "disabled":
+        return False
+    for m in body.get("messages") or []:
+        if not isinstance(m, dict) or m.get("role") != "assistant":
+            continue
+        rc = m.get("reasoning_content")
+        if isinstance(rc, str) and rc.strip():
+            continue
+        content = m.get("content")
+        if isinstance(content, list):
+            text = "".join(
+                b.get("thinking", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "thinking"
+            )
+            if text.strip():
+                continue
+        return True
+    return False
+
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -87,16 +128,33 @@ class Handler(BaseHTTPRequestHandler):
             code, NEXT_FAIL["code"] = NEXT_FAIL["code"], None
             return self._json(code, {"error": {"message": f"mock forced {code}"}})
 
+        if strict_reasoning_violation(body):
+            print(f"[upstream] STRICT 400: {u.path}", flush=True)
+            return self._json(400, STRICT_REASONING_ERR)
+
         model = body.get("model", "unknown")
         anthropic = u.path.endswith("/messages")
 
         if body.get("stream"):
-            return self._stream(model, anthropic)
+            # mock_slow：把块间隔拉长——e2e 用它让一条流跨过 restart 窗口，
+            # 验证优雅交接不掐在途请求
+            return self._stream(model, anthropic,
+                                slow=bool(body.get("mock_slow")),
+                                tools=bool(body.get("tools")))
         if anthropic:
+            # 思考内容 + tool_use：让 newgate 的 thinkcache 有东西可记
+            # （tool_use 只在请求带了 tools 时给，id 固定，方便 e2e 断言回填）。
+            content = [{"type": "thinking",
+                        "thinking": "MOCK-THINKING-ORIGINAL",
+                        "signature": "mock-sig"}]
+            if body.get("tools"):
+                content.append({"type": "tool_use", "id": "toolu_mock_1",
+                                "name": "Read", "input": {"path": "x"}})
+            content.append({"type": "text", "text": f"MOCK-OK model={model}"})
             return self._json(200, {
                 "id": "msg_mock", "type": "message", "role": "assistant",
                 "model": model,
-                "content": [{"type": "text", "text": f"MOCK-OK model={model}"}],
+                "content": content,
                 "stop_reason": "end_turn",
                 "usage": {"input_tokens": 7, "output_tokens": 5},
             })
@@ -108,8 +166,14 @@ class Handler(BaseHTTPRequestHandler):
             "usage": {"prompt_tokens": 7, "completion_tokens": 5, "total_tokens": 12},
         })
 
-    def _stream(self, model, anthropic):
-        """逐块吐，每块之间留间隔——用来验证代理没有缓冲整个响应。"""
+    def _stream(self, model, anthropic, slow=False, tools=False):
+        """逐块吐，每块之间留间隔——用来验证代理没有缓冲整个响应。
+
+        Anthropic 方言按 Claude Code 的真实形态吐块：thinking 块在前、
+        tools 请求加 tool_use 块——thinkcache 观察者靠这两个块的相邻关系
+        把推理内容和 tool id 关联起来（e2e 第 8 章的回填断言依赖它）。
+        """
+        delay = 0.5 if slow else 0.05
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -123,16 +187,29 @@ class Handler(BaseHTTPRequestHandler):
         if anthropic:
             send({"type": "message_start",
                   "message": {"id": "msg_mock", "model": model, "content": []}})
+            send({"type": "content_block_start", "index": 0,
+                  "content_block": {"type": "thinking", "thinking": ""}})
+            send({"type": "content_block_delta", "index": 0,
+                  "delta": {"type": "thinking_delta",
+                            "thinking": "MOCK-THINKING-ORIGINAL"}})
+            i = 1
+            if tools:
+                send({"type": "content_block_start", "index": i,
+                      "content_block": {"type": "tool_use", "id": "toolu_mock_1",
+                                        "name": "Read", "input": {}}})
+                i += 1
+            send({"type": "content_block_start", "index": i,
+                  "content_block": {"type": "text", "text": ""}})
             for w in ["MOCK", "-", "STREAM", f" {model}"]:
-                send({"type": "content_block_delta",
+                send({"type": "content_block_delta", "index": i,
                       "delta": {"type": "text_delta", "text": w}})
-                time.sleep(0.05)
+                time.sleep(delay)
             send({"type": "message_stop"})
         else:
             for w in ["MOCK", "-", "STREAM", f" {model}"]:
                 send({"object": "chat.completion.chunk", "model": model,
                       "choices": [{"index": 0, "delta": {"content": w}}]})
-                time.sleep(0.05)
+                time.sleep(delay)
             send({"object": "chat.completion.chunk", "model": model,
                   "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
         self.wfile.write(b"data: [DONE]\n\n")

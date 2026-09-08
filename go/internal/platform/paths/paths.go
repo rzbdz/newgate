@@ -31,16 +31,33 @@ func StateFile() string     { return filepath.Join(root(), "state.json") }
 func BackupDir() string     { return filepath.Join(root(), "backups") }
 func LogFile() string       { return filepath.Join(root(), "newgate.log") }
 
-// pid / lock 放 $HOME，除非 NEWGATE_HOME 被覆盖（测试时隔离）
+// pid / lock 放共享配置目录，便于同一组的多用户管理同一个 daemon。
+// NEWGATE_HOME 仍可用于测试时隔离整套运行时文件。
 func runtimeDir() string {
-	if v := os.Getenv("NEWGATE_HOME"); v != "" {
-		return v
-	}
-	return Home()
+	return root()
 }
 
 func PidFile() string  { return filepath.Join(runtimeDir(), ".newgate.pid") }
 func LockFile() string { return filepath.Join(runtimeDir(), ".newgate.lock") }
+
+// LegacyPidFile / LegacyLockFile 老版本的 pid / lock 位置（$HOME 根下）。
+// 只在真实部署（没设 NEWGATE_HOME）时兜底**读**它：升级到共享目录后，
+// 正在跑的老 daemon 还把 pid 写在那儿——不兜底的话它就「失踪」了，
+// stop 不到、start 又撞端口。
+// 沙箱里必须返回空：绝不能让测试里的 stop 顺藤摸瓜摸到真实 daemon。
+func LegacyPidFile() string {
+	if os.Getenv("NEWGATE_HOME") != "" {
+		return ""
+	}
+	return filepath.Join(Home(), ".newgate.pid")
+}
+
+func LegacyLockFile() string {
+	if os.Getenv("NEWGATE_HOME") != "" {
+		return ""
+	}
+	return filepath.Join(Home(), ".newgate.lock")
+}
 
 // TargetFiles 被接管的目标配置文件。
 // NEWGATE_TARGET_DIR 可整体重定向（mock/测试用）。
@@ -77,9 +94,19 @@ func TargetFiles() []string {
 	return out
 }
 
+// EnsureDirs 2770（组可读写 + setgid）：共享部署模型下，同组的其他用户
+// （developer 组里的 claude 用户）也要能读配置、写 pid/lock 管理同一个
+// daemon。新文件继承组的 setgid 靠目录位，umask 剥掉的组写用 chmod 补回。
+// 已存在的目录不碰——权限是装它的人的事。
 func EnsureDirs() error {
 	for _, d := range []string{Config(), Mappings(), BackupDir()} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
+		if _, err := os.Stat(d); err == nil {
+			continue
+		}
+		if err := os.MkdirAll(d, 0o2770); err != nil {
+			return err
+		}
+		if err := os.Chmod(d, 0o2770); err != nil {
 			return err
 		}
 	}

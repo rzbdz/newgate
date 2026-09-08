@@ -47,6 +47,8 @@ newgate-toy claude --resume abc     # ≡ newgate --preset toy claude --resume a
 2. 遇到 `--`：其后**第一个 token 是 tool**，再之后全是透传参数，扫描结束。
 3. 遇到 newgate 已知选项：按其 arity 消费值（`--provider kimi` 消费两个 token，`--provider=kimi` 消费一个）。
 4. 遇到 **第一个非选项 token**：它是 tool，**它之后的所有 token 一律原样透传，不再解析**。
+   唯一例外：`--profile` / `--preset` 是 newgate 自己的档位选项，出现在 tool 之后也仍
+   被 newgate 消费——否则 `newgate claude --profile=ds` 里的 profile 会被透传给 claude。
 5. 遇到未知选项且尚未确定 tool：报错（不是透传）——因为此时还没进入 tool 的领地，未知选项一定是拼错了。
 
 ### 逐例验证
@@ -172,7 +174,7 @@ newgate use --list
 | `stop` | 全面停止：停代理 + 所有 agent 恢复直连（**不改接管意愿**） |
 | `start <agent>` / `on <agent>` / `takeover <agent>` | 只接管一个，并记下「要接管它」 |
 | `stop <agent>` / `off <agent>` / `release <agent>` | 只放开一个，并记下「不要接管它」 |
-| `restart` | 重启代理，接管现场原样保留 |
+| `restart` | 重启代理，接管现场原样保留。**优先优雅交接**（nginx 式）：旧 daemon 把监听 socket 移交给新二进制，在途请求（含 SSE 长流）由旧进程流完为止，正穿行在代理里的会话不断线，接管状态不动。运行中的是旧版 daemon（无 `/__newgate/upgrade` 端点，`status` 无 `handoff` 字段）时退回 stop+start，有短暂断流窗口并提示。交接鉴权与停机端点同源（`state.json` 的 `control_token`）。 |
 | `shim [status\|uninstall]` | 底层逃生口：摊开 shim 目录实况 / 连 rc 里的 PATH 行一起清干净 |
 
 **为什么不暴露 `shim install <agent>`**：那把内部结构泄漏成了用户接口——用户

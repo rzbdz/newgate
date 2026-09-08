@@ -13,6 +13,18 @@ import "time"
 // 这样只有两个模型的 provider 家族也只需写两行。
 var Roles = []string{"heavy", "mid", "light", "vision"}
 
+// IsRole 判断一个模型名是不是语义档位名（而不是具体模型名）。
+// 代理收到客户端发来的 model 字段时用它区分「档位路由」和「具体模型路由」
+// （docs/18 §5）。
+func IsRole(s string) bool {
+	for _, r := range Roles {
+		if r == s {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	// DefaultPriority profile 没写 priority 时的默认值。取中间值，
 	// 用户既能往前插（更小）也能往后放（更大）。
@@ -54,10 +66,21 @@ type Profile struct {
 	// Pinned 「我当链头时，链到我为止」——不好用就报错，别偷偷换。
 	Pinned bool `json:"pinned,omitempty"`
 	// Excluded 「别人别自动掉到我这」——只能被显式选中。
-	Excluded bool                  `json:"excluded,omitempty"`
+	Excluded bool `json:"excluded,omitempty"`
 	Roles    map[string]Candidates `json:"roles"`
 	// Fallback 本 profile 内所有未定义档位的兜底，等价于 roles["*"]。
 	Fallback *Binding `json:"fallback,omitempty"`
+
+	// ContextWindow 主力模型的真实上下文窗口（token 数），>0 才生效。
+	// 为什么需要：代理给客户端注入的是真实模型名（glm-5.3），不在
+	// Claude Code 的内置模型目录里，客户端按「未知模型」假设 200k 窗口，
+	// 动不动提前 compact。设了就在启动时注入 CLAUDE_CODE_MAX_CONTEXT_TOKENS。
+	ContextWindow int `json:"context_window,omitempty"`
+	// AutoCompactWindow auto-compact 的目标窗口，>0 才生效，应 ≤
+	// ContextWindow（客户端取 min）。注入 CLAUDE_CODE_AUTO_COMPACT_WINDOW
+	// ——它在客户端解析优先级最高、不依赖账号状态，/context 里会显示
+	// "(from CLAUDE_CODE_AUTO_COMPACT_WINDOW)"。
+	AutoCompactWindow int `json:"auto_compact_window,omitempty"`
 }
 
 func (p *Profile) Prio() int {
@@ -159,6 +182,13 @@ type State struct {
 
 	Port      int  `json:"port"`
 	TakenOver bool `json:"taken_over"`
+
+	// ControlToken 控制端点（/__newgate/stop）的 Bearer 令牌。
+	// 为什么需要它：共享部署里同组用户读得到这份 state（0660），却对
+	// 别人起的 daemon 没有 kill() 权限——停机只能靠代理自己的 HTTP 端点，
+	// 而端点必须验明来意。令牌和 providers 的 key 同级保密：能读到它的
+	// 组员本来就被信任到了「能拿走上游 key」的程度，停机权限不构成新暴露。
+	ControlToken string `json:"control_token,omitempty"`
 
 	// Takeover per-agent 接管意愿（期望态）。没有条目 = 想接管，所以
 	// `newgate start` 默认全面接管；显式 false = 用户 `newgate off <agent>`

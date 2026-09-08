@@ -22,6 +22,12 @@ var (
 
 const usage = `newgate — AI CLI 的语义模型层
 
+包装启动（本次用某个 profile，不改全局状态）
+  newgate <agent> [--profile <名>] [agent-args...]
+  newgate --profile <名> <agent> [agent-args...]
+  newgate run <agent> [agent-args...]      显式包装路径
+  newgate-<名> <agent> ...                 argv0 分发，等价 --preset <名>
+
 接管与退出
   newgate start                 全面接管：起代理 + 接管所有 agent
   newgate stop                  全面停止：停代理 + 所有 agent 恢复直连
@@ -77,6 +83,13 @@ func Run(args []string) int {
 			}
 			return cmdSetProfile(findFlag(args, "--agent", "--tool", "--target"), name)
 		}
+	}
+
+	// 包装启动：newgate claude --profile=ds / newgate --profile ds claude /
+	// newgate run claude（docs/03 §1）。在子命令 switch 之前判断——agent 名
+	// 与子命令名是互斥的封闭集合，不会撞车。
+	if _, ok := detectLaunch(args); ok {
+		return cmdLaunch(args)
 	}
 
 	switch args[0] {
