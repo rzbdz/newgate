@@ -33,8 +33,11 @@ func runWrapper(a *agents.Agent, argv []string) {
 		os.Exit(69)
 	}
 
-	// Start the proxy lazily; otherwise the agent gets a connection refused.
-	if daemon.Running() == nil {
+	// Start the proxy lazily only if it isn't already serving. The port check
+	// matters for cross-user setups: a root-owned proxy can't be signaled by a
+	// non-root uid (kill(0) → EPERM), so the pidfile check alone would falsely
+	// report "not running" and spawn a second proxy that fails to bind.
+	if daemon.Running() == nil && !tcpAlive(st.Port) {
 		fmt.Fprintf(os.Stderr, "newgate: proxy not running, starting…\n")
 		if _, err := daemon.Spawn(st.Port); err != nil {
 			fmt.Fprintf(os.Stderr, "newgate: failed to start proxy: %v\n"+
