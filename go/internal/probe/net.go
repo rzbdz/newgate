@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
+	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/store"
 )
 
@@ -71,7 +72,7 @@ func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 	// 2. TCP
 	addr := net.JoinHostPort(host, port)
 	t0 = time.Now()
-	conn, err := net.DialTimeout("tcp", addr, timeout)
+	conn, err := httpx.DialUpstreamTimeout("tcp", addr, timeout)
 	d = time.Since(t0)
 	if err != nil {
 		nc.Steps = append(nc.Steps, Step{"TCP 连接", false,
@@ -89,7 +90,7 @@ func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 		d = time.Since(t0)
 		if err != nil {
 			nc.Steps = append(nc.Steps, Step{"TLS 握手", false,
-				fmt.Sprintf("%v\n      ↳ 证书问题 / 中间有 MITM 代理 / 时钟不对", err), d})
+				tlsErrorDetail(err), d})
 			_ = conn.Close()
 			return nc
 		}
@@ -106,6 +107,14 @@ func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 		return nc
 	}
 	return nc
+}
+
+func tlsErrorDetail(err error) string {
+	hint := "证书问题 / 中间有 MITM 代理 / 时钟不对"
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		hint = "TCP 已连通但 TLS 回包不完整：检查 MTU/MSS、VPN 嵌套，或 Tailscale subnet route 是否回灌成环"
+	}
+	return fmt.Sprintf("%v\n      ↳ %s", err, hint)
 }
 
 // CheckNetAll 对所有 provider 各跑一遍分层探测。

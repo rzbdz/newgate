@@ -1,11 +1,14 @@
 package httpx
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
 )
+
+const UpstreamTCPMaxSegment = 1200
 
 // IsLoopback 判断 host 是不是本机回环。
 func IsLoopback(host string) bool {
@@ -38,6 +41,37 @@ func LoopbackAwareTransport() *http.Transport {
 		return http.ProxyFromEnvironment(req)
 	}
 	return t
+}
+
+// UpstreamTransport 给真实上游使用。较小的 TCP MSS 避免 VPN、WSL 和叠加网络
+// 没有正确转发 ICMP "packet too big" 时，大 TLS 握手包永远重传的 MTU 黑洞。
+func UpstreamTransport(responseHeaderTimeout time.Duration) *http.Transport {
+	t := LoopbackAwareTransport()
+	d := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   setTCPMaxSegment,
+	}
+	t.DialContext = d.DialContext
+	t.ResponseHeaderTimeout = responseHeaderTimeout
+	return t
+}
+
+func UpstreamClient(timeout, responseHeaderTimeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: UpstreamTransport(responseHeaderTimeout),
+	}
+}
+
+func DialUpstreamTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	d := &net.Dialer{
+		Timeout: timeout,
+		Control: setTCPMaxSegment,
+	}
+	return d.DialContext(ctx, network, address)
 }
 
 // LocalClient 专门用于打本机的客户端。

@@ -13,6 +13,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
+	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/store"
 )
 
@@ -268,7 +269,7 @@ func One(p domain.Provider, model string, timeout time.Duration) (int, time.Dura
 	}
 
 	start := time.Now()
-	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	resp, err := httpx.UpstreamClient(timeout, 0).Do(req)
 	lat := time.Since(start)
 	if err != nil {
 		return 0, lat, err
@@ -399,7 +400,7 @@ func CheckQuirks(provName string, p domain.Provider, model string, timeout time.
 		req.Header.Set("Authorization", "Bearer "+p.Key())
 	}
 
-	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	resp, err := httpx.UpstreamClient(timeout, 0).Do(req)
 	if err != nil {
 		return nil
 	}
