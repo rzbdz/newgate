@@ -405,13 +405,14 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, reqID uint64, body []b
 //	          此后退回本地粗估不再白跑；2xx = 有，记下，此后一直拿真值
 //	连接失败 / 429 / 401 → 不学（「现在不行」≠「没有」），本次退回本地
 //
-// 模型注入：count_tokens 请求不带 model 字段，补 mid 档链头——主循环
-// 在 mid 跑，数出来的才是将要处理这段对话的 tokenizer。不走链、不碰
-// 熔断器：数 token 失败不算上游病。
+// 模型注入：count_tokens 请求不带 model 字段，补 heavy 档链头——
+// Claude Code 的主循环跑在 opus 槽（= heavy 档，2026-09-09 实测 /context
+// Model: heavy），数出来的才是将要处理这段对话的 tokenizer。不走链、
+// 不碰熔断器：数 token 失败不算上游病。
 func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 	body []byte, tgt Target, reqID uint64) bool {
 
-	head, ok := s.midHead(tgt)
+	head, ok := s.mainLoopHead(tgt)
 	if !ok {
 		return false
 	}
@@ -471,12 +472,12 @@ func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 	return true
 }
 
-// midHead mid 档的链头（含完整 provider 记录）。count_tokens 不带 model，
-// 转发时按 mid 补。用 PrimaryBinding（忽略熔断器）：数 token 用配置里
-// 排第一的就行，不值得为它触发 fallback 语义。
-func (s *Server) midHead(tgt Target) (resolve.Step, bool) {
+// mainLoopHead 主循环档（heavy）的链头（含完整 provider 记录）。
+// count_tokens 不带 model，转发时按它补。用 PrimaryBinding（忽略熔断器）：
+// 数 token 用配置里排第一的就行，不值得为它触发 fallback 语义。
+func (s *Server) mainLoopHead(tgt Target) (resolve.Step, bool) {
 	if testChain != nil {
-		if steps := testChain("mid"); len(steps) > 0 {
+		if steps := testChain("heavy"); len(steps) > 0 {
 			return steps[0], true
 		}
 		return resolve.Step{}, false
@@ -489,7 +490,7 @@ func (s *Server) midHead(tgt Target) (resolve.Step, bool) {
 	if active == "" {
 		active = snap.State.ActiveFor(tgt.TaskCreate)
 	}
-	b, ok := resolve.PrimaryBinding("mid", snap.Profiles, snap.Providers, active)
+	b, ok := resolve.PrimaryBinding("heavy", snap.Profiles, snap.Providers, active)
 	if !ok {
 		return resolve.Step{}, false
 	}
@@ -728,15 +729,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 		// 流式不能设总超时（长响应会被砍断），但必须限制首字节等待时间，
 		// 否则上游装死就永久挂住。ResponseHeaderTimeout 正好只管到响应头。
-		// 非流式（后台小调用）另用更紧的上限：卡住它 = 卡住整个会话——
-		// Claude Code 的权限分类器在等，用户终端陪绑（2026-09-09 实测：
-		// relay 一发 air 请求 89s 无响应头，直到用户手动打断）。两个值都
-		// 从 state.json 的 timeouts 热加载（domain.Timeouts），误杀了改
-		// 配置就行，不用重编译；误杀率看 newgate metrics。
+		// 非流式（后台小调用）用更紧的基础值 + 按请求体大小加成（大输入
+		// 的 prefill 合法地慢——/compact 的总结请求 500KB+，一刀切 12s
+		// 会在链上连环掐死它）。全部从 state.json 的 timeouts 热加载
+		// （domain.Timeouts），误杀率看 newgate metrics。
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.ResponseHeaderTimeout = st.Timeouts.FirstByte()
 		if !stream {
-			tr.ResponseHeaderTimeout = st.Timeouts.FirstByteNonStream()
+			tr.ResponseHeaderTimeout = st.Timeouts.FirstByteNonStreamFor(len(newBody))
 		}
 		client := &http.Client{Transport: tr, Timeout: func() time.Duration {
 			if stream {
@@ -788,7 +788,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
 				waitLimit := st.Timeouts.FirstByte()
 				if !stream {
-					waitLimit = st.Timeouts.FirstByteNonStream()
+					waitLimit = st.Timeouts.FirstByteNonStreamFor(len(newBody))
 				}
 				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
 			}

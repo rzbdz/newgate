@@ -13,9 +13,9 @@ import (
 	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
 )
 
-// midChainOnly 测试桩：mid 档指向 given 上游，其他档为空——count_tokens
-// 的转发只看 mid 链头（主循环在 mid 跑）。
-func midChainOnly(t *testing.T, up *httptest.Server) {
+// heavyChainOnly 测试桩：heavy 档指向 given 上游，其他档为空——count_tokens
+// 的转发只看主循环档（heavy）链头。
+func heavyChainOnly(t *testing.T, up *httptest.Server) {
 	t.Helper()
 	dialect.Reset()
 	t.Cleanup(func() {
@@ -23,7 +23,7 @@ func midChainOnly(t *testing.T, up *httptest.Server) {
 		testChain = nil
 	})
 	testChain = func(role string) []resolve.Step {
-		if role != "mid" {
+		if role != "heavy" {
 			return nil
 		}
 		return []resolve.Step{{
@@ -60,7 +60,7 @@ func TestCountTokensLazyProbeThenLocal(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"Invalid URL"}`))
 	}))
 	defer up.Close()
-	midChainOnly(t, up)
+	heavyChainOnly(t, up)
 
 	srv := &Server{Port: 0}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
@@ -107,7 +107,7 @@ func TestCountTokensForwardedWhenSupported(t *testing.T) {
 		_, _ = w.Write([]byte(`{"input_tokens":42}`))
 	}))
 	defer up.Close()
-	midChainOnly(t, up)
+	heavyChainOnly(t, up)
 
 	srv := &Server{Port: 0}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
@@ -127,7 +127,7 @@ func TestCountTokensForwardedWhenSupported(t *testing.T) {
 		t.Errorf("上游路径 = %s", gotPath)
 	}
 	if gotModel != "real-model-1" {
-		t.Errorf("model 应按 mid 链头补上，实际 %q", gotModel)
+		t.Errorf("model 应按主循环档（heavy）链头补上，实际 %q", gotModel)
 	}
 	if gotAuth != "Bearer sk-real" {
 		t.Errorf("auth 跟 provider 声明的协议走，实际 %q", gotAuth)
@@ -153,7 +153,7 @@ func TestCountTokensTransientErrorNotLearned(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
 	}))
 	defer up.Close()
-	midChainOnly(t, up)
+	heavyChainOnly(t, up)
 
 	srv := &Server{Port: 0}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
@@ -188,7 +188,7 @@ func TestCountTokensAlreadyLearnedSkipsUpstream(t *testing.T) {
 	up.Close() // 故意关掉：连不上也不影响本地粗估
 
 	testChain = func(role string) []resolve.Step {
-		if role != "mid" {
+		if role != "heavy" {
 			return nil
 		}
 		return []resolve.Step{{
@@ -227,7 +227,7 @@ func TestCountTokensRespectsClientModel(t *testing.T) {
 		_, _ = w.Write([]byte(`{"input_tokens":7}`))
 	}))
 	defer up.Close()
-	midChainOnly(t, up)
+	heavyChainOnly(t, up)
 
 	srv := &Server{Port: 0}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
