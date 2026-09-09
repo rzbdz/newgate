@@ -220,11 +220,16 @@ check "切到 glm 后 opus 档是 glm-4-plus" \
 GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r[0]["body"]["model"] if r else "NONE")')
 check "上游收到 glm 的 glm-4-plus" "$GOT" "glm-4-plus"
 
-echo; echo "== 4. 不带 profile 用默认（ds） =="
+echo; echo "== 4. 不带 profile 用默认（ds）：动态模式，槽位 = 档位名 =="
+# 默认（动态）模式槽位保持档位名——会话发档位名回来，代理按请求时的当前
+# 配置解析，--set-profile 对跑着的会话立刻生效。窗口声明照注入（档位名
+# 对 Claude Code 也是未知模型，MAX_CONTEXT_TOKENS 一样生效）。
 curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
 OUT="$("$BIN" claude 2>"$SANDBOX/default.err")"
-check "默认 profile 是 ds（deepseek-chat）" \
-  "$(echo "$OUT" | grep '^OPUS_MODEL=' | cut -d= -f2-)" "deepseek-chat"
+check "默认（动态）：opus 槽 = 档位名 heavy" \
+  "$(echo "$OUT" | grep '^OPUS_MODEL=' | cut -d= -f2-)" "heavy"
+check "默认（动态）：窗口声明照注入（ds 没配 → 空）" \
+  "$(echo "$OUT" | grep '^WIN_MAX=' | cut -d= -f2-)" ""
 
 echo; echo "== 5. 不存在的 profile 要立刻报错（退出码 65） =="
 "$BIN" claude --profile=nope >/dev/null 2>"$SANDBOX/nope.err"

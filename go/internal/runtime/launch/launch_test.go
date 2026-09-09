@@ -90,36 +90,49 @@ func TestBuildInjectWindowEnv(t *testing.T) {
 	})
 }
 
-// TestBuildInjectModelNames 真实模型名注入 + base URL 的 profile 覆盖，
-// 顺带确认窗口注入没有破坏这两条老行为。
+// TestBuildInjectModelNames 槽位命名的两种模式（2026-09-09 定稿）：
+// 默认动态——槽位保持档位名，--set-profile 对跑着的会话立刻生效；
+// 显式 --profile 钉死——注入真实模型名，显示的就是这次真用的。
 func TestBuildInjectModelNames(t *testing.T) {
 	sandboxStore(t)
 	st := &domain.State{Port: 8899}
 	a := agents.Registry["claude"]
 
-	t.Run("默认：base URL 不带 /p/，模型名是真实名", func(t *testing.T) {
+	t.Run("默认（动态）：槽位 = 档位名，base URL 不带 /p/", func(t *testing.T) {
 		inject := buildInject(a, st, "glm", "")
 		if got := inject["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:8899/a/claude" {
 			t.Errorf("BASE_URL = %q", got)
 		}
+		if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "heavy" {
+			t.Errorf("动态模式槽位应是档位名，OPUS_MODEL = %q", got)
+		}
+		if got := inject["ANTHROPIC_DEFAULT_HAIKU_MODEL"]; got != "light" {
+			t.Errorf("HAIKU_MODEL = %q，应为 light", got)
+		}
+	})
+
+	t.Run("显式 profile（钉死）：槽位 = 真实模型名，base URL 带 /p/", func(t *testing.T) {
+		inject := buildInject(a, st, "glm", "glm")
+		if got := inject["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:8899/a/claude/p/glm" {
+			t.Errorf("BASE_URL = %q", got)
+		}
 		if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "glm-5.3" {
-			t.Errorf("OPUS_MODEL = %q，应为 glm-5.3", got)
+			t.Errorf("钉死模式应是真实名，OPUS_MODEL = %q", got)
 		}
 		if got := inject["ANTHROPIC_DEFAULT_HAIKU_MODEL"]; got != "glm-4.5-air" {
 			t.Errorf("HAIKU_MODEL = %q，应为 glm-4.5-air", got)
 		}
 	})
 
-	t.Run("显式 profile：base URL 带 /p/，窗口跟 profile 走", func(t *testing.T) {
-		// 默认链头是 glm（有窗口），--profile tiny（没窗口）：窗口 env
-		// 必须跟 tiny 走，而不是跟默认链头——否则用户切到小窗口 profile
-		// 时拿到的还是大窗口声明。
+	t.Run("钉死到别的 profile：真名跟被选中的 profile 走", func(t *testing.T) {
+		// 默认链头是 glm，--profile tiny：真名必须是 tiny 的，不然界面
+		// 显示的和实际跑的对不上
 		inject := buildInject(a, st, "tiny", "tiny")
-		if got := inject["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:8899/a/claude/p/tiny" {
-			t.Errorf("BASE_URL = %q", got)
+		if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "glm-4-plus" {
+			t.Errorf("OPUS_MODEL = %q，应为 tiny 的 glm-4-plus", got)
 		}
 		if _, has := inject["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; has {
-			t.Error("窗口应该跟被选中的 profile（tiny）走")
+			t.Error("窗口应该跟被选中的 profile（tiny，没声明）走")
 		}
 	})
 }
