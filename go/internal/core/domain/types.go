@@ -205,12 +205,16 @@ type Timeouts struct {
 	// （anthropic-relay）有固定 ~43s 开销，设太短会把本来能成功的请求
 	// 误杀。
 	FirstByteMs int `json:"first_byte_ms,omitempty"`
-	// FirstByteNonStreamMs 非流式（后台小调用）等响应头的上限。默认
-	// 12s（2026-09-09 用户定的起点）：卡住后台调用 = 冻住整个会话——
-	// Claude Code 的权限分类器在等，用户终端陪绑。误杀率看
-	// `newgate metrics` 的 timeout.first_byte.non_stream 和
-	// chain.failover，拿数据再调。
+	// FirstByteNonStreamMs 非流式（后台小调用）等响应头的上限的基础值，
+	// 实际上限还叠加每兆字节的预填时间（FirstByteNonStreamPerMbMs）。
+	// 默认 12s（2026-09-09 用户定的起点）：卡住后台调用 = 冻住整个会话。
 	FirstByteNonStreamMs int `json:"first_byte_non_stream_ms,omitempty"`
+	// FirstByteNonStreamPerMbMs 非流式首字节上限的每兆字节加成。为什么
+	// 必须：大输入的第一字节合法地慢——/compact 的总结请求 500KB+，
+	// 一刀切 12s 把它在链上连环掐死（2026-09-09 实抓：glm→deepseek→
+	// minimax 三连超时 + 熔断，客户端报「can't help」）。默认 30s/MB，
+	// 512KB ≈ 27s 上限。误杀率看 `newgate metrics` 再调。
+	FirstByteNonStreamPerMbMs int `json:"first_byte_non_stream_per_mb_ms,omitempty"`
 	// TotalMs 非流式请求的总超时（流式不设总超时——长响应会被砍断）。
 	TotalMs int `json:"total_ms,omitempty"`
 }
@@ -227,6 +231,17 @@ func (t Timeouts) FirstByteNonStream() time.Duration {
 		return 12 * time.Second
 	}
 	return time.Duration(t.FirstByteNonStreamMs) * time.Millisecond
+}
+
+// FirstByteNonStreamFor 非流式请求按请求体大小算出的首字节上限：
+// 基础值 + 每兆字节的预填时间。大输入的第一字节合法地慢（prefill 与
+// 大小成正比），固定值要么误杀大请求、要么放走装死的小请求。
+func (t Timeouts) FirstByteNonStreamFor(bodyLen int) time.Duration {
+	perMb := 30 * time.Second
+	if t.FirstByteNonStreamPerMbMs > 0 {
+		perMb = time.Duration(t.FirstByteNonStreamPerMbMs) * time.Millisecond
+	}
+	return t.FirstByteNonStream() + perMb*time.Duration(bodyLen)/(1024*1024)
 }
 
 func (t Timeouts) Total() time.Duration {
