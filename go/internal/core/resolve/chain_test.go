@@ -276,3 +276,78 @@ func TestBackwardCompatOldProfileFormat(t *testing.T) {
 		t.Error("旧格式没有 priority，应取默认值")
 	}
 }
+
+// ---------- classifier_override ----------
+
+func TestOverrideChainHeadsChain(t *testing.T) {
+	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{
+		"light": list("pA/m1", "pB/m2")}}}
+	steps, skips, applied := OverrideChain(domain.Binding{Provider: "pC", Model: "m3"},
+		"light", ps, mkProvs("pA", "pB", "pC"), Opts{Active: "a"})
+	eq(t, names(steps), "(classifier_override):pC/m3", "a:pA/m1", "a:pB/m2")
+	if !applied {
+		t.Error("覆盖应生效")
+	}
+	if len(skips) != 0 {
+		t.Errorf("不该有跳过，得到 %+v", skips)
+	}
+}
+
+func TestOverrideChainFallsBackOnUnknownProvider(t *testing.T) {
+	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{
+		"light": list("pA/m1")}}}
+	steps, skips, applied := OverrideChain(domain.Binding{Provider: "ghost", Model: "m"},
+		"light", ps, mkProvs("pA"), Opts{Active: "a"})
+	eq(t, names(steps), "a:pA/m1")
+	if applied {
+		t.Error("provider 未定义时覆盖不应生效")
+	}
+	found := false
+	for _, sk := range skips {
+		if sk.Profile == "(classifier_override)" && strings.Contains(sk.Reason, "provider 未定义") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("应记录覆盖失效原因，得到 %+v", skips)
+	}
+}
+
+func TestOverrideChainFallsBackOnMissingKey(t *testing.T) {
+	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{"light": one("pA", "m1")}}}
+	provs := &domain.Providers{Providers: map[string]domain.Provider{
+		"pA":    {BaseURL: "http://x", APIKey: "sk-a"},
+		"nokey": {BaseURL: "http://x"},
+	}}
+	steps, _, applied := OverrideChain(domain.Binding{Provider: "nokey", Model: "m"},
+		"light", ps, provs, Opts{Active: "a"})
+	eq(t, names(steps), "a:pA/m1")
+	if applied {
+		t.Error("provider 无 key 时覆盖不应生效")
+	}
+}
+
+func TestOverrideChainFallsBackOnBreaker(t *testing.T) {
+	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{"light": one("pA", "m1")}}}
+	steps, _, applied := OverrideChain(domain.Binding{Provider: "pC", Model: "m3"},
+		"light", ps, mkProvs("pA", "pC"), Opts{
+			Active:    "a",
+			Available: func(p string) bool { return p != "pC" },
+		})
+	eq(t, names(steps), "a:pA/m1")
+	if applied {
+		t.Error("熔断时覆盖不应生效")
+	}
+}
+
+func TestOverrideChainDedupsWhenOverrideAlreadyInChain(t *testing.T) {
+	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{
+		"light": list("pA/m1", "pB/m2")}}}
+	steps, _, applied := OverrideChain(domain.Binding{Provider: "pA", Model: "m1"},
+		"light", ps, mkProvs("pA", "pB"), Opts{Active: "a"})
+	// pA/m1 原本在 light 链里，覆盖后只出现一次且在最前
+	eq(t, names(steps), "(classifier_override):pA/m1", "a:pB/m2")
+	if !applied {
+		t.Error("覆盖 binding 已在链里时也应生效（提到最前）")
+	}
+}
