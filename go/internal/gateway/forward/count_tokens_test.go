@@ -248,3 +248,23 @@ func TestCountTokensRespectsClientModel(t *testing.T) {
 		t.Fatalf("客户端的 model 不该被覆盖，上游收到 %q", gotModel)
 	}
 }
+
+// TestAPIHelloAnsweredLocally Claude Code 的连通性探针（HEAD/GET，无 body）
+// 本地应 200——掉进 model 解析会刷 400 日志（2026-09-09 实抓）。
+func TestAPIHelloAnsweredLocally(t *testing.T) {
+	srv := &Server{Port: 0}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	for _, method := range []string{"HEAD", "GET"} {
+		req, _ := http.NewRequest(method, front.URL+"/a/claude/api/hello", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s /api/hello 应本地 200，实际 %d", method, resp.StatusCode)
+		}
+	}
+}

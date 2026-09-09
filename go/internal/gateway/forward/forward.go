@@ -505,6 +505,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	atomic.AddUint64(&s.requests, 1)
 	metrics.Default.Inc("requests.total")
 
+	// /api/hello：Claude Code 的连通性探针（HEAD/GET，无 body）。探的是
+	// 「API 基地址活着吗」——我们就是它的 API，本地应 200；掉进下面的
+	// model 解析只会刷一串 400 日志（2026-09-09 实抓）。
+	if strings.HasSuffix(r.URL.Path, "/api/hello") {
+		w.WriteHeader(200)
+		return
+	}
+
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		s.fail(w, 400, "读请求体失败: "+err.Error())

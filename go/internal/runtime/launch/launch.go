@@ -10,10 +10,12 @@
 // 它做的事（docs/16 §3.4）：解析真实可执行文件、必要时懒起代理、往子进程
 // 注入 env（含真实模型名）、exec。除此之外不碰任何文件、不发任何网络请求。
 //
-// 「真实模型名」是这一层的核心改动：Claude Code 这类工具把
-// ANTHROPIC_DEFAULT_*_MODEL 的值既当路由键也当界面显示名。我们把它填成
-// profile 链头里该档位的真实模型（deepseek-chat / glm-4-plus），界面就能
-// 显示真实名字；代理侧再把这个真实模型反解回档位（resolve.ResolveRequest）。
+// 槽位命名是这一层的核心决策（2026-09-09 定稿，见 buildInject 注释）：
+// 默认注入**档位名**（heavy/mid/…）——会话发档位名回来，代理按请求时的
+// 当前配置解析，`newgate --set-profile` 对跑着的会话立刻生效（动态）；
+// 显式 --profile 钉死本次调用时才注入**真实模型名**（glm-5.3），显示的
+// 就是这次真用的（钉死才配真名）。窗口声明（CLAUDE_CODE_*）两种模式
+// 都注入，与命名无关。
 package launch
 
 import (
@@ -83,22 +85,38 @@ func Launch(a *agents.Agent, args []string, o Options) int {
 
 // buildInject 算出要叠加给子进程的整组 env（NEWGATE_DEPTH 除外）。
 // 单独成函数是为了可测：只依赖读盘快照和入参，不 exec、不碰 daemon。
+//
+// 槽位命名有两种模式（2026-09-09 定稿）：
+//
+//   - 动态（默认）：槽位保持**档位名**（heavy/mid/…）。会话把档位名发
+//     回来，代理按**请求时**的当前配置解析——`newgate --set-profile`
+//     对跑着的会话立刻生效。界面显示的是语义层名字，实际模型看
+//     X-Newgate-Route / `newgate tier`，两边各自为真、互不冒充。
+//   - 钉死（显式 --profile / NEWGATE_PROFILE / argv0 分发）：注入**真实
+//     模型名**。本次调用已被用户钉在这个 profile 上，显示的就是这次
+//     真用的——钉死才配得上真名。
+//
+// 窗口声明两条模式都注入：CLAUDE_CODE_MAX_CONTEXT_TOKENS 走客户端的
+// 「未知模型」分支（档位名和真实名对它都是未知，效果相同），
+// AUTO_COMPACT_WINDOW 无条件优先级最高——窗口修复不依赖命名模式。
 func buildInject(a *agents.Agent, st *domain.State, active, explicit string) map[string]string {
-	inject := a.BuildEnv(st.Port, "newgate-local")
+	inject := a.BuildEnv(st.Port, "newgate-local") // 槽位默认 = 档位名（动态模式）
 
-	// 每个槽位 env 从「档位名」换成「真实模型名」，让工具界面显示真实模型。
-	// 解析不出就保留档位名（fail-open，docs/16 §6.1）：代理仍能按档位路由。
 	if snap, err := store.Load(); err == nil {
-		for _, s := range a.EnvSlots() {
-			if b, ok := resolve.PrimaryBinding(s.Tier, snap.Profiles, snap.Providers, active); ok {
-				inject[s.EnvVar] = b.Model
+		// 钉死模式：槽位换成该 profile 链头的真实模型名。解析不出就保留
+		// 档位名（fail-open，docs/16 §6.1）：代理仍能按档位路由。
+		if explicit != "" {
+			for _, s := range a.EnvSlots() {
+				if b, ok := resolve.PrimaryBinding(s.Tier, snap.Profiles, snap.Providers, active); ok {
+					inject[s.EnvVar] = b.Model
+				}
 			}
 		}
 
 		// 主力模型的真实窗口（profile 里声明）。不给 Claude Code 声明的
-		// 话，它不认识注入的真实模型名，按「未知模型」假设 200k 窗口提前
-		// compact（2026-09 实测）。两个 env 都只在配置 >0 时注入；其他
-		// agent（如 opencode）不认识这些变量，忽略之，无害。
+		// 话，它对不认识的模型名（档位名或真实名都一样）按 200k 窗口假设
+		// 提前 compact（2026-09 实测）。两个 env 都只在配置 >0 时注入；
+		// 其他 agent（如 opencode）不认识这些变量，忽略之，无害。
 		for _, p := range snap.Profiles {
 			if p.Name != active {
 				continue
