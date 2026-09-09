@@ -583,6 +583,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if st.SpecialEnabled() {
 		routeTier = special.RouteTier(tgt.TaskCreate, stream0, body, st.SpecialPluginOff)
 	}
+	// 分类器身份：紧超时只认它（RouteTier 认出的就是它——同一个 marker）。
+	// 用户 st off claude-bg 时改道和紧超时一起停。
+	isClassifier := routeTier != ""
 	if routeTier != "" {
 		var rs []resolve.Step
 		if testChain != nil {
@@ -729,14 +732,15 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 		// 流式不能设总超时（长响应会被砍断），但必须限制首字节等待时间，
 		// 否则上游装死就永久挂住。ResponseHeaderTimeout 正好只管到响应头。
-		// 非流式（后台小调用）用更紧的基础值 + 按请求体大小加成（大输入
-		// 的 prefill 合法地慢——/compact 的总结请求 500KB+，一刀切 12s
-		// 会在链上连环掐死它）。全部从 state.json 的 timeouts 热加载
-		// （domain.Timeouts），误杀率看 newgate metrics。
+		// 紧上限只给**分类器**（它挡在交互通路上，挂住 = 冻住会话，靠
+		// system marker 精确认出）；其他请求——包括 /compact 这种 500KB+
+		// 的非流式大输入——一律标准 150s：大 prefill 合法地慢，一刀切
+		// 紧超时只会在链上连环掐死（2026-09-09 实抓教训）。全部从
+		// state.json 的 timeouts 热加载，误杀率看 newgate metrics。
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.ResponseHeaderTimeout = st.Timeouts.FirstByte()
-		if !stream {
-			tr.ResponseHeaderTimeout = st.Timeouts.FirstByteNonStreamFor(len(newBody))
+		if isClassifier {
+			tr.ResponseHeaderTimeout = st.Timeouts.ClassifierFirstByte()
 		}
 		client := &http.Client{Transport: tr, Timeout: func() time.Duration {
 			if stream {
@@ -787,8 +791,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			hint := ""
 			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
 				waitLimit := st.Timeouts.FirstByte()
-				if !stream {
-					waitLimit = st.Timeouts.FirstByteNonStreamFor(len(newBody))
+				if isClassifier {
+					waitLimit = st.Timeouts.ClassifierFirstByte()
 				}
 				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
 			}
