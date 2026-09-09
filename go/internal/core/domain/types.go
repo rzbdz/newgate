@@ -205,16 +205,14 @@ type Timeouts struct {
 	// （anthropic-relay）有固定 ~43s 开销，设太短会把本来能成功的请求
 	// 误杀。
 	FirstByteMs int `json:"first_byte_ms,omitempty"`
-	// FirstByteNonStreamMs 非流式（后台小调用）等响应头的上限的基础值，
-	// 实际上限还叠加每兆字节的预填时间（FirstByteNonStreamPerMbMs）。
-	// 默认 12s（2026-09-09 用户定的起点）：卡住后台调用 = 冻住整个会话。
-	FirstByteNonStreamMs int `json:"first_byte_non_stream_ms,omitempty"`
-	// FirstByteNonStreamPerMbMs 非流式首字节上限的每兆字节加成。为什么
-	// 必须：大输入的第一字节合法地慢——/compact 的总结请求 500KB+，
-	// 一刀切 12s 把它在链上连环掐死（2026-09-09 实抓：glm→deepseek→
-	// minimax 三连超时 + 熔断，客户端报「can't help」）。默认 30s/MB，
-	// 512KB ≈ 27s 上限。误杀率看 `newgate metrics` 再调。
-	FirstByteNonStreamPerMbMs int `json:"first_byte_non_stream_per_mb_ms,omitempty"`
+	// ClassifierFirstByteMs **分类器专用**的紧首字节上限。为什么按身份
+	// 不按「非流式」一刀切：只有 Bash 权限分类器在交互通路上——用户
+	// 终端等它放行才能动，挂住它 = 冻住会话；而其他非流式请求（/compact
+	// 总结、起标题）不挡交互，还常常是 500KB+ 的大输入，prefill 合法地
+	// 慢，套 12s 只会在链上连环掐死（2026-09-09 实抓：compact 三连超时
+	// + 熔断，客户端报「can't help」）。分类器靠 system marker 精确认出
+	// （special.RouteTier）。默认 12s，误杀率看 newgate metrics。
+	ClassifierFirstByteMs int `json:"classifier_first_byte_ms,omitempty"`
 	// TotalMs 非流式请求的总超时（流式不设总超时——长响应会被砍断）。
 	TotalMs int `json:"total_ms,omitempty"`
 }
@@ -226,22 +224,12 @@ func (t Timeouts) FirstByte() time.Duration {
 	return time.Duration(t.FirstByteMs) * time.Millisecond
 }
 
-func (t Timeouts) FirstByteNonStream() time.Duration {
-	if t.FirstByteNonStreamMs <= 0 {
+// ClassifierFirstByte 分类器请求的首字节上限（见字段注释）。
+func (t Timeouts) ClassifierFirstByte() time.Duration {
+	if t.ClassifierFirstByteMs <= 0 {
 		return 12 * time.Second
 	}
-	return time.Duration(t.FirstByteNonStreamMs) * time.Millisecond
-}
-
-// FirstByteNonStreamFor 非流式请求按请求体大小算出的首字节上限：
-// 基础值 + 每兆字节的预填时间。大输入的第一字节合法地慢（prefill 与
-// 大小成正比），固定值要么误杀大请求、要么放走装死的小请求。
-func (t Timeouts) FirstByteNonStreamFor(bodyLen int) time.Duration {
-	perMb := 30 * time.Second
-	if t.FirstByteNonStreamPerMbMs > 0 {
-		perMb = time.Duration(t.FirstByteNonStreamPerMbMs) * time.Millisecond
-	}
-	return t.FirstByteNonStream() + perMb*time.Duration(bodyLen)/(1024*1024)
+	return time.Duration(t.ClassifierFirstByteMs) * time.Millisecond
 }
 
 func (t Timeouts) Total() time.Duration {
