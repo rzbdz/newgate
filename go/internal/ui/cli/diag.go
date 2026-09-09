@@ -599,6 +599,9 @@ func cmdStatus() int {
 			fmt.Printf("  %-12s %s   (per-agent 覆盖)\n", id, p)
 		}
 	}
+	if ov := st.ClassifierOverride; ov != nil && ov.Provider != "" && ov.Model != "" {
+		fmt.Printf("  分类器覆盖  %s   (classifier_override，全局第一优先)\n", ov)
+	}
 	fmt.Printf("  切换: newgate --set-profile <名> [--agent %s]\n", firstAgent())
 
 	pr, err := store.LoadProfile(st.DefaultProfile)

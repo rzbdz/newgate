@@ -589,20 +589,38 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// 用户 st off claude-bg 时改道和紧超时一起停。
 	isClassifier := routeTier != ""
 	if routeTier != "" {
+		opts := resolve.Opts{
+			Active:    active,
+			Available: health.Default.Available,
+			MaxSteps:  st.Chain.Attempts(),
+		}
 		var rs []resolve.Step
-		if testChain != nil {
+		applied := false
+		switch {
+		case testChain != nil:
 			rs = testChain(routeTier)
-		} else {
-			rs, skips = resolve.BuildChain(routeTier, snap.Profiles, snap.Providers, resolve.Opts{
-				Active:    active,
-				Available: health.Default.Available,
-				MaxSteps:  st.Chain.Attempts(),
-			})
+		case st.ClassifierOverride != nil && st.ClassifierOverride.Provider != "" &&
+			st.ClassifierOverride.Model != "":
+			// 全局覆盖：分类器不管客户端点的哪个档位，链头都用 classifier_override，
+			// 它挂了再沿 light 档 fallback（OverrideChain 内部回落）。
+			rs, skips, applied = resolve.OverrideChain(*st.ClassifierOverride, routeTier,
+				snap.Profiles, snap.Providers, opts)
+			if !applied {
+				s.logf("[proxy] #%d classifier_override 未生效（%s），回落 light 档链",
+					reqID, st.ClassifierOverride)
+			}
+		default:
+			rs, skips = resolve.BuildChain(routeTier, snap.Profiles, snap.Providers, opts)
 		}
 		if len(rs) > 0 {
 			steps, tier = rs, routeTier
-			s.logf("[proxy] #%d special_treatment claude-bg: 分类器改道 → %s 档链（含 fallback）",
-				reqID, routeTier)
+			if applied {
+				s.logf("[proxy] #%d special_treatment claude-bg: 分类器覆盖 → %s（全局 classifier_override）",
+					reqID, st.ClassifierOverride)
+			} else {
+				s.logf("[proxy] #%d special_treatment claude-bg: 分类器改道 → %s 档链（含 fallback）",
+					reqID, routeTier)
+			}
 			metrics.Default.Inc("special.claude-bg.route_light")
 		} else {
 			// light 链是空的（谁都没绑 light）：回落到正常解析——分类器留在

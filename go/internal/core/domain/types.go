@@ -312,6 +312,12 @@ type State struct {
 	// Timeouts 网关等上游的时间参数（热加载，见 Timeouts 的注释）。
 	Timeouts Timeouts `json:"timeouts,omitempty"`
 
+	// ClassifierOverride 覆盖 auto mode 分类器（Bash 安全分类器）的目标绑定。
+	// 非空时，分类器请求（system 自报 "security monitor" 的那类）链头用它，
+	// 无视客户端点名的档位（mid/light 都一样），优先级最高；它挂了再沿 light
+	// 档 fallback（fail-open）。provider / model 都填才生效。
+	ClassifierOverride *Binding `json:"classifier_override,omitempty"`
+
 	// Debug 打印每个请求的完整头/体（密钥脱敏）。出错时无论如何都会记全。
 	Debug bool `json:"debug"`
 	// DebugUntil 自动过期时刻（RFC3339）。debug 单条能记 8KB+，
