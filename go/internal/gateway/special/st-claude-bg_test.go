@@ -102,130 +102,39 @@ func TestClaudeBgApply(t *testing.T) {
 	})
 }
 
-// TestClaudeBgLightSwitch 切轻档只认分类器本体：system 里那句自报家门
-// （"You are a security monitor…"）是实抓特征；其他后台调用（总结、起
-// 标题）没有这句，保留 mid 的体格。跨 provider 不切——那得动路由。
-func TestClaudeBgLightSwitch(t *testing.T) {
-	base := func() *Request {
-		r := req("glm-5.3", "smt-glm", "https://gw.example.com/v1")
-		r.Agent, r.Stream, r.Tier = "claude", false, "mid"
-		r.LightProvider, r.LightModel = "smt-glm", "glm-4.5-air"
-		return r
-	}
+// TestRouteTier 改道是**路由决策**（建链之前，forward 在解析链前问这里）：
+// 分类器 → 整条 light 链——含 fallback，不是只换链头。特征只认
+// claude + 非流式 + system 标记；off 开关与 Apply 同源（st off 一起停）。
+func TestRouteTier(t *testing.T) {
 	classifier := []byte(`{"model":"glm-5.3","max_tokens":2112,` + sysMarker +
 		`,"messages":[{"role":"user","content":"classify"}]}`)
 	summary := []byte(`{"model":"glm-5.3","max_tokens":2112,` +
 		`"system":[{"type":"text","text":"Summarize this conversation."}],` +
 		`"messages":[{"role":"user","content":"…transcript…"}]}`)
 
-	t.Run("分类器（带标记）：切 light + 禁思考", func(t *testing.T) {
-		r := base()
-		out, notes, err := (claudeBg{}).Apply(classifier, r)
-		if err != nil {
-			t.Fatal(err)
+	cases := []struct {
+		name   string
+		agent  string
+		stream bool
+		body   []byte
+		off    func(string) bool
+		want   string
+	}{
+		{"分类器（claude 非流式 + 标记）→ light", "claude", false, classifier, nil, "light"},
+		{"其他后台调用（无标记）不改道", "claude", false, summary, nil, ""},
+		{"流式主循环不改道", "claude", true, classifier, nil, ""},
+		{"opencode 不碰", "opencode", false, classifier, nil, ""},
+		{"兼容路径（无 agent）不碰", "", false, classifier, nil, ""},
+		{"用户关掉 claude-bg → 改道一起停", "claude", false, classifier,
+			func(string) bool { return true }, ""},
+		{"没有 system 字段", "claude", false, []byte(`{"model":"glm-5.3","messages":[]}`), nil, ""},
+		{"nil body", "claude", false, nil, nil, ""},
+	}
+	for _, c := range cases {
+		if got := RouteTier(c.agent, c.stream, c.body, c.off); got != c.want {
+			t.Errorf("%s: RouteTier=%q want %q", c.name, got, c.want)
 		}
-		var m map[string]interface{}
-		if err := json.Unmarshal(out, &m); err != nil {
-			t.Fatalf("改完不是合法 JSON: %v", err)
-		}
-		if m["model"] != "glm-4.5-air" {
-			t.Fatalf("model 应切到 light，实际 %v", m["model"])
-		}
-		if th, _ := m["thinking"].(map[string]interface{}); th["type"] != "disabled" {
-			t.Fatalf("thinking 应为 disabled，实际 %v", m["thinking"])
-		}
-		if len(notes) != 2 || !strings.Contains(notes[0], "glm-4.5-air") ||
-			!strings.Contains(notes[0], "分类器") || !strings.Contains(notes[1], "disabled") {
-			t.Fatalf("两笔改动都要有 note，实际 %v", notes)
-		}
-	})
-
-	t.Run("其他后台调用（无标记）：保留 mid，只禁思考", func(t *testing.T) {
-		r := base()
-		out, notes, err := (claudeBg{}).Apply(summary, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var m map[string]interface{}
-		_ = json.Unmarshal(out, &m)
-		if m["model"] != "glm-5.3" {
-			t.Fatalf("非分类器不该切模型，实际 %v", m["model"])
-		}
-		if th, _ := m["thinking"].(map[string]interface{}); th["type"] != "disabled" {
-			t.Fatalf("thinking 照禁，实际 %v", m["thinking"])
-		}
-		if len(notes) != 1 || !strings.Contains(notes[0], "disabled") {
-			t.Fatalf("只该有禁思考一笔，实际 %v", notes)
-		}
-	})
-
-	t.Run("跨 provider：不切", func(t *testing.T) {
-		r := base()
-		r.LightProvider = "other-gw"
-		out, _, err := (claudeBg{}).Apply(classifier, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(out), "glm-4.5-air") {
-			t.Fatal("跨 provider 不该切")
-		}
-	})
-
-	t.Run("light 没配置：不切", func(t *testing.T) {
-		r := base()
-		r.LightProvider, r.LightModel = "", ""
-		out, notes, err := (claudeBg{}).Apply(classifier, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(out), "glm-4.5-air") {
-			t.Fatal("没配置 light 不该切")
-		}
-		if len(notes) != 1 || !strings.Contains(notes[0], "thinking") {
-			t.Fatalf("只该有 thinking 一笔，实际 %v", notes)
-		}
-	})
-
-	t.Run("已经是 light：只剩禁思考一笔", func(t *testing.T) {
-		r := base()
-		r.Tier = "light"
-		r.Model = "glm-4.5-air"
-		already := []byte(`{"model":"glm-4.5-air","max_tokens":100,` + sysMarker +
-			`,"messages":[{"role":"user","content":"x"}]}`)
-		out, notes, err := (claudeBg{}).Apply(already, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(out), `"model":"glm-4.5-air"`) {
-			t.Fatalf("模型不该再动: %s", out)
-		}
-		if len(notes) != 1 || !strings.Contains(notes[0], "thinking") {
-			t.Fatalf("模型没变不该有切档 note，实际 %v", notes)
-		}
-	})
-
-	// 回归（2026-09-09 实抓）：真实模型名注入后，分类器点名的 glm-5.3
-	// 同时绑 heavy+mid，按 Roles 顺序反解成 heavy。旧 Match 的 tier 闸门
-	// 把它整个跳过——分类器留在 mid 体格的模型上跑 27 秒一条。tier 有
-	// 歧义时必须照切。
-	t.Run("tier=heavy（glm-5.3 同绑 heavy+mid 的反解结果）：照切 light", func(t *testing.T) {
-		r := base()
-		r.Tier = "heavy"
-		out, notes, err := (claudeBg{}).Apply(classifier, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var m map[string]interface{}
-		if err := json.Unmarshal(out, &m); err != nil {
-			t.Fatalf("改完不是合法 JSON: %v", err)
-		}
-		if m["model"] != "glm-4.5-air" {
-			t.Fatalf("tier=heavy 的分类器也应切到 light，实际 %v", m["model"])
-		}
-		if len(notes) != 2 || !strings.Contains(notes[0], "分类器") {
-			t.Fatalf("切档 + 禁思考两笔都要有，实际 %v", notes)
-		}
-	})
+	}
 }
 
 func TestGlmMatch(t *testing.T) {

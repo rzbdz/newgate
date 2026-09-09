@@ -52,12 +52,6 @@ type Request struct {
 	Path     string // 请求路径后缀，如 /messages
 	Stream   bool
 	Agent    string // 发起方（/a/<agent>/ 路径里的名字，如 "claude"）；空 = 兼容路径
-
-	// light 档的链头（配置里排第一的候选，忽略熔断器）。给「后台小调用
-	// 切轻档」的插件用（如 claude-bg）；没配 light 档时两个都是空串。
-	// 切不切、能不能切由插件按「同 provider / 档位」自己判断，这里只给事实。
-	LightProvider string
-	LightModel    string
 }
 
 // Plugin 一个特殊照顾模块。实现放在 st-<名字>.go，在 init() 里 Register。

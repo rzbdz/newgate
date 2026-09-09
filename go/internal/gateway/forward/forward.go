@@ -27,6 +27,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
 	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
 	"github.com/rzbdz/newgate/go/internal/gateway/health"
+	"github.com/rzbdz/newgate/go/internal/gateway/metrics"
 	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
 	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 	schema "github.com/rzbdz/newgate/go/internal/gateway/rewrite/schema"
@@ -112,6 +113,7 @@ func (s *Server) logf(format string, a ...interface{}) {
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__newgate/status", s.handleStatus)
+	mux.HandleFunc("/__newgate/metrics", s.handleMetrics)
 	mux.HandleFunc("/__newgate/stop", s.handleControlStop)
 	mux.HandleFunc("/__newgate/upgrade", s.handleControlUpgrade)
 	mux.HandleFunc("/v1/models", s.handleModels)
@@ -215,6 +217,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"puts":      tc.Puts,
 			"evictions": tc.Evictions,
 		},
+	})
+}
+
+// handleMetrics 网关计数器（只读，只听 127.0.0.1）。`newgate metrics` 的
+// 数据源；计数随 daemon 重启归零。
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{
+		"uptime_s": int(time.Since(s.started).Seconds()),
+		"metrics":  metrics.Default.Snapshot(),
 	})
 }
 
@@ -442,12 +453,14 @@ func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 			s.logf("[proxy] #%d 学到：%s 没有 count_tokens 端点（上游 %d）——退回本地粗估，不再试",
 				reqID, head.Binding, resp.StatusCode)
 		}
+		metrics.Default.Inc("count_tokens.probe_404")
 		return false
 	case resp.StatusCode >= 400:
 		s.logf("[proxy] #%d count_tokens 上游 %d，退回本地粗估", reqID, resp.StatusCode)
 		return false
 	}
 	dialect.Mark(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens)
+	metrics.Default.Inc("count_tokens.forwarded")
 
 	rb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	w.Header().Set("Content-Type", "application/json")
@@ -490,6 +503,7 @@ func (s *Server) midHead(tgt Target) (resolve.Step, bool) {
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	atomic.AddUint64(&s.requests, 1)
+	metrics.Default.Inc("requests.total")
 
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -506,9 +520,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// 没有（聚合器 404）退回本地粗估。
 	if strings.HasSuffix(r.URL.Path, "/count_tokens") {
 		reqID := atomic.LoadUint64(&s.requests)
+		metrics.Default.Inc("count_tokens.total")
 		if s.forwardCountTokens(w, r, body, tgt, reqID) {
 			return
 		}
+		metrics.Default.Inc("count_tokens.local")
 		s.handleCountTokens(w, reqID, body)
 		return
 	}
@@ -551,16 +567,47 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var steps []resolve.Step
 	var skips []resolve.Skip
 	tier := norm
-	if testChain != nil {
-		steps = testChain(norm)
-	} else {
-		// 档位名走档位链；具体模型名反解回它所属档位，并把点名的模型放最前
-		// （docs/18 §5）——这支持「工具界面显示真实模型名」。
-		steps, skips, tier = resolve.ResolveRequest(norm, active, snap.Profiles, snap.Providers, resolve.Opts{
-			Active:    active,
-			Available: health.Default.Available,
-			MaxSteps:  st.Chain.Attempts(),
-		})
+	// special 层的路由改道（如 claude-bg 把 Bash 分类器整条链改走 light）。
+	// 必须在 ResolveRequest 之前：改道换的是整条 fallback 链，body 改写只能
+	// 换链头。用户 `newgate st off claude-bg` 时改道一起停（off 传进去）。
+	routeTier := ""
+	if st.SpecialEnabled() {
+		routeTier = special.RouteTier(tgt.TaskCreate, stream0, body, st.SpecialPluginOff)
+	}
+	if routeTier != "" {
+		var rs []resolve.Step
+		if testChain != nil {
+			rs = testChain(routeTier)
+		} else {
+			rs, skips = resolve.BuildChain(routeTier, snap.Profiles, snap.Providers, resolve.Opts{
+				Active:    active,
+				Available: health.Default.Available,
+				MaxSteps:  st.Chain.Attempts(),
+			})
+		}
+		if len(rs) > 0 {
+			steps, tier = rs, routeTier
+			s.logf("[proxy] #%d special_treatment claude-bg: 分类器改道 → %s 档链（含 fallback）",
+				reqID, routeTier)
+			metrics.Default.Inc("special.claude-bg.route_light")
+		} else {
+			// light 链是空的（谁都没绑 light）：回落到正常解析——分类器留在
+			// 客户端点名的模型上 + 禁思考，慢而不死（fail-open）。
+			routeTier = ""
+		}
+	}
+	if routeTier == "" {
+		if testChain != nil {
+			steps = testChain(norm)
+		} else {
+			// 档位名走档位链；具体模型名反解回它所属档位，并把点名的模型放最前
+			// （docs/18 §5）——这支持「工具界面显示真实模型名」。
+			steps, skips, tier = resolve.ResolveRequest(norm, active, snap.Profiles, snap.Providers, resolve.Opts{
+				Active:    active,
+				Available: health.Default.Available,
+				MaxSteps:  st.Chain.Attempts(),
+			})
+		}
 	}
 	if len(steps) == 0 {
 		s.logf("[proxy] #%d 无可用候选。跳过原因：%s", reqID, fmtSkips(skips))
@@ -577,20 +624,13 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	deadline := start.Add(time.Duration(st.Chain.Budget()) * time.Millisecond)
 
-	// light 档的链头：claude-bg 这类「后台小调用切轻档」的插件要用。
-	// 用 PrimaryBinding（忽略熔断器）——这里只回答「配置里 light 排第一的
-	// 是谁」，切不切、能不能切（同 provider、什么档位）由插件自己判断。
-	var lightProv, lightModel string
-	if lb, ok := resolve.PrimaryBinding("light", snap.Profiles, snap.Providers, active); ok {
-		lightProv, lightModel = lb.Provider, lb.Model
-	}
-
 	var lastMsg string
 	var lastCode int
 	var trail []string // 给 X-Newgate-Chain
 	for i, a := range steps {
 		isLast := i == len(steps)-1
 		if i > 0 && time.Now().After(deadline) {
+			metrics.Default.Inc("chain.budget_exhausted")
 			s.logf("[proxy] #%d 链总预算 %dms 用尽，停在第 %d 步",
 				reqID, st.Chain.Budget(), i)
 			trail = append(trail, "budget-exhausted")
@@ -626,22 +666,29 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// special_treatment：每家上游的怪癖补丁（gateway/special）。
 		// 与 schema 修补的分工——那边是所有严格校验器都需要的通用修补，
 		// 这边是「只有某家上游才需要」的，由插件自己 Match 认领。
+		// （分类器改走 light 链的路由决策不在这——见上面 special.RouteTier。）
 		if st.SpecialEnabled() {
 			res := special.Apply(newBody, &special.Request{
-				InModel:      inModel,
-				Tier:         tier,
-				Model:        a.Binding.Model,
-				Provider:     a.Binding.Provider,
-				BaseURL:      a.Provider.BaseURL,
-				Protocol:     a.Provider.Protocol,
-				Path:         suffix,
-				Stream:       stream,
-				Agent:        tgt.TaskCreate,
-				LightProvider: lightProv,
-				LightModel:    lightModel,
+				InModel:  inModel,
+				Tier:     tier,
+				Model:    a.Binding.Model,
+				Provider: a.Binding.Provider,
+				BaseURL:  a.Provider.BaseURL,
+				Protocol: a.Provider.Protocol,
+				Path:     suffix,
+				Stream:   stream,
+				Agent:    tgt.TaskCreate,
 			}, st.SpecialPluginOff)
+			counted := map[string]bool{}
 			for _, n := range res.Notes {
 				s.logf("[proxy] #%d special_treatment %s", reqID, n)
+				// 一个插件一次请求只记一笔（notes 可能多条）
+				if j := strings.IndexByte(n, ':'); j > 0 {
+					if pn := n[:j]; !counted[pn] {
+						counted[pn] = true
+						metrics.Default.Inc("special." + pn)
+					}
+				}
 			}
 			if res.Changed {
 				newBody = res.Body
@@ -675,19 +722,19 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// 否则上游装死就永久挂住。ResponseHeaderTimeout 正好只管到响应头。
 		// 非流式（后台小调用）另用更紧的上限：卡住它 = 卡住整个会话——
 		// Claude Code 的权限分类器在等，用户终端陪绑（2026-09-09 实测：
-		// relay 一发 air 请求 89s 无响应头，直到用户手动打断）。45s 高于
-		// 已知最慢通道的固定开销（~43s），低于实测挂死时长；超时按连接
-		// 失败沿链换下一个候选，绝不无限等。
+		// relay 一发 air 请求 89s 无响应头，直到用户手动打断）。两个值都
+		// 从 state.json 的 timeouts 热加载（domain.Timeouts），误杀了改
+		// 配置就行，不用重编译；误杀率看 newgate metrics。
 		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.ResponseHeaderTimeout = firstByteTimeout
+		tr.ResponseHeaderTimeout = st.Timeouts.FirstByte()
 		if !stream {
-			tr.ResponseHeaderTimeout = firstByteTimeoutNonStream
+			tr.ResponseHeaderTimeout = st.Timeouts.FirstByteNonStream()
 		}
 		client := &http.Client{Transport: tr, Timeout: func() time.Duration {
 			if stream {
 				return 0
 			}
-			return totalTimeout
+			return st.Timeouts.Total()
 		}()}
 
 		resp, derr := client.Do(req)
@@ -712,21 +759,37 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			//
 			// 所以：不记失败、不开熔断、不往下走链、也不写 502（对面已经没人了）。
 			if cerr := r.Context().Err(); cerr != nil {
+				metrics.Default.Inc("client.cancel")
 				s.logf("[proxy] #%d %s 客户端在连接阶段就取消了（%v），停止整条链",
 					reqID, routeStr, cerr)
 				return
 			}
+			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
+				if stream {
+					metrics.Default.Inc("timeout.first_byte.stream")
+				} else {
+					metrics.Default.Inc("timeout.first_byte.non_stream")
+				}
+			}
 			opened := health.Default.RecordFailure(a.Binding.Provider)
+			if opened {
+				metrics.Default.Inc("breaker.opened")
+			}
 			atomic.AddUint64(&s.failures, 1)
 			hint := ""
 			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
-				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", firstByteTimeout)
+				waitLimit := st.Timeouts.FirstByte()
+				if !stream {
+					waitLimit = st.Timeouts.FirstByteNonStream()
+				}
+				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
 			}
 			s.logf("[proxy] #%d %s 连接失败: %v%s%s", reqID, routeStr, derr,
 				breakerNote(opened, a.Binding.Provider), hint)
 			lastMsg, lastCode = fmt.Sprintf("上游 %s 连接失败: %v", a.Binding.Provider, derr), 502
 			trail = append(trail, fmt.Sprintf("%s(conn)", a.Binding))
 			if !isLast {
+				metrics.Default.Inc("chain.step_failed")
 				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
 				continue
 			}
@@ -739,11 +802,15 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			body, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 4096))
 			_ = resp.Body.Close()
 			opened := health.Default.RecordFailure(a.Binding.Provider)
+			if opened {
+				metrics.Default.Inc("breaker.opened")
+			}
 			atomic.AddUint64(&s.failures, 1)
 			s.logf("[proxy] %s -> %d%s  上游说: %s", routeStr, resp.StatusCode,
 				breakerNote(opened, a.Binding.Provider), trim(string(body)))
 			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, body)
 			s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
+			metrics.Default.Inc("chain.step_failed")
 			lastMsg, lastCode = trim(string(body)), resp.StatusCode
 			trail = append(trail, fmt.Sprintf("%s(%d)", a.Binding, resp.StatusCode))
 			continue
@@ -782,6 +849,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		health.Default.RecordSuccess(a.Binding.Provider)
+		if i > 0 {
+			metrics.Default.Inc("chain.failover")
+		}
 		if st.DebugActive() {
 			s.logf("[proxy] #%d 上游响应头 %d%s", reqID, resp.StatusCode, headerDump(resp.Header))
 		}
@@ -824,6 +894,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			n, rderr := resp.Body.Read(buf)
 			if n > 0 {
 				if _, werr := w.Write(buf[:n]); werr != nil {
+					metrics.Default.Inc("client.cancel")
 					s.logf("[proxy] #%d 客户端断开（已转发 %d 块 / %d 字节）: %v",
 						reqID, chunks, bytesOut, werr)
 					return
@@ -855,6 +926,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 							reqID, chunks, bytesOut, time.Since(start).Milliseconds())
 					}
 				case r.Context().Err() != nil:
+					metrics.Default.Inc("client.cancel")
 					s.logf("[proxy] #%d 客户端取消，已掐断上游（省下后续 token）", reqID)
 				default:
 					s.logf("[proxy] #%d 上游断流（已转发 %d 块 / %d 字节）: %v",
@@ -992,17 +1064,10 @@ func (s *Server) fail(w http.ResponseWriter, code int, msg string) {
 	})
 }
 
-// firstByteTimeout 等上游第一个响应头的上限。
-// 定 150s 是因为实测某些通道（anthropic-relay）有固定 ~43s 开销，
-// 设太短会把本来能成功的请求误杀。
-const firstByteTimeout = 150 * time.Second
-
-// firstByteTimeoutNonStream 非流式（后台小调用）的首字节上限，见转发处的
-// 注释：卡住后台调用 = 冻住整个会话，宁可沿链换人也不无限等。
-// var 而非 const 仅供测试缩短（testChain 同款模式）。
-var firstByteTimeoutNonStream = 45 * time.Second
-
-const totalTimeout = 15 * time.Minute
+// 等上游的时间参数不在这里定义：它们是 state.json 的 timeouts 字段
+// （domain.Timeouts），watcher 热加载——改配置即生效，不用重编译。
+// 缺省值见 domain.Timeouts 各 accessor（流式首字节 150s / 非流式 12s /
+// 非流式总超时 15min）。
 
 // respHopHeaders 响应里必须剥掉的 hop-by-hop 头。
 var respHopHeaders = map[string]bool{

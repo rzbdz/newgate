@@ -7,9 +7,72 @@ import (
 
 func init() { Register(alwaysThinks{}) }
 
-// alwaysThinks 修「这个模型始终思考，不支持关闭思考」这一类 400。
+// BestEffortDisableThink 「这次调用不想思考」的完整语义，一个操作做完：
 //
-// 现场报错（智谱 GLM，code 1210）
+//	1. 落地意图：写入 thinking:{"type":"disabled"}（缺就补，带了也改写——
+//	   后台调用里带的 thinking 是客户端设置泄漏过去的）；
+//	2. 按当前链步的模型翻译：不支持关闭思考的模型（quirk NoThinkingDisable）
+//	   听不懂 disabled，就地翻成 enabled + reasoning_effort:low。
+//
+// best effort 的含义：关不掉就让它思考（用户把不支持关思考的模型配进
+// light 档，也只能由他去了——慢，但请求活着）；翻译不动就原样发。绝不
+// 因为这个意图让请求失败。
+//
+// 架构位置：意图方（如 claude-bg 的后台调用）在 special 链里调用它；
+// forward 的链循环保证它对**每一步的模型**各跑一遍（fallback 换了模型，
+// 翻译跟着换）。always-thinks 插件是它的兜底半边——管别的来源写入的
+// disabled 和「带 tools 没写 thinking」的 1210 形态，两边共用同一个翻译
+// 核心（noDisableTranslate），语义只有一份。
+func BestEffortDisableThink(body []byte, r *Request) ([]byte, []string, error) {
+	const why = "这次调用不想思考（best effort）"
+	var notes []string
+	out := body
+
+	// reasoning_effort 与 thinking:disabled 互斥（见 st-deepseek 同款注释）：
+	// 客户端设了推理强度就别去关它。
+	if _, effort := rewrite.TopLevelRaw(out, "reasoning_effort"); effort {
+		return out, nil, nil
+	}
+
+	// 1) 落地意图——模型无关：写 disabled 不挑模型，缺就补、带了也改写。
+	if raw, has := rewrite.TopLevelRaw(out, "thinking"); has {
+		if t, _ := rewrite.TopLevelString(raw, "type"); t != "disabled" {
+			nb, err := rewrite.ReplaceTopLevelRaw(out, "thinking", []byte(`{"type":"disabled"}`))
+			if err != nil {
+				notes = append(notes, "thinking 未改动（"+err.Error()+"）")
+			} else {
+				out = nb
+				notes = append(notes, `thinking 已改写为 {"type":"disabled"}（`+why+`）`)
+			}
+		}
+	} else {
+		nb, err := rewrite.InsertTopLevelRaw(out, "thinking", []byte(`{"type":"disabled"}`))
+		if err != nil {
+			notes = append(notes, "thinking 未注入（"+err.Error()+"）")
+		} else {
+			out = nb
+			notes = append(notes, `注入 thinking:{"type":"disabled"}（`+why+`）`)
+		}
+	}
+
+	// 2) 模型听不懂 disabled？就地翻译成它听得懂的最小思考。
+	//    翻译按 (provider, r.Model) 的 quirk 决定——body 已被切到别的模型
+	//    就别动手：「glm-5.3 不能关思考」推不出「glm-4.5-air 不能关」。
+	if bm, has := rewrite.TopLevelString(out, "model"); (!has || bm == "" || bm == r.Model) &&
+		quirk.Has(r.Provider, r.Model, quirk.NoThinkingDisable) {
+		if nb, translated, ns, err := noDisableTranslate(out); err == nil && translated {
+			out = nb
+			notes = append(notes, ns...)
+		}
+	}
+	return out, notes, nil
+}
+
+// noDisableTranslate 翻译核心（只有这一份语义）：把 thinking:disabled 翻成
+// 始终思考模型听得懂的 enabled + reasoning_effort:low。只在 thinking 确实
+// 是 disabled 时动手；translated=false 表示没什么可翻的。
+//
+// 现场报错（智谱 GLM，code 1210）：
 //
 //	[1210][该模型始终思考，不支持关闭思考；请使用 low、high 或 max。][2026…]
 //
@@ -19,35 +82,42 @@ func init() { Register(alwaysThinks{}) }
 //	tools + reasoning_effort=low|high   → 200
 //	thinking:{"type":"disabled"}        → 400 / 1210
 //	不带 tools、也不带 thinking          → 200
-//	同样带 tools 的 glm-5.2 / glm-4.7   → 200
 //
-// 成因：聚合器看见 tools 就替我们给上游塞了「关闭思考」（很多模型不支持
-// 思考+工具同时用），而 glm-5.3 是始终思考的模型，直接拒。改不了聚合器，
-// 但只要我们**显式**给一个思考强度，就能盖过它塞的那个值。
+// 成因：聚合器看见 tools 就替我们给上游塞了「关闭思考」，而始终思考的模型
+// 直接拒。改不了聚合器，但显式给一个思考强度就能盖过它塞的值；low 最接近
+// 「别想太多」的本意（实测 none 也收，但报错原文没提它，不赌）。
+func noDisableTranslate(body []byte) (out []byte, translated bool, notes []string, err error) {
+	raw, has := rewrite.TopLevelRaw(body, "thinking")
+	if !has {
+		return body, false, nil, nil
+	}
+	if t, _ := rewrite.TopLevelString(raw, "type"); t != "disabled" {
+		return body, false, nil, nil
+	}
+	nb, rerr := rewrite.ReplaceTopLevelRaw(body, "thinking", []byte(`{"type":"enabled"}`))
+	if rerr != nil {
+		return body, false, nil, rerr
+	}
+	notes = append(notes, `thinking:disabled → enabled（该模型不支持关闭思考）`)
+
+	// effort 跟着补上（已有了就不动——客户端设过强度就尊重）
+	if _, has := rewrite.TopLevelRaw(nb, "reasoning_effort"); !has {
+		if nb2, ierr := rewrite.InsertTopLevelRaw(nb, "reasoning_effort", []byte(`"low"`)); ierr == nil {
+			nb = nb2
+			notes = append(notes, `补 reasoning_effort:"low"（报错原文要求 low/high/max）`)
+		}
+		// effort 补不上：thinking 至少翻过去了，fail-open 继续
+	}
+	return nb, true, notes, nil
+}
+
+// alwaysThinks 兜底翻译器：「始终思考」模型收到「关闭思考」就 400
+// （GLM 1210）。BestEffortDisableThink 是意图方的主动入口；这个插件管
+// **别的来源**造成的 400 形态：
 //
-// 补什么：
-//
-//  1. thinking 是 disabled 的话改成 enabled —— 这个模型压根不能关，
-//     留着 disabled 必定 400。
-//  2. 没有 reasoning_effort 就补 "low" —— 报错原文点名要 low/high/max，
-//     其中 low 最接近客户端「别想太多」的本意（实测 none 也收，但报错
-//     原文没提它，不赌）。
-//
-// 与 deepseek 插件的关系：它注册在前，可能刚给请求塞了
-// thinking:{"type":"disabled"}；这里在后面把它改回来。顺序是靠文件名
-// 保证的（st-always-thinks.go 在 st-deepseek.go 之前会出问题——所以这个
-// 文件必须排在它后面，见下面的断言测试）。
-//
-// 两道闸，缺一不可：
-//
-//   - 模型对得上才动手。quirk 是按 (provider, r.Model) 学的，但排在前面的
-//     插件可能已经把 body 的 model 切成别的模型（claude-bg 送分类器去
-//     light 档）。「glm-5.3 不能关思考」推不出「glm-4.5-air 不能关」——
-//     补丁只能打在学到它的那个模型身上，切了模型就别跟着掺和。
-//   - effort 只在真会撞 400 时补。触发条件就两个（见上面的实测矩阵）：
-//     thinking:disabled，或 带 tools 且没写 thinking（聚合器会隐式替我们
-//     关）。客户端显式写了 thinking:{"type":"adaptive"} 的请求本来就 200，
-//     再塞 reasoning_effort:"low" 是拿补丁压客户端的明确意图。
+//   - 客户端自己的 settings 写了 thinking:disabled（泄漏进后台调用，或
+//     用户真想关——分不出来，一律翻）；
+//   - 带 tools 且没写 thinking：聚合器会隐式替我们关思考 → 1210。
 //
 // 为什么 Match 只信 quirk 注册表、不按模型名猜：「始终思考」是模型版本的
 // 属性，会变，也没接口能查。按名字猜会给一堆无关请求乱加字段，比不修更糟。
@@ -59,7 +129,8 @@ func (alwaysThinks) Name() string { return "always-thinks" }
 
 func (alwaysThinks) Why() string {
 	return "有些模型始终思考，收到「关闭思考」就 400（GLM code 1210）\n" +
-		"给这些模型补显式 reasoning_effort=low，并把 thinking:disabled 改回 enabled"
+		"给这些模型补显式 reasoning_effort=low，并把 thinking:disabled 改回 enabled" +
+		"（BestEffortDisableThink 的兜底半边）"
 }
 
 func (alwaysThinks) Match(r *Request) bool {
@@ -82,18 +153,13 @@ func (alwaysThinks) Apply(body []byte, r *Request) ([]byte, []string, error) {
 	out := body
 	needEffort := false
 
-	// 1) thinking:disabled → enabled。这个模型不能关，留着必 400。
-	if raw, has := rewrite.TopLevelRaw(out, "thinking"); has {
-		if t, _ := rewrite.TopLevelString(raw, "type"); t == "disabled" {
-			nb, err := rewrite.ReplaceTopLevelRaw(out, "thinking", []byte(`{"type":"enabled"}`))
-			if err != nil {
-				// fail-open：改不动就别改，让上游报它的错
-				notes = append(notes, "thinking 未改动（"+err.Error()+"）")
-			} else {
-				out = nb
-				needEffort = true
-				notes = append(notes, `thinking:disabled → enabled（该模型不支持关闭思考）`)
-			}
+	if _, hasThinking := rewrite.TopLevelRaw(out, "thinking"); hasThinking {
+		// disabled → 翻译（与 BestEffortDisableThink 共用同一份核心）
+		if nb, translated, ns, err := noDisableTranslate(out); err != nil {
+			notes = append(notes, "thinking 未改动（"+err.Error()+"）")
+		} else if translated {
+			out = nb
+			notes = append(notes, ns...)
 		}
 	} else if _, hasTools := rewrite.TopLevelRaw(out, "tools"); hasTools {
 		// 没写 thinking 还带 tools：聚合器会隐式替我们关思考 → 1210。
@@ -101,11 +167,11 @@ func (alwaysThinks) Apply(body []byte, r *Request) ([]byte, []string, error) {
 		needEffort = true
 	}
 
-	// 2) 补显式 reasoning_effort。这是真正盖过聚合器那个隐式 disable 的一手。
+	// 补显式 reasoning_effort（tools 形态）。这是真正盖过聚合器那个隐式
+	// disable 的一手。
 	if needEffort {
 		if _, has := rewrite.TopLevelRaw(out, "reasoning_effort"); !has {
-			nb, err := rewrite.InsertTopLevelRaw(out, "reasoning_effort", []byte(`"low"`))
-			if err != nil {
+			if nb, err := rewrite.InsertTopLevelRaw(out, "reasoning_effort", []byte(`"low"`)); err != nil {
 				notes = append(notes, "reasoning_effort 未补上（"+err.Error()+"）")
 			} else {
 				out = nb

@@ -19,12 +19,13 @@
 #   6. 优雅交接 /__newgate/upgrade（nginx 式零停机升级）：restart 把监听
 #      socket 移交给新进程，在途 SSE 流由旧进程流完为止——开发 newgate
 #      的会话本身就穿行在代理里，这是「能持续开发」的前提。
-#   7. 后台请求：分类器切轻档、其余只禁思考。Claude Code 的非流式后台
-#      调用不带 thinking，国模却把缺省当默认思考 → 15-30 秒、成波超时。
-#      代理一律补 thinking:disabled（缺就补、带了也改写）；其中 Bash 安全
-#      分类器本体（实抓特征：system 开头 "You are a security monitor…"）
-#      还要切到 light 档模型，其他后台调用（compact 总结这类）保留 mid；
-#      主循环的流式请求不受影响（think1/2/3 正是流式，思考链路原样走）。
+#   7. 后台请求：分类器整条链改走 light、其余只禁思考。Claude Code 的非流
+#      式后台调用不带 thinking，国模却把缺省当默认思考 → 15-30 秒、成波超
+#      时。代理一律补 thinking:disabled（缺就补、带了也改写）；其中 Bash
+#      安全分类器本体（实抓特征：system 开头 "You are a security monitor…"）
+#      在**建链之前**改道 light 档——含 fallback，light 挂了沿 light 链换
+#      人，不回 mid；其他后台调用（compact 总结这类）不改道；主循环的流式
+#      请求不受影响（think1/2/3 正是流式，思考链路原样走）。
 #   8. 窗口声明：Claude Code 不认识注入的真实模型名（glm-4-plus），按
 #      「未知模型」默认 200k 窗口提前 compact。profile 里声明了
 #      context_window/auto_compact_window 就在启动时注入对应的
@@ -400,6 +401,40 @@ b=r[0]["body"] if r else {}
 th=(b.get("thinking") or {}).get("type","MISSING")
 print(str(b.get("model","NONE"))+"|"+th)')
   check "$SC 上游收到 $WANT" "$GOT" "$WANT"
+done
+
+echo; echo "== 13b. 分类器改道后，fallback 沿 light 链走（不回 mid） =="
+# 改道是路由决策（建链之前）：分类器整条链都是 light。武装一发 500 打掉
+# light 头（glm-4.5-air），下一站必须是下一个 profile 的 light
+# （ds/deepseek-chat），绝不能掉回 mid 的 glm-4-plus——只换链头、尾巴
+# 还是 mid 的旧实现就是这个错。
+curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
+curl -sf "http://127.0.0.1:$UP_PORT/__mock/fail?code=500" >/dev/null
+OUT="$(E2E_SCENARIO=bg_plain "$BIN" claude --profile=glm 2>"$SANDBOX/bgfo.err")"
+echo "$OUT" | sed 's/^/    /'
+check "分类器 light 头挂了仍 200（沿链换人）" "$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2)" "200"
+GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+models=[x["body"].get("model") for x in r if x["path"].endswith("/messages")]
+print("|".join(models))')
+check "沿 light 链：glm-4.5-air → deepseek-chat（不回 mid）" "$GOT" "glm-4.5-air|deepseek-chat"
+
+echo; echo "== 15. newgate metrics：路径上的操作全记账 =="
+# 计数器在 daemon 内存里（/__newgate/metrics），CLI 经 HTTP 读；第 12 节
+# 的 restart 已经清过一次零，所以这里自己先制造几笔再验。count_tokens
+# 直接 curl 代理（假上游有这个端点 → 转发拿真值）。
+CT_CODE=$(curl -s -o "$SANDBOX/ct2.out" -w '%{http_code}' -X POST \
+  "http://127.0.0.1:$PROXY_PORT/a/claude/p/glm/v1/messages/count_tokens" \
+  -H 'Content-Type: application/json' -H 'x-api-key: newgate-local' \
+  -d '{"messages":[{"role":"user","content":"count me"}]}')
+check "metrics 前置：count_tokens 200" "$CT_CODE" "200"
+MOUT="$("$BIN" metrics 2>"$SANDBOX/metrics.err")"
+echo "$MOUT" | sed 's/^/    /'
+for KEY in "special.claude-bg.route_light" "count_tokens.forwarded" "count_tokens.total" "chain.step_failed" "chain.failover"; do
+  echo "$MOUT" | command grep -q "$KEY" \
+    && ok "metrics 有 $KEY" \
+    || bad "metrics 缺 $KEY（输出：$(echo "$MOUT" | head -3)）"
 done
 
 echo; echo "== 14. 窗口声明：声明了才注入，跟被选中的 profile 走 =="

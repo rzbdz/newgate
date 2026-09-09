@@ -4,25 +4,46 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
+	"github.com/rzbdz/newgate/go/internal/gateway/metrics"
 )
 
-// TestNonStreamFirstByteTimeoutFailsOver 非流式请求的首字节等待有独立上限
-// （2026-09-09 实抓：relay 一发 air 请求 89s 无响应头，Claude Code 的权限
-// 分类器在等，用户整个终端陪绑）。超时按连接失败处理：沿链换下一个候选，
-// 绝不无限等。流式不收这条约束（长思考响应合法）。
+// sandboxState 铺一个最小 NEWGATE_HOME（state.json + 空 providers），
+// 让超时等配置从测试自己的值来，不碰真实 ~/.config/newgate。
+func sandboxState(t *testing.T, stateJSON string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("NEWGATE_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "mappings"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"),
+		[]byte(`{"providers":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(stateJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestNonStreamFirstByteTimeoutFailsOver 非流式请求的首字节等待上限从
+// state.json 的 timeouts 来（热加载，改配置不用重编译）：超时按连接失败
+// 处理，沿链换下一个候选，绝不无限等。
+// 现场动机（2026-09-09 实抓）：relay 一发 air 请求 89s 无响应头，Claude
+// Code 的权限分类器在等，用户整个终端陪绑。流式不收这条约束（长思考
+// 响应合法）。
 func TestNonStreamFirstByteTimeoutFailsOver(t *testing.T) {
-	saved := firstByteTimeoutNonStream
-	firstByteTimeoutNonStream = 400 * time.Millisecond
-	defer func() {
-		firstByteTimeoutNonStream = saved
-		testChain = nil
-	}()
+	// 400ms 的非流式首字节上限——直接写进沙箱 state.json
+	sandboxState(t, `{"port": 0, "timeouts": {"first_byte_non_stream_ms": 400}}`)
+	metrics.Default.Reset()
+	t.Cleanup(func() { metrics.Default.Reset(); testChain = nil })
 
 	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second) // 装死：远超测试用的 400ms 上限
@@ -63,5 +84,12 @@ func TestNonStreamFirstByteTimeoutFailsOver(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("等了 %v 才转移——没等到装死服务的 3s，说明超时没起作用", elapsed)
+	}
+	// 计数器也要对得上：非流式首字节超时 + 换链成功各一笔
+	if got := metrics.Default.Snapshot()["timeout.first_byte.non_stream"]; got != 1 {
+		t.Errorf("timeout.first_byte.non_stream = %d，应为 1", got)
+	}
+	if got := metrics.Default.Snapshot()["chain.failover"]; got != 1 {
+		t.Errorf("chain.failover = %d，应为 1", got)
 	}
 }

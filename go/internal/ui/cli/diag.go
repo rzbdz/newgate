@@ -17,6 +17,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
 	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
 	"github.com/rzbdz/newgate/go/internal/gateway/health"
+	"github.com/rzbdz/newgate/go/internal/gateway/metrics"
 	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/probe"
@@ -174,6 +175,92 @@ func cmdProbe(only string, asJSON bool) int {
 		}
 	}
 	return 0
+}
+
+// cmdMetrics 打网关计数器：请求在路径上遇到的每一类「被网关处理过的事」
+// ——拦截（count_tokens 兜底、special 改写、分类器改道）、超时（首字节，
+// 流式/非流式分开）、转移（链 fallback）、取消。调参数（比如非流式首字节
+// 12s 是不是太紧）看这里，不靠感觉。计数随 daemon 重启归零。
+func cmdMetrics() int {
+	info := daemon.Running()
+	if info == nil {
+		return die(69, "代理没在运行（newgate start）——计数器在 daemon 内存里")
+	}
+	resp, err := httpx.LocalClient(3*time.Second).
+		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/metrics", info.Port))
+	if err != nil {
+		return die(69, fmt.Sprintf("连不上代理 127.0.0.1:%d: %v", info.Port, err))
+	}
+	defer resp.Body.Close()
+	b, _ := ioutil.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return die(69, fmt.Sprintf("代理回 %d: %s", resp.StatusCode, b))
+	}
+	var out struct {
+		UptimeS int               `json:"uptime_s"`
+		Metrics map[string]uint64 `json:"metrics"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return die(69, "解析代理应答失败: "+err.Error())
+	}
+
+	fmt.Printf("代理 pid %d  已运行 %s（计数随重启归零）\n\n", info.PID, prettyDur(out.UptimeS))
+	if len(out.Metrics) == 0 {
+		fmt.Println("（还没有任何计数——来一个请求就有了）")
+		return 0
+	}
+	width := 0
+	for _, k := range metrics.SortedKeys(out.Metrics) {
+		if len(k) > width {
+			width = len(k)
+		}
+	}
+	for _, k := range metrics.SortedKeys(out.Metrics) {
+		fmt.Printf("%-*s %10d  %s\n", width, k, out.Metrics[k], metricHint(k))
+	}
+	return 0
+}
+
+// metricHint 计数器名字的人话注释。没列出的不硬凑。
+func metricHint(k string) string {
+	switch {
+	case k == "requests.total":
+		return "进入网关的请求"
+	case k == "count_tokens.forwarded":
+		return "转发上游拿了真值"
+	case k == "count_tokens.local":
+		return "本地粗估兜底（上游没有这个端点）"
+	case k == "count_tokens.probe_404":
+		return "lazy probe 撞 404，学到「上游没有」"
+	case strings.HasPrefix(k, "timeout.first_byte"):
+		return "等响应头超时 → 沿链换人（太频繁说明上限太紧）"
+	case k == "chain.failover":
+		return "换到链上后面的候选才成功"
+	case k == "chain.step_failed":
+		return "链上某站失败（连接/可转移错误）"
+	case k == "chain.budget_exhausted":
+		return "链总预算用尽"
+	case k == "client.cancel":
+		return "客户端主动取消"
+	case k == "breaker.opened":
+		return "熔断器打开（provider 暂时摘掉）"
+	case k == "special.claude-bg.route_light":
+		return "Bash 分类器整条链改走 light"
+	case strings.HasPrefix(k, "special."):
+		return "该插件改写了请求（不静默）"
+	}
+	return ""
+}
+
+func prettyDur(sec int) string {
+	d := time.Duration(sec) * time.Second
+	if d < time.Minute {
+		return d.String()
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 func cmdDoctor() int {
