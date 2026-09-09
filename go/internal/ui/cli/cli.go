@@ -41,6 +41,7 @@ const usage = `newgate — AI CLI 的语义模型层
   newgate --set-profile <名> [--agent <agent>]
                                 设 profile；省略 --agent 设全局默认
   newgate profiles              列出所有 profile（优先级 / 标志 / 覆盖）
+  newgate profile kv <名> [--write]  profile 转 KV 文本（--write 落盘并退役旧 json）
   newgate tier <档位>           fallback 链：每个候选为什么选中 / 跳过
   newgate probe [profile]       给候选打真实请求，出健康报告
   newgate metrics               代理计数器：拦截 / 超时 / 转移 / 改道
@@ -121,6 +122,11 @@ func Run(args []string) int {
 		return cmdReload()
 	case "profiles", "ls":
 		return cmdProfiles()
+	case "profile":
+		if len(args) > 1 && args[1] == "kv" {
+			return cmdProfileKV(args[2:])
+		}
+		return die(64, "用法：newgate profile kv <名> [--write]")
 	case "tier", "tiers", "role", "roles":
 		return cmdTier(arg(args, 1))
 	case "probe":

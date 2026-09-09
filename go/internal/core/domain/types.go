@@ -71,6 +71,11 @@ type Profile struct {
 	// Fallback 本 profile 内所有未定义档位的兜底，等价于 roles["*"]。
 	Fallback *Binding `json:"fallback,omitempty"`
 
+	// Extends 派生：本 profile 只写**差异项**，其余从 base profile 继承
+	// （docs/16 §3 的原始设计）。变体（-fast / -cheap 这类）用它可以三行
+	// 写完，换模型名时不用同步一整个文件。合并规则见 MergeFrom。
+	Extends string `json:"extends,omitempty"`
+
 	// ContextWindow 主力模型的真实上下文窗口（token 数），>0 才生效。
 	// 为什么需要：代理给客户端注入的是真实模型名（glm-5.3），不在
 	// Claude Code 的内置模型目录里，客户端按「未知模型」假设 200k 窗口，
@@ -81,6 +86,63 @@ type Profile struct {
 	// ——它在客户端解析优先级最高、不依赖账号状态，/context 里会显示
 	// "(from CLAUDE_CODE_AUTO_COMPACT_WINDOW)"。
 	AutoCompactWindow int `json:"auto_compact_window,omitempty"`
+}
+
+// MergeFrom 把 base 的未覆盖项补进来（Extends 的合并规则，store 加载时调用）。
+//
+// 规则：
+//   - 标量（description/priority/fallback/窗口声明）：自己没写（零值）取
+//     base 的；
+//   - roles：按档位覆盖，base 有、自己没提的档位原样继承；
+//   - 裸模型名（Provider 为空的绑定）从 base 同档位**借 provider**——
+//     extends=kimi 时写 mid=kimi-k2.7-code-highspeed 就够了；
+//   - bool（pinned/excluded）**不继承**：那是这个 profile 自己的态度，
+//     不是家族属性。想让变体也被排除，就在变体里再写一遍。
+func (p *Profile) MergeFrom(base *Profile) {
+	if p == nil || base == nil {
+		return
+	}
+	if p.Description == "" {
+		p.Description = base.Description
+	}
+	if p.Priority == nil {
+		p.Priority = base.Priority
+	}
+	if p.Fallback == nil {
+		p.Fallback = base.Fallback
+	}
+	if p.ContextWindow == 0 {
+		p.ContextWindow = base.ContextWindow
+	}
+	if p.AutoCompactWindow == 0 {
+		p.AutoCompactWindow = base.AutoCompactWindow
+	}
+	if len(base.Roles) > 0 {
+		merged := make(map[string]Candidates, len(base.Roles)+len(p.Roles))
+		for k, v := range base.Roles {
+			merged[k] = v
+		}
+		for k, v := range p.Roles {
+			merged[k] = fillBareProviders(v, merged[k])
+		}
+		p.Roles = merged
+	}
+}
+
+// fillBareProviders 给「只有模型名、没写 provider」的候选从同档位的
+// base 候选借 provider。base 也没有就保持空（校验层会报出来）。
+func fillBareProviders(own, base Candidates) Candidates {
+	if len(base) == 0 || base[0].Provider == "" {
+		return own
+	}
+	out := make(Candidates, len(own))
+	copy(out, own)
+	for i, b := range out {
+		if b.Provider == "" && b.Model != "" {
+			out[i].Provider = base[0].Provider
+		}
+	}
+	return out
 }
 
 func (p *Profile) Prio() int {
