@@ -10,8 +10,10 @@
 #      优先 thinkcache 里那轮的真实原文（tool id 找回），查不到就补**非空**
 #      占位符。假上游按官方最严口径校验（带 tools + 思考开 → assistant 必须
 #      回传非空推理，空串照样 400），所以这里 200 = 修复真的生效。
-#   4. count_tokens：Claude Code 周期性调用，OpenAI 方言上游没有这个端点，
-#      代理必须本地应答而不是沿链 404。
+#   4. count_tokens：Claude Code 周期性调用（水位条/自动压缩阈值）。上游
+#      听得懂（原生 anthropic 端点）就转发拿真值、model 按 mid 链头补上；
+#      听不懂的（聚合器 404）由 forward 层 lazy probe 学下来退回本地粗估
+#      （单测覆盖）。
 #   5. 控制端点 /__newgate/stop：多用户共享部署下，读得到配置却发不出
 #      信号的用户靠它停机——错令牌 403，对令牌让 daemon 退干净。
 #   6. 优雅交接 /__newgate/upgrade（nginx 式零停机升级）：restart 把监听
@@ -45,6 +47,10 @@ check(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (期望 '$3'，实际 '$
 
 export NEWGATE_HOME="$SANDBOX/ng"
 mkdir -p "$NEWGATE_HOME/mappings" "$FAKEBIN"
+# 沙箱要密闭：跑 e2e 的会话自己可能带着 newgate 注入的窗口声明（嵌套
+# 启动时父进程 env 会漏给子进程），不 unset 会让「没声明的 profile」
+# 用例读到父会话的值、假失败。
+unset CLAUDE_CODE_MAX_CONTEXT_TOKENS CLAUDE_CODE_AUTO_COMPACT_WINDOW
 
 cleanup() {
   "$BIN" stop >/dev/null 2>&1 || true
@@ -124,18 +130,23 @@ elif scenario == "count_tokens":
         print(f"INPUT_TOKENS={json.loads(body).get('input_tokens')}")
     except Exception:
         print("INPUT_TOKENS=PARSE_FAIL")
-elif scenario in ("bg_plain", "bg_adaptive", "bg_other"):
+elif scenario in ("bg_plain", "bg_adaptive", "bg_other", "bg_realname"):
     # Claude Code 后台小调用的形态（实抓 2026-09，cc 2.1.263）：非流式、
     # model 就是档位名 mid、不带 tools、max_tokens 2112。
-    #   bg_plain / bg_adaptive = Bash 分类器本体：system ~126KB 开头是
-    #     "You are a security monitor…"（bg_plain 连 thinking 都没写，bg_
-    #     adaptive 是客户端设置泄漏成 adaptive）→ 都该切 light + disabled。
+    #   bg_plain / bg_adaptive / bg_realname = Bash 分类器本体：system ~126KB
+    #     开头是 "You are a security monitor…"（bg_plain 连 thinking 都没写，
+    #     bg_adaptive 是客户端设置泄漏成 adaptive）→ 都该切 light + disabled。
     #   bg_other = 其他后台调用（compact 总结这类）：system 没有那句自报
     #     家门 → 保留 mid，只禁思考。
+    #   bg_realname = 真实模型名时代的回归现场（2026-09-09 实抓）：分类器
+    #     用主循环槽位的真实名（glm-4-plus）点名，它同时绑 heavy+mid、按
+    #     Roles 顺序反解成 heavy——tier 闸门版本会整个跳过。仍要切 light。
     payload = {"model": "mid", "max_tokens": 2112,
                "messages": [{"role": "user", "content": "classify this command"},
                             {"role": "user", "content": "and this one"}]}
-    if scenario in ("bg_plain", "bg_adaptive"):
+    if scenario == "bg_realname":
+        payload["model"] = "glm-4-plus"
+    if scenario != "bg_other":
         payload["system"] = [{"type": "text", "text":
             "You are a security monitor for autonomous AI coding agents."}]
     else:
@@ -276,22 +287,26 @@ def nz(s): return "NONEMPTY" if s.strip() else "EMPTY"
 print("rc="+nz(rc)+" blk="+nz(blk))')
 check "占位符非空（字段 + 块）" "$GOT" "rc=NONEMPTY blk=NONEMPTY"
 
-echo; echo "== 10. count_tokens：本地应答，不转发上游 =="
+echo; echo "== 10. count_tokens：上游听得懂就转发拿真值 =="
+# Claude Code 周期性调 count_tokens 算上下文水位（OpenAI 方言上游没有这个
+# 端点）。假上游实现了它（原生 anthropic 形态）→ 代理必须转发：model 按
+# mid 档链头补上（count_tokens 请求不带 model），客户端拿到上游真值 42，
+# 而不是本地字节数/4 粗估。本地粗估兜底（上游 404 → 学习 → 不再白跑）
+# 由单测盖着（count_tokens_test.go）。
 curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
 OUT="$(E2E_SCENARIO=count_tokens "$BIN" claude --profile=ds 2>"$SANDBOX/ct.err")"
 echo "$OUT" | sed 's/^/    /'
 check "count_tokens 200" "$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2)" "200"
-IT=$(echo "$OUT" | grep '^INPUT_TOKENS=' | cut -d= -f2)
-if [ -n "$IT" ] && [ "$IT" -gt 0 ] 2>/dev/null; then
-  ok "input_tokens>0（$IT）"
-else
-  bad "input_tokens 不合法: $IT"
-fi
-curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+check "拿到上游真值 42（不是本地粗估）" "$(echo "$OUT" | grep '^INPUT_TOKENS=' | cut -d= -f2)" "42"
+GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
 import json,sys
 r=json.load(sys.stdin)
-sys.exit(0 if not any(x["path"].endswith("/count_tokens") for x in r) else 1)' \
-  && ok "count_tokens 没有转发到上游" || bad "count_tokens 被转发到了上游"
+ct=[x for x in r if x["path"].endswith("/count_tokens")]
+if not ct:
+    print("NOT_FORWARDED")
+else:
+    print(str(ct[0]["body"].get("model","NONE"))+"@"+ct[0]["path"])')
+check "转发到了上游、model 按 mid 链头补上" "$GOT" "deepseek-chat@/v1/messages/count_tokens"
 
 echo; echo "== 11. 控制端点：跨用户停机（/__newgate/stop + 令牌） =="
 # 多用户部署：claude 用户读得到共享配置，却对 root 起的 daemon 没有
@@ -371,7 +386,7 @@ echo; echo "== 13. 后台请求：分类器切轻档，其余只禁思考 =="
 # 思考 15-30 秒，分类器成波超时。代理必须：分类器（bg_plain/bg_adaptive）
 # 上游收到 light 模型（glm-4.5-air）+ thinking:disabled；其他后台调用
 # （bg_other，compact 总结）保留 mid（glm-4-plus）+ thinking:disabled。
-for SC in bg_plain bg_adaptive bg_other; do
+for SC in bg_plain bg_adaptive bg_other bg_realname; do
   curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
   OUT="$(E2E_SCENARIO=$SC "$BIN" claude --profile=glm 2>"$SANDBOX/$SC.err")"
   echo "$OUT" | sed 's/^/    /'

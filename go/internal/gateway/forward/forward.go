@@ -25,6 +25,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/core/protocol"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
+	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
 	"github.com/rzbdz/newgate/go/internal/gateway/health"
 	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
 	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
@@ -367,21 +368,123 @@ func parseTarget(p string) Target {
 // 有它才能保证单测不出网——docs/17 §1「测试不出网，出网即失败」。
 var testChain func(tier string) []resolve.Step
 
-// handleCountTokens 本地应答 count_tokens。
+// handleCountTokens 本地应答 count_tokens（粗估兜底）。
 //
 // Claude Code 周期性地问 token 数（上下文水位条、自动压缩阈值都靠它），
-// 但 OpenAI 方言上游没有这个端点——转发出去沿链全是 404，客户端界面上
-// 刷一串报错。真值只有上游知道，可水位条要的是「量级对」，粗估就够：
-// 按请求体字节数 / 4（英文 ≈ 4 字符/token；中文 UTF-8 ≈ 3 字节/字、
+// 但不是所有上游都有这个端点——聚合器实测（2026-09，api.rvcompute.com）
+// /messages 200 而 /messages/count_tokens 404。所以先试转发拿真值
+// （forwardCountTokens，按 provider 学），接不住再走到这里：按请求体
+// 字节数 / 4 粗估（英文 ≈ 4 字符/token；中文 UTF-8 ≈ 3 字节/字、
 // 1 字/token，估出来偏大——对水位条来说宁可早压缩，无害）。
 //
 // 逐轮的真实计数走 /messages 响应里的 usage，不经过这里。
-func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request, body []byte) {
+func (s *Server) handleCountTokens(w http.ResponseWriter, reqID uint64, body []byte) {
 	n := len(body) / 4
-	atomic.AddUint64(&s.requests, 1)
-	reqID := atomic.LoadUint64(&s.requests)
 	s.logf("[proxy] #%d count_tokens（%d 字节）→ 本地粗估 %d tokens", reqID, len(body), n)
 	writeJSON(w, 200, map[string]interface{}{"input_tokens": n})
+}
+
+// forwardCountTokens 把 count_tokens 转发给上游拿真值。接住了返回 true。
+//
+// 为什么值得：本地只有粗估，上游的 tokenizer 才是真值——水位条和自动
+// 压缩阈值都靠它。但它是 anthropic 方言的私有端点，openai 方言上游和
+// 很多聚合器没有，所以按 (provider, model) 学，gate 层面 lazy probe：
+//
+//	没探过 → 试发一发（这本身就是 probe）；404/405 = 明确没有，记下，
+//	          此后退回本地粗估不再白跑；2xx = 有，记下，此后一直拿真值
+//	连接失败 / 429 / 401 → 不学（「现在不行」≠「没有」），本次退回本地
+//
+// 模型注入：count_tokens 请求不带 model 字段，补 mid 档链头——主循环
+// 在 mid 跑，数出来的才是将要处理这段对话的 tokenizer。不走链、不碰
+// 熔断器：数 token 失败不算上游病。
+func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
+	body []byte, tgt Target, reqID uint64) bool {
+
+	head, ok := s.midHead(tgt)
+	if !ok {
+		return false
+	}
+	if ctOK, known := dialect.Supports(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens); known && !ctOK {
+		return false // 探过了：这个上游没有 count_tokens
+	}
+
+	// 补 model 字段（请求通常不带）；带了就尊重客户端的
+	var out []byte
+	if m, has := rewrite.TopLevelString(body, "model"); has && m != "" {
+		out = body
+	} else {
+		nb, err := rewrite.InsertTopLevelRaw(body, "model", []byte(strconv.Quote(head.Binding.Model)))
+		if err != nil {
+			return false
+		}
+		out = nb
+	}
+
+	target := strings.TrimRight(head.Provider.BaseURL, "/") + "/messages/count_tokens"
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(out))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setAuth(req.Header, head.Provider)
+
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		if r.Context().Err() == nil {
+			s.logf("[proxy] #%d count_tokens 转发失败（%v），本次退回本地粗估", reqID, err)
+		}
+		return false
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == 404 || resp.StatusCode == 405:
+		if dialect.MarkUnsupported(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens) {
+			s.logf("[proxy] #%d 学到：%s 没有 count_tokens 端点（上游 %d）——退回本地粗估，不再试",
+				reqID, head.Binding, resp.StatusCode)
+		}
+		return false
+	case resp.StatusCode >= 400:
+		s.logf("[proxy] #%d count_tokens 上游 %d，退回本地粗估", reqID, resp.StatusCode)
+		return false
+	}
+	dialect.Mark(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens)
+
+	rb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Newgate-Route", "count_tokens -> "+head.Binding.String())
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(rb)
+	s.logf("[proxy] #%d count_tokens → %s 上游真值: %s", reqID, head.Binding, trim(string(rb)))
+	return true
+}
+
+// midHead mid 档的链头（含完整 provider 记录）。count_tokens 不带 model，
+// 转发时按 mid 补。用 PrimaryBinding（忽略熔断器）：数 token 用配置里
+// 排第一的就行，不值得为它触发 fallback 语义。
+func (s *Server) midHead(tgt Target) (resolve.Step, bool) {
+	if testChain != nil {
+		if steps := testChain("mid"); len(steps) > 0 {
+			return steps[0], true
+		}
+		return resolve.Step{}, false
+	}
+	snap := s.snap()
+	if snap == nil {
+		return resolve.Step{}, false
+	}
+	active := tgt.Profile
+	if active == "" {
+		active = snap.State.ActiveFor(tgt.TaskCreate)
+	}
+	b, ok := resolve.PrimaryBinding("mid", snap.Profiles, snap.Providers, active)
+	if !ok {
+		return resolve.Step{}, false
+	}
+	p, ok := snap.Providers.Providers[b.Provider]
+	if !ok {
+		return resolve.Step{}, false
+	}
+	return resolve.Step{Profile: active, Binding: b, Provider: p}, true
 }
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -395,12 +498,18 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = r.Body.Close()
 
+	tgt := parseTarget(r.URL.Path)
+
 	// count_tokens：Anthropic 协议的私有端点，Claude Code 拿它算上下文水位。
 	// 必须在 model 检查**之前**拦——有客户端发这个请求时不带 model 字段。
-	// OpenAI 方言上游（DeepSeek 等）没有等价端点，转发只会沿链 404 一路到底，
-	// Claude Code 界面上全是报错；opencode 不调它，所以只有 Claude Code 中招。
+	// 上游有这个端点就转发拿真值（按 provider 学，见 forwardCountTokens），
+	// 没有（聚合器 404）退回本地粗估。
 	if strings.HasSuffix(r.URL.Path, "/count_tokens") {
-		s.handleCountTokens(w, r, body)
+		reqID := atomic.LoadUint64(&s.requests)
+		if s.forwardCountTokens(w, r, body, tgt, reqID) {
+			return
+		}
+		s.handleCountTokens(w, reqID, body)
 		return
 	}
 
@@ -431,7 +540,6 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ---- per-agent 路由 + fallback 链 ----
-	tgt := parseTarget(r.URL.Path)
 	// 每个 agent 有自己的链头；URL 里的 /p/ 是本次调用的覆盖
 	active := tgt.Profile
 	if active == "" {
@@ -565,8 +673,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 		// 流式不能设总超时（长响应会被砍断），但必须限制首字节等待时间，
 		// 否则上游装死就永久挂住。ResponseHeaderTimeout 正好只管到响应头。
+		// 非流式（后台小调用）另用更紧的上限：卡住它 = 卡住整个会话——
+		// Claude Code 的权限分类器在等，用户终端陪绑（2026-09-09 实测：
+		// relay 一发 air 请求 89s 无响应头，直到用户手动打断）。45s 高于
+		// 已知最慢通道的固定开销（~43s），低于实测挂死时长；超时按连接
+		// 失败沿链换下一个候选，绝不无限等。
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.ResponseHeaderTimeout = firstByteTimeout
+		if !stream {
+			tr.ResponseHeaderTimeout = firstByteTimeoutNonStream
+		}
 		client := &http.Client{Transport: tr, Timeout: func() time.Duration {
 			if stream {
 				return 0
@@ -575,7 +691,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}()}
 
 		resp, derr := client.Do(req)
-		routeStr := fmt.Sprintf("%s -> %s/%s", inModel, a.Binding.Provider, a.Binding.Model)
+		// 路由串按**实际发出的** body model 报——special 插件可能已把
+		// mid 切成 light（claude-bg 的分类器切档），拿链步的模型打日志
+		// 会把人引去查错方向（2026-09-09：日志说 glm-5.3，dump 说 air）。
+		sentModel := a.Binding.Model
+		if m, has := rewrite.TopLevelString(newBody, "model"); has && m != "" {
+			sentModel = m
+		}
+		routeStr := fmt.Sprintf("%s -> %s/%s", inModel, a.Binding.Provider, sentModel)
 
 		if derr != nil {
 			// 客户端自己走了（按 ESC、关窗口、客户端侧超时）不是上游的错。
@@ -873,6 +996,12 @@ func (s *Server) fail(w http.ResponseWriter, code int, msg string) {
 // 定 150s 是因为实测某些通道（anthropic-relay）有固定 ~43s 开销，
 // 设太短会把本来能成功的请求误杀。
 const firstByteTimeout = 150 * time.Second
+
+// firstByteTimeoutNonStream 非流式（后台小调用）的首字节上限，见转发处的
+// 注释：卡住后台调用 = 冻住整个会话，宁可沿链换人也不无限等。
+// var 而非 const 仅供测试缩短（testChain 同款模式）。
+var firstByteTimeoutNonStream = 45 * time.Second
+
 const totalTimeout = 15 * time.Minute
 
 // respHopHeaders 响应里必须剥掉的 hop-by-hop 头。

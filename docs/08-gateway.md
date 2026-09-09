@@ -56,6 +56,23 @@ POST /v1/openai/v1/chat/completions    → 以 openai 协议进入
 
 翻译层要有**双向 golden 测试**：录制真实上下行报文，断言翻译结果逐字段正确。这一层没有测试就等于没写。
 
+### 3.1 现实：双语上游让翻译（暂时）不需要
+
+2026-09 实测（api.rvcompute.com 聚合器 + 智谱 GLM）：主流国模生态的聚合器
+**两个方言都收**——`/v1/chat/completions`（openai 体）和 `/v1/messages`
+（anthropic 体）都 200，连鉴权头都两种都认（Bearer 和 x-api-key）。于是
+M1 的转发层是**纯字节直通**：客户端发什么方言就原样发什么方言，只改
+`model` 一个字段——翻译矩阵的两个「需要做」格子至今没写，claude 的
+anthropic 流量天然直通。
+
+代价是能力不齐：anthropic 方言的私有端点（`/messages/count_tokens`）
+聚合器不一定实现（实测 404）。所以网关按 (provider, model) 探明方言能力
+（`gateway/dialect` 注册表）：`newgate probe` 主动探两种方言 +
+count_tokens 并报告；转发时撞 404/200 当场学（gate 层面的 lazy probe，
+不明的错误如 429/连接失败不学）。count_tokens 听得懂就转发拿真值（水位
+条/自动压缩阈值），听不懂退回本地粗估。真到单语上游接入、翻译不得不写
+的那天，这张注册表也是「哪些请求能直通、哪些必须翻」的现成依据。
+
 ## 4. 路由策略
 
 ```jsonc
