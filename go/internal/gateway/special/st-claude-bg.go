@@ -23,35 +23,28 @@ func init() { Register(claudeBg{}) }
 // 15-30 秒才回、成波超时重试（日志里一串「客户端在连接阶段就取消」），
 // 整个开发会话跟着卡死。
 //
-// 两手，各管一层：
+// 分两层，各管一件事：
 //
-//  1. 切 light（只对分类器本体）：判定就用上面实抓的 system 标记，不猜。
-//     「这条命令安全不安全」不需要 mid 的体格——light（glm-4.5-air）
-//     实测接受 thinking:disabled，200KB 输入 1-3s。其他后台调用（compact
-//     总结、起标题）**保留 mid**：它们要一点质量，且不挡交互。标记对不上
-//     时自然降级：分类器留在 mid + 禁思考，慢一点但不卡死。
-//  2. 禁思考（对全部后台调用）：一律显式 thinking:{"type":"disabled"}，
-//     缺就补，带了也改写（后台调用里带的 thinking 是客户端设置泄漏过去
-//     的，不是这次调用真要推理）。撞上「该模型始终思考」的 400（GLM
-//     1210）时由排最后的 always-thinks 兜底（改回 enabled +
-//     reasoning_effort:low）——本插件只表达「客户端这次不想思考」的意图，
-//     翻译成各家上游听得懂的话是模型级插件的事。
+//  1. 改道（RouteTier，路由层）：分类器本体整个走 **light 链**——不只是
+//     链头换 light，fallback 也在 light 链里走。「这条命令安全不安全」要
+//     的是快和便宜，这个意图必须贯穿整条链：只换头的话，light 一挂掉回
+//     mid 的体格，又慢回去了。其他后台调用（compact 总结、起标题）不改
+//     道：它们要一点质量，且不挡交互；标记对不上时也自然不改道。
+//  2. 禁思考（Apply，body 层）：对全部后台调用一律显式
+//     thinking:{"type":"disabled"}，缺就补，带了也改写（后台调用里带的
+//     thinking 是客户端设置泄漏过去的，不是这次调用真要推理）。撞上
+//     「该模型始终思考」的 400（GLM 1210）时由排最后的 always-thinks
+//     兜底（改回 enabled + reasoning_effort:low）——本插件只表达「客户端
+//     这次不想思考」的意图，翻译成各家上游听得懂的话是模型级插件的事。
 //
 // 特征为什么可靠：主循环**永远是流式的**（dump 佐证，含 -p 模式），非流式
 // 的只剩后台小调用；后台调用里分类器本体再靠 system 标记精确认出。
-//
-// 为什么 Match 不看 Tier（2026-09-09 修，两层）：真实模型名注入后，
-// Tier 从「客户端选了哪档」变成「名字反查的猜测」——resolve 层已把反查
-// 优先级改成 mid 先（见 realNameRoleOrder，主循环/分类器/总结都从 sonnet
-// 槽发名），但一对多反查终究没有真值：plan 模式的 opus 槽发的也是同一个
-// glm-5.3。所以本插件不把档位当依据——「后台小调用」认非流式，分类器
-// 本体认 system 标记，两个都是精确特征。marker 没命中时最多只禁思考：
-// glm 模型级插件本来就会给没写 thinking 的请求补 disabled，这里多的只是
-// 把泄漏的 adaptive 改写掉，换后台调用不排队。
+// 两层都不看 Tier——真实模型名注入后 Tier 是「名字反查的猜测」（见
+// resolve.realNameRoleOrder），标记和非流式才是精确特征。
 //
 // 这是少数会**改写客户端显式意图**的补丁，所以三条保险：
-//   - notes 明说改了什么（不静默，docs/16）；
-//   - `newgate st off claude-bg` 一键摘除；
+//   - notes / 日志明说改了什么（不静默，docs/16）；
+//   - `newgate st off claude-bg` 一键摘除（改道和禁思考一起停）；
 //   - 只认 Agent=="claude"（opencode 等其他客户端不受影响）。
 type claudeBg struct{}
 
@@ -65,64 +58,43 @@ func isClassifier(body []byte) bool {
 	return ok && bytes.Contains(raw, []byte(classifierMarker))
 }
 
+// RouteTier 这次请求应该按哪个档位建链；"" = 按客户端点名的模型，不改道。
+//
+// 这是 special 层参与**路由**的唯一口子：改道是路由决策（换哪条 fallback
+// 链），发生在建链之前，所以不在插件的 Apply 里做——body 改写只能换链头
+// （模型字段），换不了链的尾巴（fallback 还是原档的候选）。
+//
+// off 与 Apply 同款：用户 `newgate st off claude-bg` 时改道也一起停。
+func RouteTier(agent string, stream bool, body []byte, off func(name string) bool) string {
+	if off != nil && off("claude-bg") {
+		return ""
+	}
+	if agent != "claude" || stream || !isClassifier(body) {
+		return ""
+	}
+	return "light"
+}
+
 func (claudeBg) Name() string { return "claude-bg" }
 
 func (claudeBg) Why() string {
 	return "Claude Code 的后台非流式请求（Bash 分类器等）不带 thinking，" +
 		"国模却默认思考 → 15-30 秒、成波超时卡死会话\n" +
-		"分类器（system 自报 \"security monitor\"）切 light 档，其余后台调用只禁思考" +
+		"分类器（system 自报 \"security monitor\"）整条链走 light 档" +
+		"（含 fallback），其余后台调用只禁思考" +
 		"（主循环的流式请求不受影响）"
 }
 
 // Match 认「Claude Code 的后台小调用」这个类：claude 发起 + 非流式。
-// 分类器本体的精确判定在 Apply 里看 system 标记。不按 Tier 筛——
-// 见文件头「为什么 Match 不限档位」。
+// 分类器本体的精确判定（system 标记）在 RouteTier 里，那边管改道。
 func (claudeBg) Match(r *Request) bool {
 	return r != nil && r.Agent == "claude" && !r.Stream
 }
 
-// Apply 每一步都独立 fail-open：切不成模型就只禁思考，禁不成思考就只切
-// 模型——多补一手是一手，绝不因为一个字段改不动就整个放弃。
+// Apply 认出后台调用后，把「这次调用不想思考」交给 BestEffortDisableThink
+// ——意图在这里，翻译（模型不支持关思考时改成最小思考）在那边，best
+// effort：关不掉就让它思考，绝不因此失败。改道没命中（RouteTier 没认出
+// 分类器）时同样只禁思考，慢而不死。
 func (claudeBg) Apply(body []byte, r *Request) ([]byte, []string, error) {
-	const why = "后台小调用要快不要思考"
-	var notes []string
-	out := body
-
-	// 1) 分类器本体 → 切 light。只在同一 provider 时切——跨 provider 要换
-	//    上游和 key，那是路由的事，body 改写管不着。fallback 链换到别家时
-	//    会在这里自然停手（Provider 对不上）。
-	if r.LightModel != "" && r.LightProvider == r.Provider && r.LightModel != r.Model &&
-		isClassifier(out) {
-		if nb, err := rewrite.ReplaceTopLevelString(out, "model", r.LightModel); err == nil {
-			out = nb
-			// 上下文（r.Model）不用手动回写：Apply 框架每步后从 body 同步，
-			// 排在后面的插件自然看到切换后的模型。
-			notes = append(notes, "模型 "+r.Model+" → "+r.LightModel+"（Bash 分类器用轻档跑）")
-		} else {
-			notes = append(notes, "模型未切换（"+err.Error()+"）")
-		}
-	}
-
-	// 2) 禁思考。reasoning_effort 与 thinking:disabled 互斥（见 st-deepseek
-	//    同款注释）：客户端设了推理强度就别去关它。
-	if _, effort := rewrite.TopLevelRaw(out, "reasoning_effort"); effort {
-		return out, notes, nil
-	}
-	if raw, has := rewrite.TopLevelRaw(out, "thinking"); has {
-		if t, _ := rewrite.TopLevelString(raw, "type"); t == "disabled" {
-			return out, notes, nil // 已经是关的
-		}
-		nb, err := rewrite.ReplaceTopLevelRaw(out, "thinking", []byte(`{"type":"disabled"}`))
-		if err != nil {
-			notes = append(notes, "thinking 未改动（"+err.Error()+"）")
-			return out, notes, nil
-		}
-		return nb, append(notes, `thinking 已改写为 {"type":"disabled"}（`+why+`）`), nil
-	}
-	nb, err := rewrite.InsertTopLevelRaw(out, "thinking", []byte(`{"type":"disabled"}`))
-	if err != nil {
-		notes = append(notes, "thinking 未注入（"+err.Error()+"）")
-		return out, notes, nil
-	}
-	return nb, append(notes, `注入 thinking:{"type":"disabled"}（`+why+`）`), nil
+	return BestEffortDisableThink(body, r)
 }

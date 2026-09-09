@@ -43,6 +43,7 @@ const usage = `newgate — AI CLI 的语义模型层
   newgate profiles              列出所有 profile（优先级 / 标志 / 覆盖）
   newgate tier <档位>           fallback 链：每个候选为什么选中 / 跳过
   newgate probe [profile]       给候选打真实请求，出健康报告
+  newgate metrics               代理计数器：拦截 / 超时 / 转移 / 改道
   newgate agents                列出已知 agent 及其模型槽位
 
 维护
@@ -124,6 +125,8 @@ func Run(args []string) int {
 		return cmdTier(arg(args, 1))
 	case "probe":
 		return cmdProbe(arg(args, 1), has(args, "--json"))
+	case "metrics", "stat":
+		return cmdMetrics()
 	case "shim":
 		return cmdShim(arg(args, 1), argOr(args, 2, "claude"))
 	case "agents":

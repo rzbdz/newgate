@@ -134,6 +134,46 @@ func (c ChainLimits) Budget() int {
 	return c.TotalBudgetMs
 }
 
+// Timeouts 网关等上游的时间参数（毫秒）。为什么是配置不是常量：这些值
+// 要按上游表现调（比如非流式首字节 12s 是不是太紧），改一次编一次是
+// 反模式——写进 state.json，watcher 热加载，改完即生效（docs/06）。
+// 全部可省略，缺省用内置默认（见各 accessor）。
+type Timeouts struct {
+	// FirstByteMs 流式请求等响应头的上限。默认 150s：实测某些通道
+	// （anthropic-relay）有固定 ~43s 开销，设太短会把本来能成功的请求
+	// 误杀。
+	FirstByteMs int `json:"first_byte_ms,omitempty"`
+	// FirstByteNonStreamMs 非流式（后台小调用）等响应头的上限。默认
+	// 12s（2026-09-09 用户定的起点）：卡住后台调用 = 冻住整个会话——
+	// Claude Code 的权限分类器在等，用户终端陪绑。误杀率看
+	// `newgate metrics` 的 timeout.first_byte.non_stream 和
+	// chain.failover，拿数据再调。
+	FirstByteNonStreamMs int `json:"first_byte_non_stream_ms,omitempty"`
+	// TotalMs 非流式请求的总超时（流式不设总超时——长响应会被砍断）。
+	TotalMs int `json:"total_ms,omitempty"`
+}
+
+func (t Timeouts) FirstByte() time.Duration {
+	if t.FirstByteMs <= 0 {
+		return 150 * time.Second
+	}
+	return time.Duration(t.FirstByteMs) * time.Millisecond
+}
+
+func (t Timeouts) FirstByteNonStream() time.Duration {
+	if t.FirstByteNonStreamMs <= 0 {
+		return 12 * time.Second
+	}
+	return time.Duration(t.FirstByteNonStreamMs) * time.Millisecond
+}
+
+func (t Timeouts) Total() time.Duration {
+	if t.TotalMs <= 0 {
+		return 15 * time.Minute
+	}
+	return time.Duration(t.TotalMs) * time.Millisecond
+}
+
 // TODO(M3): Session 一次运行实例。BE 要列出活跃会话给前端看。
 // 另外「会话粘性」需要它：同一 session 一旦解析出结果就钉住，
 // 否则模型在会话内来回跳会让 prompt 缓存反复作废（docs/18 §9）。
@@ -203,6 +243,9 @@ type State struct {
 
 	// Chain 链的成本上界。
 	Chain ChainLimits `json:"chain"`
+
+	// Timeouts 网关等上游的时间参数（热加载，见 Timeouts 的注释）。
+	Timeouts Timeouts `json:"timeouts,omitempty"`
 
 	// Debug 打印每个请求的完整头/体（密钥脱敏）。出错时无论如何都会记全。
 	Debug bool `json:"debug"`

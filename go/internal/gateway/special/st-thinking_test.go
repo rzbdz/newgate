@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
+	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 )
 
 // markAlwaysThinks 模拟「转发时撞过一次 1210」之后的 quirk 注册表状态。
@@ -129,17 +130,29 @@ func TestAlwaysThinksApply(t *testing.T) {
 	})
 }
 
-// TestAlwaysThinksSkipsSwitchedModel 回归（2026-09-09 实抓 #12）：quirk 学
-// 到 glm-5.3 之后，claude-bg 送分类器去 light 档（glm-4.5-air）的请求也被
-// always-thinks 按 r.Model 的 quirk 翻回了 enabled+low——等于白切。补丁只能
-// 打在学到它的那个模型身上。走全注册表（真实顺序）验证端到端结果。
-func TestAlwaysThinksSkipsSwitchedModel(t *testing.T) {
+// TestAlwaysThinksSkipsRoutedClassifier 回归（2026-09-09 实抓 #12 的路由版）：
+// quirk 学到 glm-5.3 之后，分类器请求必须**整个改道 light 链**——RouteTier
+// 在建链之前决定，forward 的链循环把 body 的 model 换成 light 链头
+// （glm-4.5-air）之后 special 才看到它。于是 glm-5.3 的 quirk
+// （NoThinkingDisable）从头到尾没机会掺和：thinking 保持 disabled、
+// 不补 reasoning_effort。走全注册表按真实顺序验证端到端结果。
+func TestAlwaysThinksSkipsRoutedClassifier(t *testing.T) {
 	markAlwaysThinks(t, "smt-glm", "glm-5.3")
-	r := req("glm-5.3", "smt-glm", "https://x/v1")
-	r.Agent, r.Stream, r.Tier = "claude", false, "mid"
-	r.LightProvider, r.LightModel = "smt-glm", "glm-4.5-air"
 	body := []byte(`{"model":"glm-5.3","max_tokens":2112,` + sysMarker +
 		`,"messages":[{"role":"user","content":"classify"}]}`)
+
+	// 1) 路由层：分类器改道 light（forward 在解析链之前问这里）
+	if rt := RouteTier("claude", false, body, nil); rt != "light" {
+		t.Fatalf("分类器应改道 light 链，实际 %q", rt)
+	}
+	// 2) 链循环：body 的 model 换成 light 链头
+	body, err := rewrite.ReplaceTopLevelString(body, "model", "glm-4.5-air")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 3) special 层：r.Model 从一开始就是 air
+	r := req("glm-4.5-air", "smt-glm", "https://x/v1")
+	r.Agent, r.Stream, r.Tier = "claude", false, "light"
 
 	res := Apply(body, r, nil)
 	var m map[string]interface{}
@@ -147,20 +160,77 @@ func TestAlwaysThinksSkipsSwitchedModel(t *testing.T) {
 		t.Fatalf("改完不是合法 JSON: %v\n%s", err, res.Body)
 	}
 	if m["model"] != "glm-4.5-air" {
-		t.Fatalf("分类器应切到 light，实际 %v", m["model"])
-	}
-	if r.Model != "glm-4.5-air" {
-		t.Fatalf("框架没把上下文同步到切换后的模型（r.Model=%s）——下游会拿旧模型做决定", r.Model)
+		t.Fatalf("模型应保持 light 链头，实际 %v", m["model"])
 	}
 	if th, _ := m["thinking"].(map[string]interface{}); th["type"] != "disabled" {
-		t.Fatalf("air 接受 disabled，thinking 不该被翻回: %v", m["thinking"])
+		t.Fatalf("air 接受 disabled，thinking 不该被 glm-5.3 的 quirk 翻回: %v", m["thinking"])
 	}
 	if _, has := m["reasoning_effort"]; has {
 		t.Fatalf("不该有 reasoning_effort: %s", res.Body)
 	}
 	for _, n := range res.Notes {
 		if strings.Contains(n, "always-thinks") {
-			t.Fatalf("always-thinks 不该掺和切过模型的请求: %v", res.Notes)
+			t.Fatalf("always-thinks 不该掺和改道后的请求: %v", res.Notes)
+		}
+	}
+}
+
+// TestBestEffortDisableThinkDumbLightConfig 错配现场（2026-09-09 用户提的
+// 场景）：用户把「不支持关思考」的模型配进了 light 档。best effort 的含义
+// 就在这里——意图照样落地，模型听不懂就翻成它听得懂的最小思考，请求
+// 活着（慢就慢，由他去了），绝不因为关不掉而失败。
+func TestBestEffortDisableThinkDumbLightConfig(t *testing.T) {
+	markAlwaysThinks(t, "smt-glm", "glm-5.3")
+	body := []byte(`{"model":"glm-5.3","max_tokens":2112,` + sysMarker +
+		`,"messages":[{"role":"user","content":"classify"}]}`)
+
+	// 路由照走 light（错配下 light 链头就是 glm-5.3 本尊）
+	if rt := RouteTier("claude", false, body, nil); rt != "light" {
+		t.Fatalf("错配不改路由决策，实际 %q", rt)
+	}
+	// light 链头：r.Model = glm-5.3；BestEffortDisableThink 一个操作完成
+	// 意图落地 + 翻译
+	r := req("glm-5.3", "smt-glm", "https://x/v1")
+	r.Agent, r.Stream, r.Tier = "claude", false, "light"
+
+	res := Apply(body, r, nil) // 走全注册表：claude-bg → glm → always-thinks
+	var m map[string]interface{}
+	if err := json.Unmarshal(res.Body, &m); err != nil {
+		t.Fatalf("改完不是合法 JSON: %v\n%s", err, res.Body)
+	}
+	if th, _ := m["thinking"].(map[string]interface{}); th["type"] != "enabled" {
+		t.Fatalf("不支持关思考的模型应被翻译成 enabled，实际 %v", m["thinking"])
+	}
+	if m["reasoning_effort"] != "low" {
+		t.Fatalf("应补 reasoning_effort=low，实际 %v", m["reasoning_effort"])
+	}
+}
+
+// TestBestEffortDisableThinkModelGuard 翻译按 (provider, r.Model) 的 quirk
+// 决定：body 已被切到别的模型时不掺和（写意图不受影响——那是模型无关的）。
+func TestBestEffortDisableThinkModelGuard(t *testing.T) {
+	markAlwaysThinks(t, "smt-glm", "glm-5.3")
+	// r.Model 还是 glm-5.3（quirk 在它身上），但 body 的 model 已是 air
+	r := req("glm-5.3", "smt-glm", "https://x/v1")
+	body := []byte(`{"model":"glm-4.5-air","messages":[]}`)
+
+	out, notes, err := BestEffortDisableThink(body, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]interface{}
+	_ = json.Unmarshal(out, &m)
+	// 意图落地了（模型无关）……
+	if th, _ := m["thinking"].(map[string]interface{}); th["type"] != "disabled" {
+		t.Fatalf("写意图不受模型守卫影响，实际 %v", m["thinking"])
+	}
+	// ……但 glm-5.3 的 quirk 没有翻它（air 不背这口锅）
+	if m["reasoning_effort"] != nil {
+		t.Fatalf("不该按 glm-5.3 的 quirk 给 air 补 effort: %s", out)
+	}
+	for _, n := range notes {
+		if strings.Contains(n, "always-thinks") || strings.Contains(n, "不支持关闭思考") {
+			t.Fatalf("翻译不该发生: %v", notes)
 		}
 	}
 }
