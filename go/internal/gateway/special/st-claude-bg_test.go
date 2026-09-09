@@ -63,19 +63,14 @@ func TestClaudeBgApply(t *testing.T) {
 		}
 	})
 
-	t.Run("带了 adaptive 也改写（客户端设置泄漏）", func(t *testing.T) {
+	t.Run("带了 adaptive 不碰（compact 总结显式要思考）", func(t *testing.T) {
 		body := []byte(`{"model":"mid","thinking":{"type":"adaptive","budget_tokens":1024},"messages":[]}`)
 		out, notes, err := (claudeBg{}).Apply(body, r)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var m map[string]interface{}
-		_ = json.Unmarshal(out, &m)
-		if th, _ := m["thinking"].(map[string]interface{}); th["type"] != "disabled" {
-			t.Fatalf("adaptive 应回改写为 disabled，实际 %v", m["thinking"])
-		}
-		if len(notes) == 0 || !strings.Contains(notes[0], "改写") {
-			t.Fatalf("改写必须有 note，实际 %v", notes)
+		if string(out) != string(body) || len(notes) != 0 {
+			t.Fatalf("显式 thinking 不该被动（强改 disabled 会被始终思考模型拒掉）: out=%s notes=%v", out, notes)
 		}
 	})
 
