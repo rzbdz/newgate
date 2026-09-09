@@ -144,18 +144,27 @@ opencode                      # 用全局默认
 | 其它 | 默认 400 并列出可用档位；`passthrough` 策略可原样转发 |
 
 > **M1 已实现的具体模型路由**（`resolve.ResolveRequest`）：当具体模型名出现在某档位
-> 的绑定里，代理把它**反解回该档位**，先试这个模型、再按该档位的链 fallback。这正是
-> 「工具界面显示真实模型名」的机制——wrapper 把真实模型名写进槽位 env
-> （`ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-chat`），工具原样发回来，代理反解回 heavy。
+> 的绑定里，代理把它**反解回该档位**，先试这个模型、再按该档位的链 fallback。
 > 下面「绝不替换」的原则针对的是**用户显式点名**（`--model primary=gpt-4o`）的场景，
 > 那需要 `providers.models` 区分「哪些 provider 提供这个确切模型」，仍后置（Q4）。
 
-> **窗口声明**（2026-09 实测补）：真实模型名有个副作用——Claude Code 不认识它，
-> 按「未知模型」默认 200k 窗口，会话 125k 就开始张罗 auto-compact（模型实际 1M）。
-> profile 可声明 `context_window`（真实窗口）与 `auto_compact_window`（compact
-> 目标，客户端取 min），wrapper 启动时注入 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` /
-> `CLAUDE_CODE_AUTO_COMPACT_WINDOW`。字段见 §11，注入逻辑在
-> `runtime/launch`（`buildInject`）。
+> **槽位命名的两种模式**（2026-09-09 定稿，`runtime/launch` 的 `buildInject`）：
+> **动态**（默认）——槽位 env 保持档位名（`ANTHROPIC_DEFAULT_OPUS_MODEL=heavy`），
+> 会话把档位名发回来，代理按**请求时**的当前配置解析：`newgate --set-profile`
+> 对跑着的会话立刻生效。界面显示语义层名字（恒真：「你在用 heavy 档」），
+> 实际模型看 `X-Newgate-Route` / `newgate tier`。**钉死**（显式 `--profile` /
+> NEWGATE_PROFILE / argv0 分发）——注入真实模型名（`deepseek-chat`），显示的
+> 就是这次真用的：钉死才配真名。曾短暂试过默认注入真名（为了界面好看），
+> 但它把会话钉死在启动时的模型上，`--set-profile` 对活会话失效，动态性
+> 才是这套语义层的命根子，退回来了。
+
+> **窗口声明**（2026-09 实测补）：Claude Code 对不认识的模型名（档位名和
+> 真实名都一样）按「未知模型」默认 200k 窗口，会话 125k 就开始张罗
+> auto-compact（模型实际 1M）。profile 可声明 `context_window`（真实窗口）
+> 与 `auto_compact_window`（compact 目标，客户端取 min），wrapper 启动时
+> 注入 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`。
+> 窗口声明**与命名模式无关**（MAX_CONTEXT_TOKENS 走客户端的未知模型分支，
+> 两种模式同样生效）。字段见 §11。
 
 ### 具体模型名绝不替换成别的模型
 
