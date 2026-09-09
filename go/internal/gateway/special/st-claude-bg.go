@@ -37,9 +37,17 @@ func init() { Register(claudeBg{}) }
 //     reasoning_effort:low）——本插件只表达「客户端这次不想思考」的意图，
 //     翻译成各家上游听得懂的话是模型级插件的事。
 //
-// 特征为什么可靠：主循环**永远是流式的**（dump 佐证），非流式的只剩后台
-// 小调用；档位上它们落在 mid/light——点名 heavy 的非流式调用是真要大模型
-// 干活的，不碰。
+// 特征为什么可靠：主循环**永远是流式的**（dump 佐证，含 -p 模式），非流式
+// 的只剩后台小调用；后台调用里分类器本体再靠 system 标记精确认出。
+//
+// 为什么 Match 不看 Tier（2026-09-09 修，两层）：真实模型名注入后，
+// Tier 从「客户端选了哪档」变成「名字反查的猜测」——resolve 层已把反查
+// 优先级改成 mid 先（见 realNameRoleOrder，主循环/分类器/总结都从 sonnet
+// 槽发名），但一对多反查终究没有真值：plan 模式的 opus 槽发的也是同一个
+// glm-5.3。所以本插件不把档位当依据——「后台小调用」认非流式，分类器
+// 本体认 system 标记，两个都是精确特征。marker 没命中时最多只禁思考：
+// glm 模型级插件本来就会给没写 thinking 的请求补 disabled，这里多的只是
+// 把泄漏的 adaptive 改写掉，换后台调用不排队。
 //
 // 这是少数会**改写客户端显式意图**的补丁，所以三条保险：
 //   - notes 明说改了什么（不静默，docs/16）；
@@ -66,11 +74,11 @@ func (claudeBg) Why() string {
 		"（主循环的流式请求不受影响）"
 }
 
-// Match 认「Claude Code 的后台小调用」这个类：claude 发起 + 非流式 +
-// mid/light 档。分类器本体的精确判定在 Apply 里看 system 标记。
+// Match 认「Claude Code 的后台小调用」这个类：claude 发起 + 非流式。
+// 分类器本体的精确判定在 Apply 里看 system 标记。不按 Tier 筛——
+// 见文件头「为什么 Match 不限档位」。
 func (claudeBg) Match(r *Request) bool {
-	return r != nil && r.Agent == "claude" && !r.Stream &&
-		(r.Tier == "mid" || r.Tier == "light")
+	return r != nil && r.Agent == "claude" && !r.Stream
 }
 
 // Apply 每一步都独立 fail-open：切不成模型就只禁思考，禁不成思考就只切

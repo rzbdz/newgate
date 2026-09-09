@@ -22,7 +22,8 @@ func TestClaudeBgMatch(t *testing.T) {
 	}{
 		{"claude 非流式 mid（分类器形态）", bg("claude", false, "mid"), true},
 		{"claude 非流式 light", bg("claude", false, "light"), true},
-		{"claude 非流式 heavy（点名要大模型）不碰", bg("claude", false, "heavy"), false},
+		{"claude 非流式 heavy 也要管（tier 有歧义，见文件头）", bg("claude", false, "heavy"), true},
+		{"claude 非流式没解析出 tier（兼容路径）", bg("claude", false, ""), true},
 		{"claude 流式（主循环形态）", bg("claude", true, "mid"), false},
 		{"opencode 非流式不碰", bg("opencode", false, "mid"), false},
 		{"兼容路径（无 agent）不碰", bg("", false, "mid"), false},
@@ -200,6 +201,29 @@ func TestClaudeBgLightSwitch(t *testing.T) {
 		}
 		if len(notes) != 1 || !strings.Contains(notes[0], "thinking") {
 			t.Fatalf("模型没变不该有切档 note，实际 %v", notes)
+		}
+	})
+
+	// 回归（2026-09-09 实抓）：真实模型名注入后，分类器点名的 glm-5.3
+	// 同时绑 heavy+mid，按 Roles 顺序反解成 heavy。旧 Match 的 tier 闸门
+	// 把它整个跳过——分类器留在 mid 体格的模型上跑 27 秒一条。tier 有
+	// 歧义时必须照切。
+	t.Run("tier=heavy（glm-5.3 同绑 heavy+mid 的反解结果）：照切 light", func(t *testing.T) {
+		r := base()
+		r.Tier = "heavy"
+		out, notes, err := (claudeBg{}).Apply(classifier, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal(out, &m); err != nil {
+			t.Fatalf("改完不是合法 JSON: %v", err)
+		}
+		if m["model"] != "glm-4.5-air" {
+			t.Fatalf("tier=heavy 的分类器也应切到 light，实际 %v", m["model"])
+		}
+		if len(notes) != 2 || !strings.Contains(notes[0], "分类器") {
+			t.Fatalf("切档 + 禁思考两笔都要有，实际 %v", notes)
 		}
 	})
 }
