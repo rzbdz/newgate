@@ -556,8 +556,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	st := snap.State
 	stream0 := rewrite.TopLevelBool(body, "stream")
 	reqID := atomic.LoadUint64(&s.requests)
-	// 进来就记——否则「请求没到」和「到了在等上游」在日志里长得一样
-	s.logf("[proxy] #%d ← %s stream=%v  开始", reqID, inModel, stream0)
+	// 进来就记——否则「请求没到」和「到了在等上游」在日志里长得一样。
+	// req= 是客户端请求体字节数：跟上游日志对账（300k compact 这种大输入）时
+	// 靠它定位「同一发请求」，没有它就只剩 reqID 一个数，跨系统对不上。
+	s.logf("[proxy] #%d ← %s stream=%v req=%d字节  开始", reqID, inModel, stream0, len(body))
 	if st.DebugActive() {
 		s.logf("[proxy] #%d 客户端请求 %s %s%s\n    body(%d字节): %s",
 			reqID, r.Method, r.URL.Path, headerDump(r.Header), len(body),
@@ -840,6 +842,19 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				r.Header, resp.Header, routeStr)
 			s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
 			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
+			if isReasoningPassthroughError(eb) {
+				// 专属标记：这类 400 不是客户端 schema 错，是我们补的思考内容
+				// 被上游严格节点拒了（DeepSeek 灰度），要能一眼 grep 出来。
+				s.logf("[reasoning-400] #%d %s 上游拒收思考内容回传（证据 %s.*）",
+					reqID, a.Binding.String(), filepath.Base(base))
+				// 现场单独存档：这类 400 偶发又致命，dump 目录的 req-*/err-*
+				// 滚动清理会把它挤掉，所以另存一份到不参与滚动清理的专用目录，
+				// 并附逐条 reasoning 审计（哪几条补了占位符）。
+				if rdir := s.saveReasoningEvidence(reqID, body, newBody, eb,
+					r.Header, resp.Header, routeStr); rdir != "" {
+					s.logf("[reasoning-400] #%d 现场已存档 %s/", reqID, rdir)
+				}
+			}
 			s.logf("[proxy] #%d 上游原文: %s", reqID, truncate(string(redact(eb)), 2000))
 			s.logf("[proxy] #%d 我们发出的 body(%d字节): %s", reqID, len(newBody),
 				truncate(string(redact(newBody)), 4000))
@@ -936,6 +951,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					if stream {
 						s.logf("[proxy] #%d 流正常结束：%d 块 / %d 字节 / 总 %dms",
 							reqID, chunks, bytesOut, time.Since(start).Milliseconds())
+					} else {
+						s.logf("[proxy] #%d 非流式响应结束：%d 字节 / 总 %dms",
+							reqID, bytesOut, time.Since(start).Milliseconds())
 					}
 				case r.Context().Err() != nil:
 					metrics.Default.Inc("client.cancel")
@@ -1021,8 +1039,84 @@ func (s *Server) saveErrEvidence(reqID uint64, status int, inBody, outBody, resp
 	meta := fmt.Sprintf("route: %s\nstatus: %d\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
 		routeStr, status, headerDump(reqHdr), headerDump(respHdr))
 	_ = ioutil.WriteFile(base+".meta.txt", []byte(meta), 0o600)
-	logx.PruneDir(dir, 20) // 只留最近 20 组证据，别把磁盘吃满
+	// 只清 err- 前缀的组：dump 目录里 req-* 也住一起，各设各的上限（见 dump 处
+	// 的 PruneDirBy(dir,"req-",30)），空前缀会把对方的也一起删掉——错误证据刚
+	// 落地几秒就被 req-* 挤没了，等于没存。
+	logx.PruneDirBy(dir, "err-", 20)
 	return base
+}
+
+// saveReasoningEvidence 思考回传被拒（reasoning 400）时把现场存进**专用目录**，
+// 不参与 dump 目录的 req-*/err-* 滚动清理——这类 400 偶发又致命，丢了就再也
+// 复现不了（本会话的 transcript 单条就能上 MB，dump 目录几十组就满了，而
+// 400 往往隔很久才来一次，等不到下一次就被挤没了）。
+//
+// 目录结构：dump/reasoning-400/req-<id>-<unixnano>/，里面放客户端发来的、我们
+// 发出的、上游说的，外加一份逐条 reasoning 审计（哪几条 assistant 补了占位符）。
+// 只按总字节数封顶（512MB，约几百个现场），超了才清最旧的——正常排查用
+// 根本到不了这个量，等于「不删」。
+func (s *Server) saveReasoningEvidence(reqID uint64, inBody, outBody, respBody []byte,
+	reqHdr http.Header, respHdr http.Header, routeStr string) string {
+	dir := filepath.Join(paths.Config(), "dump", "reasoning-400",
+		fmt.Sprintf("req-%06d-%d", reqID, time.Now().UnixNano()))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	_ = ioutil.WriteFile(filepath.Join(dir, "client-sent.json"), redact(inBody), 0o600)
+	_ = ioutil.WriteFile(filepath.Join(dir, "we-sent.json"), redact(outBody), 0o600)
+	_ = ioutil.WriteFile(filepath.Join(dir, "upstream-said.json"), redact(respBody), 0o600)
+	_ = ioutil.WriteFile(filepath.Join(dir, "audit.txt"),
+		[]byte(special.AuditReasoning(outBody)), 0o600)
+	meta := fmt.Sprintf("route: %s\nstatus: 400\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
+		routeStr, headerDump(reqHdr), headerDump(respHdr))
+	_ = ioutil.WriteFile(filepath.Join(dir, "meta.txt"), []byte(meta), 0o600)
+	pruneReasoningEvidence(filepath.Dir(dir), 512<<20)
+	return dir
+}
+
+// pruneReasoningEvidence 按总字节数封顶清理 reasoning-400 目录：超了就删最旧的
+// 子目录，直到回到上限以下。比按个数更可预测，磁盘安全——但上限给得很宽，
+// 正常排查根本触不到（见 saveReasoningEvidence）。
+func pruneReasoningEvidence(dir string, maxBytes int64) {
+	ents, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var subdirs []os.FileInfo
+	var total int64
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		subdirs = append(subdirs, e)
+		total += dirSize(filepath.Join(dir, e.Name()))
+	}
+	if total <= maxBytes {
+		return
+	}
+	// ioutil.ReadDir 已按名字排序，子目录名带 unixnano，最旧的在前。
+	for _, e := range subdirs {
+		if total <= maxBytes {
+			break
+		}
+		p := filepath.Join(dir, e.Name())
+		total -= dirSize(p)
+		_ = os.RemoveAll(p)
+	}
+}
+
+func dirSize(dir string) int64 {
+	var n int64
+	ents, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	for _, e := range ents {
+		if !e.IsDir() {
+			n += e.Size()
+		}
+	}
+	return n
 }
 
 // chainHeader 描述链实际走了哪几步。ASCII only（HTTP header 装不了中文）。
@@ -1056,6 +1150,19 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + fmt.Sprintf("…(截断，共 %d 字符)", len(r))
+}
+
+// isReasoningPassthroughError 认出 DeepSeek 思考模式那两句 400：
+//
+//	The `reasoning_content` in the thinking mode must be passed back to the API.
+//	The `content[].thinking` in the thinking mode must be passed back to the API.
+//
+// 这不是客户端的 schema 错误，而是我们（special/deepseek）补回去的思考内容
+// 被上游严格节点拒了——单独打点，别跟普通 400 混在一起。
+func isReasoningPassthroughError(upstreamBody []byte) bool {
+	s := string(upstreamBody)
+	return strings.Contains(s, "must be passed back") &&
+		(strings.Contains(s, "reasoning_content") || strings.Contains(s, "content[].thinking"))
 }
 
 func trim(s string) string {

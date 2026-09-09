@@ -14,6 +14,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/gateway/forward"
+	"github.com/rzbdz/newgate/go/internal/gateway/thinkcache"
 	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/platform/logx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
@@ -86,6 +87,11 @@ func Serve(port int) int {
 	if port <= 0 {
 		port = watcher.Current().State.Port
 	}
+	// thinkcache 落盘冷层：daemon 重启后找回上一进程的推理内容。失败就降级
+	// 纯内存（补不回来的轮次用占位符兜底），落盘永远不反过来搞挂代理。
+	if err := thinkcache.AttachDisk(paths.ThinkCacheFile(), 100<<20); err != nil {
+		lg.Printf("thinkcache 落盘关闭（继续纯内存）: %v", err)
+	}
 	srv := forward.New(port, lg, watcher)
 
 	sig := make(chan os.Signal, 2)
@@ -129,7 +135,7 @@ func Serve(port int) int {
 	}()
 
 	lg.Printf("newgate %s (构建于 %s) 启动，默认 profile=%s，配置热更新已开启",
-		Version, pretty(BuildTime), watcher.Current().State.DefaultProfile)
+		Version, buildTimeDisplay(), watcher.Current().State.DefaultProfile)
 	if err := srv.Start(); err != nil {
 		// 优雅交接的排空：listener 已移交新进程，Serve 因此返回——但这
 		// 不是退出的时候。等在途请求流完（Drained），再直接退（os.Exit

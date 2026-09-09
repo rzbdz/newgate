@@ -31,6 +31,11 @@ func StateFile() string     { return filepath.Join(root(), "state.json") }
 func BackupDir() string     { return filepath.Join(root(), "backups") }
 func LogFile() string       { return filepath.Join(root(), "newgate.log") }
 
+// ThinkCacheFile thinkcache 的落盘冷层文件：滚动 100MB，撑过 daemon 重启。
+// 内容是推理原文（= 对话内容），和 dump 一样是明文，权限 0660 随目录的
+// 组共享模型走（developer 组内可见）。
+func ThinkCacheFile() string { return filepath.Join(root(), "thinkcache.bin") }
+
 // pid / lock 放共享配置目录，便于同一组的多用户管理同一个 daemon。
 // NEWGATE_HOME 仍可用于测试时隔离整套运行时文件。
 func runtimeDir() string {
