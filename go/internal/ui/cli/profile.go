@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
 	"github.com/rzbdz/newgate/go/internal/gateway/health"
+	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
 	"github.com/rzbdz/newgate/go/internal/store"
 )
@@ -97,6 +100,44 @@ func cmdProfiles() int {
 		}
 	}
 	fmt.Printf("\nGlobal default: %s\n", st.DefaultProfile)
+	return 0
+}
+
+// cmdProfileKV 把一个 profile 转成 KV 文本——json→kv 的转换口。
+//
+// 不带 --write 只打印（拷走、改完再贴回来都行）；带 --write 落盘成
+// mappings/<名>.kv 并把旧 .json 改名 .bak（kv 优先于 json，留着旧文件
+// 会永远被压着，退役比并存干净）。
+func cmdProfileKV(args []string) int {
+	if len(args) < 1 || args[0] == "" {
+		return die(64, "用法：newgate profile kv <名> [--write]")
+	}
+	name := args[0]
+	raw, err := store.LoadProfileRaw(name)
+	if err != nil {
+		return die(65, err.Error())
+	}
+	text := store.SerializeProfileKV(raw)
+
+	if len(args) < 2 || args[1] != "--write" {
+		fmt.Print(text)
+		fmt.Println("# ↑ newgate profile kv " + name + " --write 可直接落盘")
+		return 0
+	}
+	kvPath := filepath.Join(paths.Mappings(), name+".kv")
+	if err := os.WriteFile(kvPath, []byte(text), 0o660); err != nil {
+		return die(70, "写 "+kvPath+" 失败: "+err.Error())
+	}
+	jsonPath := filepath.Join(paths.Mappings(), name+".json")
+	if _, err := os.Stat(jsonPath); err == nil {
+		if err := os.Rename(jsonPath, jsonPath+".bak"); err != nil {
+			return die(70, "旧 json 改名失败（kv 已写入，手动处理一下）: "+err.Error())
+		}
+		fmt.Printf("✓ %s（旧 .json → .json.bak）\n", kvPath)
+	} else {
+		fmt.Printf("✓ %s\n", kvPath)
+	}
+	notifyProxy()
 	return 0
 }
 

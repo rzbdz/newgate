@@ -113,15 +113,63 @@ func SaveProviders(p *domain.Providers) error {
 
 // ---------- profiles ----------
 
+// LoadProfile 读一个 profile，**含 extends 合并**（变体只写差异项，
+// 其余从 base 继承，见 domain.Profile.MergeFrom）。
+//
+// 文件形态两种：`name.json`（canonical，程序写）或 `name.kv`（手写友好，
+// 见 kv.go）。并存时 **.kv 赢**——kv 只会被人刻意创建，它出现就是最新的
+// 意图；`newgate profile kv --write` 转换时会把旧 json 改名 .bak。
 func LoadProfile(name string) (*domain.Profile, error) {
-	var pr domain.Profile
-	if err := readJSON(filepath.Join(paths.Mappings(), name+".json"), &pr); err != nil {
+	return loadProfile(name, map[string]bool{})
+}
+
+func loadProfile(name string, loading map[string]bool) (*domain.Profile, error) {
+	if loading[name] {
+		return nil, fmt.Errorf("extends 成环：%s 绕回了自己", name)
+	}
+	pr, err := readProfileFile(name)
+	if err != nil {
 		return nil, err
 	}
 	if pr.Name == "" {
 		pr.Name = name
 	}
+	if pr.Extends == "" {
+		return pr, nil
+	}
+	loading[name] = true
+	base, err := loadProfile(pr.Extends, loading)
+	delete(loading, name)
+	if err != nil {
+		return nil, fmt.Errorf("extends %q 解析失败: %w", pr.Extends, err)
+	}
+	pr.MergeFrom(base)
+	pr.Extends = "" // 已合并，解析后的视图不再背 extends 声明
+	return pr, nil
+}
+
+func readProfileFile(name string) (*domain.Profile, error) {
+	if b, err := ioutil.ReadFile(filepath.Join(paths.Mappings(), name+".kv")); err == nil {
+		return ParseProfileKV(string(b))
+	}
+	var pr domain.Profile
+	if err := readJSON(filepath.Join(paths.Mappings(), name+".json"), &pr); err != nil {
+		return nil, err
+	}
 	return &pr, nil
+}
+
+// LoadProfileRaw 读**未合并**的原始 profile（extends 声明原样保留）。
+// 给编辑/转换用：对一个紧凑的派生声明改一个字段，不该把它展开成全量。
+func LoadProfileRaw(name string) (*domain.Profile, error) {
+	pr, err := readProfileFile(name)
+	if err != nil {
+		return nil, err
+	}
+	if pr.Name == "" {
+		pr.Name = name
+	}
+	return pr, nil
 }
 
 // SaveProfile 写 profile。不含密钥（只有 provider/model 绑定），组内共享读
@@ -135,12 +183,26 @@ func ListProfiles() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	seen := map[string]bool{}
 	var out []string
 	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() {
 			continue
 		}
-		out = append(out, strings.TrimSuffix(e.Name(), ".json"))
+		var n string
+		switch {
+		case strings.HasSuffix(e.Name(), ".json"):
+			n = strings.TrimSuffix(e.Name(), ".json")
+		case strings.HasSuffix(e.Name(), ".kv"):
+			n = strings.TrimSuffix(e.Name(), ".kv")
+		default:
+			continue
+		}
+		// 同名 json/kv 只出一个名字（谁赢见 LoadProfile）
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
 	}
 	sort.Strings(out)
 	return out, nil
