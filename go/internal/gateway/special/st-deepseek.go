@@ -153,19 +153,16 @@ func (deepseek) Apply(body []byte, r *Request) ([]byte, []string, error) {
 	if thinkingOn {
 		restored, placeholders = 0, 0
 		valBlock := func(item []byte) []byte {
-			text := reasoningFallback
-			// 消息自带 reasoning_content（OpenAI 方言客户端保住了它）就
-			// 用它，和第 2 步对同一份内容的来源保持一致
-			if rc, ok := rewrite.TopLevelString(item, "reasoning_content"); ok && rc != "" {
-				text = rc
+			// 与第 2 步同一份来源（pickReasoning）：客户端带回的 thinking 块
+			// 原文 → thinkcache 真实推理 → 占位。**不能**读第 2 步刚补的
+			// reasoning_content——第 2 步对没缓存的消息补的是占位符，读它会把
+			// 占位符当成「真实原文」，让日志里的「用了真实原文」计数虚高。
+			if q, ok := pickReasoning(item); ok {
 				restored++
-			} else if blob, ok := thinkcache.Default.Lookup(item); ok {
-				text = string(blob)
-				restored++
-			} else {
-				placeholders++
+				return []byte(`{"type":"thinking","thinking":` + string(q) + `}`)
 			}
-			q, _ := json.Marshal(text) // string 编码不会失败
+			placeholders++
+			q, _ := json.Marshal(reasoningFallback) // string 编码不会失败
 			return []byte(`{"type":"thinking","thinking":` + string(q) + `}`)
 		}
 		if nb, n, err := rewrite.EnsureArrayItemArrayHeadFunc(out, "messages", "content",
@@ -267,4 +264,68 @@ func lacksThinking(content []byte) bool {
 		}
 	}
 	return true
+}
+
+// AuditReasoning 产出「本轮回传推理内容」的逐条审计报告，供 400 现场取证用。
+//
+// 直接解析 we-sent 的 messages，逐条 assistant 消息标出 reasoning_content 补的
+// 是真实原文还是占位符。占位符正是这类「must be passed back」400 的直接诱因
+// ——上游要逐字原文，占位符不是原文，必然被拒。所以取证必须能一眼看出是哪
+// 几条补了占位符、它们的 tool_use id 是什么（方便反查缓存该不该有）。
+//
+// 这是纯只读分析，不依赖运行时的缓存状态——缓存此刻可能已经被后续请求顶掉，
+// 但 400 发生时写下的这份报告是当时事实的定格。
+func AuditReasoning(out []byte) string {
+	msgs, ok := rewrite.TopLevelRaw(out, "messages")
+	if !ok {
+		return "（没有 messages 字段，无法审计）\n"
+	}
+	items, ok := rewrite.ArrayItems(msgs)
+	if !ok {
+		return "（messages 不是数组，无法审计）\n"
+	}
+	var b strings.Builder
+	assistant, real, ph, missing := 0, 0, 0, 0
+	for i, it := range items {
+		if !isAssistant(it) {
+			continue
+		}
+		assistant++
+		rc, has := rewrite.TopLevelString(it, "reasoning_content")
+		switch {
+		case !has:
+			missing++
+			fmt.Fprintf(&b, "msg[%d] 缺失 reasoning_content  %s\n", i, msgKeys(it))
+		case rc == reasoningFallback:
+			ph++
+			fmt.Fprintf(&b, "msg[%d] 占位符（非原文，上游会拒）  %s\n", i, msgKeys(it))
+		default:
+			real++
+		}
+	}
+	return fmt.Sprintf("assistant 共 %d 条：真实原文 %d，占位符 %d，缺失 %d\n"+
+		"占位符/缺失就是上游「must be passed back」的直接诱因，逐条：\n%s",
+		assistant, real, ph, missing, b.String())
+}
+
+// msgKeys 抽出这条 assistant 消息的 tool_use id（缓存找回的 key 就靠它），
+// 纯文本轮没有 tool_use，靠正文哈希。取证时拿 id 反查 thinkcache 该不该有。
+func msgKeys(item []byte) string {
+	var toolIDs []string
+	if c, ok := rewrite.TopLevelRaw(item, "content"); ok {
+		if bs, ok := rewrite.ArrayItems(c); ok {
+			for _, blk := range bs {
+				if t, _ := rewrite.TopLevelString(blk, "type"); t != "tool_use" {
+					continue
+				}
+				if id, _ := rewrite.TopLevelString(blk, "id"); id != "" {
+					toolIDs = append(toolIDs, id)
+				}
+			}
+		}
+	}
+	if len(toolIDs) == 0 {
+		return "（纯文本轮，无 tool_use）"
+	}
+	return "tool_use ids: " + strings.Join(toolIDs, " ")
 }

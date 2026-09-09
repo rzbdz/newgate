@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Version 由 main 注入。
@@ -168,11 +169,24 @@ func Run(args []string) int {
 
 func VersionLine() string {
 	return fmt.Sprintf("newgate %s\n  构建于 %s\n  提交于 %s",
-		Version, pretty(BuildTime), pretty(CommitTime))
+		Version, buildTimeDisplay(), pretty(CommitTime))
 }
 
 // pretty ldflags 传不了空格，用下划线占位，展示时换回。
 func pretty(s string) string { return strings.ReplaceAll(s, "_", " ") }
+
+// buildTimeDisplay 构建时间的展示串：ldflags 里的 UTC 时间 + 换算好的本地时间。
+//
+// Makefile 用 `date -u` 打 UTC 时间戳（结尾带 Z），光看它容易算错本地几点；
+// 这里顺手算一份本地时区并列出来，一眼对上「这二进制是我几点几分编的」。
+// 解析失败（dev 构建没注入时间 = "unknown"）就只回原文，不硬凑。
+func buildTimeDisplay() string {
+	utc := pretty(BuildTime)
+	if t, err := time.Parse("2006-01-02_15:04:05Z07:00", BuildTime); err == nil {
+		return fmt.Sprintf("%s（本地 %s）", utc, t.Local().Format("2006-01-02 15:04:05 MST"))
+	}
+	return utc
+}
 
 // ---------- 小工具 ----------
 

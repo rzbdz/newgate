@@ -37,7 +37,10 @@ import (
 	"time"
 )
 
-// Cache 一个按字节数封顶、带 TTL 的 LRU。
+// Cache 一个按字节数封顶、带 TTL 的 LRU。可选挂一个落盘冷层（disk），
+// 热层 miss 时到冷层找、命中再提升回热层——这就是「三级缓存」的二级：
+// 客户端自己带回的 thinking 块是第一级（见 st-deepseek 的 pickReasoning），
+// 内存是第二级，落盘是第三级。
 type Cache struct {
 	mu       sync.Mutex
 	ll       *list.List // 队头 = 最近用过
@@ -45,6 +48,7 @@ type Cache struct {
 	bytes    int64
 	maxBytes int64
 	ttl      time.Duration
+	disk     *DiskStore // 可选落盘冷层（nil = 纯内存）
 
 	hits, misses, puts, evictions uint64
 }
@@ -55,9 +59,10 @@ type entry struct {
 	at   time.Time
 }
 
-// Default 全局实例。32MB / 2 小时：一次长会话的推理内容量级是几百 KB，
-// 32MB 够放几十个并行会话；TTL 只是为了让忘掉的会话自己腾地方。
-var Default = New(32<<20, 2*time.Hour)
+// Default 全局实例。64MB / 8 小时：实测一个整天长会话的推理内容量级是
+// 1~2MB（见 dump 抽样：thinking 块 4~11KB/条），64MB 能并排放几十个会话；
+// 8h 覆盖一个工作日，重启前的会话在当天内都能找回。
+var Default = New(64<<20, 8*time.Hour)
 
 func New(maxBytes int64, ttl time.Duration) *Cache {
 	return &Cache{
@@ -66,6 +71,30 @@ func New(maxBytes int64, ttl time.Duration) *Cache {
 		maxBytes: maxBytes,
 		ttl:      ttl,
 	}
+}
+
+// AttachDisk 给全局 Default 挂上落盘冷层（三级缓存的第三级），并把盘上
+// 已有的记录回灌进内存热层——这是 daemon 重启后找回上一进程推理内容的
+// 唯一入口。路径在 ~/.config/newgate/thinkcache.bin（见 paths.ThinkCacheFile）。
+//
+// 失败（没权限 / 磁盘不可写）就返回 err，调用方决定降级：继续纯内存，
+// 补不回来的轮次用占位符兜底——落盘永远不该反过来把代理搞挂。
+func AttachDisk(path string, maxBytes int64) error {
+	d, err := openDisk(path, maxBytes, Default.ttl)
+	if err != nil {
+		return err
+	}
+	Default.mu.Lock()
+	Default.disk = d
+	Default.mu.Unlock()
+
+	now := time.Now()
+	for k := range d.snapshot() {
+		if blob, ok := d.get(k); ok {
+			Default.putMem([]string{k}, blob, now)
+		}
+	}
+	return nil
 }
 
 // Put 把一段推理内容挂到若干个 key 上。
@@ -81,9 +110,17 @@ func (c *Cache) Put(keys []string, blob []byte) {
 	cp := make([]byte, len(blob))
 	copy(cp, blob)
 
+	now := time.Now()
+	c.putMem(keys, cp, now)
+	if c.disk != nil {
+		c.disk.appendKeys(keys, cp, now)
+	}
+}
+
+// putMem 只写内存热层。回灌磁盘冷层时走这里，避免「回灌又写回磁盘」的死循环。
+func (c *Cache) putMem(keys []string, cp []byte, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	now := time.Now()
 	for _, k := range keys {
 		if k == "" {
 			continue
@@ -103,27 +140,39 @@ func (c *Cache) Put(keys []string, blob []byte) {
 	c.evictLocked(now)
 }
 
-// Get 取回推理内容。过期的当没有。
+// Get 取回推理内容。过期的当没有；热层 miss 时落到冷层找，命中再提升回热层。
 func (c *Cache) Get(key string) ([]byte, bool) {
 	if key == "" {
 		return nil, false
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	el, ok := c.items[key]
+	if ok {
+		e := el.Value.(*entry)
+		if c.ttl > 0 && time.Since(e.at) > c.ttl {
+			c.removeLocked(el)
+			c.misses++
+		} else {
+			c.ll.MoveToFront(el)
+			c.hits++
+			c.mu.Unlock()
+			return e.blob, true
+		}
+	}
+	c.misses++
+	hasDisk := c.disk != nil
+	c.mu.Unlock()
+
+	if !hasDisk {
+		return nil, false
+	}
+	blob, ok := c.disk.get(key)
 	if !ok {
-		c.misses++
 		return nil, false
 	}
-	e := el.Value.(*entry)
-	if c.ttl > 0 && time.Since(e.at) > c.ttl {
-		c.removeLocked(el)
-		c.misses++
-		return nil, false
-	}
-	c.ll.MoveToFront(el)
-	c.hits++
-	return e.blob, true
+	// 冷层命中：提升回热层（不再落盘——它本来就在盘上）
+	c.putMem([]string{key}, blob, time.Now())
+	return blob, true
 }
 
 func (c *Cache) evictLocked(now time.Time) {

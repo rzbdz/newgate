@@ -250,3 +250,29 @@ func TestDeepSeekUsesCacheReasoning(t *testing.T) {
 		t.Fatalf("thinking 块应取缓存原文:\n%s", out)
 	}
 }
+
+// 计数诚实：第 3 步（thinking 块）的占位符不能被当成「真实原文」。
+//
+// 修复前的 bug：第 2 步给没缓存的消息补了 reasoning_content（占位符），
+// 第 3 步读回这个字段，把占位符算成「真实原文」——日志里 thinking 块的
+// 计数虚高。修复后第 3 步和第 2 步用同一份来源（pickReasoning），占位符
+// 如实报成占位符。
+func TestDeepSeekThinkingBlockPlaceholderCountedHonestly(t *testing.T) {
+	body := []byte(`{"model":"deepseek-chat","thinking":{"type":"enabled"},` +
+		`"messages":[{"role":"assistant","content":[` +
+		`{"type":"tool_use","id":"t-never-cached-0003","name":"Read","input":{}}]}]}`)
+
+	_, notes, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	all := strings.Join(notes, "\n")
+	// 两步各报一次「只能补占位符」：reasoning_content 一步、thinking 块一步
+	if n := strings.Count(all, "只能补占位符"); n != 2 {
+		t.Fatalf("占位符该报 2 次（reasoning_content + thinking 块），实际 %d 次:\n%s", n, all)
+	}
+	// thinking 块那步绝不能把占位符说成「用了真实的推理原文」
+	if strings.Contains(all, "补 thinking 块：1 条用了真实的推理原文") {
+		t.Fatalf("thinking 块的占位符被虚报成真实原文:\n%s", all)
+	}
+}

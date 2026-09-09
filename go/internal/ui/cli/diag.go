@@ -538,7 +538,7 @@ func checkProxyEnv() int {
 func cmdStatus() int {
 	st := store.LoadState()
 
-	fmt.Printf("newgate %s  (构建于 %s)\n", Version, pretty(BuildTime))
+	fmt.Printf("newgate %s  (构建于 %s)\n", Version, buildTimeDisplay())
 	fmt.Println()
 
 	// 代理（数据面）—— 挂了的话，所有走 newgate 的工具一起挂。
