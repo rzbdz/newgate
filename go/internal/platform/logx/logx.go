@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -95,7 +96,11 @@ func (r *Rotator) Close() error {
 
 // PruneDir 只保留目录下按名字排序最新的 keep 个文件（按前缀分组计数）。
 // 用于限制错误证据 dump 的数量。
-func PruneDir(dir string, keep int) {
+func PruneDir(dir string, keep int) { PruneDirBy(dir, "", keep) }
+
+// PruneDirBy 只清理以 prefix 开头的文件组（空前缀 = 全部）。dump 的
+// req-* 和错误证据的 err-* 共用一个目录、各自设上限，互不删对方。
+func PruneDirBy(dir, prefix string, keep int) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -108,6 +113,9 @@ func PruneDir(dir string, keep int) {
 			continue
 		}
 		n := e.Name()
+		if prefix != "" && !strings.HasPrefix(n, prefix) {
+			continue
+		}
 		base := n
 		if i := indexAny(n, "."); i > 0 {
 			base = n[:i]

@@ -960,6 +960,8 @@ func (s *Server) learnQuirks(reqID uint64, provider, model string, status int, b
 
 // dump 在 NEWGATE_DUMP=1 时把「收到的」和「发出的」请求体落盘。
 // 排查「是不是代理改坏了请求」时，这是唯一能拿出证据的手段。
+// 只留最近 30 组——本会话的 transcript 单条就能上 MB，不设上限磁盘
+// 很快就满（和 err-* 错误证据各自独立清理，互不删对方）。
 func (s *Server) dump(reqID uint64, attempt int, in, out []byte) {
 	if os.Getenv("NEWGATE_DUMP") == "" {
 		return
@@ -973,6 +975,7 @@ func (s *Server) dump(reqID uint64, attempt int, in, out []byte) {
 	_ = ioutil.WriteFile(base+".out.json", out, 0o600)
 	same := "改写后与原文长度差 " + fmt.Sprint(len(out)-len(in)) + " 字节"
 	s.logf("[proxy] #%d dump → %s.{in,out}.json  (%s)", reqID, base, same)
+	logx.PruneDirBy(dir, "req-", 30)
 }
 
 // redact 把请求/响应里像密钥的东西抹掉，日志和 dump 都用它。
