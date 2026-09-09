@@ -30,10 +30,10 @@ func init() { Register(claudeBg{}) }
 //     的是快和便宜，这个意图必须贯穿整条链：只换头的话，light 一挂掉回
 //     mid 的体格，又慢回去了。其他后台调用（compact 总结、起标题）不改
 //     道：它们要一点质量，且不挡交互；标记对不上时也自然不改道。
-//  2. 禁思考（Apply，body 层）：对全部后台调用一律显式
-//     thinking:{"type":"disabled"}，缺就补，带了也改写（后台调用里带的
-//     thinking 是客户端设置泄漏过去的，不是这次调用真要推理）。撞上
-//     「该模型始终思考」的 400（GLM 1210）时由排最后的 always-thinks
+//  2. 禁思考（Apply，body 层）：对「没写 thinking 的」后台调用补显式
+//     thinking:{"type":"disabled"}，写了的不碰（compact 总结显式带
+//     adaptive，强改 disabled 会被始终思考模型拒掉——见 BestEffortDisableThink）。
+//     撞上「该模型始终思考」的 400（GLM 1210）时由排最后的 always-thinks
 //     兜底（改回 enabled + reasoning_effort:low）——本插件只表达「客户端
 //     这次不想思考」的意图，翻译成各家上游听得懂的话是模型级插件的事。
 //

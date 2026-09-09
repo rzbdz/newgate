@@ -9,8 +9,11 @@ func init() { Register(alwaysThinks{}) }
 
 // BestEffortDisableThink 「这次调用不想思考」的完整语义，一个操作做完：
 //
-//	1. 落地意图：写入 thinking:{"type":"disabled"}（缺就补，带了也改写——
-//	   后台调用里带的 thinking 是客户端设置泄漏过去的）；
+//	1. 落地意图：**只在没写 thinking 时**注入 thinking:{"type":"disabled"}。
+//	   写了（adaptive / enabled / disabled）就是客户端这次调用的明确意图，
+//	   尊重它、不碰它（2026-09-09 实抓 + 探针复现：compact 总结请求显式带
+//	   thinking:adaptive，强改成 disabled 会被「始终思考」模型拒掉——glm-5.3
+//	   code 1210；探针：adaptive+tools→200、disabled→1210）；
 //	2. 按当前链步的模型翻译：不支持关闭思考的模型（quirk NoThinkingDisable）
 //	   听不懂 disabled，就地翻成 enabled + reasoning_effort:low。
 //
@@ -34,18 +37,12 @@ func BestEffortDisableThink(body []byte, r *Request) ([]byte, []string, error) {
 		return out, nil, nil
 	}
 
-	// 1) 落地意图——模型无关：写 disabled 不挑模型，缺就补、带了也改写。
-	if raw, has := rewrite.TopLevelRaw(out, "thinking"); has {
-		if t, _ := rewrite.TopLevelString(raw, "type"); t != "disabled" {
-			nb, err := rewrite.ReplaceTopLevelRaw(out, "thinking", []byte(`{"type":"disabled"}`))
-			if err != nil {
-				notes = append(notes, "thinking 未改动（"+err.Error()+"）")
-			} else {
-				out = nb
-				notes = append(notes, `thinking 已改写为 {"type":"disabled"}（`+why+`）`)
-			}
-		}
-	} else {
+	// 1) 落地意图——只在「没写 thinking」时注入 disabled。
+	//    写了（adaptive/enabled/disabled）就是客户端这次调用的明确意图，尊重
+	//    它、不动它：compact（总结）请求显式带 thinking:adaptive，强改成
+	//    disabled 会被「始终思考」模型拒掉（glm-5.3 code 1210）。best effort
+	//    的边界从「关不掉就让它想」收窄成「本来就没说要想，才替它说不想」。
+	if _, has := rewrite.TopLevelRaw(out, "thinking"); !has {
 		nb, err := rewrite.InsertTopLevelRaw(out, "thinking", []byte(`{"type":"disabled"}`))
 		if err != nil {
 			notes = append(notes, "thinking 未注入（"+err.Error()+"）")
