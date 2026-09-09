@@ -128,6 +128,12 @@ class Handler(BaseHTTPRequestHandler):
             code, NEXT_FAIL["code"] = NEXT_FAIL["code"], None
             return self._json(code, {"error": {"message": f"mock forced {code}"}})
 
+        # anthropic 方言的私有端点：原生 anthropic 上游有、聚合器不一定有
+        # （api.rvcompute.com 实测 404）。newgate 按上游能力决定转发拿真值
+        # 还是本地粗估——mock 实现它，让 e2e 验证转发路径。
+        if u.path.endswith("/count_tokens"):
+            return self._json(200, {"input_tokens": 42})
+
         if strict_reasoning_violation(body):
             print(f"[upstream] STRICT 400: {u.path}", flush=True)
             return self._json(400, STRICT_REASONING_ERR)

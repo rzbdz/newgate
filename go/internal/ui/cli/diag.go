@@ -15,6 +15,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/agents"
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
+	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
 	"github.com/rzbdz/newgate/go/internal/gateway/health"
 	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
@@ -140,6 +141,19 @@ func cmdProbe(only string, asJSON bool) int {
 			fmt.Printf("   平均 %dms", s.AvgMs)
 		}
 		fmt.Println()
+	}
+
+	// 方言能力：probe 顺带探明的。count_tokens ✗ 的上游，Claude Code 的
+	// 水位条走本地粗估（forward 层 lazy probe 也会自己学到这一点）。
+	if entries := dialect.Snapshot(); len(entries) > 0 {
+		fmt.Println("\n方言能力")
+		for _, e := range entries {
+			fmt.Printf("  %-42s openai %s  anthropic %s  count_tokens %s\n",
+				e.Provider+"/"+e.Model,
+				dialectMark(e, dialect.CapOpenAI),
+				dialectMark(e, dialect.CapAnthropic),
+				dialectMark(e, dialect.CapCountTokens))
+		}
 	}
 
 	st := store.LoadState()
@@ -369,6 +383,17 @@ func sortedKeys(m map[string]domain.Provider) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// dialectMark 一格能力灯：✓ 支持 / ✗ 探过明确不支持 / ? 没探到。
+func dialectMark(e dialect.Entry, c dialect.Cap) string {
+	if e.Known&c == 0 {
+		return "?"
+	}
+	if e.Supports&c != 0 {
+		return "✓"
+	}
+	return "✗"
 }
 
 func firstLine(s string, n int) string {

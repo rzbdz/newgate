@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
+	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
 	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
 	"github.com/rzbdz/newgate/go/internal/store"
 )
@@ -26,6 +27,11 @@ type Result struct {
 	Latency  time.Duration `json:"latency_ms"`
 	Err      string        `json:"error,omitempty"`
 	Cached   bool          `json:"-"` // 同一个 provider/model 只真打一次
+	// Dialects 探明支持的方言（"openai+anthropic"），空 = 主探活没过、没探。
+	Dialects string `json:"dialects,omitempty"`
+	// CountTokens anthropic 私有端点 /messages/count_tokens 是否可用。
+	// nil = 没探到（主探活失败或连接错误）。
+	CountTokens *bool `json:"count_tokens,omitempty"`
 }
 
 func (r Result) Light() string {
@@ -182,8 +188,9 @@ func Run(o Options) ([]Result, error) {
 			st, _, err := One(p, t.Model, o.Timeout)
 
 			if err == nil && st < 400 {
-				// 普通探活通过了，顺手探一发怪癖；这次请求也属于 probe 的等待时间。
+				// 普通探活通过了，顺手探一发怪癖和方言；这些请求也算 probe 的等待时间。
 				_ = CheckQuirks(t.Provider, p, t.Model, o.Timeout)
+				CheckDialects(t.Provider, p, t.Model, o.Timeout)
 			}
 			lat := time.Since(started)
 
@@ -220,6 +227,20 @@ func Run(o Options) ([]Result, error) {
 			r.Cached = true
 		}
 		seen[t] = true
+		// 方言能力：注册表里探明的（同一个 provider/model 只探一次，行间共享）
+		if ok, _ := dialect.Supports(r.Provider, r.Model, dialect.CapOpenAI); ok {
+			r.Dialects = "openai"
+		}
+		if ok, _ := dialect.Supports(r.Provider, r.Model, dialect.CapAnthropic); ok {
+			if r.Dialects != "" {
+				r.Dialects += "+"
+			}
+			r.Dialects += "anthropic"
+		}
+		if ok, known := dialect.Supports(r.Provider, r.Model, dialect.CapCountTokens); known {
+			ct := ok
+			r.CountTokens = &ct
+		}
 	}
 
 	sort.SliceStable(results, func(i, j int) bool {
@@ -340,6 +361,88 @@ func Summarize(rs []Result) []Summary {
 		out = append(out, *s)
 	}
 	return out
+}
+
+// CheckDialects 探「这个 (provider, model) 听得懂哪些方言」——包括
+// anthropic 私有的 count_tokens（Claude Code 的水位条靠它，本地只有
+// 粗估）。主探活通过后才该调。结果记进 dialect 注册表。
+//
+// 注意：本函数在 `newgate probe` 的进程里跑，学到的随进程消失；daemon
+// 会在自己遇到第一个 count_tokens 时补学（gate 层面的 lazy probe），
+// 最终状态一致——见 dialect 包注释。
+func CheckDialects(provName string, p domain.Provider, model string, timeout time.Duration) {
+	declared, other := dialect.CapOpenAI, dialect.CapAnthropic
+	if p.Protocol == "anthropic" {
+		declared, other = dialect.CapAnthropic, dialect.CapOpenAI
+	}
+	dialect.Mark(provName, model, declared) // 声明的协议是配置事实，不用探
+
+	learnDialect(provName, p, model, other, timeout)
+
+	// count_tokens 是 anthropic 方言的端点：/messages 都不通就不用试了
+	if anthOK, _ := dialect.Supports(provName, model, dialect.CapAnthropic); !anthOK {
+		dialect.MarkUnsupported(provName, model, dialect.CapCountTokens)
+		return
+	}
+	learnDialect(provName, p, model, dialect.CapCountTokens, timeout)
+}
+
+// learnDialect 打一发最小请求，按结果记「支持/明确不支持」。
+// 连接失败和 401/429 这类**不学**——那是「现在不行」，不是「没有」，
+// 猜错了会让 gate 永久放弃一个本来存在的端点。
+func learnDialect(provName string, p domain.Provider, model string, c dialect.Cap, timeout time.Duration) {
+	st, err := oneDialect(p, model, c, timeout)
+	switch {
+	case err == nil && st < 400:
+		dialect.Mark(provName, model, c)
+	case err == nil && (st == 404 || st == 405):
+		dialect.MarkUnsupported(provName, model, c)
+	}
+}
+
+// oneDialect 打一发最小请求探某个方言的端点。auth 跟 provider 声明的
+// protocol 走——与 gate 的 setAuth 一致，探的就是 gate 将来会发的那条。
+func oneDialect(p domain.Provider, model string, c dialect.Cap, timeout time.Duration) (int, error) {
+	suffix := "/chat/completions"
+	switch c {
+	case dialect.CapAnthropic:
+		suffix = "/messages"
+	case dialect.CapCountTokens:
+		suffix = "/messages/count_tokens"
+	}
+	payload := map[string]interface{}{
+		"model":    model,
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}
+	if c != dialect.CapCountTokens {
+		payload["max_tokens"] = 4
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequest("POST", strings.TrimRight(p.BaseURL, "/")+suffix,
+		bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if p.Protocol == "anthropic" {
+		req.Header.Set("x-api-key", p.Key())
+		req.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+p.Key())
+	}
+
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = ioutil.ReadAll(resp.Body) // 排空以复用连接；错误体不需要
+	// 4xx 不算错误：404/405 正是「没有这个端点」的答案，调用方按状态码学
+	return resp.StatusCode, nil
 }
 
 // CheckQuirks 主动探一发「带 tools 的请求」，把上游的毛病提前学出来。
