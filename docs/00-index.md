@@ -48,6 +48,7 @@
 | [16-core-thesis.md](16-core-thesis.md) | ✅ 当前 | **权威文档**，与其他文档冲突时以此为准 |
 | [17-testing.md](17-testing.md) | ✅ 当前 | **M0**：全本地 mock、零 token。FakeUpstream 同时是发现探针 |
 | [18-role-preference.md](18-role-preference.md) | 📐 设计中 | **Profile 链**：priority + 绑定 list + pinned/excluded + mood。**待 review** |
+| [19-hook-mechanisms.md](19-hook-mechanisms.md) | ✅ 当前 | **接管机制原理**：PATH shim / env 注入 / 改配置 / 代理侧 hook，各挂在哪一环、为什么 |
 
 ## 术语约定
 
