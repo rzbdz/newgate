@@ -34,3 +34,11 @@ func One[T any](name string) Capability[T] { return newCapability[T](name, singl
 
 // Many 声明可由多个组件共同贡献的扩展点，读取顺序服从稳定的组件顺序。
 func Many[T any](name string) Capability[T] { return newCapability[T](name, many) }
+
+func newCapability[T any](name string, count cardinality) Capability[T] {
+	return Capability[T]{spec: capabilitySpec{
+		name:        name,
+		valueType:   reflect.TypeOf((*T)(nil)).Elem(),
+		cardinality: count,
+	}}
+}
