@@ -106,3 +106,7 @@ func ReleaseAll(releases []Release) error {
 type Loader interface {
 	Load() ([]Component, error)
 }
+
+// Context 是构图后只读的端口表，只在 Start 阶段交给组件。
+// 它刻意不提供动态写入，防止运行期退化为 service locator。
+type Context struct{ values map[string][]any }
