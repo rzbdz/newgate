@@ -122,3 +122,148 @@ type Binding struct {
 	// 展开规则见 docs/04-configuration.md、实现见 resolve.BuildChain。
 	Ref string `json:"ref,omitempty"`
 }
+
+// String 返回配置和诊断统一使用的可读绑定形式。
+func (b Binding) String() string {
+	if b.Ref != "" {
+		return "@" + b.Ref
+	}
+	return b.Provider + "/" + b.Model
+}
+
+// IsRef 这一条是引用而不是具体绑定。
+func (b Binding) IsRef() bool { return b.Ref != "" }
+
+// Profile 一套档位绑定 + 它在 fallback 链里的位置。
+// 可以是**稀疏的**——只定义关心的档位，其余跳到链上下一个 profile。
+type Profile struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Priority 越小越靠前。不写按 DefaultPriority 算。
+	Priority *int `json:"priority,omitempty"`
+	// Pinned 「我当链头时，链到我为止」——不好用就报错，别偷偷换。
+	Pinned bool `json:"pinned,omitempty"`
+	// Excluded 「别人别自动掉到我这」——只能被显式选中。
+	Excluded bool                  `json:"excluded,omitempty"`
+	Roles    map[string]Candidates `json:"roles"`
+	// Fallback 本 profile 内所有未定义档位的兜底，等价于 roles["*"]。
+	Fallback *Binding `json:"fallback,omitempty"`
+
+	// Extends 让派生 profile 只写差异项，其余从 base profile 继承。
+	// 合并规则集中在 MergeFrom，避免 store 与路由各自解释继承。
+	Extends string `json:"extends,omitempty"`
+
+	// ContextWindow 主力模型的真实上下文窗口（token 数），>0 才生效。
+	// 为什么需要：代理给客户端注入的是真实模型名（glm-5.3），不在
+	// Claude Code 的内置模型目录里，客户端按「未知模型」假设 200k 窗口，
+	// 动不动提前 compact。设了就在启动时注入 CLAUDE_CODE_MAX_CONTEXT_TOKENS。
+	ContextWindow int `json:"context_window,omitempty"`
+	// AutoCompactWindow auto-compact 的目标窗口，>0 才生效，应 ≤
+	// ContextWindow（客户端取 min）。注入 CLAUDE_CODE_AUTO_COMPACT_WINDOW
+	// ——它在客户端解析优先级最高、不依赖账号状态，/context 里会显示
+	// "(from CLAUDE_CODE_AUTO_COMPACT_WINDOW)"。
+	AutoCompactWindow int `json:"auto_compact_window,omitempty"`
+}
+
+// MergeFrom 把 base 的未覆盖项补进来（Extends 的合并规则，store 加载时调用）。
+//
+// 规则：
+//   - 标量（description/priority/fallback/窗口声明）：自己没写（零值）取
+//     base 的；
+//   - roles：按档位覆盖，base 有、自己没提的档位原样继承；
+//   - 裸模型名（Provider 为空的绑定）从 base 同档位**借 provider**——
+//     extends=kimi 时写 mid=kimi-k2.7-code-highspeed 就够了；
+//   - bool（pinned/excluded）**不继承**：那是这个 profile 自己的态度，
+//     不是家族属性。想让变体也被排除，就在变体里再写一遍。
+func (p *Profile) MergeFrom(base *Profile) {
+	if p == nil || base == nil {
+		return
+	}
+	if p.Description == "" {
+		p.Description = base.Description
+	}
+	if p.Priority == nil {
+		p.Priority = base.Priority
+	}
+	if p.Fallback == nil {
+		p.Fallback = base.Fallback
+	}
+	if p.ContextWindow == 0 {
+		p.ContextWindow = base.ContextWindow
+	}
+	if p.AutoCompactWindow == 0 {
+		p.AutoCompactWindow = base.AutoCompactWindow
+	}
+	if len(base.Roles) > 0 {
+		merged := make(map[string]Candidates, len(base.Roles)+len(p.Roles))
+		for k, v := range base.Roles {
+			merged[k] = v
+		}
+		for k, v := range p.Roles {
+			merged[k] = fillBareProviders(v, merged[k])
+		}
+		p.Roles = merged
+	}
+}
+
+// fillBareProviders 给「只有模型名、没写 provider」的候选从同档位的
+// base 候选借 provider。base 也没有就保持空（校验层会报出来）。
+func fillBareProviders(own, base Candidates) Candidates {
+	if len(base) == 0 || base[0].Provider == "" {
+		return own
+	}
+	out := make(Candidates, len(own))
+	copy(out, own)
+	for i, b := range out {
+		if b.Provider == "" && b.Model != "" {
+			out[i].Provider = base[0].Provider
+		}
+	}
+	return out
+}
+
+// Prio 返回显式优先级或稳定默认值，让排序逻辑无需重复处理 nil。
+func (p *Profile) Prio() int {
+	if p.Priority == nil {
+		return DefaultPriority
+	}
+	return *p.Priority
+}
+
+// CandidatesFor 返回这个 profile 为某个键提供的候选列表（空 = 稀疏）。
+//
+// 「键」既可以是档位（heavy…），也可以是模块贡献的动态角色键（omo-sisyphus）。
+// normal→mid 是 profile 内兼容：老 profile 没写 normal 时，复用自己的 mid。
+// 模块贡献的槽位缺省则是跨 profile 的引用，由 BuildChain 展开。
+//
+// 注意缺省可能是**引用**（omo-sisyphus 缺省 @normal），继续展开是 BuildChain
+// 的事（带环检测与去重）——这里只是把「等价于谁」翻译成候选的第一项。
+func (p *Profile) CandidatesFor(role string) Candidates {
+	if c, ok := p.Roles[role]; ok && len(c) > 0 {
+		return c
+	}
+	// normal 是 2026-09-16 后加的主力档。兼容老配置时必须只借当前
+	// profile 的 mid；若返回 @mid，BuildChain 会对每个 profile 反复展开
+	// 整条跨-profile mid 链，制造大量假重复，还会破坏稀疏 profile 语义。
+	if role == "normal" {
+		if c, ok := p.Roles["mid"]; ok && len(c) > 0 {
+			return c
+		}
+	}
+	if bd, ok := DefaultBindingFor(role); ok {
+		// normal 的内置缺省已在上面按 profile 处理。当前 profile 连 mid
+		// 都没有时，应继续走它自己的通配/fallback，而不是展开全局 mid 链。
+		if role == "normal" && bd.Ref == "mid" {
+			goto profileFallback
+		}
+		return Candidates{bd}
+	}
+profileFallback:
+	if c, ok := p.Roles["*"]; ok && len(c) > 0 {
+		return c
+	}
+	if p.Fallback != nil {
+		return Candidates{*p.Fallback}
+	}
+	return nil
+}
