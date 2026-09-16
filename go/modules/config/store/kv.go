@@ -142,3 +142,65 @@ func parseCandidates(val string) (domain.Candidates, error) {
 	}
 	return out, nil
 }
+
+// SerializeProfileKV 把 profile 写回 KV 文本（转换用）。只写**非零**字段，
+// 配合 Extends 就是紧凑的变体声明；档位多候选用逗号展开。
+// name 不写——文件名就是名字。
+func SerializeProfileKV(p *domain.Profile) string {
+	var sb strings.Builder
+	put := func(k, v string) { fmt.Fprintf(&sb, "%s=%s\n", k, v) }
+	if p.Extends != "" {
+		put("extends", p.Extends)
+	}
+	if p.Description != "" {
+		put("desc", p.Description)
+	}
+	if p.Priority != nil {
+		put("prio", strconv.Itoa(*p.Priority))
+	}
+	if p.Excluded {
+		put("excluded", "true")
+	}
+	if p.Pinned {
+		put("pinned", "true")
+	}
+	if p.ContextWindow > 0 {
+		put("window", strconv.Itoa(p.ContextWindow))
+	}
+	if p.AutoCompactWindow > 0 {
+		put("compact", strconv.Itoa(p.AutoCompactWindow))
+	}
+	for _, tier := range domain.Roles {
+		if c, ok := p.Roles[tier]; ok && len(c) > 0 {
+			items := make([]string, len(c))
+			for i, b := range c {
+				items[i] = b.String()
+			}
+			put(tier, strings.Join(items, ", "))
+		}
+	}
+	// 4 个标准档位之外的 roles key（含 "*"）走 role.<名>=，保证无损往返
+	for _, k := range sortedRoleKeys(p.Roles) {
+		if tierKeys[k] {
+			continue
+		}
+		items := make([]string, len(p.Roles[k]))
+		for i, b := range p.Roles[k] {
+			items[i] = b.String()
+		}
+		put("role."+k, strings.Join(items, ", "))
+	}
+	if p.Fallback != nil {
+		put("fallback", p.Fallback.String())
+	}
+	return sb.String()
+}
+
+func sortedRoleKeys(m map[string]domain.Candidates) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
