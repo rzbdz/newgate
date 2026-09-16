@@ -134,3 +134,18 @@ func MustGet[T any](ctx Context, capability Capability[T]) T {
 	}
 	return value
 }
+
+// GetAll 读取 many 端口的全部贡献，用于插件、命令等开放扩展点。
+func GetAll[T any](ctx Context, capability Capability[T]) []T {
+	if capability.spec.cardinality != many {
+		panic("component: GetAll called with single capability " + capability.spec.name)
+	}
+	values := ctx.values[capability.spec.name]
+	out := make([]T, 0, len(values))
+	for _, value := range values {
+		if typed, ok := value.(T); ok {
+			out = append(out, typed)
+		}
+	}
+	return out
+}
