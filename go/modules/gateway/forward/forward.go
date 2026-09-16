@@ -1234,3 +1234,127 @@ func pruneReasoningEvidence(dir string, maxBytes int64) {
 		_ = os.RemoveAll(p)
 	}
 }
+
+func dirSize(dir string) int64 {
+	var n int64
+	ents, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	for _, e := range ents {
+		if !e.IsDir() {
+			n += e.Size()
+		}
+	}
+	return n
+}
+
+// chainHeader 描述链实际走了哪几步。ASCII only（HTTP header 装不了中文）。
+func chainHeader(trail []string, final resolve.Step) string {
+	all := append(append([]string{}, trail...), final.Binding.String()+"(ok)")
+	return strings.Join(all, " -> ")
+}
+
+func fmtSkips(skips []resolve.Skip) string {
+	var parts []string
+	for _, sk := range skips {
+		t := sk.Target
+		if t == "" {
+			t = sk.Profile
+		}
+		parts = append(parts, t+"="+sk.Reason)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func breakerNote(opened bool, prov string) string {
+	if opened {
+		return fmt.Sprintf("  [熔断器已打开: %s 暂时摘掉]", prov)
+	}
+	return ""
+}
+
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + fmt.Sprintf("…(截断，共 %d 字符)", len(r))
+}
+
+// isReasoningPassthroughError 认出 DeepSeek 思考模式那两句 400：
+//
+//	The `reasoning_content` in the thinking mode must be passed back to the API.
+//	The `content[].thinking` in the thinking mode must be passed back to the API.
+//
+// 这不是客户端的 schema 错误，而是我们（special/deepseek）补回去的思考内容
+// 被上游严格节点拒了——单独打点，别跟普通 400 混在一起。
+func isReasoningPassthroughError(upstreamBody []byte) bool {
+	s := string(upstreamBody)
+	return strings.Contains(s, "must be passed back") &&
+		(strings.Contains(s, "reasoning_content") || strings.Contains(s, "content[].thinking"))
+}
+
+func trim(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if len(s) > 180 {
+		return s[:180] + "…"
+	}
+	return s
+}
+
+func (s *Server) fail(w http.ResponseWriter, code int, msg string) {
+	atomic.AddUint64(&s.failures, 1)
+	s.logf("[proxy] 错误 %d: %s", code, msg)
+	// 错误体里必须带 newgate 字样和排查命令（docs/05-gateway.md）
+	writeJSON(w, code, map[string]interface{}{
+		"error": map[string]interface{}{
+			"type":    "newgate_error",
+			"message": "[newgate] " + msg,
+			"hint":    "排查：newgate status / newgate doctor / newgate stop（一键恢复直连）",
+		},
+	})
+}
+
+// 等上游的时间参数不在这里定义：它们是 state.json 的 timeouts 字段
+// （domain.Timeouts），watcher 热加载——改配置即生效，不用重编译。
+// 缺省值见 domain.Timeouts 各 accessor（流式首字节 150s / 非流式 12s /
+// 非流式总超时 15min）。
+
+// respHopHeaders 响应里必须剥掉的 hop-by-hop 头。
+var respHopHeaders = map[string]bool{
+	"Connection": true, "Keep-Alive": true, "Transfer-Encoding": true,
+	"Te": true, "Trailer": true, "Upgrade": true, "Proxy-Authenticate": true,
+}
+
+var hopHeaders = map[string]bool{
+	"Connection": true, "Keep-Alive": true, "Proxy-Authenticate": true,
+	"Proxy-Authorization": true, "Te": true, "Trailer": true,
+	"Transfer-Encoding": true, "Upgrade": true,
+	"Authorization": true, "X-Api-Key": true, // 客户端的假 key 一律丢掉
+	"Content-Length": true, "Host": true,
+}
+
+func copyHeaders(dst, src http.Header) {
+	for k, vs := range src {
+		if hopHeaders[http.CanonicalHeaderKey(k)] {
+			continue
+		}
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
+}
+
+func setAuth(h http.Header, p domain.Provider) {
+	key := p.Key()
+	switch p.Protocol {
+	case "anthropic":
+		h.Set("x-api-key", key)
+		if h.Get("anthropic-version") == "" {
+			h.Set("anthropic-version", "2023-06-01")
+		}
+	default:
+		h.Set("Authorization", "Bearer "+key)
+	}
+}
