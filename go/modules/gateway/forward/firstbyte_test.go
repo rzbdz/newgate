@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,9 +114,9 @@ func TestCompactNotTightTimeout(t *testing.T) {
 	metrics.Default.Reset()
 	t.Cleanup(func() { metrics.Default.Reset(); testChain = nil })
 
-	var upstreamGot bool
+	var upstreamGot uint32
 	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upstreamGot = true
+		atomic.StoreUint32(&upstreamGot, 1)
 		time.Sleep(3 * time.Second) // 慢，但没超过 150s 标准上限
 		_, _ = w.Write([]byte(`{"from":"hung-slow"}`))
 	}))
@@ -144,7 +145,7 @@ func TestCompactNotTightTimeout(t *testing.T) {
 	if got := metrics.Default.Snapshot()["timeout.first_byte.non_stream"]; got != 0 {
 		t.Fatalf("compact 不该吃分类器紧超时，却超时了（counter=%d）", got)
 	}
-	if !upstreamGot {
+	if atomic.LoadUint32(&upstreamGot) == 0 {
 		t.Fatal("请求没到上游")
 	}
 	// 客户端断开后 proxy goroutine 处理取消需要一点时间——轮询等它记账

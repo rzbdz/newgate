@@ -99,14 +99,16 @@ grep -q 'fallback_models' "$NEWGATE_TARGET_DIR/oh-my-openagent.json" && ok "fall
 
 echo; echo "== 4. 假 opencode 发请求（顶层 model = newgate/heavy） =="
 curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
-python3 "$ROOT/mock/opencode_mock.py" --config-dir "$NEWGATE_TARGET_DIR" 2>&1 | sed 's/^/    /'
+python3 "$ROOT/mock/opencode_mock.py" --config-dir "$NEWGATE_TARGET_DIR" \
+  --model newgate/heavy 2>&1 | sed 's/^/    /'
 GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r[0]["body"]["model"] if r else "NONE")')
 check "链头 cheap 的 heavy 应解析成 model-large" "$GOT" "model-large"
 
 echo; echo "== 5. 切 profile（不重启，立刻生效） =="
 "$BIN" --set-profile top-only 2>&1 | sed 's/^/    /'
 curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
-python3 "$ROOT/mock/opencode_mock.py" --config-dir "$NEWGATE_TARGET_DIR" >/dev/null 2>&1
+python3 "$ROOT/mock/opencode_mock.py" --config-dir "$NEWGATE_TARGET_DIR" \
+  --model newgate/heavy >/dev/null 2>&1
 GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r[0]["body"]["model"] if r else "NONE")')
 check "切到 top-only 后 heavy 应是 model-flagship（稀疏层生效）" "$GOT" "model-flagship"
 KEY=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r[0]["headers"].get("authorization","")) if r else print("")')
@@ -114,7 +116,8 @@ check "key 应换成 upstream-b 那把" "$KEY" "Bearer sk-fake-upstream-b"
 
 "$BIN" --set-profile expensive >/dev/null 2>&1
 curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
-python3 "$ROOT/mock/opencode_mock.py" --config-dir "$NEWGATE_TARGET_DIR" >/dev/null 2>&1
+python3 "$ROOT/mock/opencode_mock.py" --config-dir "$NEWGATE_TARGET_DIR" \
+  --model newgate/heavy >/dev/null 2>&1
 GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(r[0]["body"]["model"] if r else "NONE")')
 check "切到 expensive 后 heavy 应是 model-flagship" "$GOT" "model-flagship"
 
