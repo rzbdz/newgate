@@ -32,6 +32,7 @@ import (
 	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -235,6 +236,54 @@ func ToolKey(id string) string {
 		return ""
 	}
 	return "tool:" + id
+}
+
+const originKeyPrefix = "origin:"
+
+// Origin 是产生某个 tool call 的实际上游。思考模式下，assistant 的 reasoning
+// 与整组 tool calls 属于同一个未闭合状态；在 tool_result 回来之前不能把它们
+// 搬给另一家上游。只存路由身份，不存请求或响应正文。
+type Origin struct {
+	Profile  string `json:"profile,omitempty"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+func originKey(id string) string {
+	if id == "" {
+		return ""
+	}
+	return originKeyPrefix + id
+}
+
+// PutOrigin 把响应里的 tool call 绑定到实际产生它的上游。复用 Cache/DiskStore
+// 的 TTL、容量与落盘机制，因此 daemon 重启后未闭合 tool loop 仍能回到原上游。
+func (c *Cache) PutOrigin(toolIDs []string, origin Origin) {
+	if c == nil || origin.Provider == "" || origin.Model == "" {
+		return
+	}
+	blob, err := json.Marshal(origin)
+	if err != nil {
+		return
+	}
+	var keys []string
+	for _, id := range toolIDs {
+		if k := originKey(id); k != "" {
+			keys = append(keys, k)
+		}
+	}
+	c.Put(keys, blob)
+}
+
+// GetOrigin 取回一个 tool call 的产生上游。
+func (c *Cache) GetOrigin(toolID string) (Origin, bool) {
+	var origin Origin
+	blob, ok := c.Get(originKey(toolID))
+	if !ok || json.Unmarshal(blob, &origin) != nil ||
+		origin.Provider == "" || origin.Model == "" {
+		return Origin{}, false
+	}
+	return origin, true
 }
 
 // TextKey 按 assistant 正文的哈希做 key，用于**没有** tool_call 的那些轮。

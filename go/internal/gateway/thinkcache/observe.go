@@ -212,7 +212,17 @@ func (o *Observer) Keys() []string {
 // Commit 入库。返回缓存了多少字节、挂了几个 key；没看到推理内容就是 (0,0)。
 // 调用方拿这两个数字写日志——**不要打内容**。
 func (o *Observer) Commit(c *Cache) (nbytes, nkeys int) {
-	if o == nil || c == nil || o.reason.Len() == 0 {
+	return o.CommitWithOrigin(c, Origin{})
+}
+
+// CommitWithOrigin 除推理原文外，还记录 tool call 的实际产生上游。即使这一轮
+// 没有 reasoning，也要记 origin：tool loop 的方言状态仍不能安全跨 provider。
+func (o *Observer) CommitWithOrigin(c *Cache, origin Origin) (nbytes, nkeys int) {
+	if o == nil || c == nil {
+		return 0, 0
+	}
+	c.PutOrigin(o.toolIDs, origin)
+	if o.reason.Len() == 0 {
 		return 0, 0
 	}
 	keys := o.Keys()

@@ -150,6 +150,36 @@ func TestNoKeysNoStore(t *testing.T) {
 	}
 }
 
+func TestContinuationOriginOnlyWhileToolLoopIsOpen(t *testing.T) {
+	c := New(1<<20, time.Hour)
+	origin := Origin{Profile: "ark", Provider: "ark", Model: "ark-code-latest"}
+	c.PutOrigin([]string{"call_a", "call_b"}, origin)
+
+	anthropic := []byte(`{"messages":[
+			{"role":"assistant","content":[{"type":"tool_use","id":"call_a"}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_a"}]}
+		]}`)
+	if got, ok := c.ContinuationOrigin(anthropic); !ok || got != origin {
+		t.Fatalf("Anthropic tool loop 来源错误: ok=%v got=%+v", ok, got)
+	}
+
+	openAI := []byte(`{"messages":[
+			{"role":"assistant","tool_calls":[{"id":"call_b"}]},
+			{"role":"tool","tool_call_id":"call_b","content":"ok"}
+		]}`)
+	if got, ok := c.ContinuationOrigin(openAI); !ok || got != origin {
+		t.Fatalf("OpenAI tool loop 来源错误: ok=%v got=%+v", ok, got)
+	}
+
+	newTurn := []byte(`{"messages":[
+			{"role":"tool","tool_call_id":"call_b","content":"ok"},
+			{"role":"user","content":"new question"}
+		]}`)
+	if _, ok := c.ContinuationOrigin(newTurn); ok {
+		t.Fatal("普通 user 新回合不该继续锁定旧 provider")
+	}
+}
+
 // 非流式响应也要能观测到。
 func TestObserveBody(t *testing.T) {
 	o := NewObserver()

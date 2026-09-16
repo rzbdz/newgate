@@ -79,7 +79,50 @@ func (deepseek) Name() string { return "deepseek" }
 func (deepseek) Why() string {
 	return "DeepSeek 思考模式要求逐字回传推理内容，客户端却会把它剥掉 → 400\n" +
 		"开着就补回去（客户端带回的原文 → thinkcache → 非空占位）；" +
-		"只有 Claude Code 那条路干脆显式关掉思考（它剥块，想了也白想）"
+		"只有 Claude Code 那条路干脆显式关掉思考（它剥块，想了也白想）；" +
+		"外来未闭合 tool loop 先从可见工具结果有损重建，再由 DeepSeek 接手"
+}
+
+// NeedsToolLoopRebase 标出 DeepSeek 接手别家未闭合 tool loop 时需要有损重建。
+//
+// 这不是通用限制。2026-09-16 对同一份真实 thinking + tool_use 做 A/B：
+//   - Ark → Ark:      3/3 200
+//   - Ark → DeepSeek: 3/3 400 reasoning_content must be passed back
+//   - DeepSeek → Ark: 3/3 200
+//   - DeepSeek → DS:  3/3 200
+//
+// API 是无状态的；不兼容的是请求里携带的 reasoning/tool 编码。只拦迁入
+// DeepSeek，别把这个上游怪癖扩大成所有 provider 都失去 fallback。
+func (d deepseek) NeedsToolLoopRebase(originProvider, originModel string,
+	candidate *Request) (bool, string) {
+	if !d.Match(candidate) ||
+		(candidate.Provider == originProvider && candidate.Model == originModel) {
+		return false, ""
+	}
+	return true, "接手其他上游未闭合的 reasoning/tool 状态前需要有损重建"
+}
+
+const toolLoopRebasePrompt = "Continue from the tool results above. " +
+	"Re-evaluate them as a new step without relying on prior hidden reasoning."
+
+// RebaseToolLoop 把 tool_result 变成同时带普通用户指令的新回合。旧 reasoning、
+// tool_use、tool_result 全部保留作可见上下文，只追加这一段；实测 Ark →
+// DeepSeek 原请求稳定 400，追加后 5/5 200。
+func (deepseek) RebaseToolLoop(body []byte, _ *Request) ([]byte, string, error) {
+	q, _ := json.Marshal(toolLoopRebasePrompt)
+	block := []byte(`{"type":"text","text":` + string(q) + `}`)
+	out, changed, err := rewrite.AppendLastArrayItemArray(body, "messages", "content",
+		block, func(item []byte) bool {
+			role, _ := rewrite.TopLevelString(item, "role")
+			return role == "user"
+		})
+	if err != nil {
+		return nil, "", err
+	}
+	if !changed {
+		return body, "", nil
+	}
+	return out, "有损重建外来 tool loop：保留工具结果并追加普通用户继续指令", nil
 }
 
 // Match 只认 DeepSeek：模型名、provider 名、base URL 任一处出现 deepseek。

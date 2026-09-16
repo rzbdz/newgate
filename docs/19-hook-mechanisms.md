@@ -230,6 +230,16 @@ OpenAI 方言的客户端**没有 thinking 这个字段可写**，不发是不�
 DeepSeek 要求逐字回传思维链时，`st-deepseek` 就从这里取回原文——
 **客户端剥掉的思维链，在代理这一层被记住并补回**。
 
+同一个缓存还按 tool call id 记下实际产生它的 `(provider, model)`。当下一次
+请求以 `tool_result` 结尾时，这轮工具调用尚未闭合；这个来源信息交给 special
+层判断目标上游是否能接手，而不是全局关闭 fallback。当前只有 `deepseek`
+插件需要处理：fallback 链的顺序和候选一个不动；当 DeepSeek 准备接手别家
+产生的未闭合 tool loop 时，插件在最后一条 tool_result 后追加普通用户继续
+指令，显式做一次有损 rebase。普通 user 新回合无需改写。
+2026-09-16 实测：Ark → Ark 与 DeepSeek → Ark 均为 3/3 200，DeepSeek →
+DeepSeek 为 3/3 200，Ark → DeepSeek 原样稳定 3/3 400；追加继续指令后
+5/5 200。这是请求内状态编码不兼容，不依赖上游是否保留服务端会话。
+
 ## 5. 全景图
 
 ```
