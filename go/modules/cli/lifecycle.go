@@ -277,3 +277,126 @@ func cmdTakeover(agents agentapi.AgentCatalog, agent string) int {
 	}
 	return 0
 }
+
+func cmdRelease(agent string) int {
+	if agent == "" {
+		return die(64, "要释放谁？例：newgate off claude")
+	}
+	r := takeover.Off(agent)
+	if r.Err != nil {
+		return die(65, r.Err.Error())
+	}
+	if len(r.Lines) == 0 {
+		fmt.Println(style.Item(style.Skip, style.Pad(agent, 10)+"本来就没被接管"))
+	} else {
+		printResults([]takeover.Result{r})
+	}
+	fmt.Println(style.Hint(agent + " 已恢复直连；newgate start 不再接管它（newgate on " + agent + " 恢复）"))
+	if r.Mechanism == takeover.MechShim {
+		fmt.Println(style.Hint("当前 shell 可能缓存了路径：hash -r（zsh: rehash）"))
+	}
+	return 0
+}
+
+func cmdStop() int {
+	// 顺序很重要：先把 PATH shim 摘掉。否则 `claude` 这类命令仍会命中
+	// ~/.config/newgate/bin/claude → newgate，而 wrapper 会**懒启动代理**，
+	// stop 等于没停——这是「stop 了还在走 newgate」的直接原因。
+	//
+	// OffAll 不改接管意愿：下次 start 会把这些原样插回去。
+	printResults(takeover.OffAll())
+
+	pid, err := daemon.Stop()
+	if err != nil {
+		return die(70, err.Error())
+	}
+	if pid > 0 {
+		fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已停止   pid %d", pid)))
+	} else {
+		fmt.Println(style.Item(style.Skip, "代理本来没在跑"))
+	}
+
+	st := store.LoadState()
+	st.TakenOver = false
+	_ = store.SaveState(st)
+
+	fmt.Println()
+	fmt.Println(style.Hint("所有工具已恢复直连；PATH 里那行仍指向空 shim 目录，无害"))
+	fmt.Println(style.Hint("彻底清掉：newgate shim uninstall"))
+	return 0
+}
+
+// cmdRestart 重启代理并保留接管现场。
+//
+// 优先走优雅交接（nginx upgrade 语义）：旧 daemon 把监听 socket 移交给
+// 新二进制，在途请求流完为止——正穿行在代理里的会话（比如正在开发
+// newgate 的 Claude Code）完全不受影响，接管状态也不动。
+// 运行中的是旧版 daemon（没有交接能力）时退回 stop+start：有短暂断流
+// 窗口，会提示一句。
+func cmdRestart(agents agentapi.AgentCatalog, force bool) int {
+	if tryHandoff() {
+		return 0
+	}
+	cmdStop()
+	fmt.Println()
+	return cmdStart(agents, force)
+}
+
+// tryHandoff 让运行中的 daemon 把监听 socket 交接给磁盘上的新二进制。
+// 成功（已完全就位）返回 true；不可行时打印原因并返回 false，由调用方
+// 退回 stop+start。
+func tryHandoff() bool {
+	i := daemon.Running()
+	if i == nil {
+		return false // 没在跑，restart 退化为 start
+	}
+	st := store.LoadState()
+	if st.ControlToken == "" {
+		fmt.Println(style.Item(style.Skip, "daemon 没有控制令牌（升级前启动的），退回 stop+start"))
+		return false
+	}
+	port := i.Port
+	if port <= 0 {
+		port = st.Port
+	}
+	// 先探能力再动手：旧版 daemon 没注册 /__newgate/upgrade，盲发会被
+	// catch-all 转发给上游。status 的 handoff 字段是无副作用的探针。
+	supports, err := handoffSupported(port)
+	if err != nil || !supports {
+		if err != nil {
+			fmt.Println(style.Item(style.Skip, fmt.Sprintf("探测 daemon 交接能力失败（%v），退回 stop+start", err)))
+		} else {
+			fmt.Println(style.Item(style.Skip, "运行中的是旧版 daemon（不支持优雅交接），退回 stop+start"))
+		}
+		return false
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d/__newgate/upgrade", port), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+st.ControlToken)
+	// 旧 daemon 要等新进程 ready 才回 200，给足时间
+	resp, err := httpx.LocalClient(20 * time.Second).Do(req)
+	if err != nil {
+		fmt.Println(style.Item(style.Skip, fmt.Sprintf("交接请求发不出去（%v），退回 stop+start", err)))
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		b, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 512))
+		fmt.Println(style.Item(style.Skip, fmt.Sprintf("交接被拒（HTTP %d: %s），退回 stop+start", resp.StatusCode, b)))
+		return false
+	}
+	// 200 = 新进程已接上 socket、pid/lock 已改写。这里只确认它完全就位。
+	for k := 0; k < 100; k++ { // 最多 5s
+		if j := daemon.Running(); j != nil && j.PID != i.PID && pingProxy(j.Port) {
+			fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已优雅重启   pid %d → %d · 127.0.0.1:%d", i.PID, j.PID, j.Port)))
+			fmt.Println(style.Hint("socket 无缝交接：在途请求由旧进程排空，会话不中断；接管状态未动"))
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	fmt.Printf("%s 交接已发出，但新进程 5 秒内没就位 · 日志 %s\n", style.Mark(style.Warn), paths.LogFile())
+	return false
+}
