@@ -212,3 +212,100 @@ func run(service *service, args []string) int {
 		return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))
 	}
 }
+
+func VersionLine() string {
+	return fmt.Sprintf("newgate %s\n  构建于 %s\n  提交于 %s",
+		Version, buildTimeDisplay(), pretty(CommitTime))
+}
+
+// pretty ldflags 传不了空格，用下划线占位，展示时换回。
+func pretty(s string) string { return strings.ReplaceAll(s, "_", " ") }
+
+// buildTimeDisplay 构建时间的展示串：ldflags 里的 UTC 时间 + 换算好的本地时间。
+//
+// Makefile 用 `date -u` 打 UTC 时间戳（结尾带 Z），光看它容易算错本地几点；
+// 这里顺手算一份本地时区并列出来，一眼对上「这二进制是我几点几分编的」。
+// 解析失败（dev 构建没注入时间 = "unknown"）就只回原文，不硬凑。
+func buildTimeDisplay() string {
+	utc := pretty(BuildTime)
+	if t, err := time.Parse("2006-01-02_15:04:05Z07:00", BuildTime); err == nil {
+		return fmt.Sprintf("%s（本地 %s）", utc, t.Local().Format("2006-01-02 15:04:05 MST"))
+	}
+	return utc
+}
+
+// ---------- 小工具 ----------
+
+func die(code int, msg string) int {
+	fmt.Fprintln(os.Stderr, style.WrapLine("newgate: "+msg, "  "))
+	return code
+}
+
+func has(ss []string, s string) bool {
+	for _, x := range ss {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func arg(ss []string, i int) string {
+	if i < len(ss) && !strings.HasPrefix(ss[i], "-") {
+		return ss[i]
+	}
+	return ""
+}
+
+func argOr(ss []string, i int, def string) string {
+	if v := arg(ss, i); v != "" {
+		return v
+	}
+	return def
+}
+
+func intArg(ss []string, i, def int) int {
+	if v := arg(ss, i); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func optValue(args []string, i int, name string) string {
+	if strings.Contains(args[i], "=") {
+		return strings.SplitN(args[i], "=", 2)[1]
+	}
+	if i+1 < len(args) {
+		return args[i+1]
+	}
+	return ""
+}
+
+func findFlag(args []string, names ...string) string {
+	for i, a := range args {
+		for _, n := range names {
+			if a == n && i+1 < len(args) {
+				return args[i+1]
+			}
+			if strings.HasPrefix(a, n+"=") {
+				return strings.SplitN(a, "=", 2)[1]
+			}
+		}
+	}
+	return ""
+}
+
+func intFlag(args []string, name string, def int) int {
+	if v := findFlag(args, name); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func truthy(s string) bool { return s == "on" || s == "1" || s == "true" || s == "yes" }
