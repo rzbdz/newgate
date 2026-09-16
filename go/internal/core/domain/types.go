@@ -3,7 +3,10 @@
 // 谁都可以依赖它，它不依赖任何人（docs/02-architecture.md §2）。
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Roles 语义档位。工具侧只写这些名字，永不写真实模型名。
 //
@@ -38,10 +41,63 @@ type Provider struct {
 	APIKey    string `json:"api_key,omitempty"`
 	APIKeyEnv string `json:"api_key_env,omitempty"` // 优先于 APIKey
 	Protocol  string `json:"protocol,omitempty"`    // openai | anthropic，默认 openai
+
+	// AnthropicURL 这个上游的 **Anthropic 方言** base。不填 = 两种方言同一个
+	// base（聚合网关都这样）。
+	//
+	// 为什么需要它：有些上游把两种方言放在不同的 base 上，而且没有互相转发。
+	// 火山方舟实测（2026-09-15）：
+	//
+	//	OpenAI 方言    https://ark.cn-beijing.volces.com/api/coding/v3  /chat/completions
+	//	Anthropic 方言 https://ark.cn-beijing.volces.com/api/coding     /v1/messages
+	//
+	// 前者打后者 404（istio-envoy 路由级 404，空 body），反过来也一样。转发层
+	// 是纯字节直通、不做协议转换（docs/16），客户端发什么方言就发什么方言，
+	// 所以「发给哪个 base」只能按**客户端这次说的方言**选——就是这里的用处。
+	//
+	// 写法跟 ANTHROPIC_BASE_URL 一致（**不含** /v1）：就是你会贴给任何
+	// Anthropic 协议客户端工具的那个值，/v1/messages 由 newgate 自己拼。
+	// 已经带 /v1 的写法也认（不重复拼）。
+	AnthropicURL string `json:"anthropic_url,omitempty"`
+
 	// TODO(M2): Models 声明这个 provider 提供哪些模型。
 	// 有了它才能解析「客户端直接请求具体模型名」的情况——那时链只在
 	// 提供该确切模型的 provider 之间流转，绝不换成别的模型（docs/18 §5）。
 	Models []string `json:"models,omitempty"`
+}
+
+// IsAnthropicPath 这个转发后缀是不是 Anthropic 方言（/messages、
+// /messages/count_tokens）。
+//
+// 判据是**客户端发来的路径**，不是 provider 的 protocol：protocol 说的是
+// 「怎么发到上游」（认证方式、走哪个 base），方言说的是「客户端说的是什么」。
+// 聚合网关实测两者可以不一致——provider 标 openai，却照样收 /v1/messages。
+func IsAnthropicPath(suffix string) bool {
+	return suffix == "/messages" || strings.HasPrefix(suffix, "/messages/")
+}
+
+// Base 这条后缀该发给哪个上游 base（不带尾部斜杠），不含路径。
+func (p Provider) Base(suffix string) string {
+	if p.AnthropicURL != "" && IsAnthropicPath(suffix) {
+		return strings.TrimRight(p.AnthropicURL, "/")
+	}
+	return strings.TrimRight(p.BaseURL, "/")
+}
+
+// URL 这条后缀的完整上游地址。
+//
+// 两种方言同 base 时就是 base_url + suffix（聚合网关的老样子）。分开时走
+// anthropic_url，并按 ANTHROPIC_BASE_URL 的惯例补上 /v1——方舟那种
+// 「…/api/coding」的写法照抄文档就能用，已经带 /v1 的也不重复补。
+func (p Provider) URL(suffix string) string {
+	if p.AnthropicURL != "" && IsAnthropicPath(suffix) {
+		b := p.Base(suffix)
+		if !strings.HasSuffix(b, "/v1") {
+			b += "/v1"
+		}
+		return b + suffix
+	}
+	return strings.TrimRight(p.BaseURL, "/") + suffix
 }
 
 type Providers struct {

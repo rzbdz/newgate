@@ -73,6 +73,41 @@ count_tokens 并报告；转发时撞 404/200 当场学（gate 层面的 lazy pr
 条/自动压缩阈值），听不懂退回本地粗估。真到单语上游接入、翻译不得不写
 的那天，这张注册表也是「哪些请求能直通、哪些必须翻」的现成依据。
 
+#### 两种方言不在同一个 base 上
+
+「两个方言都收」是聚合器的特性，不是行业的。火山方舟实测（2026-09-15）：
+
+```
+OpenAI 方言    https://ark.cn-beijing.volces.com/api/coding/v3   /chat/completions
+Anthropic 方言 https://ark.cn-beijing.volces.com/api/coding      /v1/messages
+```
+
+打错了是 **istio-envoy 的空 body 404**——不是上游的 JSON 报错，看着像「网络
+不通」。所以 provider 多了一个可选字段：
+
+```jsonc
+"ark": {
+  "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+  "anthropic_url": "https://ark.cn-beijing.volces.com/api/coding",  // 写法同 ANTHROPIC_BASE_URL
+  "protocol": "openai",
+  "api_key": "…"
+}
+```
+
+选哪个 base 由**客户端这次说的方言**决定（请求后缀是不是 `/messages*`，
+见 `domain.Provider.URL`），不是由 `protocol` 决定：protocol 说的是「怎么
+发到上游」（鉴权方式），方言说的是「客户端说的是什么」，聚合器上这两者
+可以不一致（实测 provider 标 openai 却照样收 `/v1/messages`）。填空
+`anthropic_url` = 老行为（两方言同 base）。
+
+这条也解释了「probe 全绿、真实流量 404」这类错觉：probe 的主探活只打
+provider **声明协议**那条路，声明 openai 就只打 `/chat/completions`；
+claude 的 anthropic 流量走的是另一条。配了 `anthropic_url` 之后 probe 的
+方言探测也按各自的 base 打，两个方言的真实可用性才都体现在报告里。
+
+> 这是 docs/06 §3 里「一个 provider 多个 endpoint」的设计在 M1 的落地形态：
+> 先只加「另一种方言的 base」这一个字段，等真有第三个端点再谈数组化。
+
 ## 4. 路由策略
 
 ```jsonc

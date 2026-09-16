@@ -432,7 +432,7 @@ func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 		out = nb
 	}
 
-	target := strings.TrimRight(head.Provider.BaseURL, "/") + "/messages/count_tokens"
+	target := head.Provider.URL("/messages/count_tokens")
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(out))
 	if err != nil {
 		return false
@@ -705,7 +705,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				Tier:     tier,
 				Model:    a.Binding.Model,
 				Provider: a.Binding.Provider,
-				BaseURL:  a.Provider.BaseURL,
+				// 按这次请求实际会去的 base 报——两种方言分家的上游
+				// （provider.anthropic_url）要让插件看到真实那一个。
+				BaseURL:  a.Provider.Base(suffix),
 				Protocol: a.Provider.Protocol,
 				Path:     suffix,
 				Stream:   stream,
@@ -727,7 +729,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		target := strings.TrimRight(a.Provider.BaseURL, "/") + suffix
+		target := a.Provider.URL(suffix)
 		if r.URL.RawQuery != "" {
 			target += "?" + r.URL.RawQuery
 		}
