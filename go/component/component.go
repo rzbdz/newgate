@@ -163,3 +163,41 @@ type Manager struct {
 func New(loaders ...Loader) (*Manager, error) {
 	return NewContext(context.Background(), loaders...)
 }
+
+// NewContext 收集组件、验证端口、拓扑排序并依次启动。
+// 任一 Start 失败都会立即逆序停止已经进入生命周期的节点。
+func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
+	var components []Component
+	for _, loader := range loaders {
+		loaded, err := loader.Load()
+		if err != nil {
+			return nil, err
+		}
+		components = append(components, loaded...)
+	}
+	ordered, values, err := resolve(components)
+	if err != nil {
+		return nil, err
+	}
+	manager := &Manager{
+		components: ordered,
+		context:    Context{values: values},
+	}
+	for i, component := range manager.components {
+		if component.Start != nil {
+			if err := component.Start(ctx, manager.context); err != nil {
+				// Start 可能在报错前已经注册扩展或占用资源，因此失败节点也进入
+				// 回滚范围；组件的 Stop 必须能处理部分初始化。
+				manager.started = i + 1
+				rollbackErr := manager.Stop(ctx)
+				if rollbackErr != nil {
+					return nil, fmt.Errorf("start component %s: %w; rollback: %v",
+						component.Name, err, rollbackErr)
+				}
+				return nil, fmt.Errorf("start component %s: %w", component.Name, err)
+			}
+		}
+		manager.started = i + 1
+	}
+	return manager, nil
+}
