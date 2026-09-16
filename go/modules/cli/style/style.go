@@ -413,3 +413,117 @@ type Table struct {
 	aligns  []align
 	indent  string
 }
+
+func NewTable(headers ...string) *Table {
+	t := &Table{headers: headers, indent: "  "}
+	t.aligns = make([]align, len(headers))
+	return t
+}
+
+// AlignRight 第 i 列右对齐（数字列用）。
+func (t *Table) AlignRight(i int) *Table {
+	if i >= 0 && i < len(t.aligns) {
+		t.aligns[i] = Right
+	}
+	return t
+}
+
+// Indent 整表左缩进（默认两格）。
+func (t *Table) Indent(s string) *Table { t.indent = s; return t }
+
+func (t *Table) Row(cells ...string) *Table {
+	t.rows = append(t.rows, cells)
+	return t
+}
+
+func (t *Table) Len() int { return len(t.rows) }
+
+// String 渲染。列宽 = 该列最宽的一格（表头也参与），列间两空格，
+// 行尾不留空格——重定向到文件时不会有恼人的 trailing space。
+func (t *Table) String() string {
+	n := len(t.headers)
+	for _, r := range t.rows {
+		if len(r) > n {
+			n = len(r)
+		}
+	}
+	widths := make([]int, n)
+	measure := func(cells []string) {
+		for i, c := range cells {
+			if i < n && VisibleWidth(c) > widths[i] {
+				widths[i] = VisibleWidth(c)
+			}
+		}
+	}
+	measure(t.headers)
+	for _, r := range t.rows {
+		measure(r)
+	}
+	// 表格总宽不得超过 75 列。优先收缩最宽的列，每列至少保留 4 列；
+	// 超出的单元格在本列内换行，不截断内容。
+	available := MaxColumns - VisibleWidth(t.indent) - 2*(n-1)
+	if available < n {
+		available = n
+	}
+	for sum(widths) > available {
+		widest, room := -1, 0
+		for i, w := range widths {
+			const minW = 4
+			if w-minW > room {
+				widest, room = i, w-minW
+			}
+		}
+		if widest < 0 {
+			break
+		}
+		widths[widest]--
+	}
+
+	var b strings.Builder
+	line := func(cells []string, dim bool) {
+		wrapped := make([][]string, n)
+		height := 1
+		for i, c := range cells {
+			if i >= n {
+				break
+			}
+			if dim {
+				c = Dim(c)
+			}
+			wrapped[i] = Wrap(c, widths[i])
+			if len(wrapped[i]) > height {
+				height = len(wrapped[i])
+			}
+		}
+		for row := 0; row < height; row++ {
+			b.WriteString(t.indent)
+			var parts []string
+			for i := 0; i < n; i++ {
+				c := ""
+				if row < len(wrapped[i]) {
+					c = wrapped[i][row]
+				}
+				if t.aligns[i] == Right {
+					parts = append(parts, PadLeft(c, widths[i]))
+				} else {
+					parts = append(parts, Pad(c, widths[i]))
+				}
+			}
+			b.WriteString(strings.TrimRight(strings.Join(parts, "  "), " "))
+			b.WriteString("\n")
+		}
+	}
+	line(t.headers, true)
+	for _, r := range t.rows {
+		line(r, false)
+	}
+	return b.String()
+}
+
+func sum(ns []int) int {
+	total := 0
+	for _, n := range ns {
+		total += n
+	}
+	return total
+}
