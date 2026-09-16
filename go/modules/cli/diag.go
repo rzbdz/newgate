@@ -226,3 +226,122 @@ func cmdProbe(only string, asJSON bool) int {
 	}
 	return 0
 }
+
+func publishProbeHealth(results []probe.Result) (int, error) {
+	info, _ := proxyState()
+	if info == nil || info.Port <= 0 {
+		return 0, fmt.Errorf("daemon 未运行")
+	}
+	st := store.LoadState()
+	type observation struct {
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+		Status    int    `json:"status"`
+		LatencyMs int64  `json:"latency_ms"`
+		Context   int    `json:"context_bytes"`
+		Error     string `json:"error,omitempty"`
+	}
+	byTarget := map[string]observation{}
+	for _, r := range results {
+		if r.Provider == "" || r.Model == "" {
+			continue
+		}
+		key := r.Provider + "/" + r.Model
+		byTarget[key] = observation{
+			Provider: r.Provider, Model: r.Model, Status: r.Status,
+			LatencyMs: r.Latency.Milliseconds(), Context: 1, Error: r.Err,
+		}
+	}
+	var keys []string
+	for key := range byTarget {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var observations []observation
+	for _, key := range keys {
+		observations = append(observations, byTarget[key])
+	}
+	var response struct {
+		Opened int `json:"opened"`
+	}
+	err := localPost(info.Port, "/__newgate/health", st.ControlToken,
+		map[string]interface{}{"observations": observations}, &response)
+	return response.Opened, err
+}
+
+// probeMark 探活结果的标记。跟 probe.Light() 的灯同义，但用本 CLI 统一的
+// 符号集——表格里塞 emoji 会撑坏对齐，也不 geek。
+func probeMark(ok bool) string {
+	if ok {
+		return style.OK
+	}
+	return style.Bad
+}
+
+func probeGrade(r probe.Result, slowAfter time.Duration) string {
+	switch {
+	case r.Status != http.StatusOK:
+		return style.Red("不可用")
+	case r.Latency > slowAfter:
+		return style.Red("卡顿")
+	case r.Latency >= 3*time.Second:
+		return style.Yellow("可用")
+	default:
+		return style.Green("流畅")
+	}
+}
+
+// cmdMetrics 展示全局 binding 评分与网关计数器。可用 binding 逐个列出，
+// 卡顿/不可用只汇总数量；具体失败原因由 probe 输出，避免 metrics 退化成日志。
+//
+// 版式：按**分组**排（请求 / 链 / 超时 / 客户端 / 插件 / 兜底），组名只在
+// 该组第一行出现。原始计数器名一列不少——用户会拿它去 grep 日志。
+func cmdMetrics() int {
+	info, ps := proxyState()
+	if info == nil {
+		return die(69, "代理没在运行（newgate start）——计数器在 daemon 内存里")
+	}
+	counter, uptime, ok := proxyMetrics(info.Port)
+	if !ok {
+		return die(69, fmt.Sprintf("连不上代理 127.0.0.1:%d（newgate doctor）", info.Port))
+	}
+	fmt.Println(style.Title("newgate metrics",
+		fmt.Sprintf("pid %d · %s", info.PID, prettyDur(uptime))))
+	if ps != nil {
+		fmt.Println(style.Hint(fmt.Sprintf("%dreq/%derr · 计数随 daemon 重启归零", ps.Requests, ps.Failures)))
+	} else {
+		fmt.Println(style.Hint("计数随 daemon 重启归零"))
+	}
+	printModelHealth(ps)
+
+	if len(counter) == 0 {
+		fmt.Print(style.Section("请求计数") + "\n")
+		fmt.Println(style.Dim("  无计数（daemon 启动后尚无请求）"))
+	} else {
+		t := style.NewTable("分组", "计数器", "次数", "说明")
+		t.AlignRight(2)
+		keys := metrics.SortedKeys(counter)
+		// 按**组**排，组内再按名字。不加这一步的话字母序会让「链」和「超时」
+		// 交错出现，分组那一列就白设了。
+		sort.SliceStable(keys, func(i, j int) bool {
+			gi, gj := metricRank(keys[i]), metricRank(keys[j])
+			if gi != gj {
+				return gi < gj
+			}
+			return keys[i] < keys[j]
+		})
+		lastGroup := ""
+		for _, k := range keys {
+			g := metricGroup(k)
+			label := style.Dim(g)
+			if g == lastGroup {
+				label = ""
+			}
+			lastGroup = g
+			t.Row(label, k, fmt.Sprintf("%d", counter[k]), style.Dim(metricHint(k)))
+		}
+		fmt.Print(style.Section("请求计数") + "\n")
+		fmt.Print(t.String())
+	}
+	return 0
+}
