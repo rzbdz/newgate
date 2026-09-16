@@ -39,16 +39,13 @@ go vet ./... && gofmt -l internal/
 
 | 目录 | 管什么 | 改这里当你在做… |
 | --- | --- | --- |
-| `internal/core/domain` | 实体与值类型：Provider / Profile / Binding / Roles | 配置语义、档位定义 |
-| `internal/core/resolve` | fallback 链构造（纯函数） | 路由顺序、稀疏层、profile 合并 |
-| `internal/store` | 配置读写（`providers.json` / `mappings/*.kv`）、热更新 | 配置格式与加载 |
-| `internal/gateway/forward` | 收请求 → 建链 → 改写 → 转发 | 网关主循环、超时、转移 |
-| `internal/gateway/special` | **上游怪癖插件**（`st-*.go`） | 「只有某家上游才需要」的补丁 |
-| `internal/gateway/rewrite` | 字节手术（只改该改的那一段） | 请求改写原语 |
-| `internal/gateway/thinkcache` | 推理内容旁路缓存 | 思维链回传 |
-| `internal/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
-| `internal/agents` | 被接管的 CLI 描述符（槽位/环境变量） | 新增客户端、改槽位映射 |
-| `internal/ui/cli` | 命令实现 | `newgate <动词>` |
+| `component` | typed capability、依赖 DAG、生命周期 | 组件框架本身 |
+| `modules/config/{domain,resolve,store}` | 配置语义、fallback 纯函数、持久化 | 档位与配置 |
+| `modules/gateway/{forward,special,rewrite,thinkcache}` | 网关组件及其内部实现 | 转发、扩展与思维链 |
+| `modules/confighook` | agent/config/state-field 注册端口 | 配置文件接管 |
+| `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
+| `modules/cli` | CLI 组件与命令壳 | `newgate <动词>` |
+| `modules/<客户端或模型>` | Claude Code、DeepSeek、组合行为 | 新增可组合组件 |
 
 档位阶梯（2026-09-16 四档化）：
 `heavy`(fable) > `normal`(opus，**主力**) > `mid`(sonnet) > `light`(haiku)，

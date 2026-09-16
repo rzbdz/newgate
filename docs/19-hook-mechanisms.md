@@ -19,14 +19,14 @@ claude 和 opencode 是两类完全不同的客户端，它们的「可配置面
 
 - claude 的 `settings.json` 里有 `env` 块，但**用户 shell 里 export 的变量优先级更高**。
   写配置文件会被 shell 环境静默盖掉——这是最难查的那类故障。所以对 claude
-  我们用 env 注入（`internal/runtime/injection/shim.go:24-27`）。
+  我们用 env 注入（`modules/runtime/injection/shim.go`）。
 - opencode 没有 env 这一层，它读 `opencode.json`，所以对它只能改配置文件。
 
 ## 1. 机制一：PATH shim + argv0 分发（claude 的入口）
 
 **挂在哪**：命令行解析。用户敲的 `claude` 不再直接命中真 claude。
 
-**怎么挂**（`internal/runtime/injection/shim.go:28-46`）：
+**怎么挂**（`modules/runtime/injection/shim.go`）：
 
 ```
 1. 在 ~/.config/newgate/bin/ 放一个符号链接 claude → newgate 二进制
@@ -63,7 +63,7 @@ env，天然盖过用户 shell 里的一切残留变量。
 env 注入是 newgate 的心脏。它做的事：**把「模型」这件事从 CLI 手里拿走，
 换成一层档位名**。
 
-**注入什么**（`internal/agents/agents.go:82-97`）：
+**注入什么**（`modules/claudecode/agent.go`）：
 
 | 角色 | 环境变量 | 注入的值 | 谁在用 |
 | --- | --- | --- | --- |
@@ -131,7 +131,8 @@ UnsetEnv: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST
 
 ## 3. 机制三：改配置文件（opencode 的入口）
 
-opencode 不认 env，只能改它的配置文件（`internal/runtime/injection/config_file.go`）：
+opencode 不认 env，只能由 `modules/opencodeomo` 的 `ConfigTakeover`
+能力改它的配置文件：
 
 ```
 ~/.config/opencode/opencode.json
@@ -178,47 +179,51 @@ JSON 保留注释（jsonc）地做字节级替换，不是整份重写。
 
 ### 4.1 路由改道（routing hook）
 
-`special.Route` 在建链**之前**遍历实现了 `RoutePlugin` 的插件，取得结构化
+Gateway 组件提供请求扩展端口，各组件在自己的 `Start` 中消费该 capability
+并注册 hook；通用 Component Manager 不知道 `RoutePlugin`。`special.Route`
+在建链**之前**遍历实现了 `RoutePlugin` 的插件，取得结构化
 `RouteDecision`：档位、可选的强制链头、首响应超时、日志说明和指标名都由
 认领请求的插件提供。当前 `claude-bg` 认出 Claude Code 的 Bash 安全分类器
 （system 里自报 `"You are a security monitor"` 的非流式请求），让整条链
 改走 `light`；若配置了 `classifier_override`，它也由该插件声明为最高优先
-链头。
+链头。这个顶层字段由 `claudecode` 模块的 `StateFields` 注册并在模块内解码；
+core 只无损携带未知配置原文，不知道 classifier 这个概念。
 
 为什么放在建链之前而不是 body 改写里：**改道换的是整条 fallback 链**，body
 改写只能换链头（model 字段），换不了链的尾巴。
 
 插件同时可以实现 `StatusProvider` 和 `MetricProvider`，把自己的状态行和指标
-说明注册给统一 registry。`newgate status` / `newgate metrics` 只遍历结构化
+说明注册给 Gateway 组件拥有的 registry。`newgate status` / `newgate metrics` 只遍历结构化
 结果并排版，不出现 `claude-bg`、DeepSeek 等插件名的条件分支。新增插件因此
 不需要再修改 CLI 或转发热路径。
 
 ### 4.2 body 改写（special_treatment 插件）
 
-`gateway/special` 是一串插件，每个 `Match` 认领自己的上游、`Apply` 做**纯字节
-手术**（绝不 JSON 往返，保证 message 内容逐字节不变）。当前四个：
+`modules/gateway/special` 只是一条通用执行链；具体 hook 位于 `modules`，
+每个 `Match` 认领自己的语义交集、`Apply` 做**纯字节手术**。当前模块：
 
 | 插件 | 认领条件 | 干什么 |
 | --- | --- | --- |
-| `claude-bg` | claude + 非流式 | 后台调用补 `thinking:disabled` |
-| `deepseek` | 模型/provider/URL 含 deepseek | 补回被客户端剥掉的思维链；**只有 Claude Code** 才顺带把 thinking 关掉 |
-| `glm` | 含 glm | 缺省 thinking 补显式 disabled（**只有 Claude Code**——OpenAI 方言的客户端没有这个字段可写） |
+| `claudecode` / `claude-bg` | Claude Code + 非流式 | 后台调用补 `thinking:disabled` |
+| `deepseek` | 模型/provider/URL 含 deepseek | 补齐 DeepSeek 要求回传的 reasoning/tool 历史，不认识客户端 |
+| `claudecode_deepseek` | Claude Code × DeepSeek | 客户端未显式要求思考时关闭 thinking，避免剥块后下一轮 400 |
+| `claudecode_glm` / `glm` | Claude Code × GLM | 缺省 thinking 补显式 disabled |
 | `always-thinks` | quirk 注册表命中 | 「始终思考」模型收到 disabled → 翻回 enabled+effort |
 
-**顺序即文件名序**（`claude-bg` → `deepseek` → `glm` → `always-thinks`），
-因为插件是 `init()` 里按文件注册的。
+执行顺序由 hook 的具名 `Before/After` 依赖图决定；缺省稳定，成环直接拒绝，
+不依赖数字 priority、文件名或 `init()` 偶然顺序。
 
 **发起方怎么认**：`Request.Agent` 来自路径（`/a/<agent>/`，见 `forward.go` 的
 `parseTarget`）。接管时只有 claude 的 base URL 带 `/a/claude`——opencode 注入的
-是裸 `http://127.0.0.1:8899/v1`（`runtime/injection/config_file.go`），所以
+是裸 `http://127.0.0.1:8899/v1`（`modules/opencodeomo/takeover.go`），所以
 opencode 的请求 `Agent` 是空。判断一律用**等于 `claude`**，不是「不等于空」：
 认不出是谁时按「不是 Claude Code」处理（2026-09-15 现场：opencode 走 OpenAI
 方言，压根不写 thinking 这个 Anthropic 字段，被当成「客户端没要思考」条条关掉，
 用户报「deepseek 不思考了」）。
 
-按这条判断分流的只有「替客户端关思考」那一类（`claude-bg`、`deepseek` 第 1 手、
-`glm`），统一走 `special.claudeCode`。共同前提是「客户端有表达思考意图的能力却
-没表达」——Claude Code 剥思考块，开着也回不来，替它关掉省的是白花的几十秒；
+客户端与模型族不互相 import。需要同时知道两边的逻辑放在组合模块
+（`claudecode_deepseek`、`claudecode_glm`）。共同前提是「客户端有表达思考
+意图的能力却没表达」——Claude Code 剥思考块，开着也回不来，替它关掉省的是白花的几十秒；
 OpenAI 方言的客户端**没有 thinking 这个字段可写**，不发是不具备表达能力，不是
 意图。`always-thinks` 不在这一类：它管的是上游拒收 `disabled`，与谁在调用无关。
 
@@ -235,7 +240,7 @@ OpenAI 方言的客户端**没有 thinking 这个字段可写**，不发是不�
 
 `gateway/thinkcache` 旁路观察每个响应（SSE 或非流式），把模型吐出的
 `reasoning_content` 按 `tool:<id>` / `text:<hash>` 存进 LRU。下一轮请求里
-DeepSeek 要求逐字回传思维链时，`st-deepseek` 就从这里取回原文——
+DeepSeek 要求逐字回传思维链时，`modules/deepseek/st-reasoning.go` 就从这里取回原文——
 **客户端剥掉的思维链，在代理这一层被记住并补回**。
 
 同一个缓存还按 tool call id 记下实际产生它的 `(provider, model)`。当下一次
