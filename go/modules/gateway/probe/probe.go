@@ -403,3 +403,184 @@ func Summarize(rs []Result) []Summary {
 	}
 	return out
 }
+
+func UniqueCount(rs []Result) int {
+	seen := map[string]bool{}
+	for _, r := range rs {
+		if r.Provider != "" && r.Model != "" {
+			seen[r.Provider+"\x00"+r.Model] = true
+		}
+	}
+	return len(seen)
+}
+
+func FailedCount(rs []Result) int {
+	seen := map[string]bool{}
+	failed := 0
+	for _, r := range rs {
+		if r.Provider == "" || r.Model == "" {
+			continue
+		}
+		key := r.Provider + "\x00" + r.Model
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if !r.OK {
+			failed++
+		}
+	}
+	return failed
+}
+
+// CheckDialects 探「这个 (provider, model) 听得懂哪些方言」——包括
+// anthropic 私有的 count_tokens（Claude Code 的水位条靠它，本地只有
+// 粗估）。主探活通过后才该调。结果记进 dialect 注册表。
+//
+// 注意：本函数在 `newgate probe` 的进程里跑，学到的随进程消失；daemon
+// 会在自己遇到第一个 count_tokens 时补学（gate 层面的 lazy probe），
+// 最终状态一致——见 dialect 包注释。
+func CheckDialects(provName string, p domain.Provider, model string, timeout time.Duration) {
+	declared, other := dialect.CapOpenAI, dialect.CapAnthropic
+	if p.Protocol == "anthropic" {
+		declared, other = dialect.CapAnthropic, dialect.CapOpenAI
+	}
+	dialect.Mark(provName, model, declared) // 声明的协议是配置事实，不用探
+
+	learnDialect(provName, p, model, other, timeout)
+
+	// count_tokens 是 anthropic 方言的端点：/messages 都不通就不用试了
+	if anthOK, _ := dialect.Supports(provName, model, dialect.CapAnthropic); !anthOK {
+		dialect.MarkUnsupported(provName, model, dialect.CapCountTokens)
+		return
+	}
+	learnDialect(provName, p, model, dialect.CapCountTokens, timeout)
+}
+
+// learnDialect 打一发最小请求，按结果记「支持/明确不支持」。
+// 连接失败和 401/429 这类**不学**——那是「现在不行」，不是「没有」，
+// 猜错了会让 gate 永久放弃一个本来存在的端点。
+func learnDialect(provName string, p domain.Provider, model string, c dialect.Cap, timeout time.Duration) {
+	st, err := oneDialect(p, model, c, timeout)
+	switch {
+	case err == nil && st < 400:
+		dialect.Mark(provName, model, c)
+	case err == nil && (st == 404 || st == 405):
+		dialect.MarkUnsupported(provName, model, c)
+	}
+}
+
+// oneDialect 打一发最小请求探某个方言的端点。auth 跟 provider 声明的
+// protocol 走——与 gate 的 setAuth 一致，探的就是 gate 将来会发的那条。
+func oneDialect(p domain.Provider, model string, c dialect.Cap, timeout time.Duration) (int, error) {
+	suffix := "/chat/completions"
+	switch c {
+	case dialect.CapAnthropic:
+		suffix = "/messages"
+	case dialect.CapCountTokens:
+		suffix = "/messages/count_tokens"
+	}
+	payload := map[string]interface{}{
+		"model":    model,
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}
+	if c != dialect.CapCountTokens {
+		payload["max_tokens"] = 4
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	// URL 构造统一走 provider 自己那份：两种方言分家的上游（anthropic_url）
+	// 靠它选对 base——探的路径必须和 gate 将来发的一模一样。
+	req, err := http.NewRequest("POST", p.URL(suffix),
+		bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if p.Protocol == "anthropic" {
+		req.Header.Set("x-api-key", p.Key())
+		req.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+p.Key())
+	}
+
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = ioutil.ReadAll(resp.Body) // 排空以复用连接；错误体不需要
+	// 4xx 不算错误：404/405 正是「没有这个端点」的答案，调用方按状态码学
+	return resp.StatusCode, nil
+}
+
+// CheckQuirks 主动探一发「带 tools 的请求」，把上游的毛病提前学出来。
+//
+// 为什么必须单独探这一发：普通探活发的是一句 "hi"，**不带 tools**。而
+// glm-5.3 那个 400 恰恰只在带 tools 时出现——聚合器看见 tools 才会替我们
+// 塞「关闭思考」。于是 `newgate probe` 一片全绿，真实流量却每条都 400，
+// 探活比现实乐观是最坏的一种探活。
+//
+// 只在普通探活通过后再打，且一个 (provider, model) 只打一次：多打一发就多
+// 一次额度和一次撞限流的机会。
+//
+// 返回学到的毛病（人话）。什么都没学到就返回 nil——包括请求本身失败的情况：
+// 探测失败不代表模型有毛病，不能凭猜往注册表里写。
+func CheckQuirks(provName string, p domain.Provider, model string, timeout time.Duration) []string {
+	payload := map[string]interface{}{
+		"model":      model,
+		"max_tokens": 4,
+		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+		"tools": []map[string]interface{}{{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":        "newgate_probe",
+				"description": "probe",
+				"parameters": map[string]interface{}{
+					"type": "object", "properties": map[string]interface{}{}, "required": []string{},
+				},
+			},
+		}},
+	}
+	suffix := "/chat/completions"
+	if p.Protocol == "anthropic" {
+		// Anthropic 方言的 tools 是平铺的，没有 function 包一层
+		payload["tools"] = []map[string]interface{}{{
+			"name": "newgate_probe", "description": "probe",
+			"input_schema": map[string]interface{}{
+				"type": "object", "properties": map[string]interface{}{}, "required": []string{},
+			},
+		}}
+		suffix = "/messages"
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+
+	// URL 构造统一走 provider 自己那份：两种方言分家的上游（anthropic_url）
+	// 靠它选对 base——探的路径必须和 gate 将来发的一模一样。
+	req, err := http.NewRequest("POST", p.URL(suffix),
+		bytes.NewReader(body))
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if p.Protocol == "anthropic" {
+		req.Header.Set("x-api-key", p.Key())
+		req.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+p.Key())
+	}
+
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	raw, _ := ioutil.ReadAll(resp.Body) // error body is small
+	return quirk.Learn(provName, model, resp.StatusCode, raw)
+}
