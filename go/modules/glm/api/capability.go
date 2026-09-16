@@ -7,3 +7,6 @@ import modules "github.com/rzbdz/newgate/go/component"
 type Model struct {
 	MatchTarget func(model, provider, baseURL string) bool
 }
+
+// Capability 标识唯一的 GLM 模型家族判定器。
+var Capability = modules.One[Model]("model-family.glm")
