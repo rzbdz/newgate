@@ -1012,3 +1012,128 @@ func cmdAllLogs(agents agentapi.AgentCatalog) int {
 	}
 	return 0
 }
+
+func cmdInit(force bool) int {
+	created, err := store.Init(force)
+	if err != nil {
+		return die(70, err.Error())
+	}
+	if len(created) == 0 {
+		fmt.Println("配置已存在，无需初始化（--force 可覆盖）")
+	} else {
+		for _, c := range created {
+			fmt.Println("创建 " + c)
+		}
+	}
+	fmt.Printf("\n下一步：把上游 key 填进 %s\n", paths.ProvidersFile())
+	fmt.Println("默认写入的是占位符，必须改成你自己的 provider / endpoint / 模型名。")
+	fmt.Println("key 建议走环境变量（不落盘）：NEWGATE_KEY_<PROVIDER 大写，- 换 _>")
+	return 0
+}
+
+func sortedKeys(m map[string]domain.Provider) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// dialectMark 一格能力灯：✓ 支持 / ✗ 探过明确不支持 / ? 没探到。
+func dialectMark(e dialect.Entry, c dialect.Cap) string {
+	if e.Known&c == 0 {
+		return "?"
+	}
+	if e.Supports&c != 0 {
+		return "✓"
+	}
+	return "✗"
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	return s
+}
+
+func cmdStatus(agents agentapi.AgentCatalog) int {
+	st := store.LoadState()
+	info, ps := proxyState()
+
+	fmt.Println(style.Title("newgate "+Version, buildTimeDisplay()))
+	fmt.Println(style.Rule(64))
+
+	// 代理（数据面）：它挂了，所有走 newgate 的工具一起挂，所以排第一行。
+	switch {
+	case info == nil:
+		fmt.Println(style.Field("代理", style.Dim("未运行")+"    newgate start"))
+	case ps == nil:
+		fmt.Println(style.Field("代理", style.Yellow("端口无响应")+
+			fmt.Sprintf("   pid %d · 127.0.0.1:%d", info.PID, info.Port)))
+		fmt.Println(style.Hint("进程在，端口不通；常见于出站代理劫持 loopback。newgate doctor"))
+	default:
+		fmt.Println(style.Field("代理", style.Green("● 运行中")+fmt.Sprintf(
+			"   pid %d · 127.0.0.1:%d · %s · %dreq/%derr",
+			info.PID, info.Port, prettyDur(ps.UptimeS), ps.Requests, ps.Failures)))
+	}
+
+	// 接管：回答「谁的命令现在会走 newgate」。期望态（on/off 过什么）和现实态
+	// （磁盘上真装了什么）不一致，正是那两个对称故障的现场。
+	fmt.Println(style.Field("接管", takeoverStatusLine(ps)))
+
+	// 配置：用哪个 profile。
+	fmt.Println(style.Field("配置", configLine(agents, st)))
+	for _, item := range special.Statuses(st) {
+		fmt.Println(style.Field(item.Label, item.Value))
+	}
+
+	if flags := statusFlags(st); flags != "" {
+		fmt.Println(style.Field("开关", flags))
+	}
+
+	pr, err := store.LoadProfile(st.DefaultProfile)
+	if err != nil {
+		fmt.Println(style.Item(style.Warn, fmt.Sprintf("默认 profile %q 读不出: %v", st.DefaultProfile, err)))
+		return 0
+	}
+	provs, _ := store.LoadProviders()
+
+	fmt.Print(style.Section("档位绑定") + style.Dim("   profile "+st.DefaultProfile) + "\n")
+	t := style.NewTable("档位", "绑定", "备注")
+	for _, role := range domain.Roles {
+		b, ok := pr.Resolve(role)
+		if !ok {
+			t.Row(style.Dim(role), style.Dim("未绑定"), "")
+			continue
+		}
+		note := ""
+		if provs != nil {
+			if p, exists := provs.Providers[b.Provider]; !exists {
+				note = style.Red("provider 未定义")
+			} else if p.Key() == "" {
+				note = style.Yellow("缺 api_key")
+			}
+		}
+		t.Row(style.Cyan(role), b.String(), note)
+	}
+	fmt.Print(t.String())
+
+	if snap, err := store.Load(); err == nil {
+		steps, skips := resolve.BuildChain("normal", snap.Profiles, snap.Providers, resolve.Opts{
+			Active: st.DefaultProfile, Available: availableFromProxy(ps),
+			Rank:     rankFromProxy(ps),
+			MaxSteps: st.Chain.Attempts()})
+		fmt.Print(style.Section("fallback 链") + style.Dim("   normal 档，按序尝试") + "\n")
+		if len(steps) == 0 {
+			fmt.Println(style.Item(style.Warn, "无可用候选   newgate tier normal"))
+		} else {
+			fmt.Print(bindingChain(steps, "  "))
+			if tail := chainTail(steps, skips); tail != "" {
+				fmt.Println(style.Hint(tail))
+			}
+		}
+	}
+	return 0
+}
