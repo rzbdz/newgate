@@ -390,3 +390,119 @@ func (b *Breaker) UseFile(path string) error {
 	}
 	return nil
 }
+
+func (b *Breaker) persistLocked() {
+	if b.file == "" {
+		return
+	}
+	var entries []Status
+	keys := map[string]bool{}
+	for key := range b.probes {
+		keys[key] = true
+	}
+	for key := range b.openedAt {
+		keys[key] = true
+	}
+	for key := range b.scores {
+		keys[key] = true
+	}
+	for key := range keys {
+		provider, model := splitBindingKey(key)
+		p := b.probes[key]
+		s := Status{
+			Provider: provider, Model: model, Fails: b.fails[key],
+			Reason: b.reasons[key], Grade: p.Grade, Latency: p.LatencyMs,
+			Checked: p.CheckedAt,
+		}
+		if opened, ok := b.openedAt[key]; ok {
+			s.Open, s.OpenedAt, s.OpenFor = true, opened, time.Since(opened)
+		}
+		score := b.scores[key]
+		if score.Samples[0] > 0 {
+			s.ScoreMs = int(score.EWMA[0])
+		}
+		for i, n := range score.Samples {
+			if n > 0 {
+				s.Scores[i] = int(score.EWMA[i])
+			}
+			s.Buckets[i] = n
+			s.Samples += n
+		}
+		entries = append(entries, s)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Provider != entries[j].Provider {
+			return entries[i].Provider < entries[j].Provider
+		}
+		return entries[i].Model < entries[j].Model
+	})
+	raw, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		b.reportLocked(fmt.Errorf("encode %s: %w", b.file, err))
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(b.file), 0o2770); err != nil {
+		b.reportLocked(fmt.Errorf("create health directory: %w", err))
+		return
+	}
+	tmp := b.file + ".tmp"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o660); err != nil {
+		b.reportLocked(fmt.Errorf("write %s: %w", tmp, err))
+		return
+	}
+	if err := os.Chmod(tmp, 0o660); err != nil {
+		b.reportLocked(fmt.Errorf("chmod %s: %w", tmp, err))
+		return
+	}
+	if err := os.Rename(tmp, b.file); err != nil {
+		b.reportLocked(fmt.Errorf("replace %s: %w", b.file, err))
+		return
+	}
+	b.persistedAt = time.Now()
+}
+
+func (b *Breaker) reportLocked(err error) {
+	if b.onError != nil {
+		b.onError(err)
+	}
+}
+
+func splitBindingKey(key string) (string, string) {
+	for i := range key {
+		if key[i] == 0 {
+			return key[:i], key[i+1:]
+		}
+	}
+	return key, ""
+}
+
+// Retryable 判断这个失败该不该转移到备用。
+// 只转移「确定没产生副作用」的失败——已经开始吐流的绝不转移。
+func Retryable(statusCode int, connErr bool) bool {
+	return ShouldAdvance(statusCode, false) || connErr
+}
+
+// ShouldAdvance 决定这个上游状态码该不该沿链往下走。见 docs/04-configuration.md。
+//
+//	连接失败/超时/429/5xx  → 走：明确的可用性问题
+//	404 模型不存在         → 走：这家没这个模型
+//	401/403                → 走，但调用方要大声告警：凭证坏了不该让请求死，
+//	                          但必须让用户知道是 key 问题不是模型问题
+//	400                    → 默认不走（fallbackOn400 可开）。schema 类问题
+//	                          应在 schemarepair 根治，而不是靠换 provider 掩盖；
+//	                          若是客户端自己的 bug，往下走就是拿坏请求撞遍所有上游
+//	其它 4xx               → 不走：请求本身有问题，换谁都一样
+func ShouldAdvance(statusCode int, fallbackOn400 bool) bool {
+	switch statusCode {
+	case 400:
+		return fallbackOn400
+	case 401, 403, 404, 408, 409, 429:
+		return true
+	}
+	return statusCode >= 500
+}
+
+// CredentialProblem 这个状态码是不是凭证问题（调用方要给不同的提示）。
+func CredentialProblem(statusCode int) bool {
+	return statusCode == 401 || statusCode == 403
+}
