@@ -36,7 +36,20 @@ func usageText() string {
 	// 左列按显示宽度补齐（CJK 双宽），右列一律暗色——扫读时先看命令名，
 	// 需要时再看说明。
 	cmd := func(left, right string) {
-		b.WriteString("  " + style.Cyan(style.Pad(left, 38)) + style.Dim(right) + "\n")
+		const commandWidth = 38
+		prefix := "  " + style.Cyan(style.Pad(left, commandWidth))
+		if right == "" {
+			b.WriteString(prefix + "\n")
+			return
+		}
+		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-commandWidth)
+		for i, line := range lines {
+			if i == 0 {
+				b.WriteString(prefix + line + "\n")
+			} else {
+				b.WriteString(strings.Repeat(" ", 2+commandWidth) + line + "\n")
+			}
+		}
 	}
 	raw := func(line string) { b.WriteString("  " + line + "\n") }
 
@@ -95,6 +108,13 @@ func usageText() string {
 
 // Run 是 CLI 的唯一入口。
 func Run(args []string) int {
+	if shouldAuditLayout(args) {
+		return auditLayout(args, func() int { return run(args) })
+	}
+	return run(args)
+}
+
+func run(args []string) int {
 	if len(args) == 0 {
 		fmt.Print(usageText())
 		return 0
@@ -217,7 +237,7 @@ func buildTimeDisplay() string {
 // ---------- 小工具 ----------
 
 func die(code int, msg string) int {
-	fmt.Fprintf(os.Stderr, "newgate: %s\n", msg)
+	fmt.Fprintln(os.Stderr, style.WrapLine("newgate: "+msg, "  "))
 	return code
 }
 

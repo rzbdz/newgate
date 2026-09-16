@@ -183,7 +183,7 @@ func specialExplain(st *domain.State, name string) int {
 	mark, word := specialState(st, name)
 	fmt.Println(style.Title("newgate st "+name, word))
 	fmt.Println(style.Rule(72))
-	fmt.Println("  " + style.Mark(mark) + " " + p.Why())
+	fmt.Println(style.Item(mark, p.Why()))
 	fmt.Println()
 	if st.SpecialPluginOff(name) {
 		fmt.Println(style.Hint("打开：newgate st on " + name))

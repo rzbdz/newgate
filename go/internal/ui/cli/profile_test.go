@@ -29,3 +29,23 @@ func TestTierOverviewUsesCandidateBoundaries(t *testing.T) {
 		t.Fatalf("tierOverview() hid candidates: %q", got)
 	}
 }
+
+func TestBindingChainKeepsIdentifiersWhole(t *testing.T) {
+	steps := []resolve.Step{
+		{Profile: "a", Binding: domain.Binding{Provider: "provider", Model: "model-one"}},
+		{Profile: "b", Binding: domain.Binding{Provider: "provider", Model: "model-two"}},
+	}
+	got := bindingChain(steps, "  ")
+	for _, binding := range []string{"provider/model-one", "provider/model-two"} {
+		if !strings.Contains(got, binding) {
+			t.Fatalf("bindingChain() split %q:\n%s", binding, got)
+		}
+	}
+
+	detailed := numberedBindingChain(steps, nil)
+	for _, binding := range []string{"provider/model-one", "provider/model-two"} {
+		if !strings.Contains(detailed, binding) {
+			t.Fatalf("numberedBindingChain() split %q:\n%s", binding, detailed)
+		}
+	}
+}

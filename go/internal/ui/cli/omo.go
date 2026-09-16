@@ -62,18 +62,16 @@ func omoRegistry() *injection.OmoSlots {
 	return reg
 }
 
-// omoList 槽位清单：一行一个键，六列答完「它现在是什么、建议是什么、实际用什么」。
-//
-// 建议的**理由**另起一段（塞进表格会把每行撑到折行）。docs/18 §10：用户唯一
-// 会问的问题是「为什么不是我想的那个」。
+// omoList 槽位清单使用纵向卡片。键、槽位和模型标识符都是不可分割的信息，
+// 不能为了六列表格从中间硬切；属性放在后续缩进行。
 func omoList() int {
 	reg := omoRegistry()
 	fmt.Println(style.Title("newgate omo",
 		fmt.Sprintf("%d 个槽位键 · 模式 %s", len(reg.Slots), omoModeName(reg))))
 	fmt.Println(style.Rule(78))
-	fmt.Println(style.Hint("模式 current 按接管时的现状，suggested 按建议 · 切换 newgate omo mode <模式>"))
+	fmt.Println(style.Hint("current=接管现状 · suggested=建议 · 切换：newgate omo mode <模式>"))
 
-	t := style.NewTable("键", "槽位", "接管前", "现状", "建议", "生效")
+	fmt.Println()
 	for _, s := range reg.Slots {
 		eff := reg.SlotBinding(s.Key)
 		if _, ok := reg.Overrides[s.Key]; ok {
@@ -87,10 +85,10 @@ func omoList() int {
 		if s.Suggested != "" && s.Suggested != s.Current {
 			sug = style.Yellow(s.Suggested)
 		}
-		t.Row(s.Key, style.Dim(s.Kind+"/"+s.Name), style.Dim(was), s.Current, sug, eff)
+		fmt.Println(style.Item(style.Skip, s.Key))
+		fmt.Println(style.Hint(style.Dim(s.Kind+"/"+s.Name) + " · 接管前 " + style.Dim(was)))
+		fmt.Println(style.Hint("现状 " + s.Current + " · 建议 " + sug + " · 生效 " + eff))
 	}
-	fmt.Println()
-	fmt.Print(t.String())
 	if len(reg.Overrides) > 0 {
 		fmt.Println(style.Hint("* 有覆盖（newgate omo use 写入），优先级最高"))
 	}
@@ -104,11 +102,14 @@ func omoList() int {
 	if len(diff) > 0 {
 		fmt.Print(style.Section(fmt.Sprintf("建议与现状不同（%d 个）", len(diff))) +
 			style.Dim("   newgate omo mode suggested 全部采纳") + "\n")
-		d := style.NewTable("键", "现状", "建议", "依据")
 		for _, s := range diff {
-			d.Row(s.Key, s.Current, style.Yellow(s.Suggested), style.Dim(s.Why))
+			fmt.Println(style.Item(style.Skip, s.Key))
+			line := s.Current + " → " + style.Yellow(s.Suggested)
+			if s.Why != "" {
+				line += " · " + style.Dim(s.Why)
+			}
+			fmt.Println(style.Hint(line))
 		}
-		fmt.Print(d.String())
 	}
 	fmt.Println()
 	fmt.Println(style.Hint("profile 里直接写键名同样有效：omo-sisyphus=@normal, terra/medium"))
@@ -300,12 +301,7 @@ func omoExplain(key string) int {
 		if len(steps) == 0 {
 			fmt.Println(style.Item(style.Bad, "无可用候选"))
 		} else {
-			t := style.NewTable("#", "profile", "绑定")
-			t.AlignRight(0)
-			for i, s := range steps {
-				t.Row(fmt.Sprintf("%d", i+1), s.Profile, s.Binding.String())
-			}
-			fmt.Print(t.String())
+			fmt.Print(numberedBindingChain(steps, nil))
 		}
 		if len(skips) > 0 {
 			printSkips(skips)
