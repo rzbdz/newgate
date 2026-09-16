@@ -16,3 +16,11 @@ const (
 	single cardinality = iota
 	many
 )
+
+// capabilitySpec 是 Capability 的运行时身份。泛型保证调用点类型安全，
+// 这份反射信息则让构图阶段能在启动任何组件前发现同名异型等配置错误。
+type capabilitySpec struct {
+	name        string
+	valueType   reflect.Type
+	cardinality cardinality
+}
