@@ -153,3 +153,127 @@ func Serve(port int) int {
 	}
 	return 0
 }
+
+func cmdStart(agents agentapi.AgentCatalog, force bool) int {
+	if _, err := os.Stat(paths.ProvidersFile()); os.IsNotExist(err) {
+		fmt.Println(style.Dim("首次运行，初始化配置"))
+		if _, err := store.Init(false); err != nil {
+			return die(70, err.Error())
+		}
+	}
+	if i := daemon.Running(); i != nil {
+		fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已在运行   pid %d · 127.0.0.1:%d", i.PID, i.Port)))
+		return 0
+	}
+
+	// 令牌先于 Spawn 落盘：daemon 一起来就要能验 /__newgate/stop。
+	// 也是为了防竞态——下面 Spawn 之后 st 还会被 SaveState 写回，
+	// 先确保 st 里带着令牌，写回就不会把 daemon 已生成的令牌冲掉。
+	st := store.EnsureControlToken()
+	// 没 key 就别接管——接管了每个请求都是错误，而用户的配置已经被改了
+	if probs := activeProblems(st); len(probs) > 0 && !force {
+		fmt.Fprintf(os.Stderr, "newgate: 配置不可用，拒绝接管\n")
+		for _, p := range probs {
+			fmt.Fprintf(os.Stderr, "  %s %s\n", style.Mark(style.Bad), p)
+		}
+		fmt.Fprintf(os.Stderr, "%s\n", style.Hint("填 key 进 "+paths.ProvidersFile()+"，或设对应的环境变量"))
+		fmt.Fprintf(os.Stderr, "%s\n", style.Hint("确认：newgate doctor    强行接管：newgate start --force"))
+		return 65
+	}
+
+	info, err := daemon.Spawn(st.Port)
+	if err != nil {
+		return die(70, "启动守护进程失败: "+err.Error())
+	}
+	ok := false
+	for k := 0; k < 60; k++ {
+		if pingProxy(st.Port) {
+			ok = true
+			break
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+	if !ok {
+		// 区分「进程没起来」和「起来了但我们连不上」——后者绝不能杀进程
+		if httpx.TCPAlive("127.0.0.1", st.Port, time.Second) {
+			fmt.Fprintf(os.Stderr,
+				"newgate: 端口 %d 在听但 HTTP 探活失败，代理进程保留。\n"+
+					"  最常见原因：出站代理把 loopback 请求劫走了。跑 newgate doctor。\n", st.Port)
+		} else {
+			fmt.Fprintf(os.Stderr, "newgate: 代理没起来（端口 %d 没在听），看日志 %s\n",
+				st.Port, paths.LogFile())
+			_, _ = daemon.Stop()
+			return 70
+		}
+	}
+	fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已启动   pid %d · 127.0.0.1:%d · profile %s",
+		info.PID, st.Port, st.DefaultProfile)))
+
+	// 全面接管：所有没被用户显式 off 掉的 agent，各按自己的机制插上。
+	fmt.Println()
+	rs := takeover.OnAll(st.Port)
+	printResults(rs)
+	for _, r := range rs {
+		if r.Mechanism == takeover.MechShim && r.Err == nil && !r.Skipped && len(r.Lines) > 0 {
+			warnShellEnvConflict(agents, r.Agent)
+		}
+	}
+
+	st.TakenOver = true
+	_ = store.SaveState(st)
+	fmt.Println()
+	fmt.Println(style.Hint("配置改动 1 秒内自动热更新，无需重启"))
+	fmt.Println(style.Hint("原配置备份 " + paths.BackupDir() + "/original/"))
+	return 0
+}
+
+// printResults 把接管/释放结果打成人话。
+//
+// 三种标记不能混：✓ 真的接管上了，· 有意跳过，✗ 出错了。agent 名补到固定
+// 宽度，续行对齐到说明列——一次接管多个 agent 时才扫得动。
+func printResults(rs []takeover.Result) {
+	const nameW = 10
+	for _, r := range rs {
+		switch {
+		case r.Err != nil:
+			fmt.Fprintln(os.Stderr, style.Item(style.Bad, style.Pad(r.Agent, nameW)+r.Err.Error()))
+		case len(r.Lines) == 0:
+			continue
+		default:
+			mark := style.OK
+			if r.Skipped {
+				mark = style.Skip
+			}
+			fmt.Println(style.Item(mark, style.Pad(r.Agent, nameW)+r.Lines[0]))
+			for _, l := range r.Lines[1:] {
+				fmt.Println("    " + style.Pad("", nameW) + style.Dim(l))
+			}
+		}
+		for _, w := range r.Warn {
+			fmt.Println(style.Bullet(style.Mark(style.Warn) + " " + w))
+		}
+	}
+}
+
+// cmdTakeover / cmdRelease 单独接管或释放一个 agent。
+//
+// 用户不该关心机制：claude 靠 PATH shim、opencode 靠改配置文件，这是我们的
+// 实现细节。对外只有「接管」和「释放」，机制由 runtime/takeover 挑。
+func cmdTakeover(agents agentapi.AgentCatalog, agent string) int {
+	if agent == "" {
+		return die(64, "要接管谁？例：newgate on claude")
+	}
+	st := store.LoadState()
+	r := takeover.On(agent, st.Port)
+	if r.Err != nil {
+		return die(65, r.Err.Error())
+	}
+	printResults([]takeover.Result{r})
+	if r.Mechanism == takeover.MechShim {
+		warnShellEnvConflict(agents, agent)
+	}
+	if daemon.Running() == nil {
+		fmt.Println(style.Hint("代理未运行 · newgate start 之后才生效"))
+	}
+	return 0
+}
