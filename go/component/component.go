@@ -86,3 +86,17 @@ type Component struct {
 // Release 撤销一次注册所有权。返回句柄而不是暴露全局 Remove，
 // 可以确保组件只释放自己创建的贡献，并让 Stop 自然成为 Start 的逆操作。
 type Release func() error
+
+// ReleaseAll 按注册的相反顺序撤销一组贡献，与组件逆序停止保持相同所有权语义。
+func ReleaseAll(releases []Release) error {
+	var first error
+	for i := len(releases) - 1; i >= 0; i-- {
+		if releases[i] == nil {
+			continue
+		}
+		if err := releases[i](); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
