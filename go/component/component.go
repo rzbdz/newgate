@@ -59,3 +59,10 @@ func Need[T any](capability Capability[T]) Requirement {
 func Optional[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec, optional: true}
 }
+
+// Provision 把一个具体值绑定到端口。绑定会先于 Start 完成，
+// 因此依赖解析不依赖组件启动时的全局副作用。
+type Provision struct {
+	spec  capabilitySpec
+	value any
+}
