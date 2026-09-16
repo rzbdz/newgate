@@ -125,3 +125,28 @@ var signatures = []signature{{
 	},
 	label: "该模型始终思考",
 }}
+
+// Learn 从一次失败的转发里学。只看 4xx——5xx 是上游自己挂了，跟请求形状无关。
+//
+// 返回学到的东西（人话，可以直接写日志）；什么都没学到就返回 nil。
+// 认不出的报错一律不猜：宁可让用户看到原始报错，也不能瞎加字段。
+func Learn(provider, model string, status int, body []byte) []string {
+	if status < 400 || status >= 500 || len(body) == 0 {
+		return nil
+	}
+	low := strings.ToLower(string(body))
+	var learned []string
+	for _, sg := range signatures {
+		hit := false
+		for _, pat := range sg.any {
+			if strings.Contains(low, strings.ToLower(pat)) {
+				hit = true
+				break
+			}
+		}
+		if hit && Mark(provider, model, sg.flag) {
+			learned = append(learned, sg.label)
+		}
+	}
+	return learned
+}
