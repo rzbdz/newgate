@@ -122,3 +122,142 @@ func omoList() int {
 	fmt.Println(style.Hint("profile 里直接写键名同样有效：omo-sisyphus=@normal, terra/medium"))
 	return 0
 }
+
+func omoSlotCard(key, slot, was, current, suggested, effective string) string {
+	var out strings.Builder
+	identifierLine := func(label, value string) {
+		out.WriteString("    " + style.Dim(label) + " " + value + "\n")
+	}
+	out.WriteString("  " + style.Mark(style.Skip) + " " + key + "\n")
+	identifierLine("槽位", slot)
+	identifierLine("接管前", was)
+	identifierLine("现状", current)
+	identifierLine("建议", suggested)
+	identifierLine("生效", effective)
+	return out.String()
+}
+
+func omoModeName(reg *OmoSlots) string {
+	if reg.Mode == "suggested" {
+		return "suggested"
+	}
+	return "current"
+}
+
+// omoDiffCount 建议档位与现状不同的键数（有覆盖的不算——那些已经定了）。
+func omoDiffCount(reg *OmoSlots) int {
+	if reg == nil {
+		return 0
+	}
+	n := 0
+	for _, s := range reg.Slots {
+		if _, over := reg.Overrides[s.Key]; over {
+			continue
+		}
+		if s.Suggested != "" && s.Suggested != s.Current {
+			n++
+		}
+	}
+	return n
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// omoUse 写/删一个覆盖。value 为空表示删除。
+func omoUse(host cliapi.Host, key, value string, set bool) int {
+	reg := ReadOmoSlots()
+	if reg == nil {
+		return host.Die(65, "没有 omo 槽位登记表；先 newgate on opencode")
+	}
+	if _, ok := reg.SlotOf(key); !ok {
+		return host.Die(64, fmt.Sprintf("没有这个槽位键 %q（newgate omo 看列表）", key))
+	}
+	if set {
+		if err := validateBindingValue(value); err != nil {
+			return host.Die(64, err.Error())
+		}
+		if reg.Overrides == nil {
+			reg.Overrides = map[string]string{}
+		}
+		reg.Overrides[key] = value
+	} else {
+		delete(reg.Overrides, key)
+	}
+	if err := WriteOmoSlots(reg); err != nil {
+		return host.Die(70, "写注册表失败: "+err.Error())
+	}
+	if set {
+		fmt.Println(style.Item(style.OK, key+" 缺省归属 → "+style.Cyan(value)))
+	} else {
+		fmt.Println(style.Item(style.OK, key+" 覆盖已删除，回到 "+omoModeName(reg)))
+	}
+	host.NotifyProxy()
+	fmt.Println(style.Hint("1 秒内自动生效；profile 里显式写了这个键则以 profile 为准"))
+	return 0
+}
+
+func validateBindingValue(v string) error {
+	if strings.HasPrefix(v, "@") {
+		key := strings.TrimPrefix(v, "@")
+		if key == "" || strings.ContainsAny(key, "/ ") {
+			return fmt.Errorf("引用写成 @键名（如 @normal），得到 %q", v)
+		}
+		return nil
+	}
+	if strings.Contains(v, "/") {
+		if _, err := domain.ParseBindingString(v); err != nil {
+			return err
+		}
+		return nil
+	}
+	if !domain.IsKnownRole(v) {
+		return fmt.Errorf("%q 既不是档位（heavy/normal/mid/light/vision）、"+
+			"也不是已注册的动态角色键、也不是 provider/模型", v)
+	}
+	return nil
+}
+
+func omoMode(host cliapi.Host, mode string) int {
+	reg := omoRegistry()
+	if mode == "" {
+		fmt.Println(style.Title("newgate omo mode", omoModeName(reg)))
+		fmt.Println(style.Rule(64))
+		t := style.NewTable("模式", "含义")
+		t.Row("current", style.Dim("每个键按接管时的现状（默认，行为不变）"))
+		t.Row("suggested", style.Dim("每个键按建议，由模型体格与 variant 强度推出"))
+		fmt.Print(t.String())
+		fmt.Println(style.Hint("切换：newgate omo mode current|suggested"))
+		return 0
+	}
+	switch mode {
+	case "current", "suggested":
+	default:
+		return host.Die(64, "模式只认 current / suggested")
+	}
+	reg.Mode = mode
+	if err := WriteOmoSlots(reg); err != nil {
+		return host.Die(70, "写注册表失败: "+err.Error())
+	}
+	fmt.Println(style.Item(style.OK, "模式 → "+style.Cyan(mode)))
+	n := 0
+	for _, s := range reg.Slots {
+		if _, ok := reg.Overrides[s.Key]; ok {
+			continue
+		}
+		if s.Suggested != "" && s.Suggested != s.Current {
+			n++
+		}
+	}
+	if mode == "suggested" {
+		fmt.Println(style.Hint(fmt.Sprintf("%d 个键的归属随之改变（有覆盖的不受影响）；不满意：newgate omo mode current", n)))
+	} else {
+		fmt.Println(style.Hint("已回到接管时的现状"))
+	}
+	host.NotifyProxy()
+	return 0
+}
