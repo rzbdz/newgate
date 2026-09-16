@@ -428,3 +428,74 @@ type State struct {
 	// 关掉某一个比关掉整层更精确。名字见 `newgate st`。
 	SpecialOff []string `json:"special_treatment_off,omitempty"`
 }
+
+// Normalize 补默认值。读盘后调用。
+func (s *State) Normalize() {
+	if s.Port == 0 {
+		s.Port = ProxyPort
+	}
+	// 迁移：v0 的 active_profile → default_profile。
+	if s.DefaultProfile == "" && s.ActiveProfile != "" {
+		s.DefaultProfile = s.ActiveProfile
+	}
+	if s.DefaultProfile == "" {
+		s.DefaultProfile = "cheap"
+	}
+	if s.Active == nil {
+		s.Active = map[string]string{}
+	}
+}
+
+// ActiveFor 某个 agent 的链头。没单独设过就用全局默认。
+func (s *State) ActiveFor(agent string) string {
+	if p, ok := s.Active[agent]; ok && p != "" {
+		return p
+	}
+	return s.DefaultProfile
+}
+
+// TakeoverWanted 用户是否希望接管这个 agent。没表态过就算想要——
+// `newgate start` 的语义是「全面接管」，不该要求用户先逐个登记。
+func (s *State) TakeoverWanted(agent string) bool {
+	if v, ok := s.Takeover[agent]; ok {
+		return v
+	}
+	return true
+}
+
+func (s *State) RepairEnabled() bool {
+	return s.SchemaRepair == nil || *s.SchemaRepair
+}
+
+// SpecialEnabled special_treatment 层是否启用。默认开。
+func (s *State) SpecialEnabled() bool {
+	return s.SpecialTreatment == nil || *s.SpecialTreatment
+}
+
+// SpecialPluginOff 某个插件是否被单独关掉。
+func (s *State) SpecialPluginOff(name string) bool {
+	for _, n := range s.SpecialOff {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// DebugActive debug 是否仍在有效期内。过期即视为关闭。
+//
+// debug 单条请求能记 8KB+（opencode 的系统提示就有 97KB），忘了关会把
+// 磁盘写满，所以默认带过期时间。
+func (s *State) DebugActive() bool {
+	if !s.Debug {
+		return false
+	}
+	if s.DebugUntil == "" {
+		return true // 显式永久开
+	}
+	t, err := time.Parse(time.RFC3339, s.DebugUntil)
+	if err != nil {
+		return true
+	}
+	return time.Now().Before(t)
+}
