@@ -137,3 +137,195 @@ func buildNewgateProvider(port int, extra []string) map[string]interface{} {
 		"models": models,
 	}
 }
+
+// ApplyOpencode 合并式改写：只增加 provider.newgate 并把 model/small_model 指过去，
+// 用户原有的 provider 块、plugin、以及任何其它键全部原样保留。
+func ApplyOpencode(target string, port int, extra []string) (*Report, error) {
+	rep := &Report{File: target}
+	raw, err := ioutil.ReadFile(target)
+	if err != nil {
+		return rep, err
+	}
+	if err := backup(target); err != nil {
+		return rep, err
+	}
+
+	// 用 map 保留未知键
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return rep, fmt.Errorf("解析 %s 失败: %w", target, err)
+	}
+
+	provs := map[string]json.RawMessage{}
+	if v, ok := root["provider"]; ok {
+		if err := json.Unmarshal(v, &provs); err != nil {
+			return rep, fmt.Errorf("provider 字段不是对象: %w", err)
+		}
+	}
+	np, err := marshal(buildNewgateProvider(port, extra))
+	if err != nil {
+		return rep, err
+	}
+	provs[ProviderID] = json.RawMessage(np)
+	if b, err := marshal(provs); err == nil {
+		root["provider"] = json.RawMessage(b)
+	} else {
+		return rep, err
+	}
+
+	// 顶层 model / small_model 指向语义档位
+	root["model"] = json.RawMessage(`"` + ProviderID + `/normal"`)
+	root["small_model"] = json.RawMessage(`"` + ProviderID + `/light"`)
+	rep.Rewrites = append(rep.Rewrites,
+		"model -> "+ProviderID+"/normal",
+		"small_model -> "+ProviderID+"/light",
+		"provider."+ProviderID+" 已注入（原有 provider 全部保留）")
+
+	out, err := marshal(root)
+	if err != nil {
+		return rep, err
+	}
+	return rep, writeAtomic(target, out)
+}
+
+// ---------- oh-my-openagent.json ----------
+
+// ApplyOpenagent 把 omo 的 intra-agent 槽位接到 newgate 上。
+//
+// 与老版本的区别：**保留槽位身份**。以前每个 `"model": "厂商/模型"` 都被换成
+// 按体格算出来的 `newgate/normal`，sisyphus 和 librarian 从此长得一模一样；
+// 现在换成按槽位起的键 `newgate/omo-sisyphus` / `newgate/cat-deep`，体格
+// （它现在算哪一档、建议算哪一档）记在同目录的 omo-slots.json 里。
+//
+// 三件事，每一件都不改写用户看不出来的东西：
+//
+//	槽位键：agents.<名> → omo-<名>，categories.<名> → cat-<名>（omo.go）
+//	注册表：键 → 现状档位 / 建议档位 / 原模型名，写 omo-slots.json
+//	链的归属：注册表里的 default 就是这个键在 profile 里没写时的缺省
+//
+// `fallback_models` 收敛成一条（同一个键）：链已经由 newgate 在服务端兜底，
+// 留在配置里的多条 fallback 只会让一次失败重试同一件事。原列表记进注册表
+// （was_fallbacks），原文件也还在 backups/original/。
+//
+// 幂等：已经是 newgate/xxx 的槽位不会被再翻译一遍；重新接管时用注册表和
+// 备份里的原始文件找回「原来是什么模型」，所以反复接管不会丢信息。
+func ApplyOpenagent(target string, port int) (*Report, error) {
+	rep := &Report{File: target}
+	raw, err := ioutil.ReadFile(target)
+	if err != nil {
+		return rep, err
+	}
+	if err := backup(target); err != nil {
+		return rep, err
+	}
+
+	var root map[string]interface{}
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return rep, fmt.Errorf("解析 %s 失败: %w", target, err)
+	}
+
+	slots, err := DiscoverSlots(target)
+	if err != nil {
+		return rep, err
+	}
+	prev := ReadOmoSlots()
+	orig := map[string]Slot{}
+	for _, s := range OriginalSlots() {
+		orig[s.Kind+"/"+s.Name] = s
+	}
+
+	reg := &OmoSlots{}
+	if prev != nil {
+		reg.Mode = prev.Mode
+		reg.Overrides = prev.Overrides
+	}
+	byKey := map[string]OmoSlot{}
+	for _, sl := range slots {
+		key := sl.Key()
+		origModel, origVariant := "", ""
+		if o, ok := orig[sl.Kind+"/"+sl.Name]; ok {
+			origModel, origVariant = o.Model, o.Variant
+		}
+
+		// was = 接管前的真实模型名。三处信息按可信度排序：备份里的原始文件
+		// （从没被我们碰过）> 上次接管记下的 > 当前文件（只有第一次接管时
+		// 它还是真名字，之后就是我们写的 newgate/xxx 了）。
+		was := ""
+		if origModel != "" && !isTakenOver(origModel) {
+			was = origModel
+		} else {
+			if p, ok := prev.SlotOf(key); ok {
+				was = p.Was
+			}
+			if was == "" && !isTakenOver(sl.Model) {
+				was = sl.Model
+			}
+		}
+
+		variant := firstNonEmpty(sl.Variant, origVariant)
+		current, note := currentTier(sl.Model, key, prev, was)
+		suggested, swhy := Suggest(was, variant)
+		entry := OmoSlot{
+			Key: key, Kind: sl.Kind, Name: sl.Name,
+			Was: was, WasFallbacks: sl.Fallbacks, Variant: variant,
+			Current: current, Suggested: suggested, Default: current,
+			Why: joinWhy(note, swhy),
+		}
+		reg.Slots = append(reg.Slots, entry)
+		byKey[key] = entry
+		rep.Rewrites = append(rep.Rewrites, fmt.Sprintf("%s.%s → %s/%s（现状 %s%s）",
+			sl.Kind+"s", sl.Name, ProviderID, key, current, suggestTag(suggested, current)))
+	}
+	// 注册表里的 default 以 overrides/mode 为准（写文件的人看得见最终归属）
+	for i := range reg.Slots {
+		reg.Slots[i].Default = reg.SlotBinding(reg.Slots[i].Key)
+		if reg.Slots[i].Default == "" {
+			reg.Slots[i].Default = reg.Slots[i].Current
+		}
+		byKey[reg.Slots[i].Key] = reg.Slots[i]
+	}
+	if err := WriteOmoSlots(reg); err != nil {
+		return rep, fmt.Errorf("写槽位注册表失败: %w", err)
+	}
+	rep.Rewrites = append(rep.Rewrites,
+		fmt.Sprintf("槽位注册表 → %s（%d 个键，default 决定每个键跟哪一档走）",
+			SlotsFile(), len(reg.Slots)))
+
+	// 改写：只动 agents.*.model / categories.*.model 和它们的 fallback_models
+	fallbackIsObject := map[string]bool{}
+	for _, s := range slots {
+		fallbackIsObject[s.Key()] = s.FallbackObjects
+	}
+	for kind, plural := range map[string]string{"agent": "agents", "category": "categories"} {
+		section, ok := root[plural].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for name, rawNode := range section {
+			node, ok := rawNode.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			key, ok := byKey[slotKey(kind, name)]
+			if !ok {
+				continue // DiscoverSlots 跳过的（没有 model 字段）
+			}
+			node["model"] = ProviderID + "/" + key.Key
+			if _, has := node["fallback_models"]; has {
+				// 原样保留元素形态（对象 or 字符串），只把内容收敛成同一个键。
+				if fallbackIsObject[key.Key] {
+					node["fallback_models"] = []interface{}{
+						map[string]interface{}{"model": ProviderID + "/" + key.Key}}
+				} else {
+					node["fallback_models"] = []interface{}{ProviderID + "/" + key.Key}
+				}
+			}
+		}
+	}
+
+	out, err := marshal(root)
+	if err != nil {
+		return rep, err
+	}
+	return rep, writeAtomic(target, out)
+}
