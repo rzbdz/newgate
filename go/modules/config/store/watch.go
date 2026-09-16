@@ -129,3 +129,91 @@ func (w *Watcher) Reload(force bool) bool {
 	}
 	return true
 }
+
+// signature 配置目录的指纹：所有相关文件的 (路径, 大小, mtime) 哈希。
+//
+// 用 mtime+size 而不是内容哈希：配置文件可能上百个，每秒读一遍内容
+// 没必要。代价是同一秒内的原地改写可能漏检——但我们自己的写入都走
+// 原子 rename（mtime 必变），手工编辑器也几乎都是 rename。
+func signature() string {
+	h := sha256.New()
+	var files []string
+	// omo-slots.json 也是配置：它是模块贡献的角色键（omo-sisyphus 跟哪一档走）
+	// 的唯一来源。接管 omo 会写它，改了就该在 1 秒内生效（见 core/roleprov）。
+	files = append(files, paths.ProvidersFile(), paths.StateFile())
+	files = append(files, roleprov.WatchFiles()...)
+	if ents, err := ioutil.ReadDir(paths.Mappings()); err == nil {
+		var names []string
+		for _, e := range ents {
+			if !e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+		sort.Strings(names) // 顺序必须稳定，否则指纹会假变化
+		for _, n := range names {
+			files = append(files, filepath.Join(paths.Mappings(), n))
+		}
+	}
+	for _, f := range files {
+		fi, err := os.Stat(f)
+		if err != nil {
+			h.Write([]byte(f + "|missing\n"))
+			continue
+		}
+		h.Write([]byte(f + "|" +
+			fi.ModTime().UTC().Format(time.RFC3339Nano) + "|" +
+			itoa(fi.Size()) + "\n"))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func itoa(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		b[i] = '-'
+	}
+	return string(b[i:])
+}
+
+// DiffSummary 人类可读的变更摘要，给日志用。
+// 只报**结构性**变化，不打印任何密钥。
+func DiffSummary(old, new *Snapshot) []string {
+	var out []string
+	if old == nil || new == nil {
+		return out
+	}
+	if old.State.DefaultProfile != new.State.DefaultProfile {
+		out = append(out, "默认 profile: "+old.State.DefaultProfile+" → "+new.State.DefaultProfile)
+	}
+	for agent, p := range new.State.Active {
+		if old.State.Active[agent] != p {
+			out = append(out, "agent "+agent+" → profile "+p)
+		}
+	}
+	for agent := range old.State.Active {
+		if _, still := new.State.Active[agent]; !still {
+			out = append(out, "agent "+agent+" 回落到默认 profile")
+		}
+	}
+	if len(old.Profiles) != len(new.Profiles) {
+		out = append(out, "profile 数量变化")
+	}
+	if len(old.Providers.Providers) != len(new.Providers.Providers) {
+		out = append(out, "provider 数量变化")
+	}
+	return out
+}
