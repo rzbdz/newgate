@@ -29,17 +29,26 @@ func init() { Register(deepseek{}) }
 //
 // 三手一起上，对应上游的三种口味：
 //
-//  1. 客户端没写 thinking → 补顶层 thinking:{"type":"disabled"}，从根上不
-//     进思考模式。这是 Anthropic 协议里的合法字段，disabled 也是默认值，
-//     对不认识它的上游是语义无操作；而 DeepSeek 是**必须显式写**才算关，
-//     省略不算。
+//  1. **只有 Claude Code** 没写 thinking 时 → 补顶层
+//     thinking:{"type":"disabled"}，从根上不进思考模式。这是 Anthropic 协议
+//     里的合法字段，disabled 也是默认值，对不认识它的上游是语义无操作；
+//     而 DeepSeek 是**必须显式写**才算关，省略不算。
 //  2. messages 里的 assistant 消息补 reasoning_content（OpenAI 方言）。
-//  3. 思考模式确实开着时（客户端自己写了 enabled/adaptive），给 assistant
-//     消息的 content[] **开头**补 thinking 块（Anthropic 方言）。位置是协议
-//     的一部分——thinking 必须排在 text / tool_use 之前。
+//  3. 思考模式确实开着、且这次是 Anthropic 方言时，给 assistant 消息的
+//     content[] **开头**补 thinking 块（Anthropic 方言）。位置是协议的一部分
+//     ——thinking 必须排在 text / tool_use 之前。
 //
 // 第 3 手只在思考模式开着时做：思考关掉时再塞 thinking 块，反而会被上游
 // 以「关了还给我思考块」拒掉。
+//
+// 第 1 手只给 Claude Code（`/a/claude/` 认出来，见 claudeCode）：它剥掉思考块，
+// 思考开着也回不来，白花思考的时间和 token。**别的客户端不能关**——2026-09-15
+// 现场：opencode 走 OpenAI 方言（`/chat/completions`），压根不会写 thinking 这个
+// Anthropic 字段，于是条条请求都被当成「客户端没要思考」而关掉，用户报
+// 「deepseek 不思考了」。opencode 要的是模型的默认思考，推理由第 2 手替它送回去。
+//
+// 第 3 手只对 Anthropic 方言做：OpenAI 方言里回传推理的载体是 reasoning_content
+// （第 2 手），往人家的 content[] 里塞 thinking 块是塞一个它不认识的块类型。
 //
 // 补什么内容，三级来源，逐级降级：
 //
@@ -69,7 +78,8 @@ func (deepseek) Name() string { return "deepseek" }
 
 func (deepseek) Why() string {
 	return "DeepSeek 思考模式要求逐字回传推理内容，客户端却会把它剥掉 → 400\n" +
-		"没开思考就显式关掉；开着就补回去（客户端带回的原文 → thinkcache → 非空占位）"
+		"开着就补回去（客户端带回的原文 → thinkcache → 非空占位）；" +
+		"只有 Claude Code 那条路干脆显式关掉思考（它剥块，想了也白想）"
 }
 
 // Match 只认 DeepSeek：模型名、provider 名、base URL 任一处出现 deepseek。
@@ -99,10 +109,15 @@ func (deepseek) Apply(body []byte, r *Request) ([]byte, []string, error) {
 	var notes []string
 	out := body
 
-	// 1) 客户端没写 thinking 就显式关掉。写了就尊重它——用户显式要思考
-	//    模式时我们不该悄悄关掉，改成走第 3 步把 thinking 块补回去。
+	// 1) Claude Code 没写 thinking 就显式关掉（只有它该被关，见文件头）。
+	//    写了就尊重它——用户显式要思考模式时我们不该悄悄关掉，改成走第 3 步
+	//    把 thinking 块补回去。
 	thinkingOn := true
-	if raw, has := rewrite.TopLevelRaw(out, "thinking"); !has {
+	if raw, has := rewrite.TopLevelRaw(out, "thinking"); has {
+		if t, _ := rewrite.TopLevelString(raw, "type"); t == "disabled" {
+			thinkingOn = false
+		}
+	} else if claudeCode(r) {
 		// reasoning_effort 与 thinking:disabled 互斥：上游会回
 		// 「thinking options type cannot be disabled when reasoning_effort
 		// is set」。客户端设了推理强度就是明确要思考，别去关它，
@@ -116,8 +131,6 @@ func (deepseek) Apply(body []byte, r *Request) ([]byte, []string, error) {
 			thinkingOn = false
 			notes = append(notes, `注入 thinking:{"type":"disabled"}`)
 		}
-	} else if t, _ := rewrite.TopLevelString(raw, "type"); t == "disabled" {
-		thinkingOn = false
 	}
 	// 认不出 type（adaptive、或形状不认识）时按「开着」处理：多补两个占位块
 	// 顶多是冗余，漏补就是 400。
@@ -150,7 +163,8 @@ func (deepseek) Apply(body []byte, r *Request) ([]byte, []string, error) {
 
 	// 3) 思考模式开着 → assistant 的 content[] 开头必须有 thinking 块
 	//    （Anthropic 方言那句报错）。同样：真实原文 → 占位符。
-	if thinkingOn {
+	//    只对 Anthropic 方言做：OpenAI 方言里回传推理的载体是 reasoning_content。
+	if thinkingOn && anthropicDialect(r) {
 		restored, placeholders = 0, 0
 		valBlock := func(item []byte) []byte {
 			// 与第 2 步同一份来源（pickReasoning）：客户端带回的 thinking 块
@@ -244,6 +258,15 @@ func reasoningNote(what string, total, restored, placeholders int) string {
 func isAssistant(item []byte) bool {
 	role, _ := rewrite.TopLevelString(item, "role")
 	return role == "assistant"
+}
+
+// anthropicDialect 客户端这次发的是 Anthropic 方言吗（/v1/messages）。
+//
+// 判据用路径，不用 r.Protocol：protocol 说的是「怎么发到上游」（实测聚合
+// 网关的 provider 全标 "openai"，却照样收 /v1/messages 的 Anthropic 方言
+// 请求），而客户端发什么路径才是这次请求本身的方言。
+func anthropicDialect(r *Request) bool {
+	return r != nil && strings.HasPrefix(r.Path, "/messages")
 }
 
 // lacksThinking 这条 content[] 里有没有思考内容。

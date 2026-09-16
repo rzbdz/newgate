@@ -170,12 +170,26 @@ JSON 保留注释（jsonc）地做字节级替换，不是整份重写。
 | 插件 | 认领条件 | 干什么 |
 | --- | --- | --- |
 | `claude-bg` | claude + 非流式 | 后台调用补 `thinking:disabled` |
-| `deepseek` | 模型/provider/URL 含 deepseek | 补回被客户端剥掉的思维链 |
-| `glm` | 含 glm | 缺省 thinking 补显式 disabled |
+| `deepseek` | 模型/provider/URL 含 deepseek | 补回被客户端剥掉的思维链；**只有 Claude Code** 才顺带把 thinking 关掉 |
+| `glm` | 含 glm | 缺省 thinking 补显式 disabled（**只有 Claude Code**——OpenAI 方言的客户端没有这个字段可写） |
 | `always-thinks` | quirk 注册表命中 | 「始终思考」模型收到 disabled → 翻回 enabled+effort |
 
 **顺序即文件名序**（`claude-bg` → `deepseek` → `glm` → `always-thinks`），
 因为插件是 `init()` 里按文件注册的。
+
+**发起方怎么认**：`Request.Agent` 来自路径（`/a/<agent>/`，见 `forward.go` 的
+`parseTarget`）。接管时只有 claude 的 base URL 带 `/a/claude`——opencode 注入的
+是裸 `http://127.0.0.1:8899/v1`（`runtime/injection/config_file.go`），所以
+opencode 的请求 `Agent` 是空。判断一律用**等于 `claude`**，不是「不等于空」：
+认不出是谁时按「不是 Claude Code」处理（2026-09-15 现场：opencode 走 OpenAI
+方言，压根不写 thinking 这个 Anthropic 字段，被当成「客户端没要思考」条条关掉，
+用户报「deepseek 不思考了」）。
+
+按这条判断分流的只有「替客户端关思考」那一类（`claude-bg`、`deepseek` 第 1 手、
+`glm`），统一走 `special.claudeCode`。共同前提是「客户端有表达思考意图的能力却
+没表达」——Claude Code 剥思考块，开着也回不来，替它关掉省的是白花的几十秒；
+OpenAI 方言的客户端**没有 thinking 这个字段可写**，不发是不具备表达能力，不是
+意图。`always-thinks` 不在这一类：它管的是上游拒收 `disabled`，与谁在调用无关。
 
 ### 4.3 quirk 学习（错误驱动的补丁）
 

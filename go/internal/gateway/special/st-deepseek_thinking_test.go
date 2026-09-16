@@ -8,6 +8,16 @@ import (
 	"github.com/rzbdz/newgate/go/internal/gateway/thinkcache"
 )
 
+// claudeReq Claude Code 形态的上下文：/a/claude/ + /v1/messages。
+//
+// 这个包里的 deepseek 测试默认都是「Claude Code 打 DeepSeek 网关」这一幕
+// ——插件就是为它写的。opencode 那条路（Agent 空 + /chat/completions）在
+// TestDeepSeekOpencodeKeepsThinking 里单独立着。
+func claudeReq(model string) *Request {
+	return &Request{Model: model, Provider: "gw", BaseURL: "https://gw.example.com/v1",
+		Protocol: "anthropic", Path: "/messages", Agent: "claude"}
+}
+
 // 思考模式开着时，assistant 的 content[] 必须带 thinking 块，否则 DeepSeek
 // 回 400 The `content[].thinking` in the thinking mode must be passed back。
 // 客户端（Claude Code）对非官方端点会主动剥掉这些块，所以只能我们补。
@@ -19,7 +29,7 @@ func TestDeepSeekBackfillsThinkingBlockWhenThinkingOn(t *testing.T) {
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}` +
 		`]}`)
 
-	out, notes, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+	out, notes, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -72,7 +82,7 @@ func TestDeepSeekNoThinkingBlockWhenDisabled(t *testing.T) {
 		[]byte(`{"model":"deepseek-chat","messages":[{"role":"assistant","content":[{"type":"text","text":"hi"}]}]}`),
 		[]byte(`{"model":"deepseek-chat","thinking":{"type":"disabled"},"messages":[{"role":"assistant","content":[{"type":"text","text":"hi"}]}]}`),
 	} {
-		out, _, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+		out, _, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
@@ -90,7 +100,7 @@ func TestDeepSeekLeavesExistingThinkingAlone(t *testing.T) {
 	} {
 		body := []byte(`{"thinking":{"type":"enabled"},"messages":[` +
 			`{"role":"assistant","content":[` + blk + `,{"type":"text","text":"hi"}]}]}`)
-		out, _, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+		out, _, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
@@ -104,7 +114,7 @@ func TestDeepSeekLeavesExistingThinkingAlone(t *testing.T) {
 // content 是纯字符串（Anthropic 允许）时没有块可插，跳过而不是报错。
 func TestDeepSeekStringContentSkipped(t *testing.T) {
 	body := []byte(`{"thinking":{"type":"enabled"},"messages":[{"role":"assistant","content":"hi"}]}`)
-	out, _, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+	out, _, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -122,7 +132,7 @@ func TestDeepSeekStringContentSkipped(t *testing.T) {
 func TestDeepSeekRespectsReasoningEffort(t *testing.T) {
 	body := []byte(`{"model":"deepseek-chat","reasoning_effort":"high",` +
 		`"messages":[{"role":"assistant","content":[{"type":"text","text":"hi"}]}]}`)
-	out, _, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+	out, _, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -148,7 +158,7 @@ func TestDeepSeekPlaceholderNeverEmpty(t *testing.T) {
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-never-cached-0001","content":"ok"}]}` +
 		`]}`)
 
-	out, notes, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+	out, notes, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -187,7 +197,7 @@ func TestDeepSeekUsesClientThinkingBlock(t *testing.T) {
 		`{"type":"thinking","thinking":"我先想想","signature":"sig"},` +
 		`{"type":"text","text":"答案"}]}]}`)
 
-	out, _, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+	out, _, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -224,7 +234,7 @@ func TestDeepSeekUsesCacheReasoning(t *testing.T) {
 		`{"role":"assistant","content":[{"type":"tool_use","id":"` + toolID + `","name":"Bash","input":{}}]}` +
 		`]}`)
 
-	out, _, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+	out, _, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -262,7 +272,7 @@ func TestDeepSeekThinkingBlockPlaceholderCountedHonestly(t *testing.T) {
 		`"messages":[{"role":"assistant","content":[` +
 		`{"type":"tool_use","id":"t-never-cached-0003","name":"Read","input":{}}]}]}`)
 
-	_, notes, err := deepseek{}.Apply(body, &Request{Model: "deepseek-chat"})
+	_, notes, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -274,5 +284,85 @@ func TestDeepSeekThinkingBlockPlaceholderCountedHonestly(t *testing.T) {
 	// thinking 块那步绝不能把占位符说成「用了真实的推理原文」
 	if strings.Contains(all, "补 thinking 块：1 条用了真实的推理原文") {
 		t.Fatalf("thinking 块的占位符被虚报成真实原文:\n%s", all)
+	}
+}
+
+// ---- opencode（裸 /v1 + OpenAI 方言）这条路上不能关思考 ----
+
+// 现场（2026-09-15）：opencode 走 OpenAI 方言，压根不会写 thinking 这个
+// Anthropic 字段，于是条条请求都被当成「客户端没要思考」补上 disabled——
+// 用户看到的是「deepseek somehow 不思考了」。
+//
+// 修后：关思考只给 Claude Code（Agent=="claude"）。这里 Agent 空、路径
+// /chat/completions，就是 opencode 的形态：thinking 一个字节都不许动，
+// 但推理内容照旧替它回传（思考开着，上游就会要）。
+func TestDeepSeekOpencodeKeepsThinking(t *testing.T) {
+	body := []byte(`{"model":"deepseek-flash","stream":true,"messages":[` +
+		`{"role":"user","content":"看下这个文件"},` +
+		`{"role":"assistant","content":"看完了","tool_calls":[` +
+		`{"id":"call_oa_1","type":"function","function":{"name":"Read","arguments":"{}"}}]}` +
+		`]}`)
+
+	r := &Request{Model: "deepseek-flash", Provider: "smt-deepseek",
+		BaseURL: "https://gw.example.com/v1", Protocol: "openai",
+		Path: "/chat/completions"}
+	out, notes, err := deepseek{}.Apply(body, r)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if strings.Contains(string(out), `"thinking"`) {
+		t.Fatalf("opencode 的请求被关了思考（现场 bug）:\n%s", out)
+	}
+
+	var got struct {
+		Messages []struct {
+			ReasoningContent string `json:"reasoning_content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("改完不是合法 JSON: %v\n%s", err, out)
+	}
+	if got.Messages[1].ReasoningContent == "" {
+		t.Fatalf("思考开着就必须回传推理内容，缺了上游要 400:\n%s", out)
+	}
+	if !strings.Contains(strings.Join(notes, "\n"), "reasoning_content") {
+		t.Fatalf("改了 reasoning_content 却没回报（违反「不静默」）: %v", notes)
+	}
+}
+
+// 对照组：Claude Code 那条路照旧显式关掉——它剥思考块，开着也回不来。
+func TestDeepSeekClaudeCodeStillDisablesThinking(t *testing.T) {
+	body := []byte(`{"model":"deepseek-chat","messages":[{"role":"assistant","content":"a"}]}`)
+	out, notes, err := deepseek{}.Apply(body, claudeReq("deepseek-chat"))
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !strings.Contains(string(out), `"thinking":{"type":"disabled"}`) {
+		t.Fatalf("Claude Code 的请求没被关思考:\n%s", out)
+	}
+	if !strings.Contains(strings.Join(notes, "\n"), "注入 thinking") {
+		t.Fatalf("注入没回报: %v", notes)
+	}
+}
+
+// 第 3 手（content[] 开头的 thinking 块）是 Anthropic 方言的协议要求；
+// OpenAI 方言里回传推理的载体是 reasoning_content，往人家的 content[] 里
+// 塞一个上游不认识的块类型只会招 400。
+func TestDeepSeekNoThinkingBlockInOpenAIDialect(t *testing.T) {
+	body := []byte(`{"model":"deepseek-flash","thinking":{"type":"enabled"},` +
+		`"messages":[{"role":"assistant","content":[` +
+		`{"type":"tool_use","id":"t-oa-0001","name":"Read","input":{}}]}]}`)
+
+	out, _, err := deepseek{}.Apply(body, &Request{Model: "deepseek-flash",
+		Provider: "smt-deepseek", BaseURL: "https://gw.example.com/v1",
+		Path: "/chat/completions"})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if strings.Contains(string(out), `"type":"thinking"`) {
+		t.Fatalf("往 OpenAI 方言的 content[] 里塞了 thinking 块:\n%s", out)
+	}
+	if !strings.Contains(string(out), `"reasoning_content"`) {
+		t.Fatalf("reasoning_content 该照补:\n%s", out)
 	}
 }

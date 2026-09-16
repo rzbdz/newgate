@@ -153,10 +153,10 @@ func TestGlmMatch(t *testing.T) {
 	}
 }
 
-// TestGlmApply 现场机制：glm 把「没写 thinking」当默认开。没写就补显式
-// disabled；写了（真要思考）一个字节不动。
+// TestGlmApply 现场机制：glm 把「没写 thinking」当默认开。Claude Code 没写
+// 就补显式 disabled；写了（真要思考）一个字节不动。
 func TestGlmApply(t *testing.T) {
-	r := req("glm-5.3", "smt-glm", "https://gw.example.com/v1")
+	r := claudeReq("glm-5.3")
 
 	t.Run("没写 thinking 就补 disabled", func(t *testing.T) {
 		body := []byte(`{"model":"glm-5.3","max_tokens":64,"messages":[{"role":"user","content":"go"}]}`)
@@ -197,6 +197,28 @@ func TestGlmApply(t *testing.T) {
 			t.Fatalf("没 messages 没东西可补: out=%s notes=%v", out, notes)
 		}
 	})
+}
+
+// TestGlmApply_OpencodeUntouched 现场回归（2026-09-15，与 st-deepseek 同款）：
+// opencode 走 OpenAI 方言，没有 thinking 这个字段可写，它不发 thinking 不是
+// 「不想思考」。替它补 disabled 就是把用户给模型配的行为改掉。
+func TestGlmApply_OpencodeUntouched(t *testing.T) {
+	r := &Request{Model: "glm-5.3", Provider: "smt-glm",
+		BaseURL: "https://gw.example.com/v1", Protocol: "openai",
+		Path: "/chat/completions"}
+
+	body := []byte(`{"model":"glm-5.3","max_tokens":64,"messages":[{"role":"user","content":"go"}]}`)
+	out, notes, err := (glm{}).Apply(body, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(body) || len(notes) != 0 {
+		t.Fatalf("opencode 的请求被补了 thinking（现场 bug）: out=%s notes=%v", out, notes)
+	}
+	// Match 仍然认领（它认的是上游）——认领但不动，这是两条独立的判断。
+	if !(glm{}).Match(r) {
+		t.Fatal("glm 插件该继续认领 glm 上游")
+	}
 }
 
 // TestClaudeBgThenGlmCompose 组合语义：claude-bg 先把后台请求的 thinking

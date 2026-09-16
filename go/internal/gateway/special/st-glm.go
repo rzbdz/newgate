@@ -16,10 +16,17 @@ func init() { Register(glm{}) }
 // 不思考，Claude 家族也是这么实现的；GLM 把缺省当成了开。于是「客户端
 // 没要求思考」的请求被拖进 15-30 秒的思考。
 //
-// 修法与 st-deepseek 第 1 手同款：**只在客户端没写 thinking 时**补显式
-// disabled；写了（enabled/adaptive）就一个字节不动——那是客户端真要思考。
-// 与 claude-bg 的分工：那边按客户端（claude 的后台非流式请求，带了也改写），
-// 这边按模型（glm 系，任何客户端，只补缺）。
+// 修法与 st-deepseek 第 1 手同款：只在 Claude Code **没写 thinking 时**补
+// 显式 disabled；写了（enabled/adaptive）就一个字节不动——那是客户端真要
+// 思考。与 claude-bg 的分工：那边按请求形态（claude 的后台非流式）认领、
+// 这边按上游（glm 系），互补不重复。
+//
+// 为什么只给 Claude Code 补（claudeCode，见 special.go）：OpenAI 方言的
+// 客户端（opencode）压根没有 thinking 这个 Anthropic 字段可写，它不发
+// thinking 是表达能力问题、不是「不想思考」的意图。替它补 disabled 就是
+// 把用户给这个模型配的默认行为改掉——2026-09-15 的现场：opencode 走
+// DeepSeek 时条条请求被关思考，用户报「deepseek 不思考了」，同一天收窄。
+// GLM 把缺省当默认思考，对本来就要思考的客户端来说正是它想要的。
 //
 // 摘除条件：GLM 把缺省改成不思考（或网关替它改了），
 // `newgate st off glm` 即可验证；确认不需要了整文件可删。
@@ -30,7 +37,8 @@ func (glm) Name() string { return "glm" }
 func (glm) Why() string {
 	return "GLM 系模型把「没写 thinking」当默认开思考（Anthropic 语义是关）" +
 		"→ 没要求思考的请求被拖进十几秒\n" +
-		"客户端没写就补显式 disabled；写了就不动"
+		"Claude Code 那条路没写就补显式 disabled（写了不动）；" +
+		"OpenAI 方言的客户端（opencode）没有这个字段可写，不碰"
 }
 
 // Match 只认 GLM：模型名、provider 名、base URL 任一处出现 glm
@@ -52,6 +60,11 @@ func (glm) Match(r *Request) bool {
 }
 
 func (glm) Apply(body []byte, r *Request) ([]byte, []string, error) {
+	// 只给 Claude Code 补——别的客户端（opencode，OpenAI 方言）没有 thinking
+	// 这个字段可写，它不说话不代表它不想思考。见 claudeCode。
+	if !claudeCode(r) {
+		return body, nil, nil
+	}
 	if _, has := rewrite.TopLevelRaw(body, "thinking"); has {
 		return body, nil, nil // 客户端写了：尊重，一个字节不动
 	}

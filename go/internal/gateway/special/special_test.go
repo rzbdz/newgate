@@ -8,6 +8,9 @@ import (
 	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 )
 
+// req 一条不带 agent 身份的请求上下文（裸 /v1，认不出是谁）。
+// 测「按上游认领」的 Match/Apply 用它；要区分发起方的（deepseek 的关思考、
+// claude-bg）用 claudeReq——接管时只有 claude 的 base URL 带 /a/claude。
 func req(model, provider, baseURL string) *Request {
 	return &Request{
 		InModel: "heavy", Tier: "heavy",
@@ -38,7 +41,8 @@ func TestDeepseekMatch(t *testing.T) {
 }
 
 // TestDeepseekApply 复现现场那条 400：多轮里带 tool_use 的 assistant 消息
-// 没有 reasoning_content。两处修补都要落地，其他字节一个不动。
+// 没有 reasoning_content。两处修补都要落地（关思考 + 补推理），其他字节
+// 一个不动。走 claudeReq：只有 Claude Code 才会被关思考。
 func TestDeepseekApply(t *testing.T) {
 	body := []byte(`{"model":"deepseek-chat","max_tokens":8192,"messages":[` +
 		`{"role":"user","content":[{"type":"text","text":"看下这个文件","cache_control":{"type":"ephemeral"}}]},` +
@@ -46,7 +50,7 @@ func TestDeepseekApply(t *testing.T) {
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"…"}]}` +
 		`],"stream":true}`)
 
-	out, notes, err := (deepseek{}).Apply(body, req("deepseek-chat", "gw", "https://gw.example.com/v1"))
+	out, notes, err := (deepseek{}).Apply(body, claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +99,7 @@ func TestDeepseekApply(t *testing.T) {
 func TestDeepseekApply_RespectsExplicitThinking(t *testing.T) {
 	body := []byte(`{"model":"deepseek-reasoner","thinking":{"type":"enabled","budget_tokens":1024},` +
 		`"messages":[{"role":"assistant","content":"hi"}]}`)
-	out, notes, err := (deepseek{}).Apply(body, req("deepseek-reasoner", "gw", "https://x/v1"))
+	out, notes, err := (deepseek{}).Apply(body, claudeReq("deepseek-reasoner"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +114,7 @@ func TestDeepseekApply_RespectsExplicitThinking(t *testing.T) {
 // TestDeepseekApply_NoMessages 没有 messages（如 /v1/models）不算错。
 func TestDeepseekApply_NoMessages(t *testing.T) {
 	out, notes, err := (deepseek{}).Apply([]byte(`{"model":"deepseek-chat"}`),
-		req("deepseek-chat", "gw", "https://x/v1"))
+		claudeReq("deepseek-chat"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +130,7 @@ func TestDeepseekApply_NoMessages(t *testing.T) {
 // 请求体时不能越改越多。
 func TestDeepseekApply_Idempotent(t *testing.T) {
 	body := []byte(`{"model":"deepseek-chat","messages":[{"role":"assistant","content":"a"}]}`)
-	r := req("deepseek-chat", "gw", "https://x/v1")
+	r := claudeReq("deepseek-chat")
 	once, _, err := (deepseek{}).Apply(body, r)
 	if err != nil {
 		t.Fatal(err)
