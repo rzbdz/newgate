@@ -7,7 +7,7 @@ import (
 )
 
 // componentCLIHost exposes rendering and daemon notification primitives to
-// component-owned commands without importing concrete components into the CLI.
+// module-owned commands without importing concrete modules into the CLI.
 type componentCLIHost struct{}
 
 func (componentCLIHost) Die(code int, message string) int { return die(code, message) }

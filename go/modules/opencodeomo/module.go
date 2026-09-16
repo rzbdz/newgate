@@ -25,6 +25,7 @@ func (moduleProvider) Component() modules.Component {
 	return modules.Component{
 		Name: "opencode-omo",
 		Requires: []modules.Requirement{
+			modules.Need(contracts.ConfigCapability),
 			modules.Need(contracts.ConfigHooksCapability),
 			modules.Need(contracts.OpenCodeClient),
 		},

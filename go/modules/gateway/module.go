@@ -30,7 +30,8 @@ func New() modules.Provider {
 func (p provider) Component() modules.Component {
 	instance := &p
 	return modules.Component{
-		Name: "gateway",
+		Name:     "gateway",
+		Requires: []modules.Requirement{modules.Need(contracts.ConfigCapability)},
 		Provides: []modules.Provision{
 			modules.Provide(contracts.GatewayCapability, contracts.Gateway(p.port)),
 		},

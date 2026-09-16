@@ -17,8 +17,11 @@ func New() modules.Provider { return provider{} }
 func (provider) Component() modules.Component {
 	var restore func()
 	return modules.Component{
-		Name:     "runtime",
-		Requires: []modules.Requirement{modules.Need(contracts.AgentCatalogCapability)},
+		Name: "runtime",
+		Requires: []modules.Requirement{
+			modules.Need(contracts.ConfigCapability),
+			modules.Need(contracts.AgentCatalogCapability),
+		},
 		Provides: []modules.Provision{
 			modules.Provide(contracts.RuntimeCapability, contracts.Runtime{}),
 		},

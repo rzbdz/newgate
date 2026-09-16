@@ -75,6 +75,12 @@ go/
 编译期只要求 `component` 不 import `modules`。组件之间不靠目录层级表达依赖，
 而靠 capability；`modules/builtin` 是唯一可以 import 全部具体组件的装配点。
 
+除 `builtin`（装配器）和 `contracts`（共享契约）外，每个
+`go/modules/<name>/` 都是一个组件，并以根目录的 **`module.go`** 作为唯一标准
+入口。`module.go` 声明 `New()`、`Component()`、`Requires` 和 `Provides`；
+复杂组件可以有任意内部文件和子包，但不能把入口改叫 `component.go`、散落到子目录，
+或让装配器依赖文件布局猜测入口。
+
 ### 2.1 整个运行时是一张组件图
 
 newgate 没有“框架知道的特殊模块类型”。参与运行时装配的对象都实现同一个
@@ -95,11 +101,13 @@ Manager 位于 `go/component`，只会校验 capability 的名字、Go 类型、
 单例多 provider、类型冲突和依赖环都会拒绝启动。它不知道 request hook、agent、
 state field、doctor 或 CLI command 是什么。
 
-两个根能力：
+一个基础能力和两个扩展根能力：
 
-1. `gateway` 组件提供请求扩展端口和本地入口；模型、客户端及交叉组件消费它，
+1. `config` 组件拥有配置语义、解析、持久化和路径，提供 `config` 能力；Gateway、
+   Runtime、CLI 和需要直接操作配置的组件显式消费它。
+2. `gateway` 组件消费 `config`，提供请求扩展端口和本地入口；模型、客户端及交叉组件消费它，
    把 request/route/response hook 注册进去。
-2. `config-hook` 消费 `gateway`，提供 agent/config/state-field/role 注册端口；
+3. `config-hook` 消费 `config` 和 `gateway`，提供 agent/config/state-field/role 注册端口；
    客户端及其配置扩展消费它。
 
 因此每个组件既可做 provider，也可做 consumer。`opencode-omo` 消费
