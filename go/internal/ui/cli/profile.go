@@ -287,13 +287,9 @@ func tierReport(which string) int {
 		} else {
 			fmt.Println(style.Field("最终", style.Cyan(r.steps[0].Binding.String())))
 			fmt.Println()
-			t := style.NewTable("#", "profile", "绑定", "实时评分")
-			t.AlignRight(0)
-			for i, s := range r.steps {
-				t.Row(fmt.Sprintf("%d", i+1), s.Profile, s.Binding.String(),
-					bindingHealthLabel(liveHealth[s.Binding.String()]))
-			}
-			fmt.Print(t.String())
+			fmt.Print(numberedBindingChain(r.steps, func(step resolve.Step) string {
+				return bindingHealthLabel(liveHealth[step.Binding.String()])
+			}))
 			fmt.Println(style.Hint("链头固定；fallback 按当前上下文的预测 TTFT 排序"))
 			fmt.Println(style.Hint("同 (provider, model) 全链仅一次"))
 			if limit := st.Chain.Attempts(); limit < len(r.steps) {
@@ -336,6 +332,35 @@ func chainSig(steps []resolve.Step) string {
 		b.WriteByte('|')
 	}
 	return b.String()
+}
+
+func bindingChain(steps []resolve.Step, indent string) string {
+	var out strings.Builder
+	for i, step := range steps {
+		out.WriteString(indent)
+		if i > 0 {
+			out.WriteString(style.Dim("→ "))
+		}
+		out.WriteString(step.Binding.String())
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
+func numberedBindingChain(steps []resolve.Step, extra func(resolve.Step) string) string {
+	var out strings.Builder
+	for i, step := range steps {
+		out.WriteString(fmt.Sprintf("  %d. %s\n", i+1, step.Binding.String()))
+		detail := "profile " + step.Profile
+		if extra != nil {
+			if value := extra(step); value != "" {
+				detail += " · " + value
+			}
+		}
+		out.WriteString(style.Hint(detail))
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 func tierOverview(rows []tierView) string {

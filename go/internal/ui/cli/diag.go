@@ -1139,11 +1139,7 @@ func cmdStatus() int {
 		if len(steps) == 0 {
 			fmt.Println(style.Item(style.Warn, "无可用候选   newgate tier normal"))
 		} else {
-			var parts []string
-			for _, s := range steps {
-				parts = append(parts, style.Cyan(s.Binding.String()))
-			}
-			fmt.Print("  " + strings.Join(parts, style.Dim(" → ")) + "\n")
+			fmt.Print(bindingChain(steps, "  "))
 			if tail := chainTail(steps, skips); tail != "" {
 				fmt.Println(style.Hint(tail))
 			}
