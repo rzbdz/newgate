@@ -142,3 +142,145 @@ func (s *Server) Start() error {
 	s.logf("[proxy] 监听 127.0.0.1:%d", s.Port)
 	return s.srv.Serve(ln)
 }
+
+// listen 拿监听 socket：父进程交接来的 fd 优先（优雅升级路径），否则
+// 自己 listen。继承时 fd 号从 NEWGATE_LISTENER_FD 读，读完立刻 unset——
+// 环境变量不能传染给这个进程之后 spawn 的任何东西（比如它自己的升级
+// 子进程、或懒启动路径的普通 Spawn），否则 fd3 会被当成 socket 用。
+func (s *Server) listen() (net.Listener, error) {
+	if fdStr := os.Getenv("NEWGATE_LISTENER_FD"); fdStr != "" {
+		os.Unsetenv("NEWGATE_LISTENER_FD")
+		fd, err := strconv.Atoi(fdStr)
+		if err != nil {
+			return nil, fmt.Errorf("NEWGATE_LISTENER_FD=%q 不是 fd 号: %w", fdStr, err)
+		}
+		f := os.NewFile(uintptr(fd), "inherited-listener")
+		ln, err := net.FileListener(f)
+		if err != nil {
+			return nil, fmt.Errorf("继承监听 fd %d 失败: %w", fd, err)
+		}
+		if _, ok := ln.(*net.TCPListener); !ok {
+			ln.Close()
+			return nil, fmt.Errorf("继承的 fd %d 不是 TCP 监听器", fd)
+		}
+		// 端口号以真身为准：继承路径下 s.Port 参数可能只是父进程的复述
+		if a, ok := ln.Addr().(*net.TCPAddr); ok {
+			s.Port = a.Port
+		}
+		return ln, nil
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.Port))
+	if err != nil {
+		return nil, fmt.Errorf("监听 127.0.0.1:%d 失败: %w", s.Port, err)
+	}
+	return ln, nil
+}
+
+// signalReady 优雅交接的另一半握手：进入 accept 循环前往父进程给的
+// 管道写一个字节。没有交接（正常 Spawn 启动）时是空操作。
+func (s *Server) signalReady() {
+	fdStr := os.Getenv("NEWGATE_READY_FD")
+	if fdStr == "" {
+		return
+	}
+	os.Unsetenv("NEWGATE_READY_FD")
+	if fd, err := strconv.Atoi(fdStr); err == nil {
+		if f := os.NewFile(uintptr(fd), "ready-pipe"); f != nil {
+			_, _ = f.Write([]byte{1})
+			_ = f.Close()
+		}
+	}
+}
+
+func (s *Server) Shutdown() {
+	health.Default.Flush()
+	if s.srv != nil {
+		_ = s.srv.Close()
+	}
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	snap := s.snap()
+	if snap == nil {
+		s.fail(w, 400, "配置读不出 ← 跑 `newgate doctor`")
+		return
+	}
+	st := snap.State
+	tc := thinkcache.Default.Stats()
+	writeJSON(w, 200, map[string]interface{}{
+		"ok":              true,
+		"default_profile": st.DefaultProfile,
+		"active":          st.Active,
+		"port":            s.Port,
+		"requests":        atomic.LoadUint64(&s.requests),
+		"failures":        atomic.LoadUint64(&s.failures),
+		"breakers":        health.Default.Snapshot(),
+		"uptime_s":        int(time.Since(s.started).Seconds()),
+		"tiers":           domain.Roles,
+		// 给 `newgate restart` 探测用：支持优雅交接（socket 移交）。
+		// 旧版 daemon 没这个字段——restart 看到缺失就退回 stop+start，
+		// 绝不盲发 /__newgate/upgrade（那会被 catch-all 转发到上游）。
+		"handoff": true,
+		// 推理内容缓存：只报计数，绝不报内容
+		"thinkcache": map[string]interface{}{
+			"entries":   tc.Entries,
+			"bytes":     tc.Bytes,
+			"max_bytes": tc.MaxBytes,
+			"hits":      tc.Hits,
+			"misses":    tc.Misses,
+			"puts":      tc.Puts,
+			"evictions": tc.Evictions,
+		},
+	})
+}
+
+type probeHealthObservation struct {
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Status    int    `json:"status"`
+	LatencyMs int64  `json:"latency_ms"`
+	Context   int    `json:"context_bytes"`
+	Error     string `json:"error,omitempty"`
+}
+
+// handleHealth 接收 probe 的主动健康结论，写入 daemon 唯一的全局熔断表。
+// probe 是 4-token 极小请求；超过分类器首字节阈值仍未完成，就不具备进入
+// 交互 fallback 链的资格，即使它最终回了 200。
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": "只接受 POST"})
+		return
+	}
+	snap := s.snap()
+	if snap == nil || snap.State.ControlToken == "" ||
+		r.Header.Get("Authorization") != "Bearer "+snap.State.ControlToken {
+		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": "control token 不符"})
+		return
+	}
+	var req struct {
+		Observations []probeHealthObservation `json:"observations"`
+	}
+	dec := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]interface{}{"ok": false, "error": "请求 JSON 无效"})
+		return
+	}
+	threshold := snap.State.Timeouts.ClassifierFirstByte()
+	opened := 0
+	for _, o := range req.Observations {
+		if o.Provider == "" || o.Model == "" {
+			continue
+		}
+		grade, didOpen := health.Default.RecordProbe(o.Provider, o.Model, o.Status, o.Context,
+			time.Duration(o.LatencyMs)*time.Millisecond, threshold, o.Error)
+		if didOpen {
+			opened++
+			s.logf("[probe] 熔断 %s/%s：%s（至少 60s，之后须 probe 成功才回链）",
+				o.Provider, o.Model, grade)
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"ok": true, "opened": opened, "breakers": health.Default.Snapshot(),
+	})
+}
