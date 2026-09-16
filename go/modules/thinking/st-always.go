@@ -124,3 +124,66 @@ func noDisableTranslate(body []byte) (out []byte, translated bool, notes []strin
 // 注册表的两个来源：转发时撞上这个报错学到（一次失败换永久免疫），或者
 // newgate probe 主动探出来。
 type alwaysThinks struct{}
+
+func (alwaysThinks) Name() string { return "always-thinks" }
+
+func (alwaysThinks) Before() []string { return nil }
+func (alwaysThinks) After() []string {
+	return []string{"claude-bg", "claudecode-deepseek", "deepseek", "glm"}
+}
+
+func (alwaysThinks) Why() string {
+	return "有些模型始终思考，收到「关闭思考」就 400（GLM code 1210）\n" +
+		"给这些模型补显式 reasoning_effort=low，并把 thinking:disabled 改回 enabled" +
+		"（BestEffortDisableThink 的兜底半边）"
+}
+
+func (alwaysThinks) Match(r *special.Request) bool {
+	if r == nil {
+		return false
+	}
+	return quirk.Has(r.Provider, r.Model, quirk.NoThinkingDisable)
+}
+
+func (alwaysThinks) Apply(body []byte, r *special.Request) ([]byte, []string, error) {
+	// 不变量保险：quirk 是按 (provider, r.Model) 学的，只对还发往这个模型
+	// 的请求生效。链上 r.Model 由框架从 body 同步（special.Apply），正常
+	// 到不了这里就不相等；直调或将来有新路径时这一道把「补丁打错模型」
+	// 挡在最后关口。
+	if bm, has := rewrite.TopLevelString(body, "model"); has && bm != r.Model {
+		return body, nil, nil
+	}
+
+	var notes []string
+	out := body
+	needEffort := false
+
+	if _, hasThinking := rewrite.TopLevelRaw(out, "thinking"); hasThinking {
+		// disabled → 翻译（与 BestEffortDisableThink 共用同一份核心）
+		if nb, translated, ns, err := noDisableTranslate(out); err != nil {
+			notes = append(notes, "thinking 未改动（"+err.Error()+"）")
+		} else if translated {
+			out = nb
+			notes = append(notes, ns...)
+		}
+	} else if _, hasTools := rewrite.TopLevelRaw(out, "tools"); hasTools {
+		// 没写 thinking 还带 tools：聚合器会隐式替我们关思考 → 1210。
+		// （显式写了 adaptive/enabled 的不在此列——客户端要思考，没人隐式关它。）
+		needEffort = true
+	}
+
+	// 补显式 reasoning_effort（tools 形态）。这是真正盖过聚合器那个隐式
+	// disable 的一手。
+	if needEffort {
+		if _, has := rewrite.TopLevelRaw(out, "reasoning_effort"); !has {
+			if nb, err := rewrite.InsertTopLevelRaw(out, "reasoning_effort", []byte(`"low"`)); err != nil {
+				notes = append(notes, "reasoning_effort 未补上（"+err.Error()+"）")
+			} else {
+				out = nb
+				notes = append(notes, `补 reasoning_effort:"low"（报错原文要求 low/high/max）`)
+			}
+		}
+	}
+
+	return out, notes, nil
+}
