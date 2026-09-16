@@ -49,3 +49,8 @@ type Requirement struct {
 	spec     capabilitySpec
 	optional bool
 }
+
+// Need 建立硬依赖；缺少提供者时整张图拒绝启动。
+func Need[T any](capability Capability[T]) Requirement {
+	return Requirement{spec: capability.spec}
+}
