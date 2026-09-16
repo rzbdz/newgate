@@ -2,7 +2,9 @@ package claudecode_deepseek
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
+	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek/api"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
 )
 
 type moduleProvider struct{}
@@ -15,14 +17,14 @@ func (moduleProvider) Component() modules.Component {
 	return modules.Component{
 		Name: "claudecode-deepseek",
 		Requires: []modules.Requirement{
-			modules.Need(contracts.GatewayCapability),
-			modules.Need(contracts.ClaudeCodeClient),
-			modules.Need(contracts.DeepSeekModel),
+			modules.Need(gatewayapi.Capability),
+			modules.Need(claudeapi.Capability),
+			modules.Need(deepseekapi.Capability),
 		},
 		Start: func(ctx modules.Context) error {
-			gateway := modules.MustGet(ctx, contracts.GatewayCapability)
-			client := modules.MustGet(ctx, contracts.ClaudeCodeClient)
-			model := modules.MustGet(ctx, contracts.DeepSeekModel)
+			gateway := modules.MustGet(ctx, gatewayapi.Capability)
+			client := modules.MustGet(ctx, claudeapi.Capability)
+			model := modules.MustGet(ctx, deepseekapi.Capability)
 			for _, treatment := range Treatments(client, model) {
 				gateway.RegisterRequestHook(treatment)
 			}

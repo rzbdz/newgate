@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	agents "github.com/rzbdz/newgate/go/modules/builtin"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/api"
 )
 
 // main 做 argv0 分发：被当成某个 agent 调用时进 wrapper，被当成
@@ -20,7 +20,7 @@ func main() {
 		return
 	}
 	cli := agents.CLI()
-	build := contracts.BuildInfo{
+	build := cliapi.BuildInfo{
 		Version: version, BuildTime: buildTime, CommitTime: commitTime,
 	}
 

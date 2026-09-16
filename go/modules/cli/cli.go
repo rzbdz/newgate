@@ -138,8 +138,8 @@ func run(args []string) int {
 	if _, ok := detectLaunch(args); ok {
 		return cmdLaunch(args)
 	}
-	if command, ok := componentCommand(args[0]); ok {
-		return command.Run(componentCLIHost{}, args[1:])
+	if command, ok := moduleCommand(args[0]); ok {
+		return command.Run(moduleCLIHost{}, args[1:])
 	}
 
 	switch args[0] {

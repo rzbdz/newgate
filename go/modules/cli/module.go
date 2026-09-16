@@ -5,8 +5,11 @@ import (
 	"sync"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/api"
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
+	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime/api"
 )
 
 type provider struct{}
@@ -14,11 +17,11 @@ type service struct{}
 
 var (
 	_ modules.Provider = (*provider)(nil)
-	_ contracts.CLI    = (*service)(nil)
+	_ cliapi.CLI       = (*service)(nil)
 
 	extensionsMu sync.RWMutex
-	commands     []contracts.CLICommand
-	diagnostics  []contracts.DiagnosticProvider
+	commands     []cliapi.Command
+	diagnostics  []cliapi.DiagnosticProvider
 )
 
 func New() modules.Provider { return provider{} }
@@ -27,18 +30,18 @@ func (provider) Component() modules.Component {
 	return modules.Component{
 		Name: "cli",
 		Requires: []modules.Requirement{
-			modules.Need(contracts.ConfigCapability),
-			modules.Need(contracts.RuntimeCapability),
-			modules.Optional(contracts.CLICommandsCapability),
-			modules.Optional(contracts.DiagnosticsCapability),
+			modules.Need(configapi.Capability),
+			modules.Need(runtimeapi.Capability),
+			modules.Optional(cliapi.CommandsCapability),
+			modules.Optional(cliapi.DiagnosticsCapability),
 		},
 		Provides: []modules.Provision{
-			modules.Provide(contracts.CLICapability, contracts.CLI(service{})),
+			modules.Provide(cliapi.Capability, cliapi.CLI(service{})),
 		},
 		Start: func(ctx modules.Context) error {
 			extensionsMu.Lock()
-			commands = modules.GetAll(ctx, contracts.CLICommandsCapability)
-			diagnostics = modules.GetAll(ctx, contracts.DiagnosticsCapability)
+			commands = modules.GetAll(ctx, cliapi.CommandsCapability)
+			diagnostics = modules.GetAll(ctx, cliapi.DiagnosticsCapability)
 			extensionsMu.Unlock()
 			return nil
 		},
@@ -52,14 +55,14 @@ func (provider) Component() modules.Component {
 	}
 }
 
-func (service) Run(args []string, build contracts.BuildInfo) int {
+func (service) Run(args []string, build cliapi.BuildInfo) int {
 	Version = build.Version
 	BuildTime = build.BuildTime
 	CommitTime = build.CommitTime
 	return Run(args)
 }
 
-func componentCommand(name string) (contracts.CLICommand, bool) {
+func moduleCommand(name string) (cliapi.Command, bool) {
 	extensionsMu.RLock()
 	defer extensionsMu.RUnlock()
 	for _, command := range commands {
@@ -72,14 +75,14 @@ func componentCommand(name string) (contracts.CLICommand, bool) {
 	return nil, false
 }
 
-func componentDiagnostics() []contracts.Diagnostic {
+func moduleDiagnostics() []cliapi.Diagnostic {
 	extensionsMu.RLock()
 	defer extensionsMu.RUnlock()
-	var out []contracts.Diagnostic
+	var out []cliapi.Diagnostic
 	for _, provider := range diagnostics {
 		out = append(out, provider.Diagnostics()...)
 	}
 	return out
 }
 
-func agentCatalog() contracts.AgentCatalog { return agentstate.Catalog() }
+func agentCatalog() confighookapi.AgentCatalog { return agentstate.Catalog() }

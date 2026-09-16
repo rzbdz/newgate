@@ -5,15 +5,16 @@ import (
 	"testing"
 
 	"github.com/rzbdz/newgate/go/modules/claudecode"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
 	"github.com/rzbdz/newgate/go/modules/deepseek"
+	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
 func testPlugin() thinking {
 	return thinking{
-		client: contracts.ClientFamily{AgentID: claudecode.ID},
-		model:  contracts.ModelFamily{MatchTarget: deepseek.MatchTarget},
+		client: claudeapi.Client{AgentID: claudecode.ID},
+		model:  deepseekapi.Model{MatchTarget: deepseek.MatchTarget},
 	}
 }
 
