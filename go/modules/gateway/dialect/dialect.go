@@ -120,3 +120,38 @@ func Supports(provider, model string, c Cap) (ok, known bool) {
 	}
 	return e.supported&c != 0, true
 }
+
+// Entry 给 newgate status / probe 报告展示。
+type Entry struct {
+	Provider string
+	Model    string
+	Supports Cap
+	Known    Cap
+}
+
+func Snapshot() []Entry {
+	mu.RLock()
+	defer mu.RUnlock()
+	var out []Entry
+	for k, e := range caps {
+		i := strings.LastIndexByte(k, '/')
+		if i < 0 {
+			continue
+		}
+		out = append(out, Entry{Provider: k[:i], Model: k[i+1:], Supports: e.supported, Known: e.known})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		return out[i].Model < out[j].Model
+	})
+	return out
+}
+
+// Reset 仅供测试。
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	caps = map[string]entry{}
+}
