@@ -336,3 +336,16 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 	}
 	return ordered, values, nil
 }
+
+func isNil(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
