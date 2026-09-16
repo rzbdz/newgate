@@ -124,3 +124,44 @@ func DefaultBindingFor(key string) (Binding, bool) {
 	}
 	return Binding{Ref: d}, true
 }
+
+// IsKnownRole 客户端发来的 model 字段是不是一个**角色键**（档位或动态角色）。
+// 不是的话就按「具体模型名」反查（docs/04-configuration.md）。
+func IsKnownRole(s string) bool {
+	if IsRole(s) {
+		return true
+	}
+	_, ok := ExtraRoleOf(s)
+	return ok
+}
+
+// TierLadder 阶梯档由弱到强。vision 是**正交**档（看得见图，不代表更聪明），
+// 不在阶梯上，也就不能靠「升一级」从别的档走过来。
+var TierLadder = []string{"light", "mid", "normal", "heavy"}
+
+// ShiftTier 在阶梯上挪 n 级（越界夹住）。不是阶梯档（vision / 未知）原样返回。
+// 用途：omo 槽位的 `variant`（max/high/low）表达的是「这条槽位调多猛」，
+// 算建议档位时把它折进体格（docs/04-configuration.md）。
+func ShiftTier(tier string, n int) string {
+	if n == 0 {
+		return tier
+	}
+	i := -1
+	for j, t := range TierLadder {
+		if t == tier {
+			i = j
+			break
+		}
+	}
+	if i < 0 {
+		return tier
+	}
+	i += n
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(TierLadder) {
+		i = len(TierLadder) - 1
+	}
+	return TierLadder[i]
+}
