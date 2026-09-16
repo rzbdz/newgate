@@ -132,3 +132,103 @@ func cmdSpecial(args []string) int {
 	notifyProxy()
 	return 0
 }
+
+func findPlugin(name string) special.Plugin {
+	for _, p := range special.Plugins() {
+		if p.Name() == name {
+			return p
+		}
+	}
+	return nil
+}
+
+// specialState 单个插件此刻的状态：层开关 + 单插件开关。
+func specialState(st *domain.State, name string) (mark, word string) {
+	switch {
+	case !st.SpecialEnabled():
+		return style.Skip, "整层关闭"
+	case st.SpecialPluginOff(name):
+		return style.Bad, "已单独关闭"
+	}
+	return style.OK, "生效"
+}
+
+func specialList(st *domain.State) int {
+	ps := special.Plugins()
+	layer := style.Green("开")
+	if !st.SpecialEnabled() {
+		layer = style.Yellow("关（整层）")
+	}
+	fmt.Println(style.Title("newgate st", fmt.Sprintf("special_treatment %s · %d 个插件", layer, len(ps))))
+	fmt.Println(style.Rule(72))
+	if len(ps) == 0 {
+		fmt.Println(style.Hint("没有注册任何插件"))
+		return 0
+	}
+	t := style.NewTable("状态", "插件", "为什么存在")
+	for _, p := range ps {
+		mark, _ := specialState(st, p.Name())
+		why := strings.SplitN(p.Why(), "\n", 2)[0]
+		t.Row(style.Mark(mark), p.Name(), style.Dim(why))
+	}
+	fmt.Print(t.String())
+	fmt.Println(style.Hint("上游怪癖补丁：只对认领本次请求的上游生效，改动逐条写日志"))
+	fmt.Println(style.Hint("看完整说明 newgate st <插件> · 单独关 newgate st off <插件> · 整层关 newgate st off"))
+	printThinkCache()
+	return 0
+}
+
+func specialExplain(st *domain.State, name string) int {
+	p := findPlugin(name)
+	mark, word := specialState(st, name)
+	fmt.Println(style.Title("newgate st "+name, word))
+	fmt.Println(style.Rule(72))
+	fmt.Println(style.Item(mark, p.Why()))
+	fmt.Println()
+	if st.SpecialPluginOff(name) {
+		fmt.Println(style.Hint("打开：newgate st on " + name))
+	} else {
+		fmt.Println(style.Hint("关闭：newgate st off " + name))
+	}
+	return 0
+}
+
+func cmdTUI() int {
+	if err := tui.Run(); err != nil {
+		return die(70, err.Error())
+	}
+	return 0
+}
+
+// printThinkCache 展示推理内容缓存的命中情况。
+//
+// 数字必须从**跑着的守护进程**取：缓存在守护进程的内存里，CLI 是另一个进程，
+// 在这边读 thinkcache.Default 只会看到一个空缓存——那比不显示更误导人。
+//
+// 只报计数，永远不报内容。
+func printThinkCache() {
+	info, ps := proxyState()
+	if info == nil || ps == nil {
+		return
+	}
+	t := ps.Think
+	fmt.Println()
+	fmt.Println(style.Field("推理缓存", fmt.Sprintf("%d 条 · %s / %s · 命中 %d · 未命中 %d · 淘汰 %d",
+		t.Entries, human(t.Bytes), human(t.MaxBytes), t.Hits, t.Misses, t.Evictions)))
+	fmt.Println(style.Hint("客户端会丢弃上游的推理内容，代理代为保存并在下一轮原样补回"))
+	if t.Misses > 0 {
+		fmt.Println(style.Hint("未命中只能补空串（那几轮模型看不到自己的上一轮推理）；日志逐条有记"))
+	}
+	fmt.Println(style.Hint("内存 + thinkcache.bin 冷层；重启后自动装回，只存计数不存内容"))
+}
+
+func human(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
+}
