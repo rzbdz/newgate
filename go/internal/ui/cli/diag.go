@@ -634,12 +634,12 @@ func cmdStatus() int {
 	}
 
 	if snap, err := store.Load(); err == nil {
-		steps, skips := resolve.BuildChain("heavy", snap.Profiles, snap.Providers, resolve.Opts{
+		steps, skips := resolve.BuildChain("normal", snap.Profiles, snap.Providers, resolve.Opts{
 			Active: st.DefaultProfile, Available: health.Default.Available,
 			MaxSteps: st.Chain.Attempts()})
-		fmt.Printf("\nfallback 链  (heavy 档)\n")
+		fmt.Printf("\nfallback 链  (normal 档，主力)\n")
 		if len(steps) == 0 {
-			fmt.Println("  ⚠ 无可用候选（newgate tier heavy 看原因）")
+			fmt.Println("  ⚠ 无可用候选（newgate tier normal 看原因）")
 		} else {
 			for i, s := range steps {
 				arrow := "  ↓ "
@@ -649,7 +649,7 @@ func cmdStatus() int {
 				fmt.Printf("%s%s: %s\n", arrow, s.Profile, s.Binding.String())
 			}
 			if len(skips) > 0 {
-				fmt.Printf("  （%d 个候选被跳过，newgate tier heavy 看原因）\n", len(skips))
+				fmt.Printf("  （%d 个候选被跳过，newgate tier normal 看原因）\n", len(skips))
 			}
 		}
 	}

@@ -32,7 +32,11 @@ func sandboxStore(t *testing.T) {
 		"roles": {"heavy": "smt-glm/glm-5.3", "mid": "smt-glm/glm-5.3",
 			"light": "smt-glm/glm-4.5-air", "vision": "smt-glm/glm-4.5-air"}
 	}`)
-	write("mappings/tiny.json", `{"name":"tiny","priority":30,"roles":{"heavy":"smt-glm/glm-4-plus"}}`)
+	// tiny 只写 heavy 的话，主力槽（四档化后是 normal）在它身上没有候选，
+	// 链会掉到下一个 profile——所以这里显式给 tiny 一条 normal（也是给它
+	// 的测试用例留个「主力档真名跟 profile 走」的断言点）。
+	write("mappings/tiny.json", `{"name":"tiny","priority":30,
+		"roles":{"heavy":"smt-glm/glm-4-plus","normal":"smt-glm/glm-4-plus"}}`)
 }
 
 // TestBuildInjectWindowEnv 窗口声明的注入。Claude Code 不认识我们注入的
@@ -103,8 +107,12 @@ func TestBuildInjectModelNames(t *testing.T) {
 		if got := inject["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:8899/a/claude" {
 			t.Errorf("BASE_URL = %q", got)
 		}
-		if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "heavy" {
+		// 四档化（2026-09-16）：opus 槽 = 主力档 normal，fable 槽才是 heavy
+		if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "normal" {
 			t.Errorf("动态模式槽位应是档位名，OPUS_MODEL = %q", got)
+		}
+		if got := inject["ANTHROPIC_DEFAULT_FABLE_MODEL"]; got != "heavy" {
+			t.Errorf("FABLE_MODEL = %q，应为 heavy", got)
 		}
 		if got := inject["ANTHROPIC_DEFAULT_HAIKU_MODEL"]; got != "light" {
 			t.Errorf("HAIKU_MODEL = %q，应为 light", got)

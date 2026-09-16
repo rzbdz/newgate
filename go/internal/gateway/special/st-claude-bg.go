@@ -12,7 +12,7 @@ func init() { Register(claudeBg{}) }
 //
 // 现场实抓（2026-09，Claude Code 2.1.263，NEWGATE_DUMP 落盘复核）：
 //
-//	主循环     heavy + stream=true + tools:33 + thinking:adaptive
+//	主循环     normal + stream=true + tools:33 + thinking:adaptive
 //	后台调用   mid   + 非流式      + tools 无 + thinking 没写
 //	分类器本体 再叠加：system ~126KB，开头是
 //	           "You are a security monitor for autonomous AI coding agents"；

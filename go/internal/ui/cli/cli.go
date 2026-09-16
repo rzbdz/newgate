@@ -62,7 +62,7 @@ const usage = `newgate — AI CLI 的语义模型层
 
 术语
   agent      被接管的 CLI —— claude / opencode
-  tier       能力档 —— heavy / mid / light / vision
+  tier       能力档 —— heavy / normal / mid / light / vision
   profile    一套 (tier → provider/model) 绑定
   st         special_treatment：只对某家上游生效的请求补丁
 

@@ -35,6 +35,28 @@ for P in profiles(按 priority 升序, 已过滤):
 
 这个顺序是有语义的：**先在当前任务档位内部找替代，找不到才降到下一个档位。** 符合直觉——「我要便宜的」应该先在便宜的里面挑，而不是一失败就跳到贵的。
 
+### 1.1 档位阶梯：四档（2026-09-16 落地的现状）
+
+Claude 自己就是 `fable / opus / sonnet / haiku` 四档，语义档位按它对齐，
+别的家族（只有大中小三个模型）自然映射得下：
+
+| 档位 | 对标 | 谁在用它 |
+| --- | --- | --- |
+| `heavy` | fable | 明确点名要最贵那档的活 |
+| `normal` | opus | **主力**：claude 的 opus 槽（主循环）、opencode 的 `model` |
+| `mid` | sonnet | Bash 分类器、`/compact` 总结、subagent |
+| `light` | haiku | 起标题这类小活 |
+| `vision` | — | 多模态，与上面的阶梯正交 |
+
+`normal` 是后加的档：**没写 `normal` 的配置，直接用 `mid` 顶上**
+（`domain.CandidatesFor`），不是「整层跳过」。跳过会让老配置在主力档上
+没有候选、链空转；而四档化之前主循环用的本来就是 mid 那一档的资源，语义
+上就该跟 mid 一样。写了 `normal` 的配置按自己的来。
+
+一个后果值得单独说：**只写了 `heavy`、没写 `mid` 的 profile，在主力档上
+没有候选**，链会掉到后面 priority 的 profile 去。老配置里「只写 heavy」
+很常见（懒），四档化之后要补一行 `normal=`（或 `mid=`）才留得住主力档。
+
 ## 2. 两级各管什么
 
 | 级别 | 表达的意思 | 例子 |
@@ -149,9 +171,9 @@ opencode                      # 用全局默认
 > 那需要 `providers.models` 区分「哪些 provider 提供这个确切模型」，仍后置（Q4）。
 
 > **槽位命名的两种模式**（2026-09-09 定稿，`runtime/launch` 的 `buildInject`）：
-> **动态**（默认）——槽位 env 保持档位名（`ANTHROPIC_DEFAULT_OPUS_MODEL=heavy`），
+> **动态**（默认）——槽位 env 保持档位名（`ANTHROPIC_DEFAULT_OPUS_MODEL=normal`），
 > 会话把档位名发回来，代理按**请求时**的当前配置解析：`newgate --set-profile`
-> 对跑着的会话立刻生效。界面显示语义层名字（恒真：「你在用 heavy 档」），
+> 对跑着的会话立刻生效。界面显示语义层名字（恒真：「你在用 normal 档」），
 > 实际模型看 `X-Newgate-Route` / `newgate tier`。**钉死**（显式 `--profile` /
 > NEWGATE_PROFILE / argv0 分发）——注入真实模型名（`deepseek-chat`），显示的
 > 就是这次真用的：钉死才配真名。曾短暂试过默认注入真名（为了界面好看），

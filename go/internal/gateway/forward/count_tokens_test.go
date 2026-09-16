@@ -15,7 +15,10 @@ import (
 
 // heavyChainOnly 测试桩：heavy 档指向 given 上游，其他档为空——count_tokens
 // 的转发只看主循环档（heavy）链头。
-func heavyChainOnly(t *testing.T, up *httptest.Server) {
+// mainLoopChainOnly 造一条「只有主力档（normal）有候选」的链。
+// count_tokens 补的就是主力档链头（forward.mainLoopHead），所以别的档位
+// 一律返回 nil——它要是去问了别的档位，这个测试就该红。
+func mainLoopChainOnly(t *testing.T, up *httptest.Server) {
 	t.Helper()
 	dialect.Reset()
 	t.Cleanup(func() {
@@ -23,7 +26,7 @@ func heavyChainOnly(t *testing.T, up *httptest.Server) {
 		testChain = nil
 	})
 	testChain = func(role string) []resolve.Step {
-		if role != "heavy" {
+		if role != "normal" {
 			return nil
 		}
 		return []resolve.Step{{
@@ -60,7 +63,7 @@ func TestCountTokensLazyProbeThenLocal(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"Invalid URL"}`))
 	}))
 	defer up.Close()
-	heavyChainOnly(t, up)
+	mainLoopChainOnly(t, up)
 
 	srv := &Server{Port: 0}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
@@ -107,7 +110,7 @@ func TestCountTokensForwardedWhenSupported(t *testing.T) {
 		_, _ = w.Write([]byte(`{"input_tokens":42}`))
 	}))
 	defer up.Close()
-	heavyChainOnly(t, up)
+	mainLoopChainOnly(t, up)
 
 	srv := &Server{Port: 0}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
@@ -153,7 +156,7 @@ func TestCountTokensTransientErrorNotLearned(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
 	}))
 	defer up.Close()
-	heavyChainOnly(t, up)
+	mainLoopChainOnly(t, up)
 
 	srv := &Server{Port: 0}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
@@ -188,7 +191,7 @@ func TestCountTokensAlreadyLearnedSkipsUpstream(t *testing.T) {
 	up.Close() // 故意关掉：连不上也不影响本地粗估
 
 	testChain = func(role string) []resolve.Step {
-		if role != "heavy" {
+		if role != "normal" {
 			return nil
 		}
 		return []resolve.Step{{
@@ -227,7 +230,7 @@ func TestCountTokensRespectsClientModel(t *testing.T) {
 		_, _ = w.Write([]byte(`{"input_tokens":7}`))
 	}))
 	defer up.Close()
-	heavyChainOnly(t, up)
+	mainLoopChainOnly(t, up)
 
 	srv := &Server{Port: 0}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))

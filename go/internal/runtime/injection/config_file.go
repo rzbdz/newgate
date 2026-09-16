@@ -172,10 +172,10 @@ func ApplyOpencode(target string, port int) (*Report, error) {
 	}
 
 	// 顶层 model / small_model 指向语义档位
-	root["model"] = json.RawMessage(`"` + ProviderID + `/heavy"`)
+	root["model"] = json.RawMessage(`"` + ProviderID + `/normal"`)
 	root["small_model"] = json.RawMessage(`"` + ProviderID + `/light"`)
 	rep.Rewrites = append(rep.Rewrites,
-		"model -> "+ProviderID+"/heavy",
+		"model -> "+ProviderID+"/normal",
 		"small_model -> "+ProviderID+"/light",
 		"provider."+ProviderID+" 已注入（原有 provider 全部保留）")
 

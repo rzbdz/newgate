@@ -10,11 +10,22 @@ import (
 
 // Roles 语义档位。工具侧只写这些名字，永不写真实模型名。
 //
+// 四档能力阶梯 + 一个正交的 vision（2026-09-16 从三档扩到四档）：Claude
+// 家族自己就是四档，按它对齐，别的家族（只有大中小三个模型）自然映射得下：
+//
+//	heavy  ← fable   最贵最强，留给明确点名要它的活
+//	normal ← opus    **主力**：claude 的 opus 槽、opencode 的 model
+//	mid    ← sonnet  分类器 / compact 总结 / subagent
+//	light  ← haiku   起标题这类小活
+//	vision           多模态，与上面的阶梯正交
+//
+// 顺序即能力从高到低，别随手调——`newgate status`、doctor、TUI 都按它排。
+//
 // TODO(M1+): 现在是「能力档」一个维度。docs/18 与后续讨论要引入
 // 「功能」维度（planner / executor / thinker / reviewer …），
 // 两者是正交的：profile 只声明 2-3 个能力档，另有一张功能→档位映射表，
 // 这样只有两个模型的 provider 家族也只需写两行。
-var Roles = []string{"heavy", "mid", "light", "vision"}
+var Roles = []string{"heavy", "normal", "mid", "light", "vision"}
 
 // IsRole 判断一个模型名是不是语义档位名（而不是具体模型名）。
 // 代理收到客户端发来的 model 字段时用它区分「档位路由」和「具体模型路由」
@@ -209,9 +220,20 @@ func (p *Profile) Prio() int {
 }
 
 // CandidatesFor 返回这个 profile 为某档位提供的候选列表（空 = 稀疏）。
+//
+// normal 是 2026-09-16 新加的档（四档化的主力档），老配置里没有它。缺省时
+// **用 mid 顶上**，而不是整层跳过：跳过会让「没写 normal 的配置」在主力档
+// 上变成没有候选（整条链空转 → 404），而它的语义本来就该跟 mid 一样
+// ——四档化之前，主循环跑的就是 mid 那一档的资源。写了 normal 的配置按自己
+// 的来，互不影响。
 func (p *Profile) CandidatesFor(role string) Candidates {
 	if c, ok := p.Roles[role]; ok && len(c) > 0 {
 		return c
+	}
+	if role == "normal" {
+		if c, ok := p.Roles["mid"]; ok && len(c) > 0 {
+			return c
+		}
 	}
 	if c, ok := p.Roles["*"]; ok && len(c) > 0 {
 		return c

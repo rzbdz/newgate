@@ -11,7 +11,7 @@
 //	mid=kimi-k2.7-code-highspeed
 //
 // 语法：`key=value` 一行一个；`#` 开头是注释；空行忽略。档位缩写
-// （heavy/mid/light/vision）各占一个 key，值是 `provider/model` 或裸模型
+// （heavy/normal/mid/light/vision）各占一个 key，值是 `provider/model` 或裸模型
 // 名（extends 时从 base 同档位借 provider）；多个候选用逗号分隔。
 // 未知 key **报错**，不静默忽略（docs/06 §8 的老规矩）。
 //
@@ -30,7 +30,7 @@ import (
 )
 
 // tierKeys 档位缩写 → roles key。
-var tierKeys = map[string]bool{"heavy": true, "mid": true, "light": true, "vision": true}
+var tierKeys = map[string]bool{"heavy": true, "normal": true, "mid": true, "light": true, "vision": true}
 
 // ParseProfileKV 把 KV 文本解析成 Profile（Extends 的合并不在这做，
 // 由 LoadProfile 负责）。

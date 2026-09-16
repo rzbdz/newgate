@@ -91,13 +91,13 @@ OmniRoute 走的是后者（19 种策略、14 因子打分）。那是另一个�
 // ~/.claude/settings.json —— 写一次，再也不动
 { "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:8788",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL":   "heavy",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL":   "normal",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "cheap",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL":  "fast"
 }}
 
 // ~/.config/opencode/opencode.json —— 写一次，再也不动
-{ "model": "newgate/heavy",
+{ "model": "newgate/normal",
   "small_model": "newgate/fast",
   "agent": { "search": { "model": "newgate/search" } } }
 ```

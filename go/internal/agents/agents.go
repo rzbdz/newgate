@@ -79,11 +79,16 @@ var Registry = map[string]*Agent{
 		// 槽位实测（cc 2.1.266，2026-09-09 抓包）：主循环跑在 opus 槽
 		// （/context 的 Model 就是它）；Bash 权限分类器和 /compact 总结
 		// 走 sonnet 槽；标题这类小活走 haiku。别再按「主循环 = mid」假设。
+		//
+		// 四档（2026-09-16）：Claude 自己就是 fable/opus/sonnet/haiku 四档，
+		// 语义档位按它对齐——**fable = heavy，opus = normal**，sonnet = mid，
+		// haiku = light。所以主力档是 normal 而不是 heavy。没写 normal 的
+		// 老配置由 domain.CandidatesFor 用 mid 顶上，不会因为这次改名而没候选。
 		Slots: []Slot{
-			{Name: "opus", Tier: "heavy", EnvVar: "ANTHROPIC_DEFAULT_OPUS_MODEL",
-				Desc: "opus 档；主循环在这跑（cc 默认），Plan Mode 下的 opusplan"},
 			{Name: "fable", Tier: "heavy", EnvVar: "ANTHROPIC_DEFAULT_FABLE_MODEL",
-				Desc: "fable 档；也是第三方 provider 上自动回退的识别依据"},
+				Desc: "fable 档（最贵档）；也是第三方 provider 上自动回退的识别依据"},
+			{Name: "opus", Tier: "normal", EnvVar: "ANTHROPIC_DEFAULT_OPUS_MODEL",
+				Desc: "opus 档（主力档）；主循环在这跑（cc 默认），Plan Mode 下的 opusplan"},
 			{Name: "sonnet", Tier: "mid", EnvVar: "ANTHROPIC_DEFAULT_SONNET_MODEL",
 				Desc: "sonnet 档；Bash 分类器与 /compact 总结在这跑"},
 			{Name: "haiku", Tier: "light", EnvVar: "ANTHROPIC_DEFAULT_HAIKU_MODEL",

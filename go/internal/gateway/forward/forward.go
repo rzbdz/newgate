@@ -405,9 +405,9 @@ func (s *Server) handleCountTokens(w http.ResponseWriter, reqID uint64, body []b
 //	          此后退回本地粗估不再白跑；2xx = 有，记下，此后一直拿真值
 //	连接失败 / 429 / 401 → 不学（「现在不行」≠「没有」），本次退回本地
 //
-// 模型注入：count_tokens 请求不带 model 字段，补 heavy 档链头——
-// Claude Code 的主循环跑在 opus 槽（= heavy 档，2026-09-09 实测 /context
-// Model: heavy），数出来的才是将要处理这段对话的 tokenizer。不走链、
+// 模型注入：count_tokens 请求不带 model 字段，补**主力档**链头——
+// Claude Code 的主循环跑在 opus 槽（四档化后 opus 槽 = normal 档，
+// 2026-09-16；之前是 heavy），数出来的才是将要处理这段对话的 tokenizer。不走链、
 // 不碰熔断器：数 token 失败不算上游病。
 func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 	body []byte, tgt Target, reqID uint64) bool {
@@ -472,12 +472,12 @@ func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 	return true
 }
 
-// mainLoopHead 主循环档（heavy）的链头（含完整 provider 记录）。
+// mainLoopHead 主循环档（normal）的链头（含完整 provider 记录）。
 // count_tokens 不带 model，转发时按它补。用 PrimaryBinding（忽略熔断器）：
 // 数 token 用配置里排第一的就行，不值得为它触发 fallback 语义。
 func (s *Server) mainLoopHead(tgt Target) (resolve.Step, bool) {
 	if testChain != nil {
-		if steps := testChain("heavy"); len(steps) > 0 {
+		if steps := testChain("normal"); len(steps) > 0 {
 			return steps[0], true
 		}
 		return resolve.Step{}, false
@@ -490,7 +490,7 @@ func (s *Server) mainLoopHead(tgt Target) (resolve.Step, bool) {
 	if active == "" {
 		active = snap.State.ActiveFor(tgt.TaskCreate)
 	}
-	b, ok := resolve.PrimaryBinding("heavy", snap.Profiles, snap.Providers, active)
+	b, ok := resolve.PrimaryBinding("normal", snap.Profiles, snap.Providers, active)
 	if !ok {
 		return resolve.Step{}, false
 	}
