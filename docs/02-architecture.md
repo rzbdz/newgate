@@ -54,34 +54,81 @@ CLI 只在两件事上**可选地**联系 BE：
 
 ## 2. 模块分层
 
+```text
+go/
+  component/              # capability、DAG、Context、生命周期；唯一 bootstrap
+  lib/                    # 无状态、无注册、跨组件复用的低层工具
+  modules/
+    builtin/              # 默认 Loader 与进程组件图
+    contracts/            # 内置组件之间的窄 capability interface
+    gateway/              # 网关组件；forward/rewrite/special/thinkcache 是其内部包
+    confighook/           # 配置 Hook 组件；agent/state-field/role 注册
+    config/               # 配置语义、resolve、store
+    runtime/              # daemon、launch、takeover
+    cli/                  # CLI 组件；style/tui 是其内部包
+    claudecode/           # 客户端组件
+    deepseek/             # 模型族组件
+    claudecode_deepseek/  # 交叉组件
+    ...
 ```
-packages/
-  core/            # 无 IO 的领域层：类型、解析、plan 生成、schema 校验
-    concepts/      #   Provider / Endpoint / Tool / Profile / Session 类型
-    resolve/       #   解析优先级流水线（纯函数，输入快照 → 输出 ResolvedConfig）
-    injection/     #   Injection 接口 + plan() 纯逻辑
-    protocol/      #   协议协商、模型槽位映射
 
-  store/           # Config Store：读写、文件锁、原子替换、迁移、密钥引用解析
-  tools/         # 内置 tool 描述符（数据为主）+ 少量特例适配代码
-  runtime/         # 有 IO 的执行层：apply/rollback、spawn、信号转发、journal、崩溃恢复
-  cli/             # 参数解析、子命令、输出渲染
-  server/          # BE：HTTP API、SSE、探活、session 汇总
-  web/             # FE
-  gateway/         # 插件：反向代理、协议翻译、路由策略、用量统计
-```
+编译期只要求 `component` 不 import `modules`。组件之间不靠目录层级表达依赖，
+而靠 capability；`modules/builtin` 是唯一可以 import 全部具体组件的装配点。
 
-依赖方向严格单向：
+### 2.1 整个运行时是一张组件图
 
-```
-cli ──▶ runtime ──▶ core
- │         │         ▲
- │         └──▶ store┘
- └──▶ tools ──▶ core
-server ──▶ store, core, (runtime 只读部分)
-gateway ──▶ core (只用 protocol/ 和类型)
-web ──▶ server (HTTP)
-```
+newgate 没有“框架知道的特殊模块类型”。参与运行时装配的对象都实现同一个
+`modules.Provider`，返回 `modules.Component`：
+
+- `Name`：稳定组件名，只用于诊断；
+- `Requires`：消费哪些**有类型的 capability**；
+- `Provides`：提供哪些 capability 及其值；
+- `Start(Context)`：provider 启动后，从 Context 取得依赖并向它注册扩展；
+- `Stop(context.Context)`：按启动逆序释放资源。
+
+依赖的是 capability，不是组件名。`claudecode-deepseek` 消费
+`client-family.claudecode`、`model-family.deepseek` 和 `gateway`，并不 import
+Claude/DeepSeek 的实现。换一个组件提供同一契约，consumer 不需要修改。
+
+Manager 位于 `go/component`，只会校验 capability 的名字、Go 类型、单例/多例
+基数，按 provider → consumer 求拓扑序，再做正序启动、逆序停止。缺 provider、
+单例多 provider、类型冲突和依赖环都会拒绝启动。它不知道 request hook、agent、
+state field、doctor 或 CLI command 是什么。
+
+两个根能力：
+
+1. `gateway` 组件提供请求扩展端口和本地入口；模型、客户端及交叉组件消费它，
+   把 request/route/response hook 注册进去。
+2. `config-hook` 消费 `gateway`，提供 agent/config/state-field/role 注册端口；
+   客户端及其配置扩展消费它。
+
+因此每个组件既可做 provider，也可做 consumer。`opencode-omo` 消费
+`config-hooks` 和 `client-family.opencode`，再向配置管理器注入 takeover 与动态
+角色；它的 doctor 信息和 `omo` 命令则直接提供为多例 capability，由 CLI 壳
+统一渲染/调用。增加这种能力不需要修改 Manager。
+
+具体组件平铺在 `go/modules/<name>/`；`modules/builtin` 只保存框架默认
+Loader、链接期组件清单和进程默认实例。实现文件用
+`var _ Interface = (*implementation)(nil)` 标明接入的标准契约，未导出函数只是
+组件内部 helper。
+
+`state.json` 允许组件拥有顶层字段，但 domain 只保存未知字段的原始 JSON，不声明
+具体语义。例如 `classifier_override` 由 `claudecode` 经 `config-hooks` 注册、
+由该组件解码和报告错误；`domain.State` 不知道 Bash 分类器。普通
+`LoadState → SaveState` 必须无损保留这些字段。
+
+同一扩展端口内部仍可有更细的顺序约束。例如 gateway request hooks 使用具名
+`Before/After`，不使用数字 priority，也不依赖文件名或 `init()` 顺序。
+
+v1 只启用静态 Go builtin loader。Loader 接口为后续目录 manifest、独立进程/RPC
+或 WASM 预留；Go 原生 `.so plugin` 因编译器/依赖/平台强绑定且不能可靠卸载，
+不作为默认动态扩展机制。Lua 不进入代理热路径，避免双语言类型、GC、sandbox
+和部署复杂度先于真实需求出现。
+
+物理目录也服从同一个模型：`go/component` 是唯一位于组件图之外的最小
+bootstrap；所有有生命周期或能力所有权的代码都在 `go/modules`。纯粹、无状态、
+可跨组件复用的低层工具才允许进入 `go/lib`，不能用 `utils` 名义藏业务逻辑。
+仓库不再保留 `go/internal` 这棵旧分层。
 
 `core` 不 import 任何 IO。这样「给定配置快照 + argv，应该解析出什么、生成什么注入计划」全部可以纯函数测试，不碰文件系统。
 

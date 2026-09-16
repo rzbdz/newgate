@@ -105,7 +105,7 @@ core              →  domain.ExtraRole（一张表）    →  与档位一视�
 ```
 
 于是 core 全程不认识 omo：它只看到一批角色键，命名、数量、缺省归属由模块
-自己决定（`internal/runtime/injection/omo.go`）。插件哪天加了个新 agent，
+自己决定（`modules/opencodeomo`）。插件哪天加了个新 agent，
 重新接管就自动多出一个键，框架一行都不用改。
 
 `.model` 里留下的是**身份**（`newgate/omo-sisyphus`），不是体格——老做法写
@@ -291,7 +291,9 @@ opencode                      # 用全局默认
 
 但若是客户端自己的 bug，往下走就是拿一个坏请求撞遍所有 provider，每家可能 40 秒。
 
-**建议默认 `false` + 提供 `fallbackOn400` 开关。** schema 类问题应该在 [schemarepair](../go/internal/schemarepair/) 里根治（已经这么做了），而不是靠换 provider 掩盖。开了必须每次告警。
+**建议默认 `false` + 提供 `fallbackOn400` 开关。** schema 类问题应该在
+[`gateway/rewrite/schema`](../go/modules/gateway/rewrite/schema/) 里根治
+（已经这么做了），而不是靠换 provider 掩盖。开了必须每次告警。
 
 ### 已开始流式输出就绝不再换
 

@@ -191,7 +191,7 @@ newgate use --list
 
 `stop` 是「暂时全停」，所以不动意愿；`off <agent>` 是「以后别管它」，所以写进意愿。
 只有 `on <agent>` 能把被 off 掉的那个拉回来。回归测试见
-`go/internal/runtime/takeover/takeover_test.go`。
+`go/modules/runtime/takeover/takeover_test.go`。
 
 实现分层：`runtime/takeover` 是接管的唯一实现，CLI / TUI / Web 三个壳都只调它
 （docs/02 §2、docs/12 §1）。
@@ -247,7 +247,7 @@ omo（opencode 的 oh-my-openagent 插件）自带一层 intra-agent 槽位。�
 
 ### 5.1 控制命令的版式与语气
 
-排版原语集中在 `internal/ui/style`（颜色、显示宽度、表格、状态标记），CLI 与 TUI 共用。
+排版原语集中在 `modules/cli/style`（颜色、显示宽度、表格、状态标记），CLI 与 TUI 共用。
 不在调用点写裸 ANSI，也不写 `fmt.Printf("%-22s")`——理由见下表第一条。
 
 | 约定 | 为什么 |
