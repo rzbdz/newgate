@@ -1358,3 +1358,10 @@ func setAuth(h http.Header, p domain.Provider) {
 		h.Set("Authorization", "Bearer "+key)
 	}
 }
+
+func writeJSON(w http.ResponseWriter, code int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	b, _ := json.MarshalIndent(v, "", "  ")
+	_, _ = w.Write(append(b, '\n'))
+}
