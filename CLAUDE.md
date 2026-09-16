@@ -47,9 +47,10 @@ go vet ./... && gofmt -l internal/
 | `modules/cli` | CLI 组件与命令壳 | `newgate <动词>` |
 | `modules/<客户端或模型>` | Claude Code、DeepSeek、组合行为 | 新增可组合组件 |
 
-除 `modules/builtin` 和 `modules/contracts` 外，每个 `modules/<name>` 都必须在根目录
+除 `modules/builtin` 外，每个 `modules/<name>` 都必须在根目录
 提供唯一的 `module.go`，由它声明 `New`、`Component`、`Requires` 和 `Provides`。
 复杂实现可以拆文件或子包，但入口文件名和所在层级不能变化。
+公开 capability 和接口归组件自己的 `api/` 子包；禁止建立中心化 contracts 包。
 
 档位阶梯（2026-09-16 四档化）：
 `heavy`(fable) > `normal`(opus，**主力**) > `mid`(sonnet) > `light`(haiku)，

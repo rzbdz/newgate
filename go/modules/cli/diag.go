@@ -607,7 +607,7 @@ func cmdDoctor() int {
 		checkTakeover(),
 		checkBackups(),
 	}
-	for _, item := range componentDiagnostics() {
+	for _, item := range moduleDiagnostics() {
 		mark := style.Skip
 		switch item.State {
 		case "ok":

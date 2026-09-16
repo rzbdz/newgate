@@ -10,14 +10,15 @@ import (
 	"sync"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/confighook/roleprov"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
 )
 
 type registry struct {
 	mu      sync.RWMutex
-	gateway contracts.Gateway
+	gateway gatewayapi.Gateway
 	roles   *roleprov.Registry
 	agents  map[string]*agentapi.Agent
 	fields  map[string]string
@@ -26,9 +27,9 @@ type registry struct {
 type provider struct{ registry *registry }
 
 var (
-	_ contracts.ConfigHooks  = (*registry)(nil)
-	_ contracts.AgentCatalog = (*registry)(nil)
-	_ modules.Provider       = (*provider)(nil)
+	_ agentapi.ConfigHooks  = (*registry)(nil)
+	_ agentapi.AgentCatalog = (*registry)(nil)
+	_ modules.Provider      = (*provider)(nil)
 )
 
 func New() modules.Provider {
@@ -44,15 +45,15 @@ func (p provider) Component() modules.Component {
 	return modules.Component{
 		Name: "config-hook",
 		Requires: []modules.Requirement{
-			modules.Need(contracts.ConfigCapability),
-			modules.Need(contracts.GatewayCapability),
+			modules.Need(configapi.Capability),
+			modules.Need(gatewayapi.Capability),
 		},
 		Provides: []modules.Provision{
-			modules.Provide(contracts.ConfigHooksCapability, contracts.ConfigHooks(p.registry)),
-			modules.Provide(contracts.AgentCatalogCapability, contracts.AgentCatalog(p.registry)),
+			modules.Provide(agentapi.ConfigHooksCapability, agentapi.ConfigHooks(p.registry)),
+			modules.Provide(agentapi.AgentCatalogCapability, agentapi.AgentCatalog(p.registry)),
 		},
 		Start: func(ctx modules.Context) error {
-			p.registry.gateway = modules.MustGet(ctx, contracts.GatewayCapability)
+			p.registry.gateway = modules.MustGet(ctx, gatewayapi.Capability)
 			restoreRoles = roleprov.InstallDefault(p.registry.roles)
 			return nil
 		},
@@ -95,7 +96,7 @@ func (r *registry) BindTakeover(agentID string, takeover agentapi.ConfigTakeover
 	return nil
 }
 
-func (r *registry) RegisterRoleProvider(provider roleprov.Provider) {
+func (r *registry) RegisterRoleProvider(provider agentapi.RoleProvider) {
 	r.roles.Register(provider)
 }
 

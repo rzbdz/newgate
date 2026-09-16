@@ -2,7 +2,7 @@ package config
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
 )
 
 type provider struct{}
@@ -15,7 +15,7 @@ func (provider) Component() modules.Component {
 	return modules.Component{
 		Name: "config",
 		Provides: []modules.Provision{
-			modules.Provide(contracts.ConfigCapability, contracts.Config{}),
+			modules.Provide(configapi.Capability, configapi.Config{}),
 		},
 	}
 }

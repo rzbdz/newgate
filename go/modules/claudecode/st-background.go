@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
-	"github.com/rzbdz/newgate/go/modules/contracts"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
+	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking/api"
 )
 
 var (
@@ -19,7 +19,7 @@ var (
 	_ special.MetricProvider  = (*background)(nil)
 )
 
-func Treatments(thinking contracts.ThinkingService) []special.Plugin {
+func Treatments(thinking thinkingapi.Service) []special.Plugin {
 	return []special.Plugin{background{thinking: thinking}}
 }
 
@@ -61,7 +61,7 @@ func Treatments(thinking contracts.ThinkingService) []special.Plugin {
 //   - notes / 日志明说改了什么（不静默，docs/16）；
 //   - `newgate st off claude-bg` 一键摘除（改道和禁思考一起停）；
 //   - 只认 Agent=="claude"（opencode 等其他客户端不受影响）。
-type background struct{ thinking contracts.ThinkingService }
+type background struct{ thinking thinkingapi.Service }
 
 // classifierMarker 分类器系统提示词的开头（cc 2.1.263 实抓，4/4 命中）。
 // 出现在 system 里 = 这条非流式请求是 Bash 安全分类器本体。

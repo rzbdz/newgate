@@ -20,19 +20,11 @@ import (
 	"sync"
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 )
 
-// Provider 一个模块报出自己的角色键体系。
-type Provider interface {
-	// Source 模块短名，写进 domain.ExtraRole.Source，只给人看。
-	Source() string
-	// Roles 这个模块当前有哪些键。文件不存在 / 没接管过时返回空，不是错误。
-	Roles() ([]domain.ExtraRole, error)
-}
-
-type WatchProvider interface {
-	WatchFiles() []string
-}
+type Provider = confighookapi.RoleProvider
+type WatchProvider = confighookapi.RoleWatchProvider
 
 type Registry struct {
 	mu        sync.RWMutex

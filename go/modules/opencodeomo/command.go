@@ -6,20 +6,20 @@ import (
 	"sort"
 	"strings"
 
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/api"
 	"github.com/rzbdz/newgate/go/modules/cli/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	"github.com/rzbdz/newgate/go/modules/contracts"
 )
 
 type omoCommand struct{}
 
-var _ contracts.CLICommand = (*omoCommand)(nil)
+var _ cliapi.Command = (*omoCommand)(nil)
 
 func (omoCommand) Names() []string { return []string{"omo", "slots"} }
 
-func (omoCommand) Run(host contracts.CLIHost, args []string) int {
+func (omoCommand) Run(host cliapi.Host, args []string) int {
 	return cmdOmo(host, args)
 }
 
@@ -30,7 +30,7 @@ func (omoCommand) Run(host contracts.CLIHost, args []string) int {
 // 地解析。所以这个命令只做三件事——看一眼现状、改缺省归属、解释解析结果。
 //
 // 用户不需要记键名：不带参数就是列表。
-func cmdOmo(host contracts.CLIHost, args []string) int {
+func cmdOmo(host cliapi.Host, args []string) int {
 	if len(args) == 0 {
 		return omoList()
 	}
@@ -169,7 +169,7 @@ func dash(s string) string {
 }
 
 // omoUse 写/删一个覆盖。value 为空表示删除。
-func omoUse(host contracts.CLIHost, key, value string, set bool) int {
+func omoUse(host cliapi.Host, key, value string, set bool) int {
 	reg := ReadOmoSlots()
 	if reg == nil {
 		return host.Die(65, "没有 omo 槽位登记表；先 newgate on opencode")
@@ -222,7 +222,7 @@ func validateBindingValue(v string) error {
 	return nil
 }
 
-func omoMode(host contracts.CLIHost, mode string) int {
+func omoMode(host cliapi.Host, mode string) int {
 	reg := omoRegistry()
 	if mode == "" {
 		fmt.Println(style.Title("newgate omo mode", omoModeName(reg)))
@@ -264,7 +264,7 @@ func omoMode(host contracts.CLIHost, mode string) int {
 
 // omoExplain 把一个槽位键解析成实际的 fallback 链——「为什么不是我想的那个」
 // 只能靠这个回答（docs/18 §10）。
-func omoExplain(host contracts.CLIHost, key string) int {
+func omoExplain(host cliapi.Host, key string) int {
 	reg := ReadOmoSlots()
 	if reg == nil {
 		return host.Die(65, "没有 omo 槽位登记表；先 newgate on opencode")

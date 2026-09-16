@@ -4,8 +4,10 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
+	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime/api"
 )
 
 type provider struct{}
@@ -19,14 +21,14 @@ func (provider) Component() modules.Component {
 	return modules.Component{
 		Name: "runtime",
 		Requires: []modules.Requirement{
-			modules.Need(contracts.ConfigCapability),
-			modules.Need(contracts.AgentCatalogCapability),
+			modules.Need(configapi.Capability),
+			modules.Need(confighookapi.AgentCatalogCapability),
 		},
 		Provides: []modules.Provision{
-			modules.Provide(contracts.RuntimeCapability, contracts.Runtime{}),
+			modules.Provide(runtimeapi.Capability, runtimeapi.Runtime{}),
 		},
 		Start: func(ctx modules.Context) error {
-			restore = agentstate.Set(modules.MustGet(ctx, contracts.AgentCatalogCapability))
+			restore = agentstate.Set(modules.MustGet(ctx, confighookapi.AgentCatalogCapability))
 			return nil
 		},
 		Stop: func(context.Context) error {

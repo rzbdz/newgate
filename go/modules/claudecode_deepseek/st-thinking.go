@@ -5,19 +5,20 @@ package claudecode_deepseek
 import (
 	"fmt"
 
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
+	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
 type thinking struct {
-	client contracts.ClientFamily
-	model  contracts.ModelFamily
+	client claudeapi.Client
+	model  deepseekapi.Model
 }
 
 var _ special.Plugin = (*thinking)(nil)
 
-func Treatments(client contracts.ClientFamily, model contracts.ModelFamily) []special.Plugin {
+func Treatments(client claudeapi.Client, model deepseekapi.Model) []special.Plugin {
 	return []special.Plugin{thinking{client: client, model: model}}
 }
 

@@ -3,18 +3,18 @@ package agentstate
 import (
 	"sync"
 
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 )
 
 var (
 	mu           sync.RWMutex
-	catalog      contracts.AgentCatalog
+	catalog      confighookapi.AgentCatalog
 	currentOwner *owner
 )
 
 type owner struct{}
 
-func Set(next contracts.AgentCatalog) func() {
+func Set(next confighookapi.AgentCatalog) func() {
 	mu.Lock()
 	previous := catalog
 	previousOwner := currentOwner
@@ -32,7 +32,7 @@ func Set(next contracts.AgentCatalog) func() {
 	}
 }
 
-func Catalog() contracts.AgentCatalog {
+func Catalog() confighookapi.AgentCatalog {
 	mu.RLock()
 	current := catalog
 	mu.RUnlock()

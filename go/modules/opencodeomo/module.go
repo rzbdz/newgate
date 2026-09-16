@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/api"
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	opencodeapi "github.com/rzbdz/newgate/go/modules/opencode/api"
 )
 
 type configTakeover struct{}
@@ -25,18 +27,18 @@ func (moduleProvider) Component() modules.Component {
 	return modules.Component{
 		Name: "opencode-omo",
 		Requires: []modules.Requirement{
-			modules.Need(contracts.ConfigCapability),
-			modules.Need(contracts.ConfigHooksCapability),
-			modules.Need(contracts.OpenCodeClient),
+			modules.Need(configapi.Capability),
+			modules.Need(agentapi.ConfigHooksCapability),
+			modules.Need(opencodeapi.Capability),
 		},
 		Provides: []modules.Provision{
-			modules.Provide(contracts.DiagnosticsCapability,
-				contracts.DiagnosticProvider(diagnostics{})),
-			modules.Provide(contracts.CLICommandsCapability,
-				contracts.CLICommand(omoCommand{})),
+			modules.Provide(cliapi.DiagnosticsCapability,
+				cliapi.DiagnosticProvider(diagnostics{})),
+			modules.Provide(cliapi.CommandsCapability,
+				cliapi.Command(omoCommand{})),
 		},
 		Start: func(ctx modules.Context) error {
-			config := modules.MustGet(ctx, contracts.ConfigHooksCapability)
+			config := modules.MustGet(ctx, agentapi.ConfigHooksCapability)
 			if err := config.BindTakeover("opencode", Takeover()); err != nil {
 				return err
 			}

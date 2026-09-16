@@ -3,19 +3,20 @@ package claudecode_glm
 import (
 	"fmt"
 
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
+	glmapi "github.com/rzbdz/newgate/go/modules/glm/api"
 )
 
 type thinking struct {
-	client contracts.ClientFamily
-	model  contracts.ModelFamily
+	client claudeapi.Client
+	model  glmapi.Model
 }
 
 var _ special.Plugin = (*thinking)(nil)
 
-func Treatments(client contracts.ClientFamily, model contracts.ModelFamily) []special.Plugin {
+func Treatments(client claudeapi.Client, model glmapi.Model) []special.Plugin {
 	return []special.Plugin{thinking{client: client, model: model}}
 }
 

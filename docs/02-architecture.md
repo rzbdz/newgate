@@ -60,8 +60,8 @@ go/
   lib/                    # 无状态、无注册、跨组件复用的低层工具
   modules/
     builtin/              # 默认 Loader 与进程组件图
-    contracts/            # 内置组件之间的窄 capability interface
     gateway/              # 网关组件；forward/rewrite/special/thinkcache 是其内部包
+      api/                # Gateway 自己拥有的 capability contract
     confighook/           # 配置 Hook 组件；agent/state-field/role 注册
     config/               # 配置语义、resolve、store
     runtime/              # daemon、launch、takeover
@@ -75,11 +75,16 @@ go/
 编译期只要求 `component` 不 import `modules`。组件之间不靠目录层级表达依赖，
 而靠 capability；`modules/builtin` 是唯一可以 import 全部具体组件的装配点。
 
-除 `builtin`（装配器）和 `contracts`（共享契约）外，每个
+除 `builtin`（装配器）外，每个
 `go/modules/<name>/` 都是一个组件，并以根目录的 **`module.go`** 作为唯一标准
 入口。`module.go` 声明 `New()`、`Component()`、`Requires` 和 `Provides`；
 复杂组件可以有任意内部文件和子包，但不能把入口改叫 `component.go`、散落到子目录，
 或让装配器依赖文件布局猜测入口。
+
+能力契约不进入中心仓库。每个组件在自己的 `api/` 子包拥有公开 capability、
+接口和跨组件值类型；provider 与 consumer 都只依赖该窄 API。组合组件例如
+`claudecode-deepseek` 依赖 `claudecode/api`、`deepseek/api` 和 `gateway/api`，
+不 import 三者实现，也不经过全知的 `modules/contracts` 中介。
 
 ### 2.1 整个运行时是一张组件图
 

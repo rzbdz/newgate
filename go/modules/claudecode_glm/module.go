@@ -2,7 +2,9 @@ package claudecode_glm
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
+	glmapi "github.com/rzbdz/newgate/go/modules/glm/api"
 )
 
 type moduleProvider struct{}
@@ -15,14 +17,14 @@ func (moduleProvider) Component() modules.Component {
 	return modules.Component{
 		Name: "claudecode-glm",
 		Requires: []modules.Requirement{
-			modules.Need(contracts.GatewayCapability),
-			modules.Need(contracts.ClaudeCodeClient),
-			modules.Need(contracts.GLMModel),
+			modules.Need(gatewayapi.Capability),
+			modules.Need(claudeapi.Capability),
+			modules.Need(glmapi.Capability),
 		},
 		Start: func(ctx modules.Context) error {
-			gateway := modules.MustGet(ctx, contracts.GatewayCapability)
-			client := modules.MustGet(ctx, contracts.ClaudeCodeClient)
-			model := modules.MustGet(ctx, contracts.GLMModel)
+			gateway := modules.MustGet(ctx, gatewayapi.Capability)
+			client := modules.MustGet(ctx, claudeapi.Capability)
+			model := modules.MustGet(ctx, glmapi.Capability)
 			for _, treatment := range Treatments(client, model) {
 				gateway.RegisterRequestHook(treatment)
 			}

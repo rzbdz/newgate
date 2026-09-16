@@ -8,7 +8,8 @@ import (
 	"fmt"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
@@ -19,8 +20,8 @@ type provider struct {
 }
 
 var (
-	_ contracts.Gateway = (*port)(nil)
-	_ modules.Provider  = (*provider)(nil)
+	_ gatewayapi.Gateway = (*port)(nil)
+	_ modules.Provider   = (*provider)(nil)
 )
 
 func New() modules.Provider {
@@ -31,9 +32,9 @@ func (p provider) Component() modules.Component {
 	instance := &p
 	return modules.Component{
 		Name:     "gateway",
-		Requires: []modules.Requirement{modules.Need(contracts.ConfigCapability)},
+		Requires: []modules.Requirement{modules.Need(configapi.Capability)},
 		Provides: []modules.Provision{
-			modules.Provide(contracts.GatewayCapability, contracts.Gateway(p.port)),
+			modules.Provide(gatewayapi.Capability, gatewayapi.Gateway(p.port)),
 		},
 		Start: func(modules.Context) error {
 			instance.restore = special.InstallDefault(instance.port.registry)
@@ -48,7 +49,7 @@ func (p provider) Component() modules.Component {
 	}
 }
 
-func (p *port) RegisterRequestHook(hook special.Plugin) { p.registry.Register(hook) }
+func (p *port) RegisterRequestHook(hook gatewayapi.Plugin) { p.registry.Register(hook) }
 
 func (*port) AgentBaseURL(port int, agentID string) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/a/%s", port, agentID)

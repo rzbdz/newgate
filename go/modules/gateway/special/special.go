@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 )
 
@@ -49,35 +50,10 @@ import (
 // 手动维护它：忘了维护就是「上游切了模型、下游拿旧模型做决定」的失真
 // （2026-09-09 实抓过一次）。其余字段（Provider/Tier/Stream/Agent…）来自
 // 路由和请求形态，不来自 body，链上不变。
-type Request struct {
-	InModel  string // 客户端原本写的 model（档位名如 "heavy"，或真实模型名如 "deepseek-chat"）
-	Tier     string // 归一化后解析出的档位
-	Model    string // 即将发给上游的真实模型名；body 的 model 被改写后由框架自动同步
-	Provider string // provider 名（providers.json 里的 key）
-	BaseURL  string // 上游 base URL
-	Protocol string // "anthropic" / "openai"
-	Path     string // 请求路径后缀，如 /messages
-	Stream   bool
-	Agent    string // 发起方（/a/<agent>/ 路径里的名字，如 "claude"）；空 = 兼容路径
-}
+type Request = gatewayapi.Request
 
 // Plugin 是模块可以挂到请求处理链的 typed capability。
-type Plugin interface {
-	// Name 稳定的短名，用户用它开关这个插件（newgate st off <name>）。
-	Name() string
-	// Why 一句话说明它为什么存在：哪个上游、什么报错。
-	// 这句话会直接展示给用户，也是将来判断「还需不需要它」的唯一依据。
-	Why() string
-	// Match 这次请求是不是该由我照顾。
-	Match(r *Request) bool
-	// Apply 返回改写后的 body 和「我改了什么」。
-	//
-	// 契约：
-	//   - 什么都没改 → notes 为空（out 会被忽略），调用方保持原字节；
-	//   - 改了      → notes 非空且 out 有效；
-	//   - 出错      → err 非 nil，调用方丢弃 out，按原样发。
-	Apply(body []byte, r *Request) (out []byte, notes []string, err error)
-}
+type Plugin = gatewayapi.Plugin
 
 // ToolLoopMigrator 是可选的路由约束：某些上游不能原样接手别家尚未闭合的
 // reasoning/tool 状态，但可以在安全候选都失败后做一次显式的有损重建。

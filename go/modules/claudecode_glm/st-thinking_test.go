@@ -5,16 +5,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rzbdz/newgate/go/modules/contracts"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 	"github.com/rzbdz/newgate/go/modules/glm"
+	glmapi "github.com/rzbdz/newgate/go/modules/glm/api"
 	thinkingmodule "github.com/rzbdz/newgate/go/modules/thinking"
 )
 
 func testPlugin() thinking {
 	return thinking{
-		client: contracts.ClientFamily{AgentID: "claude"},
-		model:  contracts.ModelFamily{MatchTarget: glm.MatchTarget},
+		client: claudeapi.Client{AgentID: "claude"},
+		model:  glmapi.Model{MatchTarget: glm.MatchTarget},
 	}
 }
 
