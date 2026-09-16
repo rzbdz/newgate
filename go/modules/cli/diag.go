@@ -478,3 +478,165 @@ func modelScoreLine(h health.Status) string {
 	}
 	return modelHealthState(h) + " · " + strings.Join(scores, " · ")
 }
+
+func modelDisplayScore(h health.Status) (int, bool) {
+	for i, n := range h.Buckets {
+		if n > 0 {
+			return h.Scores[i], true
+		}
+	}
+	return h.ScoreMs, h.ScoreMs > 0
+}
+
+// metricOrder 组的显示顺序：先「请求」，再按一次请求会依次遇到的
+// 链 → 超时 → 兜底 → 插件，最后是熔断与客户端。这个顺序本身在讲请求的
+// 生命周期，比字母序有用。
+var metricOrder = []string{"请求", "链", "超时", "兜底", "插件", "熔断", "客户端", "其他"}
+
+func metricRank(k string) int {
+	g := metricGroup(k)
+	for i, name := range metricOrder {
+		if name == g {
+			return i
+		}
+	}
+	return len(metricOrder)
+}
+
+// metricGroup 计数器归属的组。分组是给人看的锚点——一眼扫过就知道
+// 「有没有在换人」「有没有超时」，不用逐个读计数器名。
+func metricGroup(k string) string {
+	switch {
+	case strings.HasPrefix(k, "requests."):
+		return "请求"
+	case strings.HasPrefix(k, "chain."):
+		return "链"
+	case strings.HasPrefix(k, "timeout."):
+		return "超时"
+	case strings.HasPrefix(k, "client."):
+		return "客户端"
+	case strings.HasPrefix(k, "breaker."):
+		return "熔断"
+	case strings.HasPrefix(k, "special."):
+		return "插件"
+	case strings.HasPrefix(k, "count_tokens."):
+		return "兜底"
+	}
+	return "其他"
+}
+
+// metricHint 计数器名字的人话注释。没列出的不硬凑——空说明比编一句好。
+func metricHint(k string) string {
+	switch {
+	case k == "requests.total":
+		return "进入网关的请求"
+	case k == "count_tokens.forwarded":
+		return "转发上游取真值"
+	case k == "count_tokens.local":
+		return "本地粗估兜底（上游无此端点）"
+	case k == "count_tokens.probe_404":
+		return "lazy probe 404，记为「上游不支持」"
+	case k == "timeout.first_byte.non_stream":
+		return "首字节超时（非流式），沿链下移"
+	case k == "timeout.first_byte.stream":
+		return "首字节超时（流式），沿链下移"
+	case strings.HasPrefix(k, "timeout.first_byte"):
+		return "首字节超时，沿链下移"
+	case k == "chain.failover":
+		return "前序候选失败，换到后续候选后成功"
+	case k == "chain.step_failed":
+		return "链上某站失败（连接 / 可转移错误）"
+	case k == "chain.budget_exhausted":
+		return "链总预算用尽"
+	case k == "client.cancel":
+		return "客户端主动取消"
+	case k == "breaker.opened":
+		return "熔断器打开，provider 暂时摘除"
+	case strings.HasPrefix(k, "special."):
+		if hint, ok := special.MetricHint(k); ok {
+			return hint
+		}
+		return "插件改写了请求（逐条有日志）"
+	}
+	return ""
+}
+
+// prettyMs 毫秒 → 人话。链预算是按 ms 配的（state.json 里 120000），
+// 打印时不该原样甩 120000ms 给用户。
+func prettyMs(ms int) string {
+	return (time.Duration(ms) * time.Millisecond).String()
+}
+
+func prettyDur(sec int) string {
+	d := time.Duration(sec) * time.Second
+	if d < time.Minute {
+		return d.String()
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+}
+
+// check 一次体检里的一项。
+//
+// 设计是「绿的只占一行，红的才展开」：体检命令每天跑，全绿时应该一眼扫完；
+// 出问题时才需要路径、原因、修法。以前每行都顶着绝对路径和 ✓，等于把
+// 有用的信息埋进噪声里 —— 用户会开始跳着看，然后就漏掉真正的那条。
+type check struct {
+	label   string
+	mark    string
+	line    string   // 一句话结论
+	details []string // 只在有问题时展开
+}
+
+func (c check) print() {
+	fmt.Println(style.Field(c.label, style.Mark(c.mark)+" "+c.line))
+	for _, d := range c.details {
+		fmt.Println(style.Bullet(style.Dim(d)))
+	}
+}
+
+func cmdDoctor(service *service) int {
+	fmt.Println(style.Title("newgate doctor", Version))
+	fmt.Println(style.Rule(64))
+	checks := []check{
+		checkConfig(),
+		checkChain(),
+		checkEnv(),
+		checkProxy(),
+		checkTakeover(service.agents),
+		checkBackups(),
+	}
+	for _, item := range service.moduleDiagnostics() {
+		mark := style.Skip
+		switch item.State {
+		case "ok":
+			mark = style.OK
+		case "warn":
+			mark = style.Warn
+		case "bad":
+			mark = style.Bad
+		}
+		checks = append(checks, check{
+			label: item.Label, mark: mark, line: item.Line, details: item.Details,
+		})
+	}
+
+	fmt.Println()
+	bad := 0
+	for _, c := range checks {
+		if c.mark == style.Bad {
+			bad++
+		}
+		c.print()
+	}
+
+	fmt.Println()
+	if bad == 0 {
+		fmt.Println(style.Green("全部通过"))
+		return 0
+	}
+	fmt.Printf("%s %d 项异常\n", style.Mark(style.Bad), bad)
+	return 1
+}
