@@ -450,3 +450,140 @@ func findTopLevelValue(body []byte, key string) (int, int, error) {
 		i = vEnd
 	}
 }
+
+func skipWS(b []byte, i int) int {
+	for i < len(b) {
+		switch b[i] {
+		case ' ', '\t', '\n', '\r':
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+// scanString 从 b[i]=='"' 开始，返回闭合引号之后的位置。
+func scanString(b []byte, i int) (int, bool) {
+	if i >= len(b) || b[i] != '"' {
+		return 0, false
+	}
+	i++
+	for i < len(b) {
+		switch b[i] {
+		case '\\':
+			i += 2 // 跳过转义序列（\uXXXX 的后续字符都不是 " 或 \，安全）
+		case '"':
+			return i + 1, true
+		default:
+			i++
+		}
+	}
+	return 0, false
+}
+
+// scanValue 返回 b[i] 开始的这个 JSON 值之后的位置。
+// 只需要正确划界，不需要校验合法性——校验是上游的事，我们只管别改坏。
+func scanValue(b []byte, i int) (int, bool) {
+	if i >= len(b) {
+		return 0, false
+	}
+	switch b[i] {
+	case '"':
+		return scanString(b, i)
+	case '{', '[':
+		open, close := b[i], byte('}')
+		if open == '[' {
+			close = ']'
+		}
+		depth := 0
+		for i < len(b) {
+			switch b[i] {
+			case '"':
+				n, ok := scanString(b, i)
+				if !ok {
+					return 0, false
+				}
+				i = n
+				continue
+			case open:
+				depth++
+			case close:
+				depth--
+				if depth == 0 {
+					return i + 1, true
+				}
+			}
+			i++
+		}
+		return 0, false
+	default:
+		// 数字 / true / false / null：扫到分隔符为止
+		for i < len(b) {
+			switch b[i] {
+			case ',', '}', ']', ' ', '\t', '\n', '\r':
+				return i, true
+			}
+			i++
+		}
+		return i, true
+	}
+}
+
+// TopLevelString 只读地取出顶层某个字符串字段。
+func TopLevelString(body []byte, key string) (string, bool) {
+	s, e, err := findTopLevelStringValue(body, key)
+	if err != nil {
+		return "", false
+	}
+	var v string
+	if json.Unmarshal(body[s:e], &v) != nil {
+		return "", false
+	}
+	return v, true
+}
+
+// TopLevelBool 只读地取出顶层某个布尔字段（stream 用）。
+func TopLevelBool(body []byte, key string) bool {
+	i := skipWS(body, 0)
+	if i >= len(body) || body[i] != '{' {
+		return false
+	}
+	i++
+	for {
+		i = skipWS(body, i)
+		if i >= len(body) || body[i] == '}' {
+			return false
+		}
+		if body[i] == ',' {
+			i++
+			continue
+		}
+		if body[i] != '"' {
+			return false
+		}
+		kStart := i
+		kEnd, ok := scanString(body, i)
+		if !ok {
+			return false
+		}
+		var k string
+		if json.Unmarshal(body[kStart:kEnd], &k) != nil {
+			return false
+		}
+		i = skipWS(body, kEnd)
+		if i >= len(body) || body[i] != ':' {
+			return false
+		}
+		i = skipWS(body, i+1)
+		vStart := i
+		vEnd, ok := scanValue(body, i)
+		if !ok {
+			return false
+		}
+		if k == key {
+			return string(body[vStart:vEnd]) == "true"
+		}
+		i = vEnd
+	}
+}
