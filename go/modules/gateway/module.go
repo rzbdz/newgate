@@ -1,0 +1,51 @@
+// Package gateway 把“选路并转发一次模型请求”实现为独立数据面。
+//
+// 请求先根据 profile 解析候选链，再依次尝试 binding。上游差异不能散落在这条
+// 热路径里，所以 gateway 只公开 Plugin 注册端口：模型、客户端和交叉组件各自
+// 注册只对自己成立的修补，网关统一负责排序、执行、记录 notes 和 fail-open。
+//
+// 组件层只管理插件注册表的所有权。HTTP server、重试、健康状态、协议拼接和
+// 字节改写仍由本模块内部 package 负责；通用 component 内核不理解请求概念。
+package gateway
+
+import (
+	"context"
+
+	modules "github.com/rzbdz/newgate/go/component"
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
+	"github.com/rzbdz/newgate/go/modules/gateway/special"
+)
+
+type port struct{ registry *special.Registry }
+
+var _ gatewayapi.Gateway = (*port)(nil)
+
+// New 声明网关控制面组件。对 Config 的 Need 既表达真实依赖，
+// 也确保所有配置语义先就绪，再允许插件进入请求路径。
+func New() modules.Component {
+	port := &port{registry: special.NewRegistry()}
+	var restore func()
+	return modules.Component{
+		Name:     "gateway",
+		Requires: []modules.Requirement{modules.Need(configapi.Capability)},
+		Provides: []modules.Provision{
+			modules.Provide(gatewayapi.Capability, gatewayapi.Gateway(port)),
+		},
+		Start: func(context.Context, modules.Context) error {
+			restore = special.InstallDefault(port.registry)
+			return nil
+		},
+		Stop: func(context.Context) error {
+			if restore != nil {
+				restore()
+			}
+			return nil
+		},
+	}
+}
+
+// RegisterRequestHook 把插件注册限制在 gateway owner 内部，并把撤销权交还调用组件。
+func (p *port) RegisterRequestHook(hook gatewayapi.Plugin) (modules.Release, error) {
+	return p.registry.Register(hook)
+}
