@@ -8,6 +8,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/claudecode_deepseek"
 	"github.com/rzbdz/newgate/go/modules/claudecode_glm"
 	"github.com/rzbdz/newgate/go/modules/cli"
+	"github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/deepseek"
 	gatewaycomponent "github.com/rzbdz/newgate/go/modules/gateway"
@@ -22,6 +23,7 @@ type Loader struct{}
 
 func (Loader) Load() ([]modules.Component, error) {
 	providers := []modules.Provider{
+		config.New(),
 		gatewaycomponent.New(),
 		confighook.New(),
 		runtimecomponent.New(),

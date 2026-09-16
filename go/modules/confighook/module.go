@@ -42,8 +42,11 @@ func New() modules.Provider {
 func (p provider) Component() modules.Component {
 	var restoreRoles func()
 	return modules.Component{
-		Name:     "config-hook",
-		Requires: []modules.Requirement{modules.Need(contracts.GatewayCapability)},
+		Name: "config-hook",
+		Requires: []modules.Requirement{
+			modules.Need(contracts.ConfigCapability),
+			modules.Need(contracts.GatewayCapability),
+		},
 		Provides: []modules.Provision{
 			modules.Provide(contracts.ConfigHooksCapability, contracts.ConfigHooks(p.registry)),
 			modules.Provide(contracts.AgentCatalogCapability, contracts.AgentCatalog(p.registry)),

@@ -66,6 +66,7 @@ type CLI interface {
 }
 
 type Runtime struct{}
+type Config struct{}
 
 type ClientFamily struct {
 	Name    string
@@ -83,6 +84,7 @@ type ThinkingService interface {
 
 var (
 	GatewayCapability      = modules.One[Gateway]("gateway")
+	ConfigCapability       = modules.One[Config]("config")
 	ConfigHooksCapability  = modules.One[ConfigHooks]("config-hooks")
 	AgentCatalogCapability = modules.One[AgentCatalog]("agent-catalog")
 

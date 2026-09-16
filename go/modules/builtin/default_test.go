@@ -7,9 +7,12 @@ import (
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
-func TestDefaultGraphStartsWithGatewayAndConfigHook(t *testing.T) {
+func TestDefaultGraphStartsWithConfigGatewayAndConfigHook(t *testing.T) {
 	names := manager.ComponentNames()
-	if len(names) < 2 || names[0] != "gateway" || names[1] != "config-hook" {
+	if len(names) < 3 ||
+		names[0] != "config" ||
+		names[1] != "gateway" ||
+		names[2] != "config-hook" {
 		t.Fatalf("component order = %v", names)
 	}
 	if got, want := Names(), []string{"claude", "opencode"}; !reflect.DeepEqual(got, want) {

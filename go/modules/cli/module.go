@@ -27,6 +27,7 @@ func (provider) Component() modules.Component {
 	return modules.Component{
 		Name: "cli",
 		Requires: []modules.Requirement{
+			modules.Need(contracts.ConfigCapability),
 			modules.Need(contracts.RuntimeCapability),
 			modules.Optional(contracts.CLICommandsCapability),
 			modules.Optional(contracts.DiagnosticsCapability),
