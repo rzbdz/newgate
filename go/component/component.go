@@ -222,3 +222,21 @@ func (m *Manager) ComponentNames() []string {
 	}
 	return names
 }
+
+// Stop 只执行一次，并按启动的反方向释放组件。
+// 即使某个 Stop 失败，其余组件仍继续清理，最终返回第一个错误。
+func (m *Manager) Stop(ctx context.Context) error {
+	var first error
+	m.stopOnce.Do(func() {
+		for i := m.started - 1; i >= 0; i-- {
+			component := m.components[i]
+			if component.Stop == nil {
+				continue
+			}
+			if err := component.Stop(ctx); err != nil && first == nil {
+				first = fmt.Errorf("stop component %s: %w", component.Name, err)
+			}
+		}
+	})
+	return first
+}
