@@ -349,3 +349,17 @@ func isNil(value any) bool {
 		return false
 	}
 }
+
+func validateSpec(known map[string]capabilitySpec, spec capabilitySpec) error {
+	if spec.name == "" {
+		return fmt.Errorf("capability name is required")
+	}
+	if prior, ok := known[spec.name]; ok {
+		if prior.valueType != spec.valueType || prior.cardinality != spec.cardinality {
+			return fmt.Errorf("capability %s declared inconsistently", spec.name)
+		}
+		return nil
+	}
+	known[spec.name] = spec
+	return nil
+}
