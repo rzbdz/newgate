@@ -153,3 +153,156 @@ func cmdProfileKV(args []string) int {
 	notifyProxy()
 	return 0
 }
+
+// tierView 一个档位解析出来的结果。
+type tierView struct {
+	name  string
+	steps []resolve.Step
+	skips []resolve.Skip
+}
+
+// skipKinds 类目顺序固定：数字对不上时，两次输出可以直接比。
+var skipKinds = []string{"excluded", "未定义", "没 key", "熔断", "已禁用",
+	"超出 maxAttempts", "去重", "引用成环", "其他"}
+
+// cmdTier 展示 fallback 链——这是整套配置的**接口**：一眼要能回答
+// 「这次请求会走谁」和「为什么不是我想的那个」。
+//
+// 版式分两档（详略得当）：
+//
+//	newgate tier            每个档位一行，链相同就写 `= heavy`，末行给跳过统计
+//	newgate tier <档位>     展开：编号的站 + 按原因分组的跳过统计
+//
+// 跳过一律**只给汇总**，永不逐条铺开。实测一份配置里 106 条跳过中有 91 条
+// 是「与链上更靠前的候选重复」——把必然发生的去重当成一行行结果打出来，
+// 只会把真正的结论（走谁）淹掉。用户要的是链，不是候选全集的流水账。
+func cmdTier(args []string) int {
+	which := ""
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		which = a
+	}
+	// 缩写也认（heavy 写成 h、normal 写成 n…），省得记全名。
+	// 校验放在 tierReport 里、store.Load 之后——动态角色键要等 Load 把
+	// roleprov 刷新过才认得（在这里查会把自己刚注册的键判成未知）。
+	return tierReport(which)
+}
+
+// knownRolesLine 报错时给的可选项。动态角色键可能几十个，全列出来会把
+// 错误信息冲成一堵墙，只给数量与查询入口。
+func knownRolesLine() string {
+	if n := len(domain.ExtraRoles()); n > 0 {
+		return fmt.Sprintf("档位 %s，另有 %d 个动态角色键（newgate omo ls）",
+			strings.Join(domain.Roles, "/"), n)
+	}
+	return "档位 " + strings.Join(domain.Roles, "/")
+}
+
+func matchTier(s string) string {
+	for _, r := range domain.Roles {
+		if strings.HasPrefix(r, s) {
+			return r
+		}
+	}
+	return ""
+}
+
+func tierReport(which string) int {
+	snap, err := store.Load()
+	if err != nil {
+		return die(65, err.Error())
+	}
+	st := snap.State
+
+	// 角色键的校验必须在这里做：动态角色键（omo-sisyphus / cat-deep）是
+	// store.Load 里跟着 roleprov 刷进来的，在 Load 之前查会把自己刚注册
+	// 的键判成未知。模块注册的槽位和档位在解析层是一回事，命令层不该比
+	// 解析层更窄——newgate tier omo-sisyphus 是查「这个槽位走哪条链」的
+	// 正规入口。
+	if which != "" {
+		if full := matchTier(which); full != "" {
+			which = full
+		} else if !domain.IsKnownRole(which) {
+			return die(64, fmt.Sprintf("未知档位 %q（%s）", which, knownRolesLine()))
+		}
+	}
+
+	// 链头可能不止一个（claude 和 opencode 可以各挂一个 profile）。
+	heads := map[string][]string{st.DefaultProfile: {"默认"}}
+	for agent, p := range st.Active {
+		heads[p] = append(heads[p], agent)
+	}
+	var headNames []string
+	for h := range heads {
+		headNames = append(headNames, h)
+	}
+	sort.Strings(headNames)
+
+	names := domain.Roles
+	if which != "" {
+		names = []string{which}
+	}
+	_, live := proxyState()
+	available := availableFromProxy(live)
+	rank := rankFromProxy(live)
+	liveHealth := healthFromProxy(live)
+
+	for _, head := range headNames {
+		sort.Strings(heads[head])
+		fmt.Println(style.Title("newgate tier",
+			fmt.Sprintf("链头 %s（%s）· 最大尝试 %d · 预算 %s",
+				head, strings.Join(heads[head], ", "),
+				st.Chain.Attempts(), prettyMs(st.Chain.Budget()))))
+		fmt.Println(style.Rule(72))
+
+		var rows []tierView
+		for _, name := range names {
+			steps, skips := resolve.BuildChain(name, snap.Profiles, snap.Providers, resolve.Opts{
+				Active:    head,
+				Available: available,
+				Rank:      rank,
+				// tier 展示的是完整候选链；maxAttempts 是执行约束，不是
+				// membership。否则后续 profile 会被误解成根本没进链。
+				MaxSteps: 0,
+			})
+			rows = append(rows, tierView{name, steps, skips})
+		}
+
+		fmt.Println()
+		if which == "" {
+			// 概览：链一样的档位合并成 `= <先出现的那个>`
+			fmt.Print(tierOverview(rows))
+			if n := countSkips(rows); n > 0 {
+				fmt.Println(style.Hint(fmt.Sprintf("跳过 %d 个候选：%s", n, skipSummary(rows))))
+				fmt.Println(style.Hint("明细：newgate tier <档位>"))
+			}
+			continue
+		}
+
+		r := rows[0]
+		if len(r.steps) == 0 {
+			fmt.Println(style.Item(style.Bad, "无可用候选"))
+		} else {
+			fmt.Println(style.Field("最终", style.Cyan(r.steps[0].Binding.String())))
+			fmt.Println()
+			fmt.Print(numberedBindingChain(r.steps, func(step resolve.Step) string {
+				return bindingHealthLabel(liveHealth[step.Binding.String()])
+			}))
+			fmt.Println(style.Hint("链头固定；fallback 按当前上下文的预测 TTFT 排序"))
+			fmt.Println(style.Hint("同 (provider, model) 全链仅一次"))
+			if limit := st.Chain.Attempts(); limit < len(r.steps) {
+				fmt.Println(style.Hint(fmt.Sprintf(
+					"单次请求最多尝试前 %d 站；后续 %d 站仍在链中",
+					limit, len(r.steps)-limit)))
+				fmt.Println(style.Hint("调高 state.json chain.max_attempts 可扩大实际尝试范围"))
+			}
+		}
+		if len(r.skips) > 0 {
+			fmt.Println()
+			printSkips(r.skips)
+		}
+	}
+	return 0
+}
