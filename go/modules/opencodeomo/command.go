@@ -261,3 +261,70 @@ func omoMode(host cliapi.Host, mode string) int {
 	host.NotifyProxy()
 	return 0
 }
+
+// omoExplain 把一个槽位键解析成实际的 fallback 链——「为什么不是我想的那个」
+// 只能靠这个回答（docs/04-configuration.md）。
+func omoExplain(host cliapi.Host, key string) int {
+	reg := ReadOmoSlots()
+	if reg == nil {
+		return host.Die(65, "没有 omo 槽位登记表；先 newgate on opencode")
+	}
+	// 先装快照：角色键是 store.Load 里跟着刷新的（core/roleprov），
+	// 不先装一次的话 IsKnownRole 会说不认识我们自己刚注册的键。
+	snap, err := store.Load()
+	if err != nil {
+		return host.Die(65, err.Error())
+	}
+	if !domain.IsKnownRole(key) {
+		return host.Die(64, fmt.Sprintf("%q 不是已知角色键（newgate omo ls 看清单）", key))
+	}
+	st := snap.State
+	heads := map[string][]string{st.DefaultProfile: {"默认"}}
+	for agent, p := range st.Active {
+		heads[p] = append(heads[p], agent)
+	}
+	names := make([]string, 0, len(heads))
+	for h := range heads {
+		names = append(names, h)
+	}
+	sort.Strings(names)
+
+	sub := "模块动态角色，非 omo 槽位"
+	if sl, ok := reg.SlotOf(key); ok {
+		sub = sl.Kind + "/" + sl.Name
+	}
+	fmt.Println(style.Title("newgate omo "+key, sub))
+	fmt.Println(style.Rule(64))
+
+	if sl, ok := reg.SlotOf(key); ok {
+		t := style.NewTable("字段", "值")
+		t.Row("接管前", style.Dim(dash(sl.Was)+" "+dash(sl.Variant)))
+		t.Row("现状", sl.Current)
+		t.Row("建议", dash(sl.Suggested))
+		t.Row("生效", style.Cyan(reg.SlotBinding(key)))
+		fmt.Print(t.String())
+		if sl.Why != "" {
+			fmt.Println(style.Hint("建议依据 " + sl.Why))
+		}
+	}
+
+	available, rank := host.LiveRouting()
+	for _, head := range names {
+		fmt.Print(style.Section("链头 "+head) + style.Dim("   "+strings.Join(heads[head], ", ")) + "\n")
+		steps, skips := resolve.BuildChain(key, snap.Profiles, snap.Providers, resolve.Opts{
+			Active:    head,
+			Available: available,
+			Rank:      rank,
+			MaxSteps:  st.Chain.Attempts(),
+		})
+		if len(steps) == 0 {
+			fmt.Println(style.Item(style.Bad, "无可用候选"))
+		} else {
+			host.PrintChain(steps)
+		}
+		if len(skips) > 0 {
+			host.PrintSkips(skips)
+		}
+	}
+	return 0
+}
