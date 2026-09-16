@@ -250,3 +250,129 @@ func (s *OmoSlots) SlotOf(key string) (OmoSlot, bool) {
 	}
 	return OmoSlot{}, false
 }
+
+// WriteOmoSlots 原子写注册表。
+func WriteOmoSlots(s *OmoSlots) error {
+	if s == nil {
+		return nil
+	}
+	s.Version = 1
+	s.Source = "omo"
+	s.Updated = time.Now().Format(time.RFC3339)
+	s.Note = "接管 oh-my-openagent 时自动生成。default 是这个键在 profile 里没写时的缺省归属；" +
+		"想让某个槽位换档位，改 overrides（支持 \"@别的键\" / \"档位名\" / \"provider/模型\"），" +
+		"或在 profile 里直接写这个键。"
+	b, err := marshal(s)
+	if err != nil {
+		return err
+	}
+	// 0660：注册表要能被**跑 daemon 的那个用户**读到（常常不是写它的这个）
+	return writeAtomicMode(SlotsFile(), b, 0o660)
+}
+
+// ---------- 建议 ----------
+
+// Suggest 从「接管前是什么模型、调多猛」算出建议档位。
+//
+// 两步：先按模型名归体格（ClassifyModel），再按 variant 在阶梯上挪一级——
+// max/xhigh 表示这条槽位是奔着最强去的（opus+max 建议 heavy、sonnet+max
+// 建议 normal），low/minimal 表示刻意省着用，high/medium 不挪。
+//
+// 模型名没命中规则（模糊归类）时不建议：那本来就是猜的，再叠一层 variant
+// 只会把猜测说得更像结论。理由写在 why 里给用户看。
+func Suggest(model, variant string) (tier, why string) {
+	if model == "" {
+		return "", "接管前没有具体模型名"
+	}
+	t, exact := ClassifyModel(model)
+	if !exact {
+		return "", "模型名 " + model + " 没命中规则，体格本身就是猜的"
+	}
+	n := variantShift(variant)
+	to := domain.ShiftTier(t, n)
+	if n == 0 || to == t {
+		// 没挪档也要给理由。否则界面上「现状 heavy / 建议 normal」这类
+		// 差异会是一片空白，用户问「为什么不是我想的那个」时无处可查
+		// （docs/04-configuration.md）。分类本身就命中了规则，这句就是那个答案。
+		if variant == "" {
+			return t, "按模型体格判定，接管前没记 variant"
+		}
+		return t, "按模型体格判定，variant=" + variant + " 不改变档位"
+	}
+	dir := "上调"
+	if n < 0 {
+		dir = "下调"
+	}
+	return to, "variant=" + variant + " " + dir + "一级（" + t + " → " + to + "）"
+}
+
+// ClearOmoSlots 释放接管时清空槽位，**保留 overrides**：键没了，用户手写的
+// 「某个槽位想跟哪条链走」不该跟着丢——下次接管直接用回来。
+func ClearOmoSlots() {
+	prev := ReadOmoSlots()
+	if prev == nil {
+		return
+	}
+	if len(prev.Overrides) == 0 && len(prev.Slots) == 0 {
+		return
+	}
+	_ = WriteOmoSlots(&OmoSlots{Mode: prev.Mode, Overrides: prev.Overrides})
+}
+
+func variantShift(v string) int {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "max", "xhigh":
+		return 1
+	case "low", "minimal":
+		return -1
+	default:
+		return 0
+	}
+}
+
+// ---------- 角色键来源 ----------
+
+// omoRolesProvider 把注册表里的槽位报给框架。
+//
+// 这就是「模块注册自己的 sub agent key 机制」那一步：框架（roleprov +
+// domain.ExtraRole + resolve 的引用展开）不认识 omo，只拿到一批
+// 「键 → 缺省绑定」。omo 插件哪天加了个新 agent，重新接管就会自动多出一个键，
+// core 一行都不用改。
+type omoRolesProvider struct{}
+
+var (
+	_ roleprov.Provider      = (*omoRolesProvider)(nil)
+	_ roleprov.WatchProvider = (*omoRolesProvider)(nil)
+)
+
+func (omoRolesProvider) Source() string { return "omo" }
+
+func (omoRolesProvider) WatchFiles() []string { return []string{SlotsFile()} }
+
+func (omoRolesProvider) Roles() ([]domain.ExtraRole, error) {
+	s := ReadOmoSlots()
+	if s == nil {
+		return nil, nil // 没接管过 omo：一个键都不贡献
+	}
+	out := make([]domain.ExtraRole, 0, len(s.Slots))
+	for _, sl := range s.Slots {
+		if sl.Key == "" {
+			continue
+		}
+		out = append(out, domain.ExtraRole{
+			Key:     sl.Key,
+			Source:  "omo",
+			Default: s.SlotBinding(sl.Key),
+			Meta: map[string]string{
+				"kind":      sl.Kind,
+				"name":      sl.Name,
+				"was":       sl.Was,
+				"variant":   sl.Variant,
+				"current":   sl.Current,
+				"suggested": sl.Suggested,
+				"default":   s.SlotBinding(sl.Key),
+			},
+		})
+	}
+	return out, nil
+}
