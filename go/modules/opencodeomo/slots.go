@@ -123,3 +123,130 @@ func DiscoverSlots(target string) ([]Slot, error) {
 	}
 	return out, nil
 }
+
+type omoNode struct {
+	Model          string   `json:"model"`
+	Variant        string   `json:"variant"`
+	FallbackModels []omoRef `json:"fallback_models"`
+}
+
+// omoRef fallback_models 的一个元素。omo 两种形态都在用：
+//
+//	"smt-codex/gpt-5.6-terra"                       裸模型名
+//	{"model": "smt-codex/gpt-5.6-terra", "variant": "medium"}   带强度
+//
+// 两种都要收，所以自己解——写成 []string 会让整个文件解析失败，
+// 而解析失败的表现是「接管报告说 0 处改写」，最难查的那种静默。
+type omoRef struct {
+	Model      string `json:"model"`
+	Variant    string `json:"variant,omitempty"`
+	fromObject bool
+}
+
+func (r *omoRef) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) > 0 && b[0] == '"' {
+		return json.Unmarshal(b, &r.Model)
+	}
+	type alias omoRef // 防递归
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*r = omoRef(a)
+	r.fromObject = true
+	return nil
+}
+
+// OriginalSlots 从 backups/original/ 里的原始文件读槽位。
+//
+// 用来在**重新接管**时找回 `was`：用户第二次 `newgate on opencode` 时，
+// 磁盘上的文件早就被我们改写成 newgate/xxx 了，只有备份还记得它原来是什么
+// 模型、什么 variant。没有这份记忆，建议值就无从算起。
+func OriginalSlots() []Slot {
+	slots, _ := DiscoverSlots(originalPath(omoTargetPath()))
+	return slots
+}
+
+func omoTargetPath() string {
+	for _, t := range TargetFiles() {
+		if strings.Contains(filepath.Base(t), "openagent") {
+			return t
+		}
+	}
+	return ""
+}
+
+// ---------- 注册表 ----------
+
+// OmoSlots 槽位登记表（~/.config/newgate/omo-slots.json）。
+type OmoSlots struct {
+	Version   int               `json:"version"`
+	Source    string            `json:"source"`
+	Updated   string            `json:"updated,omitempty"`
+	Mode      string            `json:"mode,omitempty"`      // current（现状，默认）| suggested（建议）
+	Overrides map[string]string `json:"overrides,omitempty"` // 键 → 档位名/@引用，最高优先
+	Slots     []OmoSlot         `json:"slots"`
+	Note      string            `json:"note,omitempty"`
+}
+
+// OmoSlot 一个槽位的登记项。
+type OmoSlot struct {
+	Key          string   `json:"key"`
+	Kind         string   `json:"kind"`
+	Name         string   `json:"name"`
+	Was          string   `json:"was,omitempty"` // 接管前的真实模型名
+	WasFallbacks []string `json:"was_fallbacks,omitempty"`
+	Variant      string   `json:"variant,omitempty"`
+	Current      string   `json:"current"`             // 现状：接管时它的体格
+	Suggested    string   `json:"suggested,omitempty"` // 建议：体格 + variant 强度
+	Default      string   `json:"default"`             // 实际生效（overrides > mode 决定的）
+	Why          string   `json:"why,omitempty"`
+}
+
+// ReadOmoSlots 读注册表。没有（没接管过 omo）返回 nil，不是错误。
+func ReadOmoSlots() *OmoSlots {
+	var s OmoSlots
+	b, err := ioutil.ReadFile(SlotsFile())
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		return nil
+	}
+	return &s
+}
+
+// SlotBinding 一个槽位**实际生效**的缺省绑定（overrides > mode > current）。
+// 返回值直接写进 domain.ExtraRole.Default，支持 "@引用" / "provider/model" / 档位名。
+func (s *OmoSlots) SlotBinding(key string) string {
+	if s == nil {
+		return ""
+	}
+	if v, ok := s.Overrides[key]; ok && v != "" {
+		return v
+	}
+	for _, sl := range s.Slots {
+		if sl.Key != key {
+			continue
+		}
+		if s.Mode == "suggested" && sl.Suggested != "" {
+			return sl.Suggested
+		}
+		return sl.Current
+	}
+	return ""
+}
+
+// SlotOf 按键查登记项。
+func (s *OmoSlots) SlotOf(key string) (OmoSlot, bool) {
+	if s == nil {
+		return OmoSlot{}, false
+	}
+	for _, sl := range s.Slots {
+		if sl.Key == key {
+			return sl, true
+		}
+	}
+	return OmoSlot{}, false
+}
