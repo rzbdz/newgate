@@ -363,3 +363,11 @@ func validateSpec(known map[string]capabilitySpec, spec capabilitySpec) error {
 	known[spec.name] = spec
 	return nil
 }
+
+func componentList(components []Component, indexes []int) string {
+	names := make([]string, 0, len(indexes))
+	for _, index := range indexes {
+		names = append(names, components[index].Name)
+	}
+	return fmt.Sprintf("%v", names)
+}
