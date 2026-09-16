@@ -400,3 +400,102 @@ func tryHandoff() bool {
 	fmt.Printf("%s 交接已发出，但新进程 5 秒内没就位 · 日志 %s\n", style.Mark(style.Warn), paths.LogFile())
 	return false
 }
+
+// handoffSupported 问 daemon 的 status 端点：支持优雅交接吗。
+func handoffSupported(port int) (bool, error) {
+	resp, err := httpx.LocalClient(3 * time.Second).
+		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/status", port))
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Handoff bool `json:"handoff"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return false, err
+	}
+	return out.Handoff, nil
+}
+
+// cmdReload 显式触发重载。平时不需要——watcher 会自动发现。
+func cmdReload() int {
+	i := daemon.Running()
+	if i == nil {
+		fmt.Println(style.Item(style.Skip, "代理未运行；配置会在下次启动时读取"))
+		return 0
+	}
+	if err := syscall.Kill(i.PID, syscall.SIGHUP); err != nil {
+		return die(70, "发 SIGHUP 失败: "+err.Error())
+	}
+	fmt.Println(style.Item(style.OK, fmt.Sprintf("已通知代理重读配置   pid %d", i.PID)))
+	fmt.Println(style.Hint("平时不需要这个命令：配置改动 1 秒内自动生效"))
+	return 0
+}
+
+// activeProblems 只检查**实际会被用到**的 provider，别因为某个用不到的
+// profile 缺 key 就挡住启动。
+func activeProblems(st *domain.State) []string {
+	snap, err := store.Load()
+	if err != nil {
+		return []string{err.Error()}
+	}
+	used := map[string]bool{}
+	check := func(profile string) {
+		for _, p := range snap.Profiles {
+			if p.Name != profile {
+				continue
+			}
+			for _, cands := range p.Roles {
+				for _, b := range cands {
+					used[b.Provider] = true
+				}
+			}
+		}
+	}
+	check(st.DefaultProfile)
+	for _, p := range st.Active {
+		check(p)
+	}
+	var out []string
+	for name := range used {
+		prov, ok := snap.Providers.Providers[name]
+		if !ok {
+			out = append(out, fmt.Sprintf("provider %q 未定义", name))
+			continue
+		}
+		if prov.Key() == "" {
+			hint := "在 providers.json 里填 api_key"
+			if prov.APIKeyEnv != "" {
+				hint = "设环境变量 " + prov.APIKeyEnv + " 或填 api_key"
+			}
+			out = append(out, fmt.Sprintf("provider %q 没有 key → %s", name, hint))
+		}
+	}
+	return out
+}
+
+func pingProxy(port int) bool {
+	resp, err := httpx.LocalClient(1500 * time.Millisecond).
+		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/status", port))
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			return true
+		}
+	}
+	return httpx.TCPAlive("127.0.0.1", port, 500*time.Millisecond)
+}
+
+// notifyProxy 让运行中的代理立刻重读配置。
+//
+// 平时配置改动靠 watcher 的 1 秒轮询，对**手工编辑文件**足够快；
+// 但 CLI 命令（--set-profile 等）是用户刚敲下的，必须立刻生效，
+// 所以显式发 SIGHUP 强制重载。
+func notifyProxy() {
+	i := daemon.Running()
+	if i == nil {
+		return
+	}
+	_ = syscall.Kill(i.PID, syscall.SIGHUP)
+}
