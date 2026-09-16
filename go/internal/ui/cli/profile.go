@@ -14,6 +14,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
 	"github.com/rzbdz/newgate/go/internal/store"
+	"github.com/rzbdz/newgate/go/internal/ui/style"
 )
 
 // cmdSetProfile switches the chain head. An empty agent sets the global
@@ -27,37 +28,47 @@ func cmdSetProfile(agent, name string) int {
 	if agent != "" {
 		scope = "agent " + agent
 	}
-	fmt.Printf("✓ %s → profile %s\n", scope, name)
+	fmt.Println(style.Item(style.OK, scope+" → "+style.Cyan(name)))
 
 	if pr, err := store.LoadProfile(name); err == nil {
 		if pr.Description != "" {
-			fmt.Printf("  %s\n", pr.Description)
+			fmt.Println(style.Hint(pr.Description))
 		}
 		if pr.Pinned {
-			fmt.Printf("  pinned: the chain stops here; a failure is reported rather than substituted\n")
+			fmt.Println(style.Hint("pinned：链到此为止，失败直接上报，不再替换候选"))
 		}
+		t := style.NewTable("档位", "绑定")
 		for _, tier := range domain.Roles {
 			if b, ok := pr.Resolve(tier); ok {
-				fmt.Printf("    %-8s %s\n", tier, b)
+				t.Row(style.Cyan(tier), b.String())
 			}
+		}
+		if t.Len() > 0 {
+			fmt.Println()
+			fmt.Print(t.String())
 		}
 	}
 	notifyProxy()
+	fmt.Println()
 	if daemon.Running() != nil {
-		fmt.Println("\nEffective immediately. Sessions already running are unaffected.")
+		fmt.Println(style.Hint("即刻生效；已在运行的会话不受影响"))
 	} else {
-		fmt.Println("\nNote: the proxy is not running. Start it with `newgate start`.")
+		fmt.Println(style.Hint("代理未运行 · newgate start"))
 	}
 	return 0
 }
 
+// cmdProfiles 列出全部 profile。
+//
+// 一屏回答三个问题：默认是哪个、优先级怎么排、哪个 agent 挂了别名的 profile。
+// 标了标志的 profile 才是异常的（pinned / excluded），所以不加额外段落，
+// 全部信息压在一张表里——段落一多，扫读就变成阅读。
 func cmdProfiles() int {
 	names, err := store.ListProfiles()
 	if err != nil {
 		return die(65, "cannot read mappings: "+err.Error())
 	}
 	st := store.LoadState()
-	type row struct{ p *domain.Profile }
 	var ps []*domain.Profile
 	for _, n := range names {
 		if p, err := store.LoadProfile(n); err == nil {
@@ -71,35 +82,37 @@ func cmdProfiles() int {
 		return ps[i].Name < ps[j].Name
 	})
 
-	fmt.Printf("%-4s %-14s %-22s %s\n", "PRIO", "PROFILE", "FLAGS", "DESCRIPTION")
-	fmt.Println(strings.Repeat("─", 88))
+	fmt.Println(style.Title("newgate profiles",
+		fmt.Sprintf("%d 个 · 默认 %s", len(ps), st.DefaultProfile)))
+	fmt.Println(style.Rule(72))
+
+	t := style.NewTable("优先级", "profile", "标志", "说明")
+	t.AlignRight(0)
 	for _, p := range ps {
 		var flags []string
+		if p.Name == st.DefaultProfile {
+			flags = append(flags, style.Green("default"))
+		}
 		if p.Pinned {
-			flags = append(flags, "pinned")
+			flags = append(flags, style.Yellow("pinned"))
 		}
 		if p.Excluded {
-			flags = append(flags, "excluded")
-		}
-		if p.Name == st.DefaultProfile {
-			flags = append(flags, "default")
+			flags = append(flags, style.Yellow("excluded"))
 		}
 		for agent, ap := range st.Active {
 			if ap == p.Name {
-				flags = append(flags, "←"+agent)
+				flags = append(flags, style.Cyan("←"+agent))
 			}
 		}
-		fmt.Printf("%4d %-14s %-22s %s\n", p.Prio(), p.Name,
-			strings.Join(flags, ","), p.Description)
-	}
-
-	if len(st.Active) > 0 {
-		fmt.Println("\nPer-agent overrides:")
-		for agent, p := range st.Active {
-			fmt.Printf("  %-12s %s\n", agent, p)
+		name := p.Name
+		if p.Name == st.DefaultProfile {
+			name = style.Cyan(p.Name)
 		}
+		t.Row(fmt.Sprintf("%d", p.Prio()), name, strings.Join(flags, " "),
+			style.Dim(style.Truncate(p.Description, 52)))
 	}
-	fmt.Printf("\nGlobal default: %s\n", st.DefaultProfile)
+	fmt.Print(t.String())
+	fmt.Println(style.Hint("pinned 停在链首不替换 · excluded 只能被显式选中 · ←agent 该 agent 单独用这个 profile"))
 	return 0
 }
 
@@ -121,7 +134,7 @@ func cmdProfileKV(args []string) int {
 
 	if len(args) < 2 || args[1] != "--write" {
 		fmt.Print(text)
-		fmt.Println("# ↑ newgate profile kv " + name + " --write 可直接落盘")
+		fmt.Println(style.Dim("# 落盘：newgate profile kv " + name + " --write"))
 		return 0
 	}
 	kvPath := filepath.Join(paths.Mappings(), name+".kv")
@@ -131,34 +144,93 @@ func cmdProfileKV(args []string) int {
 	jsonPath := filepath.Join(paths.Mappings(), name+".json")
 	if _, err := os.Stat(jsonPath); err == nil {
 		if err := os.Rename(jsonPath, jsonPath+".bak"); err != nil {
-			return die(70, "旧 json 改名失败（kv 已写入，手动处理一下）: "+err.Error())
+			return die(70, "旧 json 改名失败（kv 已写入，手动处理）: "+err.Error())
 		}
-		fmt.Printf("✓ %s（旧 .json → .json.bak）\n", kvPath)
+		fmt.Println(style.Item(style.OK, kvPath+style.Dim("   旧 .json → .json.bak")))
 	} else {
-		fmt.Printf("✓ %s\n", kvPath)
+		fmt.Println(style.Item(style.OK, kvPath))
 	}
 	notifyProxy()
 	return 0
 }
 
-// cmdTier prints the fallback chain for a tier, including why each candidate
-// was skipped. This view is the interface: if it cannot answer "why this one,
-// and what do I change" on one screen, the configuration is unusable.
-func cmdTier(which string) int {
+// tierView 一个档位解析出来的结果。
+type tierView struct {
+	name  string
+	steps []resolve.Step
+	skips []resolve.Skip
+}
+
+// skipKinds 类目顺序固定：数字对不上时，两次输出可以直接比。
+var skipKinds = []string{"excluded", "未定义", "没 key", "熔断", "已禁用",
+	"超出 maxAttempts", "去重", "引用成环", "其他"}
+
+// cmdTier 展示 fallback 链——这是整套配置的**接口**：一眼要能回答
+// 「这次请求会走谁」和「为什么不是我想的那个」。
+//
+// 版式分两档（详略得当）：
+//
+//	newgate tier            每个档位一行，链相同就写 `= heavy`，末行给跳过统计
+//	newgate tier <档位>     展开：编号的站 + 按原因分组的跳过统计
+//
+// 跳过一律**只给汇总**，永不逐条铺开。实测一份配置里 106 条跳过中有 91 条
+// 是「与链上更靠前的候选重复」——把必然发生的去重当成一行行结果打出来，
+// 只会把真正的结论（走谁）淹掉。用户要的是链，不是候选全集的流水账。
+func cmdTier(args []string) int {
+	which := ""
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		which = a
+	}
+	// 缩写也认（heavy 写成 h、normal 写成 n…），省得记全名。
+	// 校验放在 tierReport 里、store.Load 之后——动态角色键要等 Load 把
+	// roleprov 刷新过才认得（在这里查会把自己刚注册的键判成未知）。
+	return tierReport(which)
+}
+
+// knownRolesLine 报错时给的可选项。动态角色键可能几十个，全列出来会把
+// 错误信息冲成一堵墙，只给数量与查询入口。
+func knownRolesLine() string {
+	if n := len(domain.ExtraRoles()); n > 0 {
+		return fmt.Sprintf("档位 %s，另有 %d 个动态角色键（newgate omo ls）",
+			strings.Join(domain.Roles, "/"), n)
+	}
+	return "档位 " + strings.Join(domain.Roles, "/")
+}
+
+func matchTier(s string) string {
+	for _, r := range domain.Roles {
+		if strings.HasPrefix(r, s) {
+			return r
+		}
+	}
+	return ""
+}
+
+func tierReport(which string) int {
 	snap, err := store.Load()
 	if err != nil {
 		return die(65, err.Error())
 	}
 	st := snap.State
 
-	tiers := domain.Roles
+	// 角色键的校验必须在这里做：动态角色键（omo-sisyphus / cat-deep）是
+	// store.Load 里跟着 roleprov 刷进来的，在 Load 之前查会把自己刚注册
+	// 的键判成未知。模块注册的槽位和档位在解析层是一回事，命令层不该比
+	// 解析层更窄——newgate tier omo-sisyphus 是查「这个槽位走哪条链」的
+	// 正规入口。
 	if which != "" {
-		tiers = []string{which}
+		if full := matchTier(which); full != "" {
+			which = full
+		} else if !domain.IsKnownRole(which) {
+			return die(64, fmt.Sprintf("未知档位 %q（%s）", which, knownRolesLine()))
+		}
 	}
 
-	// Show the chain for every distinct chain head in play, so per-agent
-	// differences are visible rather than hidden behind one global view.
-	heads := map[string][]string{st.DefaultProfile: {"(default)"}}
+	// 链头可能不止一个（claude 和 opencode 可以各挂一个 profile）。
+	heads := map[string][]string{st.DefaultProfile: {"默认"}}
 	for agent, p := range st.Active {
 		heads[p] = append(heads[p], agent)
 	}
@@ -168,65 +240,216 @@ func cmdTier(which string) int {
 	}
 	sort.Strings(headNames)
 
+	names := domain.Roles
+	if which != "" {
+		names = []string{which}
+	}
+
 	for _, head := range headNames {
 		sort.Strings(heads[head])
-		fmt.Printf("\n\033[1m链头 %s\033[0m  (用于: %s)   最大尝试=%d 预算=%dms\n",
-			head, strings.Join(heads[head], ", "),
-			st.Chain.Attempts(), st.Chain.Budget())
+		fmt.Println(style.Title("newgate tier",
+			fmt.Sprintf("链头 %s（%s）· 最大尝试 %d · 预算 %s",
+				head, strings.Join(heads[head], ", "),
+				st.Chain.Attempts(), prettyMs(st.Chain.Budget()))))
+		fmt.Println(style.Rule(72))
 
-		for _, tier := range tiers {
-			steps, skips := resolve.BuildChain(tier, snap.Profiles, snap.Providers,
-				resolve.Opts{
-					Active:    head,
-					Available: health.Default.Available,
-					MaxSteps:  st.Chain.Attempts(),
-				})
-			fmt.Printf("\n  %-8s", tier)
-			if len(steps) > 0 {
-				fmt.Printf(" → \033[36m%s\033[0m\n", steps[0].Binding)
-			} else {
-				fmt.Printf(" → \033[31mno usable candidate\033[0m\n")
-			}
-			for i, s := range steps {
-				mark := "   "
-				if i == 0 {
-					mark = " → "
+		var rows []tierView
+		for _, name := range names {
+			steps, skips := resolve.BuildChain(name, snap.Profiles, snap.Providers, resolve.Opts{
+				Active:    head,
+				Available: health.Default.Available,
+				MaxSteps:  st.Chain.Attempts(),
+			})
+			rows = append(rows, tierView{name, steps, skips})
+		}
+
+		fmt.Println()
+		if which == "" {
+			// 概览：链一样的档位合并成 `= <先出现的那个>`
+			t := style.NewTable("档位", "链")
+			firstOf := map[string]string{}
+			for _, r := range rows {
+				if len(r.steps) == 0 {
+					t.Row(style.Cyan(r.name), style.Red("无可用候选"))
+					continue
 				}
-				fmt.Printf("   %s%d. %-14s %-40s\n", mark, i+1, s.Profile, s.Binding)
-			}
-			for _, sk := range skips {
-				t := sk.Target
-				if t == "" {
-					t = "(whole profile)"
+				sig := chainSig(r.steps)
+				if ref, ok := firstOf[sig]; ok {
+					t.Row(style.Cyan(r.name), style.Dim("= "+ref))
+					continue
 				}
-				fmt.Printf("     -  %-14s %-40s \033[2m%s\033[0m\n", sk.Profile, t, sk.Reason)
+				firstOf[sig] = r.name
+				t.Row(style.Cyan(r.name), tableChain(r.steps))
 			}
+			fmt.Print(t.String())
+			if n := countSkips(rows); n > 0 {
+				fmt.Println(style.Hint(fmt.Sprintf("跳过 %d 个候选：%s", n, skipSummary(rows))))
+				fmt.Println(style.Hint("明细：newgate tier <档位>"))
+			}
+			continue
+		}
+
+		r := rows[0]
+		if len(r.steps) == 0 {
+			fmt.Println(style.Item(style.Bad, "无可用候选"))
+		} else {
+			fmt.Println(style.Field("最终", style.Cyan(r.steps[0].Binding.String())))
+			fmt.Println()
+			t := style.NewTable("#", "profile", "绑定")
+			t.AlignRight(0)
+			for i, s := range r.steps {
+				t.Row(fmt.Sprintf("%d", i+1), s.Profile, s.Binding.String())
+			}
+			fmt.Print(t.String())
+			fmt.Println(style.Hint("按序尝试；同 (provider, model) 全链仅一次"))
+		}
+		if len(r.skips) > 0 {
+			fmt.Println()
+			printSkips(r.skips)
 		}
 	}
 	return 0
 }
 
-// cmdAgents lists known agents and their slots.
+func chainSig(steps []resolve.Step) string {
+	var b strings.Builder
+	for _, s := range steps {
+		b.WriteString(s.Binding.String())
+		b.WriteByte('|')
+	}
+	return b.String()
+}
+
+// tableChain 一行放下整条链。站多时截断——要看全用 `newgate tier <档位>`。
+func tableChain(steps []resolve.Step) string {
+	var parts []string
+	for i, s := range steps {
+		if i >= 4 {
+			parts = append(parts, style.Dim(fmt.Sprintf("…还有 %d 站", len(steps)-i)))
+			break
+		}
+		parts = append(parts, s.Binding.String())
+	}
+	return strings.Join(parts, style.Dim(" → "))
+}
+
+func countSkips(rows []tierView) int {
+	n := 0
+	for _, r := range rows {
+		n += len(r.skips)
+	}
+	return n
+}
+
+// skipSummary 跳过原因按类目计数。用户真正想问的是「为什么没轮到它」，
+// 一百行里其实只有三五类原因。
+func skipSummary(rows []tierView) string {
+	reasons := map[string]int{}
+	for _, r := range rows {
+		for _, s := range r.skips {
+			reasons[skipKind(s.Reason)]++
+		}
+	}
+	var parts []string
+	for _, k := range skipKinds {
+		if n := reasons[k]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", k, n))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// printSkips 跳过**汇总**。永远只给按原因分组的计数与一句解释——
+// 逐条铺开是候选全集的流水账，真正的结论是上面那条链。
+//
+// 需要一个个看的时候有别的口子：newgate profiles 看标志、doctor 看链路、
+// metrics / probe 看熔断，那些才是可操作的信息。
+func printSkips(skips []resolve.Skip) {
+	reasons := map[string][]resolve.Skip{}
+	for _, s := range skips {
+		k := skipKind(s.Reason)
+		reasons[k] = append(reasons[k], s)
+	}
+	fmt.Println(style.Item(style.Skip, fmt.Sprintf("%d 个候选被跳过", len(skips))))
+
+	t := style.NewTable("原因", "数量", "说明")
+	t.AlignRight(1)
+	for _, k := range skipKinds {
+		group := reasons[k]
+		if len(group) == 0 {
+			continue
+		}
+		t.Row(k, fmt.Sprintf("%d", len(group)), style.Dim(skipDetail(group[0])))
+	}
+	fmt.Print(t.String())
+}
+
+// skipDetail 给整组配一句「所以呢」——光有类目名，用户还是不知道要改什么。
+func skipDetail(s resolve.Skip) string {
+	switch skipKind(s.Reason) {
+	case "excluded":
+		return "excluded profile 只能被显式选中，不参与自动排序"
+	case "未定义":
+		return "该 profile 未定义此档位（稀疏层，正常）"
+	case "没 key":
+		return "provider 缺 api_key"
+	case "熔断":
+		return "provider 被熔断摘除，见 newgate metrics / probe"
+	case "已禁用":
+		return s.Reason
+	case "超出 maxAttempts":
+		return "链的尝试次数已用尽，见 state.json chain.max_attempts"
+	case "去重":
+		return "与链上更靠前的候选重复"
+	case "引用成环":
+		return s.Reason
+	}
+	return s.Reason
+}
+
+// cmdAgents 已知 agent 及其模型槽位。
+//
+// 每个 agent 一个小节：头一行是身份（方言 + 当前 profile），槽位一张表。
+// 以前是一张通铺大表，说明列又长，中文一撑就错位。
 func cmdAgents() int {
 	st := store.LoadState()
 	names := agents.Names()
 	sort.Strings(names)
+
+	fmt.Println(style.Title("newgate agents", fmt.Sprintf("%d 个", len(names))))
+	fmt.Println(style.Rule(72))
+
 	for _, n := range names {
 		a, _ := agents.Get(n)
-		fmt.Printf("\n\033[1m%s\033[0m  协议=%s  当前 profile=%s\n",
-			a.ID, a.Dialect, st.ActiveFor(a.ID))
+		profile := st.ActiveFor(a.ID)
+		if profile == "" {
+			profile = st.DefaultProfile
+		}
+		fmt.Println()
+		fmt.Println("  " + style.Bold(a.ID) +
+			style.Dim("   "+a.Dialect+" 方言") +
+			style.Dim("   profile ") + style.Cyan(profile))
 		if a.Notes != "" {
-			fmt.Printf("  %s\n", a.Notes)
+			fmt.Println(style.Hint(a.Notes))
 		}
 		if len(a.Slots) == 0 {
-			fmt.Printf("  槽位：启动时从配置文件发现\n")
+			fmt.Println(style.Hint("槽位在启动时从配置文件发现"))
 			continue
 		}
-		fmt.Printf("  %-12s %-8s %-34s %s\n", "槽位", "档位", "环境变量", "说明")
+		t := style.NewTable("槽位", "档位", "环境变量")
 		for _, s := range a.Slots {
-			fmt.Printf("  %-12s %-8s %-34s %s\n", s.Name, s.Tier, s.EnvVar, s.Desc)
+			t.Row(s.Name, style.Cyan(s.Tier), s.EnvVar)
+		}
+		fmt.Print(t.String())
+		// 说明单独一行：塞进表格会把整张表撑到一百多列，反而没法对读。
+		for _, s := range a.Slots {
+			if s.Desc != "" {
+				fmt.Println(style.Hint(s.Name + "  " + s.Desc))
+			}
 		}
 	}
-	fmt.Printf("\n只切单个 agent:  newgate --set-profile <名> --agent <agent>\n")
+
+	fmt.Println()
+	fmt.Println(style.Hint("只切单个 agent：newgate --set-profile <名> --agent <agent>"))
 	return 0
 }

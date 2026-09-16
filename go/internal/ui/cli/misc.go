@@ -1,16 +1,16 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/gateway/special"
-	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
 	"github.com/rzbdz/newgate/go/internal/store"
+	"github.com/rzbdz/newgate/go/internal/ui/style"
 	"github.com/rzbdz/newgate/go/internal/ui/tui"
 )
 
@@ -37,19 +37,20 @@ func cmdDebug(args []string) int {
 		return die(70, err.Error())
 	}
 	if !on {
-		fmt.Println("✓ debug off")
+		fmt.Println(style.Item(style.Skip, "debug off"))
 		return 0
 	}
 	if ttl > 0 {
-		fmt.Printf("✓ debug on, auto-off in %v (guards against filling the disk)\n", ttl)
-		fmt.Println("  keep it on indefinitely: newgate debug on --forever")
+		fmt.Println(style.Item(style.OK, fmt.Sprintf("debug on · %s 后自动关闭", prettyDur(int(ttl.Seconds())))))
+		fmt.Println(style.Hint("不设期限：newgate debug on --forever"))
 	} else {
-		fmt.Println("✓ debug on, no expiry — remember to run `newgate debug off`")
+		fmt.Println(style.Item(style.Warn, "debug on · 不自动关闭"))
+		fmt.Println(style.Hint("记得 newgate debug off"))
 	}
-	fmt.Printf("  log %s, rotating at 16MB keeping 4 files\n", paths.LogFile())
+	fmt.Println(style.Hint("日志 " + paths.LogFile() + " · 16MB 轮转，保留 4 份"))
 	notifyProxy()
 	if daemon.Running() != nil {
-		fmt.Println("  effective immediately; no restart needed")
+		fmt.Println(style.Hint("即刻生效，无需重启"))
 	}
 	return 0
 }
@@ -66,9 +67,9 @@ func cmdSchemaRepair(on bool) int {
 		return die(70, err.Error())
 	}
 	if on {
-		fmt.Println(`✓ schema repair on (adds "required": [] where a tool schema omits it)`)
+		fmt.Println(style.Item(style.OK, "schema repair on") + style.Dim("   工具 schema 缺 required 时补一个空数组"))
 	} else {
-		fmt.Println("✓ schema repair off — tools are forwarded exactly as received")
+		fmt.Println(style.Item(style.Skip, "schema repair off") + style.Dim("   工具 schema 原样转发"))
 	}
 	notifyProxy()
 	return 0
@@ -76,7 +77,8 @@ func cmdSchemaRepair(on bool) int {
 
 // cmdSpecial 管 special_treatment 插件层。
 //
-//	newgate st                 列出插件、各自为什么存在、开着还是关着
+//	newgate st                 插件清单：一行一个，为什么存在
+//	newgate st <插件>          单个插件的完整说明
 //	newgate st on|off          整层开关
 //	newgate st on|off <插件>   单独开关一个
 //
@@ -88,42 +90,15 @@ func cmdSpecial(args []string) int {
 	name := arg(args, 2)
 
 	if sub == "" || sub == "status" || sub == "ls" {
-		state := "开"
-		if !st.SpecialEnabled() {
-			state = "关（整层）"
-		}
-		fmt.Printf("special_treatment  %s\n", state)
-		fmt.Println("  上游怪癖补丁：只对认领了这次请求的上游生效，改动逐条写日志。")
-		ps := special.Plugins()
-		if len(ps) == 0 {
-			fmt.Println("\n（没有注册任何插件）")
-			return 0
-		}
-		fmt.Println()
-		for _, p := range ps {
-			mark := "✓"
-			if !st.SpecialEnabled() {
-				mark = "·"
-			} else if st.SpecialPluginOff(p.Name()) {
-				mark = "✗"
-			}
-			// Why 可以多行：第一行跟在名字后面，其余行对齐续行。
-			for i, line := range strings.Split(p.Why(), "\n") {
-				if i == 0 {
-					fmt.Printf("  %s %-10s %s\n", mark, p.Name(), line)
-					continue
-				}
-				fmt.Printf("  %s %-10s %s\n", " ", "", line)
-			}
-		}
-		fmt.Println("\n  ✓ 生效   ✗ 已单独关掉   · 整层关着")
-		fmt.Println("  单独关一个: newgate st off <插件>       整层关: newgate st off")
-		printThinkCache()
-		return 0
+		return specialList(st)
+	}
+	// 直接给插件名 = 看它的完整说明（Why 常常是好几行，铺在清单里会淹掉）
+	if p := findPlugin(sub); p != nil {
+		return specialExplain(st, sub)
 	}
 
 	if sub != "on" && sub != "off" {
-		return die(64, "用法: newgate st [on|off] [插件名]")
+		return die(64, fmt.Sprintf("没有叫 %q 的插件（newgate st 看清单）；整层开关用 newgate st on|off", sub))
 	}
 	on := sub == "on"
 
@@ -132,35 +107,89 @@ func cmdSpecial(args []string) int {
 			return die(70, err.Error())
 		}
 		if on {
-			fmt.Println("✓ special_treatment 整层已开")
+			fmt.Println(style.Item(style.OK, "special_treatment 整层已开"))
 		} else {
-			fmt.Println("✓ special_treatment 整层已关 —— 请求原样转发，上游怪癖不再被补")
+			fmt.Println(style.Item(style.Skip, "special_treatment 整层已关") + style.Dim("   请求原样转发，上游怪癖不再补"))
 		}
 		notifyProxy()
 		return 0
 	}
 
-	known := false
-	for _, p := range special.Plugins() {
-		if p.Name() == name {
-			known = true
-		}
-	}
-	if !known {
-		return die(65, fmt.Sprintf("没有叫 %q 的插件（newgate st 看列表）", name))
+	if findPlugin(name) == nil {
+		return die(65, fmt.Sprintf("没有叫 %q 的插件（newgate st 看清单）", name))
 	}
 	if err := store.SetSpecialPlugin(name, on); err != nil {
 		return die(70, err.Error())
 	}
 	if on {
-		fmt.Printf("✓ 插件 %s 已开\n", name)
+		fmt.Println(style.Item(style.OK, "插件 "+name+" 已开"))
 	} else {
-		fmt.Printf("✓ 插件 %s 已关\n", name)
+		fmt.Println(style.Item(style.Skip, "插件 "+name+" 已关"))
 	}
 	if !st.SpecialEnabled() {
-		fmt.Println("  注意：整层还是关着的，得先 `newgate st on`")
+		fmt.Println(style.Hint("整层仍处于关闭状态，需要先 newgate st on"))
 	}
 	notifyProxy()
+	return 0
+}
+
+func findPlugin(name string) special.Plugin {
+	for _, p := range special.Plugins() {
+		if p.Name() == name {
+			return p
+		}
+	}
+	return nil
+}
+
+// specialState 单个插件此刻的状态：层开关 + 单插件开关。
+func specialState(st *domain.State, name string) (mark, word string) {
+	switch {
+	case !st.SpecialEnabled():
+		return style.Skip, "整层关闭"
+	case st.SpecialPluginOff(name):
+		return style.Bad, "已单独关闭"
+	}
+	return style.OK, "生效"
+}
+
+func specialList(st *domain.State) int {
+	ps := special.Plugins()
+	layer := style.Green("开")
+	if !st.SpecialEnabled() {
+		layer = style.Yellow("关（整层）")
+	}
+	fmt.Println(style.Title("newgate st", fmt.Sprintf("special_treatment %s · %d 个插件", layer, len(ps))))
+	fmt.Println(style.Rule(72))
+	if len(ps) == 0 {
+		fmt.Println(style.Hint("没有注册任何插件"))
+		return 0
+	}
+	t := style.NewTable("状态", "插件", "为什么存在")
+	for _, p := range ps {
+		mark, _ := specialState(st, p.Name())
+		why := strings.SplitN(p.Why(), "\n", 2)[0]
+		t.Row(style.Mark(mark), p.Name(), style.Dim(style.Truncate(why, 56)))
+	}
+	fmt.Print(t.String())
+	fmt.Println(style.Hint("上游怪癖补丁：只对认领本次请求的上游生效，改动逐条写日志"))
+	fmt.Println(style.Hint("看完整说明 newgate st <插件> · 单独关 newgate st off <插件> · 整层关 newgate st off"))
+	printThinkCache()
+	return 0
+}
+
+func specialExplain(st *domain.State, name string) int {
+	p := findPlugin(name)
+	mark, word := specialState(st, name)
+	fmt.Println(style.Title("newgate st "+name, word))
+	fmt.Println(style.Rule(72))
+	fmt.Println("  " + style.Mark(mark) + " " + p.Why())
+	fmt.Println()
+	if st.SpecialPluginOff(name) {
+		fmt.Println(style.Hint("打开：newgate st on " + name))
+	} else {
+		fmt.Println(style.Hint("关闭：newgate st off " + name))
+	}
 	return 0
 }
 
@@ -178,38 +207,19 @@ func cmdTUI() int {
 //
 // 只报计数，永远不报内容。
 func printThinkCache() {
-	i := daemon.Running()
-	if i == nil {
+	info, ps := proxyState()
+	if info == nil || ps == nil {
 		return
 	}
-	resp, err := httpx.LocalClient(1500 * time.Millisecond).
-		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/status", i.Port))
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-	var s struct {
-		ThinkCache struct {
-			Entries  int   `json:"entries"`
-			Bytes    int64 `json:"bytes"`
-			MaxBytes int64 `json:"max_bytes"`
-			Hits     int64 `json:"hits"`
-			Misses   int64 `json:"misses"`
-		} `json:"thinkcache"`
-	}
-	if json.NewDecoder(resp.Body).Decode(&s) != nil {
-		return
-	}
-	t := s.ThinkCache
-	fmt.Printf("\n推理内容缓存  %d 条 / %s（上限 %s）\n",
-		t.Entries, human(t.Bytes), human(t.MaxBytes))
-	fmt.Printf("              命中 %d   未命中 %d\n", t.Hits, t.Misses)
-	fmt.Println("  客户端会把上游的推理内容丢掉，我们替它记住并在下一轮原样补回去。")
+	t := ps.Think
+	fmt.Println()
+	fmt.Println(style.Field("推理缓存", fmt.Sprintf("%d 条 · %s / %s · 命中 %d · 未命中 %d · 淘汰 %d",
+		t.Entries, human(t.Bytes), human(t.MaxBytes), t.Hits, t.Misses, t.Evictions)))
+	fmt.Println(style.Hint("客户端会丢弃上游的推理内容，代理代为保存并在下一轮原样补回"))
 	if t.Misses > 0 {
-		fmt.Println("  未命中的那些只能补空串 —— 那几轮模型看不到自己上一轮的推理。")
-		fmt.Println("  常见原因：代理重启过、会话太老被淘汰。日志里逐条有记。")
+		fmt.Println(style.Hint("未命中只能补空串（那几轮模型看不到自己的上一轮推理）；日志逐条有记"))
 	}
-	fmt.Println("  只在内存里，不落盘（推理内容属于对话内容）。")
+	fmt.Println(style.Hint("内存 + thinkcache.bin 冷层；重启后自动装回，只存计数不存内容"))
 }
 
 func human(n int64) string {

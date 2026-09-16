@@ -21,6 +21,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
 	"github.com/rzbdz/newgate/go/internal/runtime/takeover"
 	"github.com/rzbdz/newgate/go/internal/store"
+	"github.com/rzbdz/newgate/go/internal/ui/style"
 )
 
 // Serve 是守护进程的主循环。
@@ -154,13 +155,13 @@ func Serve(port int) int {
 
 func cmdStart(force bool) int {
 	if _, err := os.Stat(paths.ProvidersFile()); os.IsNotExist(err) {
-		fmt.Println("首次运行，先初始化配置…")
+		fmt.Println(style.Dim("首次运行，初始化配置"))
 		if _, err := store.Init(false); err != nil {
 			return die(70, err.Error())
 		}
 	}
 	if i := daemon.Running(); i != nil {
-		fmt.Printf("已在运行 (pid %d, 端口 %d)\n", i.PID, i.Port)
+		fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已在运行   pid %d · 127.0.0.1:%d", i.PID, i.Port)))
 		return 0
 	}
 
@@ -170,13 +171,12 @@ func cmdStart(force bool) int {
 	st := store.EnsureControlToken()
 	// 没 key 就别接管——接管了每个请求都是错误，而用户的配置已经被改了
 	if probs := activeProblems(st); len(probs) > 0 && !force {
-		fmt.Fprintf(os.Stderr, "newgate: 当前配置还不能用，拒绝接管：\n")
+		fmt.Fprintf(os.Stderr, "newgate: 配置不可用，拒绝接管\n")
 		for _, p := range probs {
-			fmt.Fprintf(os.Stderr, "  ✗ %s\n", p)
+			fmt.Fprintf(os.Stderr, "  %s %s\n", style.Mark(style.Bad), p)
 		}
-		fmt.Fprintf(os.Stderr, "\n修法：把 key 填进 %s，或设对应的环境变量。\n",
-			paths.ProvidersFile())
-		fmt.Fprintf(os.Stderr, "然后 newgate doctor 确认。（强行接管：newgate start --force）\n")
+		fmt.Fprintf(os.Stderr, "%s\n", style.Hint("填 key 进 "+paths.ProvidersFile()+"，或设对应的环境变量"))
+		fmt.Fprintf(os.Stderr, "%s\n", style.Hint("确认：newgate doctor    强行接管：newgate start --force"))
 		return 65
 	}
 
@@ -205,8 +205,8 @@ func cmdStart(force bool) int {
 			return 70
 		}
 	}
-	fmt.Printf("✓ 代理已启动  pid=%d  127.0.0.1:%d  默认 profile=%s\n",
-		info.PID, st.Port, st.DefaultProfile)
+	fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已启动   pid %d · 127.0.0.1:%d · profile %s",
+		info.PID, st.Port, st.DefaultProfile)))
 
 	// 全面接管：所有没被用户显式 off 掉的 agent，各按自己的机制插上。
 	fmt.Println()
@@ -220,32 +220,36 @@ func cmdStart(force bool) int {
 
 	st.TakenOver = true
 	_ = store.SaveState(st)
-	fmt.Printf("\n配置改动会自动热更新，不需要重启代理。\n")
-	fmt.Printf("原配置备份在 %s/original/\n", paths.BackupDir())
+	fmt.Println()
+	fmt.Println(style.Hint("配置改动 1 秒内自动热更新，无需重启"))
+	fmt.Println(style.Hint("原配置备份 " + paths.BackupDir() + "/original/"))
 	return 0
 }
 
 // printResults 把接管/释放结果打成人话。
-// 三种标记不能混：✓ 真的接管上了，· 有意跳过，✗ 出错了。
+//
+// 三种标记不能混：✓ 真的接管上了，· 有意跳过，✗ 出错了。agent 名补到固定
+// 宽度，续行对齐到说明列——一次接管多个 agent 时才扫得动。
 func printResults(rs []takeover.Result) {
+	const nameW = 10
 	for _, r := range rs {
 		switch {
 		case r.Err != nil:
-			fmt.Fprintf(os.Stderr, "✗ %-10s %v\n", r.Agent, r.Err)
+			fmt.Fprintln(os.Stderr, style.Item(style.Bad, style.Pad(r.Agent, nameW)+r.Err.Error()))
 		case len(r.Lines) == 0:
 			continue
 		default:
-			mark := "✓"
+			mark := style.OK
 			if r.Skipped {
-				mark = "·"
+				mark = style.Skip
 			}
-			fmt.Printf("%s %-10s %s\n", mark, r.Agent, r.Lines[0])
+			fmt.Println(style.Item(mark, style.Pad(r.Agent, nameW)+r.Lines[0]))
 			for _, l := range r.Lines[1:] {
-				fmt.Printf("             %s\n", l)
+				fmt.Println("    " + style.Pad("", nameW) + style.Dim(l))
 			}
 		}
 		for _, w := range r.Warn {
-			fmt.Printf("  ⚠ %s\n", w)
+			fmt.Println(style.Bullet(style.Mark(style.Warn) + " " + w))
 		}
 	}
 }
@@ -268,7 +272,7 @@ func cmdTakeover(agent string) int {
 		warnShellEnvConflict(agent)
 	}
 	if daemon.Running() == nil {
-		fmt.Println("\n注意：代理还没跑。newgate start 起来它才真的能用。")
+		fmt.Println(style.Hint("代理未运行 · newgate start 之后才生效"))
 	}
 	return 0
 }
@@ -282,14 +286,13 @@ func cmdRelease(agent string) int {
 		return die(65, r.Err.Error())
 	}
 	if len(r.Lines) == 0 {
-		fmt.Printf("- %s 本来就没被接管\n", agent)
+		fmt.Println(style.Item(style.Skip, style.Pad(agent, 10)+"本来就没被接管"))
 	} else {
 		printResults([]takeover.Result{r})
 	}
-	fmt.Printf("%s 已恢复直连；以后 newgate start 也不会再接管它（newgate on %s 可恢复）\n",
-		agent, agent)
+	fmt.Println(style.Hint(agent + " 已恢复直连；newgate start 不再接管它（newgate on " + agent + " 恢复）"))
 	if r.Mechanism == takeover.MechShim {
-		fmt.Println("  当前 shell 可能缓存了路径，`hash -r`（zsh: `rehash`）一下")
+		fmt.Println(style.Hint("当前 shell 可能缓存了路径：hash -r（zsh: rehash）"))
 	}
 	return 0
 }
@@ -307,17 +310,18 @@ func cmdStop() int {
 		return die(70, err.Error())
 	}
 	if pid > 0 {
-		fmt.Printf("✓ 代理已停 (pid %d)\n", pid)
+		fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已停止   pid %d", pid)))
 	} else {
-		fmt.Println("- 代理本来没在跑")
+		fmt.Println(style.Item(style.Skip, "代理本来没在跑"))
 	}
 
 	st := store.LoadState()
 	st.TakenOver = false
 	_ = store.SaveState(st)
 
-	fmt.Println("\nnewgate 已完全退出，所有工具恢复直连。")
-	fmt.Println("  PATH 里那行仍指向空的 shim 目录，无害；彻底清掉用 `newgate shim uninstall`。")
+	fmt.Println()
+	fmt.Println(style.Hint("所有工具已恢复直连；PATH 里那行仍指向空 shim 目录，无害"))
+	fmt.Println(style.Hint("彻底清掉：newgate shim uninstall"))
 	return 0
 }
 
@@ -347,7 +351,7 @@ func tryHandoff() bool {
 	}
 	st := store.LoadState()
 	if st.ControlToken == "" {
-		fmt.Println("· daemon 还没有控制令牌（升级前启动的），退回 stop+start")
+		fmt.Println(style.Item(style.Skip, "daemon 没有控制令牌（升级前启动的），退回 stop+start"))
 		return false
 	}
 	port := i.Port
@@ -359,9 +363,9 @@ func tryHandoff() bool {
 	supports, err := handoffSupported(port)
 	if err != nil || !supports {
 		if err != nil {
-			fmt.Printf("· 探测 daemon 交接能力失败（%v），退回 stop+start\n", err)
+			fmt.Println(style.Item(style.Skip, fmt.Sprintf("探测 daemon 交接能力失败（%v），退回 stop+start", err)))
 		} else {
-			fmt.Println("· 运行中的是旧版 daemon（不支持优雅交接），退回 stop+start")
+			fmt.Println(style.Item(style.Skip, "运行中的是旧版 daemon（不支持优雅交接），退回 stop+start"))
 		}
 		return false
 	}
@@ -374,25 +378,25 @@ func tryHandoff() bool {
 	// 旧 daemon 要等新进程 ready 才回 200，给足时间
 	resp, err := httpx.LocalClient(20 * time.Second).Do(req)
 	if err != nil {
-		fmt.Printf("· 交接请求发不出去（%v），退回 stop+start\n", err)
+		fmt.Println(style.Item(style.Skip, fmt.Sprintf("交接请求发不出去（%v），退回 stop+start", err)))
 		return false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		b, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 512))
-		fmt.Printf("· 交接被拒（HTTP %d: %s），退回 stop+start\n", resp.StatusCode, b)
+		fmt.Println(style.Item(style.Skip, fmt.Sprintf("交接被拒（HTTP %d: %s），退回 stop+start", resp.StatusCode, b)))
 		return false
 	}
 	// 200 = 新进程已接上 socket、pid/lock 已改写。这里只确认它完全就位。
 	for k := 0; k < 100; k++ { // 最多 5s
 		if j := daemon.Running(); j != nil && j.PID != i.PID && pingProxy(j.Port) {
-			fmt.Printf("✓ 代理已优雅重启  pid %d → %d  127.0.0.1:%d\n", i.PID, j.PID, j.Port)
-			fmt.Println("  socket 无缝交接：在途请求由旧进程排空，会话不中断；接管状态未动。")
+			fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已优雅重启   pid %d → %d · 127.0.0.1:%d", i.PID, j.PID, j.Port)))
+			fmt.Println(style.Hint("socket 无缝交接：在途请求由旧进程排空，会话不中断；接管状态未动"))
 			return true
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	fmt.Printf("⚠ 交接已发出，但新进程 5 秒内没就位——看日志 %s\n", paths.LogFile())
+	fmt.Printf("%s 交接已发出，但新进程 5 秒内没就位 · 日志 %s\n", style.Mark(style.Warn), paths.LogFile())
 	return false
 }
 
@@ -417,14 +421,14 @@ func handoffSupported(port int) (bool, error) {
 func cmdReload() int {
 	i := daemon.Running()
 	if i == nil {
-		fmt.Println("代理没在跑，配置会在下次启动时读取")
+		fmt.Println(style.Item(style.Skip, "代理未运行；配置会在下次启动时读取"))
 		return 0
 	}
 	if err := syscall.Kill(i.PID, syscall.SIGHUP); err != nil {
 		return die(70, "发 SIGHUP 失败: "+err.Error())
 	}
-	fmt.Printf("✓ 已通知代理 (pid %d) 重读配置\n", i.PID)
-	fmt.Println("  （平时不需要这个命令：配置改动会在 1 秒内自动生效）")
+	fmt.Println(style.Item(style.OK, fmt.Sprintf("已通知代理重读配置   pid %d", i.PID)))
+	fmt.Println(style.Hint("平时不需要这个命令：配置改动 1 秒内自动生效"))
 	return 0
 }
 

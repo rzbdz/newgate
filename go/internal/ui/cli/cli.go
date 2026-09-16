@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/rzbdz/newgate/go/internal/ui/style"
 )
 
 // Version 由 main 注入。
@@ -21,60 +23,80 @@ var (
 	CommitTime = "unknown"
 )
 
-const usage = `newgate — AI CLI 的语义模型层
+// usageText 帮助。
+//
+// 左列固定宽度、右列是**一句话结论**，细节再往里塞就会变成没人读的墙。
+// 分组按用户此刻想干什么排（接管 / 跑一次 / 路由 / 观测 / 维护），不按
+// 代码里的文件排——用户不知道也不关心命令实现在哪个文件。
+func usageText() string {
+	var b strings.Builder
+	b.WriteString(style.Bold("newgate") + " — AI CLI 的语义模型层代理\n")
 
-包装启动（本次用某个 profile，不改全局状态）
-  newgate <agent> [--profile <名>] [agent-args...]
-  newgate --profile <名> <agent> [agent-args...]
-  newgate run <agent> [agent-args...]      显式包装路径
-  newgate-<名> <agent> ...                 argv0 分发，等价 --preset <名>
+	sec := func(t string) { b.WriteString("\n" + style.Bold(t) + "\n") }
+	// 左列按显示宽度补齐（CJK 双宽），右列一律暗色——扫读时先看命令名，
+	// 需要时再看说明。
+	cmd := func(left, right string) {
+		b.WriteString("  " + style.Cyan(style.Pad(left, 38)) + style.Dim(right) + "\n")
+	}
+	raw := func(line string) { b.WriteString("  " + line + "\n") }
 
-接管与退出
-  newgate start                 全面接管：起代理 + 接管所有 agent
-  newgate stop                  全面停止：停代理 + 所有 agent 恢复直连
-  newgate on <agent>            只接管一个（同 takeover）
-  newgate off <agent>           只放开一个，且以后 start 也不再管它（同 release）
-  newgate restart               重启代理，接管现场原样保留
-  newgate status                当前状态：谁在走 newgate、用哪个 profile
-  newgate reload                立刻重读配置（平时 1 秒内自动热更新）
+	sec("接管")
+	cmd("start", "起代理 + 接管所有 agent")
+	cmd("stop", "停代理 + 所有 agent 恢复直连")
+	cmd("on <agent>", "只接管一个")
+	cmd("off <agent>", "只放开一个，以后 start 也不再管它")
+	cmd("restart", "重启代理，接管现场原样保留")
+	cmd("status", "谁在走 newgate、用哪个 profile")
+	cmd("reload", "立刻重读配置（平时 1 秒内自动热更新）")
 
-切换 profile
-  newgate --set-profile <名> [--agent <agent>]
-                                设 profile；省略 --agent 设全局默认
-  newgate profiles              列出所有 profile（优先级 / 标志 / 覆盖）
-  newgate profile kv <名> [--write]  profile 转 KV 文本（--write 落盘并退役旧 json）
-  newgate tier <档位>           fallback 链：每个候选为什么选中 / 跳过
-  newgate probe [profile]       给候选打真实请求，出健康报告
-  newgate metrics               代理计数器：拦截 / 超时 / 转移 / 改道
-  newgate agents                列出已知 agent 及其模型槽位
+	sec("跑一次（不改全局状态）")
+	cmd("<agent> [--profile <名>] [args…]", "用某个 profile 跑一次")
+	cmd("run <agent> [args…]", "同上，显式写法")
+	cmd("newgate-<名> <agent> …", "argv0 分发，等价 --profile <名>")
 
-维护
-  newgate init [--force]        铺开默认配置
-  newgate doctor                体检
-  newgate logs [N] [-f]         代理日志
-  newgate alllogs               完整诊断包
-  newgate debug on|off [分钟]   全量请求日志（默认 30 分钟自动关）
-  newgate schema-repair on|off
-  newgate st [on|off] [插件]    special_treatment：上游怪癖补丁的开关与说明
-  newgate shim …                底层逃生口，平时用 on/off 就够了
-  newgate tui                   menuconfig 风格界面
-  newgate version
+	sec("路由与配置")
+	cmd("tier [档位]", "fallback 链：走谁、跳过了什么")
+	cmd("profiles", "所有 profile（优先级 / 标志 / 覆盖）")
+	cmd("--set-profile <名> [--agent <agent>]", "切 profile；省略 --agent 设全局默认")
+	cmd("profile kv <名> [--write]", "profile 转 KV 文本")
+	cmd("agents", "已知 agent 及其模型槽位")
+	cmd("omo", "omo 槽位：现状 / 建议 / 覆盖（不带参数看列表）")
 
-术语
-  agent      被接管的 CLI —— claude / opencode
-  tier       能力档 —— heavy / normal / mid / light / vision
-  profile    一套 (tier → provider/model) 绑定
-  槽位键     模块贡献的动态角色（omo 的 intra-agent：omo-sisyphus / cat-deep）
-             和档位一样能在 profile 里写，缺省归属见 newgate omo
-  st         special_treatment：只对某家上游生效的请求补丁
+	sec("探测与观测")
+	cmd("probe [profile]", "给候选打真实请求，出健康报告")
+	cmd("metrics", "代理计数器：拦截 / 超时 / 转移 / 改道")
+	cmd("doctor", "体检")
+	cmd("logs [N] [-f]", "代理日志：终端上分页，-f 持续跟随")
+	cmd("alllogs", "完整诊断包")
+	cmd("debug on|off [分钟]", "全量请求日志（默认 30 分钟自动关）")
+	cmd("st [on|off] [插件]", "special_treatment 开关与说明")
 
-配置  ~/.config/newgate/{providers.json, mappings/*.json, state.json}
-`
+	sec("维护")
+	cmd("init [--force]", "铺开默认配置")
+	cmd("schema-repair on|off", "")
+	cmd("shim …", "底层逃生口，平时用 on/off 就够了")
+	cmd("tui", "menuconfig 风格界面")
+	cmd("version", "")
+
+	sec("术语")
+	term := func(left, right string) {
+		b.WriteString("  " + style.Pad(style.Cyan(left), 10) + style.Dim(right) + "\n")
+	}
+	term("agent", "被接管的 CLI：claude / opencode")
+	term("tier", "能力档 heavy > normal（主力）> mid > light，另加正交的 vision")
+	term("profile", "一套「档位 → provider/模型」绑定")
+	term("槽位键", "模块贡献的动态角色（omo-sisyphus / cat-deep），写法同档位")
+	term("st", "special_treatment：只对某家上游生效的请求补丁")
+
+	sec("配置")
+	raw(style.Dim("~/.config/newgate/ · providers.json · mappings/*.kv · state.json"))
+	return b.String()
+}
 
 // Run 是 CLI 的唯一入口。
 func Run(args []string) int {
 	if len(args) == 0 {
-		fmt.Print(usage)
+		fmt.Print(usageText())
 		return 0
 	}
 
@@ -131,7 +153,7 @@ func Run(args []string) int {
 		}
 		return die(64, "用法：newgate profile kv <名> [--write]")
 	case "tier", "tiers", "role", "roles":
-		return cmdTier(arg(args, 1))
+		return cmdTier(args[1:])
 	case "omo", "slots":
 		return cmdOmo(args[1:])
 	case "probe":
@@ -147,7 +169,7 @@ func Run(args []string) int {
 	case "doctor":
 		return cmdDoctor()
 	case "logs", "log":
-		return cmdLogs(intArg(args, 1, 40), has(args, "-f") || has(args, "--follow"))
+		return cmdLogs(logCount(args), has(args, "-f") || has(args, "--follow"))
 	case "alllogs", "all-logs":
 		return cmdAllLogs()
 	case "debug":
@@ -162,7 +184,7 @@ func Run(args []string) int {
 		fmt.Println(VersionLine())
 		return 0
 	case "help", "--help", "-h":
-		fmt.Print(usage)
+		fmt.Print(usageText())
 		return 0
 	case "__serve":
 		return Serve(intFlag(args, "--port", 0))
