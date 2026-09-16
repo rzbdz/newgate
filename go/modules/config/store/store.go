@@ -237,3 +237,128 @@ func LoadState() *domain.State {
 	s.Normalize()
 	return s
 }
+
+func stateJSONFields() map[string]bool {
+	typ := reflect.TypeOf(domain.State{})
+	fields := make(map[string]bool, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		name := strings.SplitN(tag, ",", 2)[0]
+		if name != "" && name != "-" {
+			fields[name] = true
+		}
+	}
+	return fields
+}
+
+func SaveState(s *domain.State) error {
+	typed, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(typed, &fields); err != nil {
+		return err
+	}
+	for name, raw := range s.ModuleConfig {
+		if _, owned := fields[name]; !owned {
+			fields[name] = append(json.RawMessage(nil), raw...)
+		}
+	}
+	return writeJSON(paths.StateFile(), fields, 0o660)
+}
+
+// NewControlToken 生成控制端点令牌（crypto/rand，48 位十六进制）。
+func NewControlToken() string {
+	b := make([]byte, 24)
+	if _, err := crand.Read(b); err != nil {
+		// rand 失败几乎只在早期 boot 的虚拟机里发生；退化到时间熵也比
+		// 空令牌（= 端点永远 403）好
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// EnsureControlToken 幂等地保证 state.json 里有控制令牌，返回最新 state。
+//
+// 必须在 daemon.Spawn **之前**调用（cmdStart / launch.Launch / Serve 各自
+// 兜一次底）：令牌先落盘，daemon 起来时 watcher 的初次加载就能读到，
+// 不存在「daemon 拿着空令牌跑着」的窗口。之后所有 LoadState→SaveState
+// 的调用方（--set-profile 等）都从盘上重新读，令牌不会被冲掉。
+func EnsureControlToken() *domain.State {
+	s := LoadState()
+	if s.ControlToken == "" {
+		s.ControlToken = NewControlToken()
+		_ = SaveState(s)
+	}
+	return s
+}
+
+// SetActiveProfile 设置某个 agent 的链头。agent 为空 = 设全局默认。
+//
+// 校验存在后才写，**绝不静默回落**——那正是「切了没生效」这类故障的来源。
+func SetActiveProfile(agent, profile string) error {
+	if _, err := LoadProfile(profile); err != nil {
+		avail, _ := ListProfiles()
+		return fmt.Errorf("profile %q 不存在（可用：%s）", profile, strings.Join(avail, ", "))
+	}
+	s := LoadState()
+	if agent == "" {
+		s.DefaultProfile = profile
+	} else {
+		if s.Active == nil {
+			s.Active = map[string]string{}
+		}
+		s.Active[agent] = profile
+	}
+	return SaveState(s)
+}
+
+// ClearActiveProfile 让某个 agent 回落到全局默认。
+func ClearActiveProfile(agent string) error {
+	s := LoadState()
+	delete(s.Active, agent)
+	return SaveState(s)
+}
+
+func SetDebug(on bool, untilRFC3339 string) error {
+	s := LoadState()
+	s.Debug = on
+	s.DebugUntil = ""
+	if on {
+		s.DebugUntil = untilRFC3339
+	}
+	return SaveState(s)
+}
+
+func SetSchemaRepair(on bool) error {
+	s := LoadState()
+	s.SchemaRepair = &on
+	return SaveState(s)
+}
+
+// SetTakeoverWanted 记下「用户要不要接管这个 agent」（期望态）。
+// 只改期望态，不碰磁盘——具体怎么接管是 runtime/takeover 的事。
+func SetTakeoverWanted(agent string, want bool) error {
+	s := LoadState()
+	if s.Takeover == nil {
+		s.Takeover = map[string]bool{}
+	}
+	if want {
+		// 默认就是想接管，所以「想要」用删除条目表示，state.json 保持干净
+		delete(s.Takeover, agent)
+	} else {
+		s.Takeover[agent] = false
+	}
+	if len(s.Takeover) == 0 {
+		s.Takeover = nil
+	}
+	return SaveState(s)
+}
+
+// SetSpecialTreatment 开关整个 special_treatment 层。
+func SetSpecialTreatment(on bool) error {
+	s := LoadState()
+	s.SpecialTreatment = &on
+	return SaveState(s)
+}
