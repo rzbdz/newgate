@@ -94,13 +94,7 @@ func pruneSnapshots(keep int) {
 	}
 }
 
-func writeAtomic(path string, b []byte) error {
-	tmp := path + ".newgate.tmp"
-	if err := ioutil.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+func writeAtomic(path string, b []byte) error { return writeAtomicMode(path, b, 0o600) }
 
 func marshal(v interface{}) ([]byte, error) {
 	b, err := json.MarshalIndent(v, "", "  ")

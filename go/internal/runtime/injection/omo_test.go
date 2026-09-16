@@ -283,6 +283,27 @@ func TestRolesReachTheResolver(t *testing.T) {
 	}
 }
 
+// TestRegistryIsReadableByOtherUsers 注册表必须**组可读**。
+//
+// 现场（2026-09-16）：root 的 CLI 接管成功、omo-slots.json 也写出来了，
+// 跑 daemon 的 claude 用户却一个角色键都没注册到——文件按 0600 落地，
+// 另一个用户读不到。症状是「文件明明在那儿，daemon 说不认识这个模型」。
+func TestRegistryIsReadableByOtherUsers(t *testing.T) {
+	target := isolate(t)
+	writeTarget(t, target, "oh-my-openagent.json", sampleOmo)
+	writeTarget(t, target, "opencode.json", `{}`)
+	if _, err := ApplyAll(8899); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(os.Getenv("NEWGATE_HOME"), "omo-slots.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm&0o060 == 0 {
+		t.Fatalf("注册表权限 %o：组读不了，跑 daemon 的另一个用户会看不到任何槽位键", perm)
+	}
+}
+
 // TestSuggest 建议档位的两条规则：模型名归体格，variant 在阶梯上挪一级。
 func TestSuggest(t *testing.T) {
 	cases := []struct {
