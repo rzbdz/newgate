@@ -345,3 +345,136 @@ func cmdMetrics() int {
 	}
 	return 0
 }
+
+func printModelHealth(ps *proxyInfo) {
+	if ps == nil {
+		return
+	}
+	snap, err := store.Load()
+	if err != nil {
+		return
+	}
+	statuses := healthFromProxy(ps)
+	bindings := map[string]bool{}
+	for _, profile := range snap.Profiles {
+		for _, candidates := range profile.Roles {
+			for _, binding := range candidates {
+				if !binding.IsRef() && binding.Provider != "" && binding.Model != "" {
+					if provider, ok := snap.Providers.Providers[binding.Provider]; ok && provider.Key() != "" {
+						bindings[binding.String()] = true
+					}
+				}
+			}
+		}
+		if profile.Fallback != nil && !profile.Fallback.IsRef() {
+			if provider, ok := snap.Providers.Providers[profile.Fallback.Provider]; ok && provider.Key() != "" {
+				bindings[profile.Fallback.String()] = true
+			}
+		}
+	}
+	for _, binding := range special.Bindings(snap.State) {
+		if provider, ok := snap.Providers.Providers[binding.Provider]; ok && provider.Key() != "" {
+			bindings[binding.String()] = true
+		}
+	}
+	var names []string
+	for binding := range bindings {
+		names = append(names, binding)
+	}
+	sort.SliceStable(names, func(i, j int) bool {
+		a, z := statuses[names[i]], statuses[names[j]]
+		if a.Open != z.Open {
+			return !a.Open
+		}
+		ra, rz := healthDisplayRank(a), healthDisplayRank(z)
+		if ra != rz {
+			return ra < rz
+		}
+		return names[i] < names[j]
+	})
+
+	counts := map[string]int{}
+	for _, name := range names {
+		h := statuses[name]
+		state := modelHealthState(h)
+		counts[state]++
+	}
+	blocked := counts["卡顿"] + counts["不可用"]
+	fmt.Print(style.Section("模型健康") + "\n")
+	fmt.Println(style.Hint(fmt.Sprintf(
+		"可用 %d（流畅 %d · 可用 %d · 未评分 %d）· 卡顿 %d · 不可用 %d",
+		len(names)-blocked, counts["流畅"], counts["可用"], counts["未评分"],
+		counts["卡顿"], counts["不可用"])))
+	for _, name := range names {
+		h := statuses[name]
+		state := modelHealthState(h)
+		if state == "卡顿" || state == "不可用" {
+			continue
+		}
+		fmt.Println(style.Item(style.Skip, name))
+		fmt.Println(style.Hint("    " + modelScoreLine(h)))
+	}
+	if blocked > 0 {
+		fmt.Println(style.Hint("卡顿/不可用详情：newgate probe"))
+	}
+}
+
+func healthDisplayRank(h health.Status) int {
+	switch modelHealthState(h) {
+	case "流畅":
+		return 0
+	case "未评分":
+		return 1
+	case "可用":
+		return 2
+	default:
+		return 3
+	}
+}
+
+func modelHealthState(h health.Status) string {
+	if h.Open {
+		score, _ := modelDisplayScore(h)
+		if h.Grade == health.ProbeLaggy || score > 12000 {
+			return "卡顿"
+		}
+		return "不可用"
+	}
+	score, sampled := modelDisplayScore(h)
+	switch {
+	case sampled && score < 3000:
+		return "流畅"
+	case sampled && score <= 12000:
+		return "可用"
+	case sampled:
+		return "卡顿"
+	default:
+		return "未评分"
+	}
+}
+
+func modelScoreLine(h health.Status) string {
+	const labels = "≤4K,≤32K,≤128K,>128K"
+	names := strings.Split(labels, ",")
+	var scores []string
+	for i, n := range h.Buckets {
+		if n > 0 {
+			latency := fmt.Sprintf("%dms", h.Scores[i])
+			if h.Scores[i] == 0 {
+				latency = "<1ms"
+			}
+			scores = append(scores, fmt.Sprintf("%s %s/%d次", names[i], latency, n))
+		}
+	}
+	if len(scores) == 0 && h.ScoreMs > 0 {
+		samples := h.Samples
+		if samples < 1 {
+			samples = 1
+		}
+		scores = append(scores, fmt.Sprintf("≤4K %dms/%d次", h.ScoreMs, samples))
+	}
+	if len(scores) == 0 {
+		return "未评分"
+	}
+	return modelHealthState(h) + " · " + strings.Join(scores, " · ")
+}
