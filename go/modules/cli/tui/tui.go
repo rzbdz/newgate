@@ -126,3 +126,106 @@ func readKey(r *bufio.Reader) key {
 	}
 	return kOther
 }
+
+// ---------- 主界面：选 profile ----------
+
+func Run() error {
+	old, err := enterRaw()
+	if err != nil {
+		return fmt.Errorf("这个终端不支持 TUI（%v）。用 `newgate --set-profile <name>` 代替", err)
+	}
+	defer restore(old)
+	fmt.Print(hideC)
+	defer fmt.Print(showC + reset + "\n")
+
+	in := bufio.NewReader(os.Stdin)
+	names, err := store.ListProfiles()
+	if err != nil || len(names) == 0 {
+		return fmt.Errorf("没有 profile，先跑 `newgate init`")
+	}
+	st := store.LoadState()
+
+	cur := 0
+	for i, n := range names {
+		if n == st.DefaultProfile {
+			cur = i
+		}
+	}
+
+	msg := ""
+	for {
+		drawProfileMenu(names, cur, st.DefaultProfile, msg)
+		switch readKey(in) {
+		case kUp:
+			if cur > 0 {
+				cur--
+			}
+			msg = ""
+		case kDown:
+			if cur < len(names)-1 {
+				cur++
+			}
+			msg = ""
+		case kEnter, kRight:
+			if err := store.SetActiveProfile("", names[cur]); err != nil {
+				msg = style.Mark(style.Bad) + " " + err.Error()
+			} else {
+				st = store.LoadState()
+				msg = style.Mark(style.OK) + " 已切到 " + style.Cyan(names[cur]) + style.Dim("   下个请求生效")
+			}
+		case kQuit:
+			return nil
+		}
+	}
+}
+
+func drawProfileMenu(names []string, cur int, active, msg string) {
+	var b strings.Builder
+	b.WriteString(clear)
+	b.WriteString(style.Bold(" newgate · profile 选择") + "\n")
+	b.WriteString(style.Dim(" ↑/↓ 或 j/k 移动 · Enter 应用 · q 退出") + "\n\n")
+
+	provs, _ := store.LoadProviders()
+	for i, n := range names {
+		mark := " "
+		if n == active {
+			mark = style.Green("*")
+		}
+		line := fmt.Sprintf(" %s %s", mark, style.Pad(n, 10))
+		if i == cur {
+			line = rev + line + reset
+		}
+		b.WriteString(line)
+
+		if pr, err := store.LoadProfile(n); err == nil {
+			b.WriteString("  " + style.Dim(pr.Description))
+		}
+		b.WriteString("\n")
+
+		if i == cur {
+			if pr, err := store.LoadProfile(n); err == nil {
+				for _, role := range domain.Roles {
+					bind, ok := pr.Resolve(role)
+					if !ok {
+						b.WriteString("        " + style.Pad(role, 8) + " " + style.Yellow("未绑定") + "\n")
+						continue
+					}
+					warn := ""
+					if provs != nil {
+						if p, ok2 := provs.Providers[bind.Provider]; !ok2 {
+							warn = style.Yellow("   provider 未定义")
+						} else if p.Key() == "" {
+							warn = style.Yellow("   缺 api_key")
+						}
+					}
+					b.WriteString("        " + style.Pad(role, 8) + " " +
+						style.Cyan(bind.Provider+"/"+bind.Model) + warn + "\n")
+				}
+			}
+		}
+	}
+	if msg != "" {
+		b.WriteString("\n " + msg + "\n")
+	}
+	fmt.Print(b.String())
+}
