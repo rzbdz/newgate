@@ -28,3 +28,6 @@ type capabilitySpec struct {
 // Capability 是提供者与消费者共同引用的有类型端口身份。
 // 模块依赖这个端口而不是依赖具体实现，因此实现可以被替换、组合和独立测试。
 type Capability[T any] struct{ spec capabilitySpec }
+
+// One 声明只能有一个提供者的端口；重复提供会在构图阶段失败，避免隐式选边。
+func One[T any](name string) Capability[T] { return newCapability[T](name, single) }
