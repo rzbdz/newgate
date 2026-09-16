@@ -12,6 +12,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/runtime/injection"
 	"github.com/rzbdz/newgate/go/internal/store"
+	"github.com/rzbdz/newgate/go/internal/ui/style"
 )
 
 // cmdOmo 管 omo（opencode 的 oh-my-openagent 插件）的 intra-agent 槽位。
@@ -55,39 +56,46 @@ func cmdOmo(args []string) int {
 func omoRegistry() *injection.OmoSlots {
 	reg := injection.ReadOmoSlots()
 	if reg == nil {
-		fmt.Printf("还没有 omo 槽位登记表（%s）。\n", paths.OmoSlotsFile())
-		fmt.Println("接管一次就有了：newgate on opencode")
+		fmt.Println(style.Item(style.Skip, "没有槽位登记表 "+paths.OmoSlotsFile()))
+		fmt.Println(style.Hint("接管一次即生成：newgate on opencode"))
 		os.Exit(0)
 	}
 	return reg
 }
 
+// omoList 槽位清单：一行一个键，六列答完「它现在是什么、建议是什么、实际用什么」。
+//
+// 建议的**理由**另起一段（塞进表格会把每行撑到折行）。docs/18 §10：用户唯一
+// 会问的问题是「为什么不是我想的那个」。
 func omoList() int {
 	reg := omoRegistry()
-	fmt.Printf("\033[1momo 槽位\033[0m  %d 个键   模式=%s   注册表=%s\n",
-		len(reg.Slots), omoModeName(reg), paths.OmoSlotsFile())
-	fmt.Printf("  模式 current=按接管时的现状，suggested=按建议（改：newgate omo mode suggested）\n\n")
-	fmt.Printf("  %-22s %-10s %-26s %-6s %-9s %-9s %s\n",
-		"键", "槽位", "接管前的模型", "强度", "现状", "建议", "生效")
+	fmt.Println(style.Title("newgate omo",
+		fmt.Sprintf("%d 个槽位键 · 模式 %s", len(reg.Slots), omoModeName(reg))))
+	fmt.Println(style.Rule(78))
+	fmt.Println(style.Hint("模式 current 按接管时的现状，suggested 按建议 · 切换 newgate omo mode <模式>"))
+
+	t := style.NewTable("键", "槽位", "接管前", "现状", "建议", "生效")
 	for _, s := range reg.Slots {
 		eff := reg.SlotBinding(s.Key)
-		over := ""
 		if _, ok := reg.Overrides[s.Key]; ok {
-			over = " *"
+			eff = style.Cyan(eff) + style.Dim("*")
 		}
-		mark := ""
+		was := dash(s.Was)
+		if s.Variant != "" {
+			was += style.Dim("(" + s.Variant + ")")
+		}
+		sug := style.Dim(dash(s.Suggested))
 		if s.Suggested != "" && s.Suggested != s.Current {
-			mark = " \033[33m←\033[0m"
+			sug = style.Yellow(s.Suggested)
 		}
-		fmt.Printf("  %-22s %-10s %-26s %-6s %-9s %s%-8s %s\n",
-			s.Key, s.Kind+"/"+s.Name, dash(s.Was), dash(s.Variant),
-			s.Current, mark, dash(s.Suggested), eff+over)
+		t.Row(s.Key, style.Dim(s.Kind+"/"+s.Name), style.Dim(was), s.Current, sug, eff)
 	}
+	fmt.Println()
+	fmt.Print(t.String())
 	if len(reg.Overrides) > 0 {
-		fmt.Println("\n  * = 有覆盖（newgate omo use 写的），优先级最高")
+		fmt.Println(style.Hint("* 有覆盖（newgate omo use 写入），优先级最高"))
 	}
-	// 建议的**理由**单独列在下面：塞进表格会把每行撑到折行，反而看不清
-	// （docs/18 §10：唯一会被问的问题是「为什么不是我想的那个」）。
+
 	var diff []injection.OmoSlot
 	for _, s := range reg.Slots {
 		if s.Suggested != "" && s.Suggested != s.Current {
@@ -95,13 +103,16 @@ func omoList() int {
 		}
 	}
 	if len(diff) > 0 {
-		fmt.Printf("\n  \033[1m建议与现状不同的 %d 个键\033[0m（newgate omo mode suggested 全部照建议来）\n", len(diff))
+		fmt.Print(style.Section(fmt.Sprintf("建议与现状不同（%d 个）", len(diff))) +
+			style.Dim("   newgate omo mode suggested 全部采纳") + "\n")
+		d := style.NewTable("键", "现状", "建议", "依据")
 		for _, s := range diff {
-			fmt.Printf("    %-22s %-8s → %-8s \033[2m%s\033[0m\n",
-				s.Key, s.Current, s.Suggested, s.Why)
+			d.Row(s.Key, s.Current, style.Yellow(s.Suggested), style.Dim(s.Why))
 		}
+		fmt.Print(d.String())
 	}
-	fmt.Println("\n  profile 里直接写这个键也能改归属，例如：omo-sisyphus=@normal, terra/medium")
+	fmt.Println()
+	fmt.Println(style.Hint("profile 里直接写键名同样有效：omo-sisyphus=@normal, terra/medium"))
 	return 0
 }
 
@@ -110,6 +121,23 @@ func omoModeName(reg *injection.OmoSlots) string {
 		return "suggested"
 	}
 	return "current"
+}
+
+// omoDiffCount 建议档位与现状不同的键数（有覆盖的不算——那些已经定了）。
+func omoDiffCount(reg *injection.OmoSlots) int {
+	if reg == nil {
+		return 0
+	}
+	n := 0
+	for _, s := range reg.Slots {
+		if _, over := reg.Overrides[s.Key]; over {
+			continue
+		}
+		if s.Suggested != "" && s.Suggested != s.Current {
+			n++
+		}
+	}
+	return n
 }
 
 func dash(s string) string {
@@ -143,12 +171,12 @@ func omoUse(key, value string, set bool) int {
 		return die(70, "写注册表失败: "+err.Error())
 	}
 	if set {
-		fmt.Printf("✓ %s 的缺省归属 → %s\n", key, value)
+		fmt.Println(style.Item(style.OK, key+" 缺省归属 → "+style.Cyan(value)))
 	} else {
-		fmt.Printf("✓ %s 的覆盖已删除，回到%s\n", key, omoModeName(reg))
+		fmt.Println(style.Item(style.OK, key+" 覆盖已删除，回到 "+omoModeName(reg)))
 	}
 	notifyProxy()
-	fmt.Println("  （daemon 1 秒内自动生效；profile 里显式写了这个键的话，以 profile 为准）")
+	fmt.Println(style.Hint("1 秒内自动生效；profile 里显式写了这个键则以 profile 为准"))
 	return 0
 }
 
@@ -156,7 +184,7 @@ func validateBindingValue(v string) error {
 	if strings.HasPrefix(v, "@") {
 		key := strings.TrimPrefix(v, "@")
 		if key == "" || strings.ContainsAny(key, "/ ") {
-			return fmt.Errorf("引用要写成 @键名（如 @normal），得到 %q", v)
+			return fmt.Errorf("引用写成 @键名（如 @normal），得到 %q", v)
 		}
 		return nil
 	}
@@ -167,8 +195,8 @@ func validateBindingValue(v string) error {
 		return nil
 	}
 	if !domain.IsKnownRole(v) {
-		return fmt.Errorf("%q 既不是档位名（heavy/normal/mid/light/vision）、"+
-			"也不是已注册的动态角色键，也不是 provider/模型", v)
+		return fmt.Errorf("%q 既不是档位（heavy/normal/mid/light/vision）、"+
+			"也不是已注册的动态角色键、也不是 provider/模型", v)
 	}
 	return nil
 }
@@ -176,10 +204,13 @@ func validateBindingValue(v string) error {
 func omoMode(mode string) int {
 	reg := omoRegistry()
 	if mode == "" {
-		fmt.Printf("当前模式：%s\n", omoModeName(reg))
-		fmt.Println("  current   每个键按接管时的现状（不改行为，默认）")
-		fmt.Println("  suggested 每个键按建议（模型体格 + variant 强度算出来的）")
-		fmt.Println("用法：newgate omo mode current|suggested")
+		fmt.Println(style.Title("newgate omo mode", omoModeName(reg)))
+		fmt.Println(style.Rule(64))
+		t := style.NewTable("模式", "含义")
+		t.Row("current", style.Dim("每个键按接管时的现状（默认，行为不变）"))
+		t.Row("suggested", style.Dim("每个键按建议，由模型体格与 variant 强度推出"))
+		fmt.Print(t.String())
+		fmt.Println(style.Hint("切换：newgate omo mode current|suggested"))
 		return 0
 	}
 	switch mode {
@@ -191,7 +222,7 @@ func omoMode(mode string) int {
 	if err := injection.WriteOmoSlots(reg); err != nil {
 		return die(70, "写注册表失败: "+err.Error())
 	}
-	fmt.Printf("✓ 模式 → %s\n", mode)
+	fmt.Println(style.Item(style.OK, "模式 → "+style.Cyan(mode)))
 	n := 0
 	for _, s := range reg.Slots {
 		if _, ok := reg.Overrides[s.Key]; ok {
@@ -202,9 +233,9 @@ func omoMode(mode string) int {
 		}
 	}
 	if mode == "suggested" {
-		fmt.Printf("  %d 个键的归属跟着变（有覆盖的键不受影响）。看完不满意：newgate omo mode current\n", n)
+		fmt.Println(style.Hint(fmt.Sprintf("%d 个键的归属随之改变（有覆盖的不受影响）；不满意：newgate omo mode current", n)))
 	} else {
-		fmt.Println("  回到接管时的现状。")
+		fmt.Println(style.Hint("已回到接管时的现状"))
 	}
 	notifyProxy()
 	return 0
@@ -224,10 +255,10 @@ func omoExplain(key string) int {
 		return die(65, err.Error())
 	}
 	if !domain.IsKnownRole(key) {
-		return die(64, fmt.Sprintf("%q 不是已知角色键（newgate omo 看列表）", key))
+		return die(64, fmt.Sprintf("%q 不是已知角色键（newgate omo ls 看清单）", key))
 	}
 	st := snap.State
-	heads := map[string][]string{st.DefaultProfile: {"(默认)"}}
+	heads := map[string][]string{st.DefaultProfile: {"默认"}}
 	for agent, p := range st.Active {
 		heads[p] = append(heads[p], agent)
 	}
@@ -237,41 +268,44 @@ func omoExplain(key string) int {
 	}
 	sort.Strings(names)
 
+	sub := "模块动态角色，非 omo 槽位"
 	if sl, ok := reg.SlotOf(key); ok {
-		fmt.Printf("\033[1m%s\033[0m  %s/%s  接管前=%s variant=%s\n",
-			key, sl.Kind, sl.Name, dash(sl.Was), dash(sl.Variant))
-		fmt.Printf("  现状=%s  建议=%s  生效归属=%s", sl.Current, dash(sl.Suggested), reg.SlotBinding(key))
+		sub = sl.Kind + "/" + sl.Name
+	}
+	fmt.Println(style.Title("newgate omo "+key, sub))
+	fmt.Println(style.Rule(64))
+
+	if sl, ok := reg.SlotOf(key); ok {
+		t := style.NewTable("字段", "值")
+		t.Row("接管前", style.Dim(dash(sl.Was)+" "+dash(sl.Variant)))
+		t.Row("现状", sl.Current)
+		t.Row("建议", dash(sl.Suggested))
+		t.Row("生效", style.Cyan(reg.SlotBinding(key)))
+		fmt.Print(t.String())
 		if sl.Why != "" {
-			fmt.Printf("  （%s）", sl.Why)
+			fmt.Println(style.Hint("建议依据 " + sl.Why))
 		}
-		fmt.Println()
-	} else {
-		fmt.Printf("\033[1m%s\033[0m  （模块动态角色，不是 omo 槽位）\n", key)
 	}
 
 	for _, head := range names {
-		fmt.Printf("\n  链头 %s (用于: %s)\n", head, strings.Join(heads[head], ", "))
+		fmt.Print(style.Section("链头 "+head) + style.Dim("   "+strings.Join(heads[head], ", ")) + "\n")
 		steps, skips := resolve.BuildChain(key, snap.Profiles, snap.Providers, resolve.Opts{
 			Active:    head,
 			Available: health.Default.Available,
 			MaxSteps:  st.Chain.Attempts(),
 		})
-		for i, s := range steps {
-			mark := "   "
-			if i == 0 {
-				mark = " → "
-			}
-			fmt.Printf("   %s%d. %-14s %s\n", mark, i+1, s.Profile, s.Binding)
-		}
-		for _, sk := range skips {
-			t := sk.Target
-			if t == "" {
-				t = "(整个 profile)"
-			}
-			fmt.Printf("     -  %-14s %-30s \033[2m%s\033[0m\n", sk.Profile, t, sk.Reason)
-		}
 		if len(steps) == 0 {
-			fmt.Println("     \033[31m没有可用候选\033[0m")
+			fmt.Println(style.Item(style.Bad, "无可用候选"))
+		} else {
+			t := style.NewTable("#", "profile", "绑定")
+			t.AlignRight(0)
+			for i, s := range steps {
+				t.Row(fmt.Sprintf("%d", i+1), s.Profile, s.Binding.String())
+			}
+			fmt.Print(t.String())
+		}
+		if len(skips) > 0 {
+			printSkips(skips)
 		}
 	}
 	return 0

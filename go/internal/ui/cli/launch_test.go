@@ -7,13 +7,13 @@ import (
 
 func TestSplitLaunch(t *testing.T) {
 	cases := []struct {
-		name       string
-		args       []string
-		agent      string
-		profile    string
+		name        string
+		args        []string
+		agent       string
+		profile     string
 		passthrough string
-		wantErr    bool
-		errHas     string
+		wantErr     bool
+		errHas      string
 	}{
 		{"bare agent", []string{"claude"}, "claude", "", "", false, ""},
 		{"profile after agent, eq form", []string{"claude", "--profile=ds"}, "claude", "ds", "", false, ""},

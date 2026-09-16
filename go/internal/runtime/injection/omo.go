@@ -290,12 +290,15 @@ func Suggest(model, variant string) (tier, why string) {
 		return "", "模型名 " + model + " 没命中规则，体格本身就是猜的"
 	}
 	n := variantShift(variant)
-	if n == 0 {
-		return t, ""
-	}
 	to := domain.ShiftTier(t, n)
-	if to == t {
-		return t, ""
+	if n == 0 || to == t {
+		// 没挪档也要给理由。否则界面上「现状 heavy / 建议 normal」这类
+		// 差异会是一片空白，用户问「为什么不是我想的那个」时无处可查
+		// （docs/18 §10）。分类本身就命中了规则，这句就是那个答案。
+		if variant == "" {
+			return t, "按模型体格判定，接管前没记 variant"
+		}
+		return t, "按模型体格判定，variant=" + variant + " 不改变档位"
 	}
 	dir := "上调"
 	if n < 0 {

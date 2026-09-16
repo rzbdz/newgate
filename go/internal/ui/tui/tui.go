@@ -10,6 +10,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/store"
+	"github.com/rzbdz/newgate/go/internal/ui/style"
 )
 
 // ---------- 零依赖 raw mode ----------
@@ -59,17 +60,14 @@ func restore(old *termios) {
 
 // ---------- 渲染 ----------
 
+// 光标/清屏/反显是**终端控制**，留在本地；语义色一律走 ui/style——那边
+// 还要处理 NO_COLOR 与「输出不是终端」，两套定义迟早分叉。
 const (
-	clear  = "\033[2J\033[H"
-	bold   = "\033[1m"
-	dim    = "\033[2m"
-	rev    = "\033[7m"
-	reset  = "\033[0m"
-	green  = "\033[32m"
-	yellow = "\033[33m"
-	cyan   = "\033[36m"
-	hideC  = "\033[?25l"
-	showC  = "\033[?25h"
+	clear = "\033[2J\033[H"
+	rev   = "\033[7m"
+	reset = "\033[0m"
+	hideC = "\033[?25l"
+	showC = "\033[?25h"
 )
 
 type key int
@@ -170,10 +168,10 @@ func Run() error {
 			msg = ""
 		case kEnter, kRight:
 			if err := store.SetActiveProfile("", names[cur]); err != nil {
-				msg = yellow + "✗ " + err.Error() + reset
+				msg = style.Mark(style.Bad) + " " + err.Error()
 			} else {
 				st = store.LoadState()
-				msg = green + "✓ 已切到 " + names[cur] + "（运行中的会话下个请求即生效）" + reset
+				msg = style.Mark(style.OK) + " 已切到 " + style.Cyan(names[cur]) + style.Dim("   下个请求生效")
 			}
 		case kQuit:
 			return nil
@@ -184,23 +182,23 @@ func Run() error {
 func drawProfileMenu(names []string, cur int, active, msg string) {
 	var b strings.Builder
 	b.WriteString(clear)
-	b.WriteString(bold + " newgate · profile 选择" + reset + "\n")
-	b.WriteString(dim + " ↑/↓ 或 j/k 移动 · Enter 应用 · q 退出" + reset + "\n\n")
+	b.WriteString(style.Bold(" newgate · profile 选择") + "\n")
+	b.WriteString(style.Dim(" ↑/↓ 或 j/k 移动 · Enter 应用 · q 退出") + "\n\n")
 
 	provs, _ := store.LoadProviders()
 	for i, n := range names {
 		mark := " "
 		if n == active {
-			mark = green + "*" + reset
+			mark = style.Green("*")
 		}
-		line := fmt.Sprintf(" %s %-10s", mark, n)
+		line := fmt.Sprintf(" %s %s", mark, style.Pad(n, 10))
 		if i == cur {
 			line = rev + line + reset
 		}
 		b.WriteString(line)
 
 		if pr, err := store.LoadProfile(n); err == nil {
-			b.WriteString("  " + dim + pr.Description + reset)
+			b.WriteString("  " + style.Dim(pr.Description))
 		}
 		b.WriteString("\n")
 
@@ -209,19 +207,19 @@ func drawProfileMenu(names []string, cur int, active, msg string) {
 				for _, role := range domain.Roles {
 					bind, ok := pr.Resolve(role)
 					if !ok {
-						b.WriteString(fmt.Sprintf("        %-8s %s未绑定%s\n", role, yellow, reset))
+						b.WriteString("        " + style.Pad(role, 8) + " " + style.Yellow("未绑定") + "\n")
 						continue
 					}
 					warn := ""
 					if provs != nil {
 						if p, ok2 := provs.Providers[bind.Provider]; !ok2 {
-							warn = yellow + "  ← provider 未定义" + reset
+							warn = style.Yellow("   provider 未定义")
 						} else if p.Key() == "" {
-							warn = yellow + "  ← 缺 api_key" + reset
+							warn = style.Yellow("   缺 api_key")
 						}
 					}
-					b.WriteString(fmt.Sprintf("        %-8s %s%s/%s%s%s\n",
-						role, cyan, bind.Provider, bind.Model, reset, warn))
+					b.WriteString("        " + style.Pad(role, 8) + " " +
+						style.Cyan(bind.Provider+"/"+bind.Model) + warn + "\n")
 				}
 			}
 		}
