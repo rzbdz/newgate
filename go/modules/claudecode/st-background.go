@@ -129,3 +129,55 @@ func (background) Status(state *domain.State) []special.StatusItem {
 		Value: "Claude Code Bash 分类器 → light 档链",
 	}}
 }
+
+func (background) Bindings(state *domain.State) []domain.Binding {
+	if state == nil {
+		return nil
+	}
+	if override, _ := classifierOverride(state); override != nil {
+		return []domain.Binding{*override}
+	}
+	return nil
+}
+
+func classifierOverride(state *domain.State) (*domain.Binding, error) {
+	if state == nil {
+		return nil, nil
+	}
+	raw := state.ModuleConfig["classifier_override"]
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	var binding domain.Binding
+	if err := json.Unmarshal(raw, &binding); err != nil {
+		return nil, fmt.Errorf("%w", err)
+	}
+	if binding.Provider == "" || binding.Model == "" {
+		return nil, fmt.Errorf("provider / model 都必须填写")
+	}
+	return &binding, nil
+}
+
+func (background) Metrics() []special.MetricInfo {
+	return []special.MetricInfo{{
+		Action: "route_light",
+		Hint:   "Bash 分类器，整条链改走 light",
+	}}
+}
+
+// Match 认「Claude Code 的后台小调用」这个类：claude 发起 + 非流式。
+// 分类器本体的精确判定（system 标记）在 Route 里，那边管改道。
+func (background) Match(r *special.Request) bool {
+	return r != nil && r.Agent == ID && !r.Stream
+}
+
+// Apply 认出后台调用后，把「这次调用不想思考」交给 BestEffortDisableThink
+// ——意图在这里，翻译（模型不支持关思考时改成最小思考）在那边，best
+// effort：关不掉就让它思考，绝不因此失败。改道没命中（Route 没认出
+// 分类器）时同样只禁思考，慢而不死。
+func (b background) Apply(body []byte, r *special.Request) ([]byte, []string, error) {
+	if b.thinking == nil {
+		return body, nil, fmt.Errorf("thinking capability is unavailable")
+	}
+	return b.thinking.BestEffortDisable(body, r)
+}
