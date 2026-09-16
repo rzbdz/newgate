@@ -119,3 +119,128 @@ func (d reasoning) NeedsToolLoopRebase(originProvider, originModel string,
 
 const toolLoopRebasePrompt = "Continue from the tool results above. " +
 	"Re-evaluate them as a new step without relying on prior hidden reasoning."
+
+// RebaseToolLoop 把 tool_result 变成同时带普通用户指令的新回合。旧 reasoning、
+// tool_use、tool_result 全部保留作可见上下文，只追加这一段；实测 Ark →
+// DeepSeek 原请求稳定 400，追加后 5/5 200。
+func (reasoning) RebaseToolLoop(body []byte, _ *special.Request) ([]byte, string, error) {
+	q, _ := json.Marshal(toolLoopRebasePrompt)
+	block := []byte(`{"type":"text","text":` + string(q) + `}`)
+	out, changed, err := rewrite.AppendLastArrayItemArray(body, "messages", "content",
+		block, func(item []byte) bool {
+			role, _ := rewrite.TopLevelString(item, "role")
+			return role == "user"
+		})
+	if err != nil {
+		return nil, "", err
+	}
+	if !changed {
+		return body, "", nil
+	}
+	return out, "有损重建外来 tool loop：保留工具结果并追加普通用户继续指令", nil
+}
+
+// Match 只认 DeepSeek：模型名、provider 名、base URL 任一处出现 deepseek。
+//
+// 为什么看这三处：模型名最可靠（deepseek-chat / deepseek-reasoner），但经过
+// 聚合网关时可能被改名，此时 provider 名或 endpoint 里通常仍留着痕迹。
+//
+// 反向兜底：Anthropic 官方端点一律不碰。它对未知字段是严格的，而它也从来
+// 不会报这个错——真有人在官方端点上挂了个叫 deepseek 的 provider，也不该
+// 让这个补丁去给它加字段。
+func (reasoning) Match(r *special.Request) bool {
+	return r != nil && MatchTarget(r.Model, r.Provider, r.BaseURL)
+}
+
+func (reasoning) Apply(body []byte, r *special.Request) ([]byte, []string, error) {
+	var notes []string
+	out := body
+
+	// 是否开启思考只看请求的显式字段。Claude Code × DeepSeek 的缺省关闭
+	// 由组合模块 claudecode_deepseek 负责，本模型模块不认识调用端。
+	thinkingOn := true
+	if raw, has := rewrite.TopLevelRaw(out, "thinking"); has {
+		if t, _ := rewrite.TopLevelString(raw, "type"); t == "disabled" {
+			thinkingOn = false
+		}
+	}
+	// 认不出 type（adaptive、或形状不认识）时按「开着」处理：多补两个占位块
+	// 顶多是冗余，漏补就是 400。
+
+	// 没有 messages（如 /v1/models 之类）就到此为止，不算错。
+	if _, has := rewrite.TopLevelRaw(out, "messages"); !has {
+		return out, notes, nil
+	}
+
+	// 2) 给 assistant 消息补 reasoning_content（OpenAI 方言那句报错）。
+	//    真实原文 → 占位符，绝不空串。
+	restored, placeholders := 0, 0
+	valReasoning := func(item []byte) []byte {
+		if q, ok := pickReasoning(item); ok {
+			restored++
+			return q
+		}
+		placeholders++
+		q, _ := json.Marshal(reasoningFallback)
+		return q
+	}
+	if nb, n, err := rewrite.EnsureArrayItemFieldFunc(out, "messages",
+		"reasoning_content", valReasoning, isAssistant); err != nil {
+		// messages 形状不认识：前面那些仍然有效，这步放弃。
+		notes = append(notes, "messages 未改动（"+err.Error()+"）")
+	} else if n > 0 {
+		out = nb
+		notes = append(notes, reasoningNote("reasoning_content", n, restored, placeholders))
+	}
+
+	// 3) 思考模式开着 → assistant 的 content[] 开头必须有 thinking 块
+	//    （Anthropic 方言那句报错）。同样：真实原文 → 占位符。
+	//    只对 Anthropic 方言做：OpenAI 方言里回传推理的载体是 reasoning_content。
+	if thinkingOn && anthropicDialect(r) {
+		restored, placeholders = 0, 0
+		valBlock := func(item []byte) []byte {
+			// 与第 2 步同一份来源（pickReasoning）：客户端带回的 thinking 块
+			// 原文 → thinkcache 真实推理 → 占位。**不能**读第 2 步刚补的
+			// reasoning_content——第 2 步对没缓存的消息补的是占位符，读它会把
+			// 占位符当成「真实原文」，让日志里的「用了真实原文」计数虚高。
+			if q, ok := pickReasoning(item); ok {
+				restored++
+				return []byte(`{"type":"thinking","thinking":` + string(q) + `}`)
+			}
+			placeholders++
+			q, _ := json.Marshal(reasoningFallback) // string 编码不会失败
+			return []byte(`{"type":"thinking","thinking":` + string(q) + `}`)
+		}
+		if nb, n, err := rewrite.EnsureArrayItemArrayHeadFunc(out, "messages", "content",
+			valBlock, isAssistant, lacksThinking); err != nil {
+			notes = append(notes, "content 未改动（"+err.Error()+"）")
+		} else if n > 0 {
+			out = nb
+			notes = append(notes, reasoningNote("thinking 块", n, restored, placeholders))
+		}
+	}
+
+	return out, notes, nil
+}
+
+// pickReasoning 为一条 assistant 消息选出回传的推理原文（JSON 编码后的字符串值）。
+//
+// 两级来源，严格对应客户端回传的形态：
+//  1. 消息自己的 content[] 里带的 thinking 块——客户端保留了原文就直接用，
+//     不依赖缓存存活；
+//  2. thinkcache 里那轮真实发生的推理（tool id / 正文哈希找回）。
+//
+// 都没有 → false，调用方补非空占位符。
+func pickReasoning(item []byte) ([]byte, bool) {
+	if t := clientThinkingText(item); t != "" {
+		if q, err := json.Marshal(t); err == nil {
+			return q, true
+		}
+	}
+	if blob, ok := thinkcache.Default.Lookup(item); ok {
+		if q, err := json.Marshal(string(blob)); err == nil {
+			return q, true
+		}
+	}
+	return nil, false
+}
