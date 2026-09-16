@@ -123,3 +123,123 @@ func (b *chainBuilder) expand(key string) {
 		}
 	}
 }
+
+// add 一条具体候选过准入检查后进链。
+func (b *chainBuilder) add(p *domain.Profile, key string, bd domain.Binding) {
+	k := bd.String()
+	if b.seen[k] {
+		b.skips = append(b.skips, Skip{p.Name, k, "与链上更前面的重复，已去重"})
+		return
+	}
+	b.seen[k] = true
+
+	prov, ok := b.provs.Providers[bd.Provider]
+	if !ok {
+		b.skips = append(b.skips, Skip{p.Name, k, "provider 未定义"})
+		return
+	}
+	if prov.Key() == "" {
+		b.skips = append(b.skips, Skip{p.Name, k, "provider 没有 api_key"})
+		return
+	}
+	if b.o.Disabled != nil {
+		if yes, why := b.o.Disabled(key, k); yes {
+			b.skips = append(b.skips, Skip{p.Name, k, "已禁用：" + why})
+			return
+		}
+	}
+	if b.o.Available != nil && !b.o.Available(bd.Provider, bd.Model) {
+		b.skips = append(b.skips, Skip{p.Name, k, "熔断中"})
+		return
+	}
+	b.steps = append(b.steps, Step{Profile: p.Name, Binding: bd, Provider: prov})
+}
+
+// OverrideChain 构造「覆盖绑定为链头、tier 档链为 fallback」的链。
+//
+// 覆盖绑定的 provider 未定义 / 没 key / 熔断 / 禁用时覆盖不生效：回落纯
+// tier 链并返回 applied=false（顺带记一条 Skip 说明为什么没覆盖上）。成功则
+// 把覆盖 Step 插到最前，tier 链里与它同 key 的重复步去掉——「全局覆盖第一
+// 优先」落在这里，覆盖 model 挂了才轮到 tier 档的候选。
+func OverrideChain(source string, override domain.Binding, tier string, profiles []*domain.Profile,
+	provs *domain.Providers, o Opts) ([]Step, []Skip, bool) {
+
+	steps, skips := BuildChain(tier, profiles, provs, o)
+	if source == "" {
+		source = "override"
+	}
+	source = "(" + source + ")"
+
+	if override.Provider == "" || override.Model == "" {
+		return steps, skips, false
+	}
+	prov, ok := provs.Providers[override.Provider]
+	switch {
+	case !ok:
+		skips = append(skips, Skip{source, override.String(), "provider 未定义，覆盖不生效"})
+		return steps, skips, false
+	case prov.Key() == "":
+		skips = append(skips, Skip{source, override.String(), "provider 没有 api_key，覆盖不生效"})
+		return steps, skips, false
+	case o.Available != nil && !o.Available(override.Provider, override.Model):
+		skips = append(skips, Skip{source, override.String(), "熔断中，覆盖不生效"})
+		return steps, skips, false
+	}
+	if o.Disabled != nil {
+		if yes, why := o.Disabled(tier, override.String()); yes {
+			skips = append(skips, Skip{source, override.String(), "已禁用：" + why})
+			return steps, skips, false
+		}
+	}
+
+	ovStep := Step{Profile: source, Binding: override, Provider: prov}
+	out := []Step{ovStep}
+	for _, s := range steps {
+		if s.Binding.String() == override.String() {
+			continue // 已经在链头
+		}
+		out = append(out, s)
+	}
+	return out, skips, true
+}
+
+// orderProfiles 链头 + 其余按 (priority, name)。
+func orderProfiles(profiles []*domain.Profile, active string) ([]*domain.Profile, []Skip) {
+	var head *domain.Profile
+	var rest []*domain.Profile
+	var skips []Skip
+
+	for _, p := range profiles {
+		if p.Name == active {
+			head = p
+			continue
+		}
+		rest = append(rest, p)
+	}
+	sort.SliceStable(rest, func(i, j int) bool {
+		if pi, pj := rest[i].Prio(), rest[j].Prio(); pi != pj {
+			return pi < pj
+		}
+		return rest[i].Name < rest[j].Name
+	})
+
+	var out []*domain.Profile
+	if head != nil {
+		out = append(out, head) // 显式选中优先，excluded 挡不住链头
+		if head.Pinned {
+			for _, p := range rest {
+				skips = append(skips, Skip{p.Name, "",
+					fmt.Sprintf("链头 %s 是 pinned，不往下掉", head.Name)})
+			}
+			return out, skips
+		}
+	}
+	for _, p := range rest {
+		if p.Excluded {
+			skips = append(skips, Skip{p.Name, "", "excluded：只能显式选中"})
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, skips
+}
