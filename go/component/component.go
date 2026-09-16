@@ -110,3 +110,17 @@ type Loader interface {
 // Context 是构图后只读的端口表，只在 Start 阶段交给组件。
 // 它刻意不提供动态写入，防止运行期退化为 service locator。
 type Context struct{ values map[string][]any }
+
+// Get 读取 single 端口；布尔值让 Optional 的消费者显式处理缺失情况。
+func Get[T any](ctx Context, capability Capability[T]) (T, bool) {
+	if capability.spec.cardinality != single {
+		panic("component: Get called with many capability " + capability.spec.name)
+	}
+	var zero T
+	values := ctx.values[capability.spec.name]
+	if len(values) == 0 {
+		return zero, false
+	}
+	value, ok := values[0].(T)
+	return value, ok
+}
