@@ -134,3 +134,123 @@ func List() []Status {
 	}
 	return out
 }
+
+// On 接管一个 agent，并记下「用户要接管它」。
+func On(agent string, port int) Result {
+	agents := agentstate.Catalog()
+	a, ok := agents.Get(agent)
+	if !ok {
+		return Result{Agent: agent, Err: unknown(agent)}
+	}
+	if err := store.SetTakeoverWanted(agent, true); err != nil {
+		return Result{Agent: agent, Mechanism: mechanismOf(a), Err: err}
+	}
+	return apply(a, port)
+}
+
+// Off 释放一个 agent，并记下「用户不要接管它」——之后 start 也不会再接管它。
+func Off(agent string) Result {
+	agents := agentstate.Catalog()
+	a, ok := agents.Get(agent)
+	if !ok {
+		return Result{Agent: agent, Err: unknown(agent)}
+	}
+	if err := store.SetTakeoverWanted(agent, false); err != nil {
+		return Result{Agent: agent, Mechanism: mechanismOf(a), Err: err}
+	}
+	return release(a)
+}
+
+// OnAll 全面接管：所有没被用户显式关掉的 agent。不改任何意愿。
+func OnAll(port int) []Result {
+	agents := agentstate.Catalog()
+	st := store.LoadState()
+	var out []Result
+	for _, id := range Agents() {
+		a, ok := agents.Get(id)
+		if !ok {
+			continue
+		}
+		if !st.TakeoverWanted(id) {
+			out = append(out, Result{Agent: id, Mechanism: mechanismOf(a), Skipped: true,
+				Lines: []string{"跳过（你 off 过它；newgate on " + id + " 可恢复）"}})
+			continue
+		}
+		out = append(out, apply(a, port))
+	}
+	return out
+}
+
+// OffAll 全面释放。**不改意愿**——这样 newgate stop 之后再 start，
+// 用户原本接管的那些还会自动插回去。
+func OffAll() []Result {
+	agents := agentstate.Catalog()
+	var out []Result
+	for _, id := range Agents() {
+		a, ok := agents.Get(id)
+		if !ok {
+			continue
+		}
+		r := release(a)
+		if len(r.Lines) == 0 && r.Err == nil {
+			continue // 本来就没接管，不用报
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func apply(a *agentapi.Agent, port int) Result {
+	res := Result{Agent: a.ID, Mechanism: mechanismOf(a)}
+	switch res.Mechanism {
+	case MechShim:
+		link, err := injection.Install(a.ID)
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		res.Lines = append(res.Lines, "PATH shim "+link+" → newgate")
+		for _, rc := range injection.RCFiles() {
+			changed, err := injection.AddToRC(rc)
+			if err != nil {
+				res.Warn = append(res.Warn, rc+": "+err.Error())
+				continue
+			}
+			if changed {
+				res.Lines = append(res.Lines, "把 "+injection.Dir()+" 前置到 PATH（写进 "+rc+"）")
+			}
+		}
+		if real, err := a.FindReal(injection.Dir()); err == nil {
+			res.Lines = append(res.Lines, "真实 "+a.ID+": "+real)
+		} else {
+			res.Warn = append(res.Warn, "找不到真实的 "+a.ID+"："+err.Error()+
+				"——shim 会转发失败，先把它装好")
+		}
+		if !injection.InPath() {
+			res.Warn = append(res.Warn, "当前 shell 的 PATH 还没生效，重开 shell 或 `exec $SHELL -l`")
+		}
+
+	case MechConfig:
+		reps, err := a.Config.Apply(port)
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		for _, rep := range reps {
+			if rep.Skipped != "" {
+				res.Lines = append(res.Lines, rep.File+"（跳过: "+rep.Skipped+"）")
+				continue
+			}
+			line := rep.File
+			if n := len(rep.Rewrites); n > 0 {
+				line += fmt.Sprintf("（%d 处改写）", n)
+			}
+			res.Lines = append(res.Lines, line)
+			if rep.Fuzzy > 0 {
+				res.Warn = append(res.Warn, fmt.Sprintf(
+					"%s 里有 %d 处没命中精确规则，归到了中档，建议核对", rep.File, rep.Fuzzy))
+			}
+		}
+	}
+	return res
+}
