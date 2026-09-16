@@ -1,0 +1,61 @@
+// Package claudecode 描述 Claude Code 这个客户端家族。
+//
+// 客户端模块只拥有 Claude Code 自身的事实：二进制名、环境槽位、协议以及
+// 客户端普遍需要的 request treatments。它把 Agent 注册到 confighook，
+// 把插件注册到 gateway，并提供一个很小的 Client capability 供交叉组件识别。
+//
+// DeepSeek 或 GLM 的特殊回传规则不属于这里；只有“Claude Code 遇到某模型”
+// 才成立的行为放在 claudecode_deepseek / claudecode_glm。
+package claudecode
+
+import (
+	"context"
+
+	modules "github.com/rzbdz/newgate/go/component"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
+	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking/api"
+)
+
+// New 声明 Claude Code 客户端组件。它注册客户端描述符和状态字段，
+// 再将客户端专属处理器接入网关；所有注册句柄都由 Stop 统一释放。
+func New() modules.Component {
+	var releases []modules.Release
+	return modules.Component{
+		Name: "claudecode",
+		Requires: []modules.Requirement{
+			modules.Need(gatewayapi.Capability),
+			modules.Need(confighookapi.ConfigHooksCapability),
+			modules.Need(thinkingapi.Capability),
+		},
+		Provides: []modules.Provision{
+			modules.Provide(claudeapi.Capability,
+				claudeapi.Client{AgentID: ID}),
+		},
+		Start: func(_ context.Context, ctx modules.Context) error {
+			config := modules.MustGet(ctx, confighookapi.ConfigHooksCapability)
+			release, err := config.RegisterAgent(Agent())
+			if err != nil {
+				return err
+			}
+			releases = append(releases, release)
+			release, err = config.RegisterStateField("claudecode", "classifier_override")
+			if err != nil {
+				return err
+			}
+			releases = append(releases, release)
+			gateway := modules.MustGet(ctx, gatewayapi.Capability)
+			thinking := modules.MustGet(ctx, thinkingapi.Capability)
+			for _, treatment := range Treatments(thinking) {
+				release, err = gateway.RegisterRequestHook(treatment)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
+			}
+			return nil
+		},
+		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },
+	}
+}
