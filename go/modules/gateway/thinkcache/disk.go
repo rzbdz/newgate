@@ -128,3 +128,107 @@ func (d *DiskStore) appendKeys(keys []string, blob []byte, at time.Time) {
 		d.compactLocked()
 	}
 }
+
+// get 读回一条 blob。过期当没有。
+func (d *DiskStore) get(key string) ([]byte, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r, ok := d.index[key]
+	if !ok {
+		return nil, false
+	}
+	if d.ttl > 0 && time.Since(r.at) > d.ttl {
+		delete(d.index, key)
+		return nil, false
+	}
+	_, blob, _, _, err := readRecAt(d.f, r.off)
+	if err != nil {
+		return nil, false
+	}
+	return blob, true
+}
+
+// 记录格式（每条）：
+//
+//	[4] keyLen   uint32 LE
+//	[4] blobLen  uint32 LE
+//	[8] unixnano uint64 LE
+//	[keyLen] key
+//	[blobLen] blob
+func recBytes(key string, blob []byte, at time.Time) []byte {
+	buf := make([]byte, 0, len(key)+len(blob)+16)
+	var n [8]byte
+	binary.LittleEndian.PutUint32(n[0:4], uint32(len(key)))
+	binary.LittleEndian.PutUint32(n[4:8], uint32(len(blob)))
+	buf = append(buf, n[:]...)
+	binary.LittleEndian.PutUint64(n[:], uint64(at.UnixNano()))
+	buf = append(buf, n[:]...)
+	buf = append(buf, key...)
+	buf = append(buf, blob...)
+	return buf
+}
+
+func readRecAt(f *os.File, off int64) (key string, blob []byte, at time.Time, n int, err error) {
+	var hdr [16]byte
+	if _, err = f.ReadAt(hdr[:], off); err != nil {
+		return
+	}
+	keyLen := binary.LittleEndian.Uint32(hdr[0:4])
+	blobLen := binary.LittleEndian.Uint32(hdr[4:8])
+	at = time.Unix(0, int64(binary.LittleEndian.Uint64(hdr[8:16])))
+	// 合理性上限：防止半条记录里的垃圾长度把内存读爆
+	if keyLen > 1<<20 || blobLen > 8<<20 {
+		err = io.ErrUnexpectedEOF
+		return
+	}
+	body := make([]byte, keyLen+blobLen)
+	if _, err = f.ReadAt(body, off+16); err != nil {
+		return
+	}
+	key = string(body[:keyLen])
+	blob = body[keyLen:]
+	n = 16 + int(keyLen) + int(blobLen)
+	return
+}
+
+func (d *DiskStore) compactLocked() {
+	// 先清过期项
+	now := time.Now()
+	for k, r := range d.index {
+		if d.ttl > 0 && now.Sub(r.at) > d.ttl {
+			delete(d.index, k)
+		}
+	}
+	tmp := d.path + ".tmp"
+	nf, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o660)
+	if err != nil {
+		return
+	}
+	if _, err := nf.Write(diskMagic); err != nil {
+		_ = nf.Close()
+		return
+	}
+	for k, r := range d.index {
+		if _, blob, _, _, err := readRecAt(d.f, r.off); err != nil {
+			continue
+		} else if _, err := nf.Write(recBytes(k, blob, r.at)); err != nil {
+			continue
+		}
+	}
+	_ = nf.Sync()
+	_ = nf.Close()
+	if err := os.Rename(tmp, d.path); err != nil {
+		_ = os.Remove(tmp)
+		return
+	}
+	_ = d.f.Close()
+	nf2, err := os.OpenFile(d.path, os.O_RDWR|os.O_APPEND, 0o660)
+	if err != nil {
+		d.index = map[string]rec{}
+		d.size = 0
+		return
+	}
+	d.f = nf2
+	d.index = map[string]rec{}
+	d.scan() // 用新文件重建索引（offset 已变）
+}
