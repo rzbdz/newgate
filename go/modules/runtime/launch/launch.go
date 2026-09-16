@@ -138,3 +138,85 @@ func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) m
 	}
 	return inject
 }
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// execReal 找到真实可执行文件并用注入后的 env 覆盖进程。
+func execReal(a *agentapi.Agent, args []string, inject map[string]string) int {
+	real, err := a.FindReal(injection.Dir())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "newgate: %v\n", err)
+		return 69
+	}
+
+	// 受控的 env 白名单：继承 → 丢掉干扰项 → 叠加我们的。
+	drop := map[string]bool{}
+	for _, k := range a.UnsetEnv {
+		drop[k] = true
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		k := kv
+		if i := indexByte(kv, '='); i >= 0 {
+			k = kv[:i]
+		}
+		if drop[k] {
+			continue
+		}
+		if _, overridden := inject[k]; overridden {
+			continue
+		}
+		env = append(env, kv)
+	}
+	for k, v := range inject {
+		env = append(env, k+"="+v)
+	}
+
+	execArgs := append([]string{real}, args...)
+	if err := syscall.Exec(real, execArgs, env); err != nil {
+		// 没有 shebang 的脚本（例如 npm 的 claude.exe 兜底脚本、或 CRLF
+		// 行尾损坏的 shebang）会让内核返回 ENOEXEC（exec format error）。
+		// 交给 /bin/sh 执行，让它打印脚本自己那清晰明了的错误信息，
+		// 而不是给用户一个神秘的 "exec format error"。
+		if errors.Is(err, syscall.ENOEXEC) {
+			shArgs := append([]string{"/bin/sh", real}, args...)
+			if err2 := syscall.Exec("/bin/sh", shArgs, env); err2 != nil {
+				fmt.Fprintf(os.Stderr, "newgate: 经 /bin/sh 执行 %s 也失败: %v\n", real, err2)
+				return 70
+			}
+			return 0 // 不会走到这里：Exec 成功则不返回
+		}
+		fmt.Fprintf(os.Stderr, "newgate: exec %s failed: %v\n", real, err)
+		return 70
+	}
+	return 0 // 不会走到这里：Exec 成功则不返回
+}
+
+func indexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
+}
+
+// waitProxy 轮询代理直到它响应，或约 3s 后放弃。
+func waitProxy(port int) {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if tcpAlive(port) {
+			return
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+}
+
+func tcpAlive(port int) bool { return httpx.TCPAlive("127.0.0.1", port, 500*time.Millisecond) }
