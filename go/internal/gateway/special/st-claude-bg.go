@@ -3,6 +3,7 @@ package special
 import (
 	"bytes"
 
+	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 )
 
@@ -25,7 +26,7 @@ func init() { Register(claudeBg{}) }
 //
 // 分两层，各管一件事：
 //
-//  1. 改道（RouteTier，路由层）：分类器本体整个走 **light 链**——不只是
+//  1. 改道（Route，路由层）：分类器本体整个走 **light 链**——不只是
 //     链头换 light，fallback 也在 light 链里走。「这条命令安全不安全」要
 //     的是快和便宜，这个意图必须贯穿整条链：只换头的话，light 一挂掉回
 //     mid 的体格，又慢回去了。其他后台调用（compact 总结、起标题）不改
@@ -58,23 +59,6 @@ func isClassifier(body []byte) bool {
 	return ok && bytes.Contains(raw, []byte(classifierMarker))
 }
 
-// RouteTier 这次请求应该按哪个档位建链；"" = 按客户端点名的模型，不改道。
-//
-// 这是 special 层参与**路由**的唯一口子：改道是路由决策（换哪条 fallback
-// 链），发生在建链之前，所以不在插件的 Apply 里做——body 改写只能换链头
-// （模型字段），换不了链的尾巴（fallback 还是原档的候选）。
-//
-// off 与 Apply 同款：用户 `newgate st off claude-bg` 时改道也一起停。
-func RouteTier(agent string, stream bool, body []byte, off func(name string) bool) string {
-	if off != nil && off("claude-bg") {
-		return ""
-	}
-	if agent != "claude" || stream || !isClassifier(body) {
-		return ""
-	}
-	return "light"
-}
-
 func (claudeBg) Name() string { return "claude-bg" }
 
 func (claudeBg) Why() string {
@@ -85,15 +69,72 @@ func (claudeBg) Why() string {
 		"（主循环的流式请求不受影响）"
 }
 
+func (claudeBg) Route(body []byte, request *Request, state *domain.State) (RouteDecision, bool) {
+	if request == nil || request.Agent != "claude" || request.Stream || !isClassifier(body) {
+		return RouteDecision{}, false
+	}
+	decision := RouteDecision{
+		Tier:             "light",
+		FirstByteTimeout: state.Timeouts.ClassifierFirstByte(),
+		Note:             "分类器改道 → light 档链（含 fallback）",
+		Metric:           "route_light",
+	}
+	if override := state.ClassifierOverride; override != nil &&
+		override.Provider != "" && override.Model != "" {
+		head := *override
+		decision.Head = &head
+		decision.OverrideNote = "分类器覆盖 → " + head.String() +
+			"（全局最高优先，先于任何 profile）"
+		decision.OverrideFailNote = "分类器覆盖 " + head.String() +
+			" 未生效，回落 light 档链"
+	}
+	return decision, true
+}
+
+func (claudeBg) Status(state *domain.State) []StatusItem {
+	if state == nil {
+		return nil
+	}
+	if override := state.ClassifierOverride; override != nil &&
+		override.Provider != "" && override.Model != "" {
+		return []StatusItem{{
+			Label: "分类器覆盖",
+			Value: override.String() + " · 全局最高优先，先于任何 profile",
+		}}
+	}
+	return []StatusItem{{
+		Label: "分类器改道",
+		Value: "Claude Code Bash 分类器 → light 档链",
+	}}
+}
+
+func (claudeBg) Bindings(state *domain.State) []domain.Binding {
+	if state == nil {
+		return nil
+	}
+	if override := state.ClassifierOverride; override != nil &&
+		override.Provider != "" && override.Model != "" {
+		return []domain.Binding{*override}
+	}
+	return nil
+}
+
+func (claudeBg) Metrics() []MetricInfo {
+	return []MetricInfo{{
+		Action: "route_light",
+		Hint:   "Bash 分类器，整条链改走 light",
+	}}
+}
+
 // Match 认「Claude Code 的后台小调用」这个类：claude 发起 + 非流式。
-// 分类器本体的精确判定（system 标记）在 RouteTier 里，那边管改道。
+// 分类器本体的精确判定（system 标记）在 Route 里，那边管改道。
 func (claudeBg) Match(r *Request) bool {
 	return claudeCode(r) && !r.Stream
 }
 
 // Apply 认出后台调用后，把「这次调用不想思考」交给 BestEffortDisableThink
 // ——意图在这里，翻译（模型不支持关思考时改成最小思考）在那边，best
-// effort：关不掉就让它思考，绝不因此失败。改道没命中（RouteTier 没认出
+// effort：关不掉就让它思考，绝不因此失败。改道没命中（Route 没认出
 // 分类器）时同样只禁思考，慢而不死。
 func (claudeBg) Apply(body []byte, r *Request) ([]byte, []string, error) {
 	return BestEffortDisableThink(body, r)

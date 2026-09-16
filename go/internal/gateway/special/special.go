@@ -28,6 +28,9 @@
 package special
 
 import (
+	"time"
+
+	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 )
 
@@ -80,6 +83,56 @@ type ToolLoopMigrator interface {
 	RebaseToolLoop(body []byte, candidate *Request) ([]byte, string, error)
 }
 
+// RoutePlugin 是 special 层在构链前的扩展点。插件只返回路由意图；如何校验
+// binding、构造 fallback 链仍由 resolve 负责。
+type RoutePlugin interface {
+	Route(body []byte, request *Request, state *domain.State) (RouteDecision, bool)
+}
+
+type RouteDecision struct {
+	Plugin           string
+	Tier             string
+	Head             *domain.Binding
+	FirstByteTimeout time.Duration
+	Note             string
+	OverrideNote     string
+	OverrideFailNote string
+	Metric           string
+}
+
+func (d RouteDecision) MetricKey() string {
+	if d.Plugin == "" || d.Metric == "" {
+		return ""
+	}
+	return "special." + d.Plugin + "." + d.Metric
+}
+
+// StatusItem 是插件贡献给 `newgate status` 的结构化信息。CLI 只负责排版，
+// 不知道 classifier、DeepSeek 等具体机制。
+type StatusItem struct {
+	Label string
+	Value string
+}
+
+type StatusProvider interface {
+	Status(state *domain.State) []StatusItem
+}
+
+// BindingProvider 让路由插件声明自己可能引入、但不在 profile 中的 binding。
+// metrics 用它构造完整观测集合，不需要知道任何插件配置字段。
+type BindingProvider interface {
+	Bindings(state *domain.State) []domain.Binding
+}
+
+type MetricInfo struct {
+	Action string
+	Hint   string
+}
+
+type MetricProvider interface {
+	Metrics() []MetricInfo
+}
+
 var registry []Plugin
 
 // Register 注册一个插件。只在 init() 里调用，所以不用加锁。
@@ -109,6 +162,76 @@ func Plugins() []Plugin {
 	out := make([]Plugin, len(registry))
 	copy(out, registry)
 	return out
+}
+
+// Route 按注册顺序询问路由插件；第一个明确认领请求的决定生效。
+func Route(body []byte, request *Request, state *domain.State) (RouteDecision, bool) {
+	if state == nil || !state.SpecialEnabled() {
+		return RouteDecision{}, false
+	}
+	for _, p := range registry {
+		if state.SpecialPluginOff(p.Name()) {
+			continue
+		}
+		router, ok := p.(RoutePlugin)
+		if !ok {
+			continue
+		}
+		if decision, matched := router.Route(body, request, state); matched {
+			decision.Plugin = p.Name()
+			return decision, true
+		}
+	}
+	return RouteDecision{}, false
+}
+
+// Statuses 汇总所有启用插件贡献的状态行。
+func Statuses(state *domain.State) []StatusItem {
+	if state == nil || !state.SpecialEnabled() {
+		return nil
+	}
+	var out []StatusItem
+	for _, p := range registry {
+		if state.SpecialPluginOff(p.Name()) {
+			continue
+		}
+		if reporter, ok := p.(StatusProvider); ok {
+			out = append(out, reporter.Status(state)...)
+		}
+	}
+	return out
+}
+
+func Bindings(state *domain.State) []domain.Binding {
+	if state == nil || !state.SpecialEnabled() {
+		return nil
+	}
+	var out []domain.Binding
+	for _, p := range registry {
+		if state.SpecialPluginOff(p.Name()) {
+			continue
+		}
+		if provider, ok := p.(BindingProvider); ok {
+			out = append(out, provider.Bindings(state)...)
+		}
+	}
+	return out
+}
+
+// MetricHint 让指标说明跟着产生指标的插件走，避免 CLI 维护插件名 switch。
+func MetricHint(key string) (string, bool) {
+	for _, p := range registry {
+		provider, ok := p.(MetricProvider)
+		if !ok {
+			continue
+		}
+		for _, metric := range provider.Metrics() {
+			if key == "special."+p.Name()+"."+metric.Action {
+				return metric.Hint, true
+			}
+		}
+	}
+	return "", false
 }
 
 // ToolLoopNeedsRebase 询问匹配 candidate 的插件是否需要先有损重建，才能接手
@@ -150,7 +273,8 @@ func RebaseToolLoop(body []byte, originProvider, originModel string, candidate *
 		}
 		out, note, err := migrator.RebaseToolLoop(body, candidate)
 		if err != nil {
-			res.Notes = []string{p.Name() + ": 有损 tool loop 重建跳过（" + err.Error() + "）"}
+			note := "有损 tool loop 重建跳过（" + err.Error() + "）"
+			res.Notes = []string{p.Name() + ": " + note}
 			return res
 		}
 		if note == "" || out == nil {
@@ -158,6 +282,7 @@ func RebaseToolLoop(body []byte, originProvider, originModel string, candidate *
 		}
 		res.Body, res.Changed = out, true
 		res.Notes = []string{p.Name() + ": " + note}
+		res.Events = []Event{{Plugin: p.Name(), Action: "tool_loop_rebase", Note: note}}
 		return res
 	}
 	return res
@@ -167,7 +292,24 @@ func RebaseToolLoop(body []byte, originProvider, originModel string, candidate *
 type Result struct {
 	Body    []byte   // Changed 为 false 时等于传进来的 body
 	Notes   []string // 形如 "deepseek: 注入 thinking…"，逐条写日志
+	Events  []Event
 	Changed bool
+}
+
+type Event struct {
+	Plugin string
+	Action string
+	Note   string
+}
+
+func (e Event) MetricKey() string {
+	if e.Plugin == "" {
+		return ""
+	}
+	if e.Action == "" || e.Action == "rewrite" {
+		return "special." + e.Plugin
+	}
+	return "special." + e.Plugin + "." + e.Action
 }
 
 // Apply 按注册顺序跑一遍所有匹配的插件，串联改写。
@@ -189,7 +331,8 @@ func Apply(body []byte, r *Request, off func(name string) bool) Result {
 		}
 		out, notes, err := p.Apply(res.Body, r)
 		if err != nil {
-			res.Notes = append(res.Notes, p.Name()+": 跳过（"+err.Error()+"），按原样发")
+			note := "跳过（" + err.Error() + "），按原样发"
+			res.Notes = append(res.Notes, p.Name()+": "+note)
 			continue
 		}
 		if len(notes) == 0 || out == nil {
@@ -199,6 +342,7 @@ func Apply(body []byte, r *Request, off func(name string) bool) Result {
 		res.Changed = true
 		for _, n := range notes {
 			res.Notes = append(res.Notes, p.Name()+": "+n)
+			res.Events = append(res.Events, Event{Plugin: p.Name(), Action: "rewrite", Note: n})
 		}
 		syncContextModel(res.Body, r)
 	}

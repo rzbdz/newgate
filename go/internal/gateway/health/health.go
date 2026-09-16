@@ -2,6 +2,7 @@ package health
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,13 +34,16 @@ type latencyScore struct {
 // Breaker 是 daemon 内的全局 binding 健康表。熔断后不会按时间自动复活：
 // 只有一次成功 probe 能把 binding 放回链，避免坏上游每分钟回来撞一次用户请求。
 type Breaker struct {
-	mu       sync.Mutex
-	fails    map[string]int
-	openedAt map[string]time.Time
-	reasons  map[string]string
-	probes   map[string]probeResult
-	scores   map[string]latencyScore
-	file     string
+	mu           sync.Mutex
+	fails        map[string]int
+	openedAt     map[string]time.Time
+	reasons      map[string]string
+	probes       map[string]probeResult
+	scores       map[string]latencyScore
+	file         string
+	persistedAt  time.Time
+	persistTimer *time.Timer
+	onError      func(error)
 
 	Threshold int           // 真实流量连续失败多少次开闸
 	Cooldown  time.Duration // 最短隔离时间；到期仍需成功 probe 才能回链
@@ -58,6 +62,12 @@ func newBreaker() *Breaker {
 }
 
 var Default = newBreaker()
+
+func (b *Breaker) SetErrorHandler(fn func(error)) {
+	b.mu.Lock()
+	b.onError = fn
+	b.mu.Unlock()
+}
 
 func bindingKey(provider, model string) string { return provider + "\x00" + model }
 
@@ -147,12 +157,37 @@ func (b *Breaker) RecordProbe(provider, model string, status, contextBytes int,
 	return grade, false
 }
 
-// ObserveSuccess 把真实请求的 TTFT 写进对应上下文桶。EWMA 让近期表现权重大，
-// 同时避免单次抖动把顺序永久改变。
+// ObserveSuccess 把真实请求的首响应延迟写进对应上下文桶。EWMA 让近期表现
+// 权重大，同时避免单次抖动把顺序永久改变。
 func (b *Breaker) ObserveSuccess(provider, model string, contextBytes int, ttft time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.observeLocked(bindingKey(provider, model), contextBytes, ttft)
+	// 延迟样本来自热路径，不能每发请求都落盘；最多每 5 秒写一次。
+	// breaker/probe 状态变化仍会立即调用 persistLocked。
+	const interval = 5 * time.Second
+	if time.Since(b.persistedAt) >= interval {
+		b.persistLocked()
+	} else if b.file != "" && b.persistTimer == nil {
+		wait := interval - time.Since(b.persistedAt)
+		b.persistTimer = time.AfterFunc(wait, func() {
+			b.mu.Lock()
+			b.persistTimer = nil
+			b.persistLocked()
+			b.mu.Unlock()
+		})
+	}
+}
+
+// Flush 把节流窗口内尚未落盘的延迟样本同步写出，供 daemon 优雅退出使用。
+func (b *Breaker) Flush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.persistTimer != nil {
+		b.persistTimer.Stop()
+		b.persistTimer = nil
+	}
+	b.persistLocked()
 }
 
 func (b *Breaker) observeLocked(key string, contextBytes int, ttft time.Duration) {
@@ -241,6 +276,9 @@ type Status struct {
 	Latency  int64         `json:"latency_ms,omitempty"`
 	Checked  time.Time     `json:"checked_at,omitempty"`
 	ScoreMs  int           `json:"score_ms"`
+	Samples  int           `json:"samples"`
+	Scores   [4]int        `json:"scores_ms,omitempty"`
+	Buckets  [4]int        `json:"samples_by_bucket,omitempty"`
 	OpenedAt time.Time     `json:"opened_at,omitempty"`
 }
 
@@ -252,10 +290,10 @@ func (b *Breaker) Snapshot() []Status {
 	for key := range b.openedAt {
 		keys[key] = true
 	}
-	for key := range b.probes {
+	for key := range b.scores {
 		keys[key] = true
 	}
-	for key := range b.scores {
+	for key := range b.probes {
 		keys[key] = true
 	}
 	for key := range keys {
@@ -274,8 +312,16 @@ func (b *Breaker) Snapshot() []Status {
 		if p, ok := b.probes[key]; ok {
 			s.Grade, s.Latency, s.Checked = p.Grade, p.LatencyMs, p.CheckedAt
 		}
-		if score := b.scores[key]; score.Samples[0] > 0 {
+		score := b.scores[key]
+		if score.Samples[0] > 0 {
 			s.ScoreMs = int(score.EWMA[0])
+		}
+		for i, n := range score.Samples {
+			if n > 0 {
+				s.Scores[i] = int(score.EWMA[i])
+			}
+			s.Buckets[i] = n
+			s.Samples += n
 		}
 		out = append(out, s)
 	}
@@ -322,8 +368,18 @@ func (b *Breaker) UseFile(path string) error {
 			b.probes[key] = probeResult{
 				Grade: s.Grade, LatencyMs: s.Latency, CheckedAt: s.Checked,
 			}
-			score := b.scores[key]
+		}
+		score := b.scores[key]
+		for i, n := range s.Buckets {
+			if n > 0 {
+				score.EWMA[i], score.Samples[i] = float64(s.Scores[i]), n
+			}
+		}
+		// 兼容旧 health.json：当时只保存 ≤4KB 的一个分数。
+		if score.Samples[0] == 0 && s.ScoreMs > 0 {
 			score.EWMA[0], score.Samples[0] = float64(s.ScoreMs), 1
+		}
+		if score.Samples != [4]int{} {
 			b.scores[key] = score
 		}
 	}
@@ -342,6 +398,9 @@ func (b *Breaker) persistLocked() {
 	for key := range b.openedAt {
 		keys[key] = true
 	}
+	for key := range b.scores {
+		keys[key] = true
+	}
 	for key := range keys {
 		provider, model := splitBindingKey(key)
 		p := b.probes[key]
@@ -353,8 +412,16 @@ func (b *Breaker) persistLocked() {
 		if opened, ok := b.openedAt[key]; ok {
 			s.Open, s.OpenedAt, s.OpenFor = true, opened, time.Since(opened)
 		}
-		if score := b.scores[key]; score.Samples[0] > 0 {
+		score := b.scores[key]
+		if score.Samples[0] > 0 {
 			s.ScoreMs = int(score.EWMA[0])
+		}
+		for i, n := range score.Samples {
+			if n > 0 {
+				s.Scores[i] = int(score.EWMA[i])
+			}
+			s.Buckets[i] = n
+			s.Samples += n
 		}
 		entries = append(entries, s)
 	}
@@ -366,17 +433,33 @@ func (b *Breaker) persistLocked() {
 	})
 	raw, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
+		b.reportLocked(fmt.Errorf("encode %s: %w", b.file, err))
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(b.file), 0o2770); err != nil {
+		b.reportLocked(fmt.Errorf("create health directory: %w", err))
 		return
 	}
 	tmp := b.file + ".tmp"
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o660); err != nil {
+		b.reportLocked(fmt.Errorf("write %s: %w", tmp, err))
 		return
 	}
-	_ = os.Chmod(tmp, 0o660)
-	_ = os.Rename(tmp, b.file)
+	if err := os.Chmod(tmp, 0o660); err != nil {
+		b.reportLocked(fmt.Errorf("chmod %s: %w", tmp, err))
+		return
+	}
+	if err := os.Rename(tmp, b.file); err != nil {
+		b.reportLocked(fmt.Errorf("replace %s: %w", b.file, err))
+		return
+	}
+	b.persistedAt = time.Now()
+}
+
+func (b *Breaker) reportLocked(err error) {
+	if b.onError != nil {
+		b.onError(err)
+	}
 }
 
 func splitBindingKey(key string) (string, string) {

@@ -328,7 +328,8 @@ func TestBackwardCompatOldProfileFormat(t *testing.T) {
 func TestOverrideChainHeadsChain(t *testing.T) {
 	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{
 		"light": list("pA/m1", "pB/m2")}}}
-	steps, skips, applied := OverrideChain(domain.Binding{Provider: "pC", Model: "m3"},
+	steps, skips, applied := OverrideChain("classifier_override",
+		domain.Binding{Provider: "pC", Model: "m3"},
 		"light", ps, mkProvs("pA", "pB", "pC"), Opts{Active: "a"})
 	eq(t, names(steps), "(classifier_override):pC/m3", "a:pA/m1", "a:pB/m2")
 	if !applied {
@@ -342,7 +343,8 @@ func TestOverrideChainHeadsChain(t *testing.T) {
 func TestOverrideChainFallsBackOnUnknownProvider(t *testing.T) {
 	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{
 		"light": list("pA/m1")}}}
-	steps, skips, applied := OverrideChain(domain.Binding{Provider: "ghost", Model: "m"},
+	steps, skips, applied := OverrideChain("classifier_override",
+		domain.Binding{Provider: "ghost", Model: "m"},
 		"light", ps, mkProvs("pA"), Opts{Active: "a"})
 	eq(t, names(steps), "a:pA/m1")
 	if applied {
@@ -365,7 +367,8 @@ func TestOverrideChainFallsBackOnMissingKey(t *testing.T) {
 		"pA":    {BaseURL: "http://x", APIKey: "sk-a"},
 		"nokey": {BaseURL: "http://x"},
 	}}
-	steps, _, applied := OverrideChain(domain.Binding{Provider: "nokey", Model: "m"},
+	steps, _, applied := OverrideChain("classifier_override",
+		domain.Binding{Provider: "nokey", Model: "m"},
 		"light", ps, provs, Opts{Active: "a"})
 	eq(t, names(steps), "a:pA/m1")
 	if applied {
@@ -375,7 +378,8 @@ func TestOverrideChainFallsBackOnMissingKey(t *testing.T) {
 
 func TestOverrideChainFallsBackOnBreaker(t *testing.T) {
 	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{"light": one("pA", "m1")}}}
-	steps, _, applied := OverrideChain(domain.Binding{Provider: "pC", Model: "m3"},
+	steps, _, applied := OverrideChain("classifier_override",
+		domain.Binding{Provider: "pC", Model: "m3"},
 		"light", ps, mkProvs("pA", "pC"), Opts{
 			Active:    "a",
 			Available: func(p, _ string) bool { return p != "pC" },
@@ -389,7 +393,8 @@ func TestOverrideChainFallsBackOnBreaker(t *testing.T) {
 func TestOverrideChainDedupsWhenOverrideAlreadyInChain(t *testing.T) {
 	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{
 		"light": list("pA/m1", "pB/m2")}}}
-	steps, _, applied := OverrideChain(domain.Binding{Provider: "pA", Model: "m1"},
+	steps, _, applied := OverrideChain("classifier_override",
+		domain.Binding{Provider: "pA", Model: "m1"},
 		"light", ps, mkProvs("pA", "pB"), Opts{Active: "a"})
 	// pA/m1 原本在 light 链里，覆盖后只出现一次且在最前
 	eq(t, names(steps), "(classifier_override):pA/m1", "a:pB/m2")

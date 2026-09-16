@@ -137,6 +137,10 @@ claude 的 anthropic 流量走的是另一条。配了 `anthropic_url` 之后 pr
 - **用量**：按 session / tool / provider / 模型 聚合 input/output/cache token，按可配置的价格表折算成本。价格表放配置里，不硬编码（价格会变）。
 - **请求日志**：默认**只记元数据**（时间、模型、token 数、耗时、状态码）。记录请求体是可选开关，且默认对内容做截断 + 明确警告——那是用户的源代码和对话内容。
 - **实时流**：通过 BE 的 SSE 转给 Web。
+- **路由评分**：`newgate metrics` 纵向列出当前所有可用 binding 的首响应延迟
+  EWMA，并按 `≤4KB`、`≤32KB`、`≤128KB`、`>128KB` 四个上下文桶显示
+  分数与样本数。卡顿和不可用 binding 只显示数量；失败原文由
+  `newgate probe` 展示，避免 metrics 变成另一份错误日志。
 
 ## 6. 安全
 

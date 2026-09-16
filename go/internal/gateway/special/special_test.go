@@ -206,9 +206,9 @@ type fakePlugin struct {
 	apply func([]byte, *Request) ([]byte, []string, error)
 }
 
-func (f fakePlugin) Name() string                 { return f.name }
-func (f fakePlugin) Why() string                  { return "测试用" }
-func (f fakePlugin) Match(r *Request) bool        { return f.match(r) }
+func (f fakePlugin) Name() string          { return f.name }
+func (f fakePlugin) Why() string           { return "测试用" }
+func (f fakePlugin) Match(r *Request) bool { return f.match(r) }
 func (f fakePlugin) Apply(b []byte, r *Request) ([]byte, []string, error) {
 	return f.apply(b, r)
 }

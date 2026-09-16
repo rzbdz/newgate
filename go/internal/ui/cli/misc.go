@@ -169,7 +169,7 @@ func specialList(st *domain.State) int {
 	for _, p := range ps {
 		mark, _ := specialState(st, p.Name())
 		why := strings.SplitN(p.Why(), "\n", 2)[0]
-		t.Row(style.Mark(mark), p.Name(), style.Dim(style.Truncate(why, 56)))
+		t.Row(style.Mark(mark), p.Name(), style.Dim(why))
 	}
 	fmt.Print(t.String())
 	fmt.Println(style.Hint("上游怪癖补丁：只对认领本次请求的上游生效，改动逐条写日志"))

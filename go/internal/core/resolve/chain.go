@@ -161,10 +161,14 @@ func (b *chainBuilder) add(p *domain.Profile, key string, bd domain.Binding) {
 // tier 链并返回 applied=false（顺带记一条 Skip 说明为什么没覆盖上）。成功则
 // 把覆盖 Step 插到最前，tier 链里与它同 key 的重复步去掉——「全局覆盖第一
 // 优先」落在这里，覆盖 model 挂了才轮到 tier 档的候选。
-func OverrideChain(override domain.Binding, tier string, profiles []*domain.Profile,
+func OverrideChain(source string, override domain.Binding, tier string, profiles []*domain.Profile,
 	provs *domain.Providers, o Opts) ([]Step, []Skip, bool) {
 
 	steps, skips := BuildChain(tier, profiles, provs, o)
+	if source == "" {
+		source = "override"
+	}
+	source = "(" + source + ")"
 
 	if override.Provider == "" || override.Model == "" {
 		return steps, skips, false
@@ -172,23 +176,23 @@ func OverrideChain(override domain.Binding, tier string, profiles []*domain.Prof
 	prov, ok := provs.Providers[override.Provider]
 	switch {
 	case !ok:
-		skips = append(skips, Skip{"(classifier_override)", override.String(), "provider 未定义，覆盖不生效"})
+		skips = append(skips, Skip{source, override.String(), "provider 未定义，覆盖不生效"})
 		return steps, skips, false
 	case prov.Key() == "":
-		skips = append(skips, Skip{"(classifier_override)", override.String(), "provider 没有 api_key，覆盖不生效"})
+		skips = append(skips, Skip{source, override.String(), "provider 没有 api_key，覆盖不生效"})
 		return steps, skips, false
 	case o.Available != nil && !o.Available(override.Provider, override.Model):
-		skips = append(skips, Skip{"(classifier_override)", override.String(), "熔断中，覆盖不生效"})
+		skips = append(skips, Skip{source, override.String(), "熔断中，覆盖不生效"})
 		return steps, skips, false
 	}
 	if o.Disabled != nil {
 		if yes, why := o.Disabled(tier, override.String()); yes {
-			skips = append(skips, Skip{"(classifier_override)", override.String(), "已禁用：" + why})
+			skips = append(skips, Skip{source, override.String(), "已禁用：" + why})
 			return steps, skips, false
 		}
 	}
 
-	ovStep := Step{Profile: "(classifier_override)", Binding: override, Provider: prov}
+	ovStep := Step{Profile: source, Binding: override, Provider: prov}
 	out := []Step{ovStep}
 	for _, s := range steps {
 		if s.Binding.String() == override.String() {

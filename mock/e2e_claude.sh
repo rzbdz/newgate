@@ -136,7 +136,8 @@ elif scenario in ("bg_plain", "bg_adaptive", "bg_other", "bg_realname"):
     # model 就是档位名 mid、不带 tools、max_tokens 2112。
     #   bg_plain / bg_adaptive / bg_realname = Bash 分类器本体：system ~126KB
     #     开头是 "You are a security monitor…"（bg_plain 连 thinking 都没写，
-    #     bg_adaptive 是客户端设置泄漏成 adaptive）→ 都该切 light + disabled。
+    #     bg_adaptive 显式要求 adaptive）→ 都切 light；只给没写 thinking 的
+    #     bg_plain 注入 disabled，显式意图不覆盖。
     #   bg_other = 其他后台调用（compact 总结这类）：system 没有那句自报
     #     家门 → 保留 mid，只禁思考。
     #   bg_realname = 真实模型名时代的回归现场（2026-09-09 实抓）：分类器
@@ -226,8 +227,8 @@ echo; echo "== 4. 不带 profile 用默认（ds）：动态模式，槽位 = 档
 # 对 Claude Code 也是未知模型，MAX_CONTEXT_TOKENS 一样生效）。
 curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
 OUT="$("$BIN" claude 2>"$SANDBOX/default.err")"
-check "默认（动态）：opus 槽 = 档位名 heavy" \
-  "$(echo "$OUT" | grep '^OPUS_MODEL=' | cut -d= -f2-)" "heavy"
+check "默认（动态）：opus 槽 = 主力档 normal" \
+  "$(echo "$OUT" | grep '^OPUS_MODEL=' | cut -d= -f2-)" "normal"
 check "默认（动态）：窗口声明照注入（ds 没配 → 空）" \
   "$(echo "$OUT" | grep '^WIN_MAX=' | cut -d= -f2-)" ""
 
@@ -388,10 +389,9 @@ fi
 
 echo; echo "== 13. 后台请求：分类器切轻档，其余只禁思考 =="
 # 实抓（2026-09，glm-5.3）：Bash 分类器 = 非流式、model=mid、system 开头
-# "You are a security monitor…"、thinking 没写或泄漏成 adaptive → 国模默认
-# 思考 15-30 秒，分类器成波超时。代理必须：分类器（bg_plain/bg_adaptive）
-# 上游收到 light 模型（glm-4.5-air）+ thinking:disabled；其他后台调用
-# （bg_other，compact 总结）保留 mid（glm-4-plus）+ thinking:disabled。
+# "You are a security monitor…"。代理必须把分类器（bg_plain/bg_adaptive）
+# 切到 light；没写 thinking 的 bg_plain 注入 disabled，显式 adaptive 必须
+# 保留。其他后台调用（bg_other，compact 总结）保留 mid + disabled。
 for SC in bg_plain bg_adaptive bg_other bg_realname; do
   curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
   OUT="$(E2E_SCENARIO=$SC "$BIN" claude --profile=glm 2>"$SANDBOX/$SC.err")"
@@ -399,6 +399,7 @@ for SC in bg_plain bg_adaptive bg_other bg_realname; do
   check "$SC 请求 200" "$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2)" "200"
   WANT="glm-4-plus|disabled"          # bg_other：无标记 → 留在 mid
   [ "$SC" != "bg_other" ] && WANT="glm-4.5-air|disabled"  # 分类器 → light
+  [ "$SC" = "bg_adaptive" ] && WANT="glm-4.5-air|adaptive" # 显式 thinking 不覆盖
   GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
 import json,sys
 r=json.load(sys.stdin)

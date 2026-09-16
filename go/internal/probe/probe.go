@@ -64,7 +64,7 @@ type Options struct {
 	// OnPlan 在开始探测前调用一次，告知总共要打几个目标。
 	OnPlan func(targets []Target)
 	// OnDone 每个目标一完成就立刻调用（完成顺序，非固定顺序）。
-	OnDone func(t Target, status int, lat, totalLat time.Duration, err error, done, total int)
+	OnDone func(t Target, status int, lat, totalLat time.Duration, err error)
 	// OnWaiting 定期告知还卡在哪些目标上，以及各自已等了多久。
 	OnWaiting func(inflight map[Target]time.Duration)
 	// WaitTick OnWaiting 的间隔，0 表示不启用。
@@ -147,8 +147,6 @@ func Run(o Options) ([]Result, error) {
 	var mu sync.Mutex
 	got := map[Target]outcome{}
 	inflight := map[Target]time.Time{}
-	doneN := 0
-	total := len(uniq)
 
 	// 定期汇报还卡在谁身上——claude 家族动辄 40s+，没这个用户会以为死了
 	stopTick := make(chan struct{})
@@ -190,11 +188,9 @@ func Run(o Options) ([]Result, error) {
 
 			p := provs.Providers[t.Provider]
 			totalStarted := time.Now()
-			st, lat, err := One(p, t.Model, o.Timeout)
-			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-				retryStatus, retryLat, retryErr := One(p, t.Model, o.Timeout)
-				st, lat, err = retryStatus, lat+retryLat, retryErr
-			}
+			st, lat, err := timeoutRetry(func() (int, time.Duration, error) {
+				return One(p, t.Model, o.Timeout)
+			})
 			if err == nil && st == http.StatusOK && o.SlowAfter > 0 && lat > o.SlowAfter {
 				err = fmt.Errorf("极小请求耗时 %s，超过交互阈值 %s",
 					lat.Round(time.Millisecond), o.SlowAfter)
@@ -213,12 +209,10 @@ func Run(o Options) ([]Result, error) {
 			mu.Lock()
 			delete(inflight, t)
 			got[t] = outcome{st, lat, totalLat, err}
-			doneN++
-			n := doneN
 			mu.Unlock()
 
 			if o.OnDone != nil {
-				o.OnDone(t, st, lat, totalLat, err, n, total)
+				o.OnDone(t, st, lat, totalLat, err)
 			}
 		}(t)
 	}
@@ -267,6 +261,16 @@ func Run(o Options) ([]Result, error) {
 		return roleIdx(results[i].Role) < roleIdx(results[j].Role)
 	})
 	return results, nil
+}
+
+func timeoutRetry(attempt func() (int, time.Duration, error)) (int, time.Duration, error) {
+	status, latency, err := attempt()
+	if networkErr, ok := err.(net.Error); !ok || !networkErr.Timeout() {
+		return status, latency, err
+	}
+	// 主延迟表示最终这次探测请求本身；第一次超时属于命令总耗时，
+	// 不能叠到成功重试上把健康评分凭空翻倍。
+	return attempt()
 }
 
 // Light 给一次探测结果配灯。
@@ -403,6 +407,25 @@ func UniqueCount(rs []Result) int {
 		}
 	}
 	return len(seen)
+}
+
+func FailedCount(rs []Result) int {
+	seen := map[string]bool{}
+	failed := 0
+	for _, r := range rs {
+		if r.Provider == "" || r.Model == "" {
+			continue
+		}
+		key := r.Provider + "\x00" + r.Model
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if !r.OK {
+			failed++
+		}
+	}
+	return failed
 }
 
 // CheckDialects 探「这个 (provider, model) 听得懂哪些方言」——包括

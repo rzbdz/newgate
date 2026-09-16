@@ -17,7 +17,9 @@ import (
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
 	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
+	"github.com/rzbdz/newgate/go/internal/gateway/health"
 	"github.com/rzbdz/newgate/go/internal/gateway/metrics"
+	"github.com/rzbdz/newgate/go/internal/gateway/special"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/probe"
 	"github.com/rzbdz/newgate/go/internal/runtime/injection"
@@ -70,8 +72,7 @@ func cmdProbe(only string, asJSON bool) int {
 			}
 			fmt.Fprintln(os.Stderr)
 		}
-		opts.OnDone = func(t probe.Target, status int, lat, totalLat time.Duration,
-			err error, done, total int) {
+		opts.OnDone = func(t probe.Target, status int, lat, totalLat time.Duration, err error) {
 			mark := style.Mark(probeMark(err == nil && status == 200))
 			st := "  -"
 			if status > 0 {
@@ -79,12 +80,12 @@ func cmdProbe(only string, asJSON bool) int {
 			}
 			msg := ""
 			if err != nil {
-				msg = "   " + firstLine(err.Error(), 64)
+				msg = "   " + firstLine(err.Error())
 			}
-			line := fmt.Sprintf("[完成 %d/%d] %s %s %s 主%dms 总%dms%s",
-				done, total, mark, style.Pad(style.Truncate(t.String(), 34), 34),
+			line := fmt.Sprintf("%s %s %s 主%dms 总%dms%s",
+				mark, t.String(),
 				st, lat.Milliseconds(), totalLat.Milliseconds(), msg)
-			fmt.Fprintln(os.Stderr, style.Truncate(line, style.MaxColumns))
+			fmt.Fprintln(os.Stderr, style.WrapLine(line, "    "))
 		}
 		opts.OnWaiting = func(inflight map[probe.Target]time.Duration) {
 			var parts []string
@@ -93,8 +94,8 @@ func cmdProbe(only string, asJSON bool) int {
 			}
 			sort.Strings(parts)
 			for _, part := range parts {
-				fmt.Fprintln(os.Stderr, style.Truncate(
-					"        "+style.Mark(style.Skip)+" 等待中: "+part, style.MaxColumns))
+				fmt.Fprintln(os.Stderr, style.WrapLine(
+					"        "+style.Mark(style.Skip)+" 等待中: "+part, "          "))
 			}
 		}
 	}
@@ -110,6 +111,9 @@ func cmdProbe(only string, asJSON bool) int {
 	if asJSON {
 		b, _ := json.MarshalIndent(results, "", "  ")
 		fmt.Println(string(b))
+		if probe.FailedCount(results) > 0 {
+			return 1
+		}
 		return 0
 	}
 
@@ -122,9 +126,9 @@ func cmdProbe(only string, asJSON bool) int {
 	fmt.Println(style.Rule(72))
 
 	// 明细：同一 profile 的后续行不再重复 profile 名（视觉分组，省一列宽度）。
-	t := style.NewTable("profile", "档位", "上游/模型", "状态", "评级", "主延迟", "总耗时", "错误")
-	t.AlignRight(3)
+	t := style.NewTable("profile", "档位", "上游/模型", "评级", "主延迟", "总耗时")
 	last := ""
+	var probeErrors []string
 	for _, r := range results {
 		p := r.Profile
 		if p == last {
@@ -132,29 +136,25 @@ func cmdProbe(only string, asJSON bool) int {
 		} else {
 			last = r.Profile
 		}
-		status := style.Dim("  -")
-		switch {
-		case r.Status >= 400:
-			status = style.Red(fmt.Sprintf("%3d", r.Status))
-		case r.Status > 0:
-			status = fmt.Sprintf("%3d", r.Status)
-		}
 		lat := style.Dim("-")
 		if r.Latency > 0 {
 			lat = fmt.Sprintf("%dms", r.Latency.Milliseconds())
 		}
-		e := ""
 		if r.Err != "" {
-			e = style.Dim(style.Truncate(firstLine(r.Err, 90), 48))
+			probeErrors = append(probeErrors, fmt.Sprintf("%s/%s：HTTP %d · %s",
+				r.Provider, r.Model, r.Status, firstLine(r.Err)))
 		}
 		totalLat := style.Dim("-")
 		if r.Total > 0 {
 			totalLat = fmt.Sprintf("%dms", r.Total.Milliseconds())
 		}
-		t.Row(p, r.Role, r.Provider+"/"+r.Model, status,
-			probeGrade(r, opts.SlowAfter), lat, totalLat, e)
+		t.Row(p, r.Role, r.Provider+"/"+r.Model,
+			probeGrade(r, opts.SlowAfter), lat, totalLat)
 	}
 	fmt.Print(t.String())
+	for _, detail := range probeErrors {
+		fmt.Println(style.Item(style.Bad, detail))
+	}
 	fmt.Println(style.Hint("健康评分只用主探活延迟；总耗时还包含方言和 quirk 检查"))
 
 	// 方言能力：probe 顺带探明的。count_tokens ✗ 的上游，Claude Code 的
@@ -202,7 +202,7 @@ func cmdProbe(only string, asJSON bool) int {
 	fmt.Println(style.Hint("当前 profile：" + st.DefaultProfile))
 	if healthErr == nil {
 		fmt.Println(style.Hint(fmt.Sprintf(
-			"全局熔断表已更新：%d 个 binding 被摘除（慢阈值 %s）",
+			"全局熔断表已更新：本轮目标中仍有 %d 个 binding 熔断（慢阈值 %s）",
 			opened, st.Timeouts.ClassifierFirstByte())))
 		if opened > 0 {
 			fmt.Println(style.Hint("至少隔离 60s；之后仅成功 probe 可以恢复"))
@@ -221,6 +221,9 @@ func cmdProbe(only string, asJSON bool) int {
 				fmt.Println(style.Bullet("没有全绿的 profile"))
 			}
 		}
+	}
+	if probe.FailedCount(results) > 0 {
+		return 1
 	}
 	return 0
 }
@@ -289,10 +292,8 @@ func probeGrade(r probe.Result, slowAfter time.Duration) string {
 	}
 }
 
-// cmdMetrics 打网关计数器：请求在路径上遇到的每一类「被网关处理过的事」
-// ——拦截（count_tokens 兜底、special 改写、分类器改道）、超时（首字节，
-// 流式/非流式分开）、转移（链 fallback）、取消。调参数（比如非流式首字节
-// 12s 是不是太紧）看这里，不靠感觉。计数随 daemon 重启归零。
+// cmdMetrics 展示全局 binding 评分与网关计数器。可用 binding 逐个列出，
+// 卡顿/不可用只汇总数量；具体失败原因由 probe 输出，避免 metrics 退化成日志。
 //
 // 版式：按**分组**排（请求 / 链 / 超时 / 客户端 / 插件 / 兜底），组名只在
 // 该组第一行出现。原始计数器名一列不少——用户会拿它去 grep 日志。
@@ -312,37 +313,180 @@ func cmdMetrics() int {
 	} else {
 		fmt.Println(style.Hint("计数随 daemon 重启归零"))
 	}
-	if len(counter) == 0 {
-		fmt.Println()
-		fmt.Println(style.Dim("  无计数（daemon 启动后尚无请求）"))
-		return 0
-	}
+	printModelHealth(ps)
 
-	t := style.NewTable("分组", "计数器", "次数", "说明")
-	t.AlignRight(2)
-	keys := metrics.SortedKeys(counter)
-	// 按**组**排，组内再按名字。不加这一步的话字母序会让「链」和「超时」
-	// 交错出现，分组那一列就白设了。
-	sort.SliceStable(keys, func(i, j int) bool {
-		gi, gj := metricRank(keys[i]), metricRank(keys[j])
-		if gi != gj {
-			return gi < gj
+	if len(counter) == 0 {
+		fmt.Print(style.Section("请求计数") + "\n")
+		fmt.Println(style.Dim("  无计数（daemon 启动后尚无请求）"))
+	} else {
+		t := style.NewTable("分组", "计数器", "次数", "说明")
+		t.AlignRight(2)
+		keys := metrics.SortedKeys(counter)
+		// 按**组**排，组内再按名字。不加这一步的话字母序会让「链」和「超时」
+		// 交错出现，分组那一列就白设了。
+		sort.SliceStable(keys, func(i, j int) bool {
+			gi, gj := metricRank(keys[i]), metricRank(keys[j])
+			if gi != gj {
+				return gi < gj
+			}
+			return keys[i] < keys[j]
+		})
+		lastGroup := ""
+		for _, k := range keys {
+			g := metricGroup(k)
+			label := style.Dim(g)
+			if g == lastGroup {
+				label = ""
+			}
+			lastGroup = g
+			t.Row(label, k, fmt.Sprintf("%d", counter[k]), style.Dim(metricHint(k)))
 		}
-		return keys[i] < keys[j]
-	})
-	lastGroup := ""
-	for _, k := range keys {
-		g := metricGroup(k)
-		label := style.Dim(g)
-		if g == lastGroup {
-			label = ""
-		}
-		lastGroup = g
-		t.Row(label, k, fmt.Sprintf("%d", counter[k]), style.Dim(metricHint(k)))
+		fmt.Print(style.Section("请求计数") + "\n")
+		fmt.Print(t.String())
 	}
-	fmt.Println()
-	fmt.Print(t.String())
 	return 0
+}
+
+func printModelHealth(ps *proxyInfo) {
+	if ps == nil {
+		return
+	}
+	snap, err := store.Load()
+	if err != nil {
+		return
+	}
+	statuses := healthFromProxy(ps)
+	bindings := map[string]bool{}
+	for _, profile := range snap.Profiles {
+		for _, candidates := range profile.Roles {
+			for _, binding := range candidates {
+				if !binding.IsRef() && binding.Provider != "" && binding.Model != "" {
+					if provider, ok := snap.Providers.Providers[binding.Provider]; ok && provider.Key() != "" {
+						bindings[binding.String()] = true
+					}
+				}
+			}
+		}
+		if profile.Fallback != nil && !profile.Fallback.IsRef() {
+			if provider, ok := snap.Providers.Providers[profile.Fallback.Provider]; ok && provider.Key() != "" {
+				bindings[profile.Fallback.String()] = true
+			}
+		}
+	}
+	for _, binding := range special.Bindings(snap.State) {
+		if provider, ok := snap.Providers.Providers[binding.Provider]; ok && provider.Key() != "" {
+			bindings[binding.String()] = true
+		}
+	}
+	var names []string
+	for binding := range bindings {
+		names = append(names, binding)
+	}
+	sort.SliceStable(names, func(i, j int) bool {
+		a, z := statuses[names[i]], statuses[names[j]]
+		if a.Open != z.Open {
+			return !a.Open
+		}
+		ra, rz := healthDisplayRank(a), healthDisplayRank(z)
+		if ra != rz {
+			return ra < rz
+		}
+		return names[i] < names[j]
+	})
+
+	counts := map[string]int{}
+	for _, name := range names {
+		h := statuses[name]
+		state := modelHealthState(h)
+		counts[state]++
+	}
+	blocked := counts["卡顿"] + counts["不可用"]
+	fmt.Print(style.Section("模型健康") + "\n")
+	fmt.Println(style.Hint(fmt.Sprintf(
+		"可用 %d（流畅 %d · 可用 %d · 未评分 %d）· 卡顿 %d · 不可用 %d",
+		len(names)-blocked, counts["流畅"], counts["可用"], counts["未评分"],
+		counts["卡顿"], counts["不可用"])))
+	for _, name := range names {
+		h := statuses[name]
+		state := modelHealthState(h)
+		if state == "卡顿" || state == "不可用" {
+			continue
+		}
+		fmt.Println(style.Item(style.Skip, name))
+		fmt.Println(style.Hint("    " + modelScoreLine(h)))
+	}
+	if blocked > 0 {
+		fmt.Println(style.Hint("卡顿/不可用详情：newgate probe"))
+	}
+}
+
+func healthDisplayRank(h health.Status) int {
+	switch modelHealthState(h) {
+	case "流畅":
+		return 0
+	case "未评分":
+		return 1
+	case "可用":
+		return 2
+	default:
+		return 3
+	}
+}
+
+func modelHealthState(h health.Status) string {
+	if h.Open {
+		score, _ := modelDisplayScore(h)
+		if h.Grade == health.ProbeLaggy || score > 12000 {
+			return "卡顿"
+		}
+		return "不可用"
+	}
+	score, sampled := modelDisplayScore(h)
+	switch {
+	case sampled && score < 3000:
+		return "流畅"
+	case sampled && score <= 12000:
+		return "可用"
+	case sampled:
+		return "卡顿"
+	default:
+		return "未评分"
+	}
+}
+
+func modelScoreLine(h health.Status) string {
+	const labels = "≤4K,≤32K,≤128K,>128K"
+	names := strings.Split(labels, ",")
+	var scores []string
+	for i, n := range h.Buckets {
+		if n > 0 {
+			latency := fmt.Sprintf("%dms", h.Scores[i])
+			if h.Scores[i] == 0 {
+				latency = "<1ms"
+			}
+			scores = append(scores, fmt.Sprintf("%s %s/%d次", names[i], latency, n))
+		}
+	}
+	if len(scores) == 0 && h.ScoreMs > 0 {
+		samples := h.Samples
+		if samples < 1 {
+			samples = 1
+		}
+		scores = append(scores, fmt.Sprintf("≤4K %dms/%d次", h.ScoreMs, samples))
+	}
+	if len(scores) == 0 {
+		return "未评分"
+	}
+	return modelHealthState(h) + " · " + strings.Join(scores, " · ")
+}
+
+func modelDisplayScore(h health.Status) (int, bool) {
+	for i, n := range h.Buckets {
+		if n > 0 {
+			return h.Scores[i], true
+		}
+	}
+	return h.ScoreMs, h.ScoreMs > 0
 }
 
 // metricOrder 组的显示顺序：先「请求」，再按一次请求会依次遇到的
@@ -409,9 +553,10 @@ func metricHint(k string) string {
 		return "客户端主动取消"
 	case k == "breaker.opened":
 		return "熔断器打开，provider 暂时摘除"
-	case k == "special.claude-bg.route_light":
-		return "Bash 分类器，整条链改走 light"
 	case strings.HasPrefix(k, "special."):
+		if hint, ok := special.MetricHint(k); ok {
+			return hint
+		}
 		return "插件改写了请求（逐条有日志）"
 	}
 	return ""
@@ -916,13 +1061,9 @@ func dialectMark(e dialect.Entry, c dialect.Cap) string {
 	return "✗"
 }
 
-func firstLine(s string, n int) string {
+func firstLine(s string) string {
 	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
 		s = s[:i]
-	}
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n]) + "…"
 	}
 	return s
 }
@@ -954,6 +1095,9 @@ func cmdStatus() int {
 
 	// 配置：用哪个 profile。
 	fmt.Println(style.Field("配置", configLine(st)))
+	for _, item := range special.Statuses(st) {
+		fmt.Println(style.Field(item.Label, item.Value))
+	}
 
 	if flags := statusFlags(st); flags != "" {
 		fmt.Println(style.Field("开关", flags))
@@ -1067,9 +1211,6 @@ func configLine(st *domain.State) string {
 	}
 	if over > 0 {
 		line += "   " + strings.Join(parts, "   ")
-	}
-	if ov := st.ClassifierOverride; ov != nil && ov.Provider != "" && ov.Model != "" {
-		line += "\n" + style.Hint("分类器覆盖 "+ov.String()+"：全局最高优先，先于所有 profile")
 	}
 	return line
 }

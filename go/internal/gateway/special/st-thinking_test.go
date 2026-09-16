@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
 	"github.com/rzbdz/newgate/go/internal/gateway/rewrite"
 )
@@ -131,7 +132,7 @@ func TestAlwaysThinksApply(t *testing.T) {
 }
 
 // TestAlwaysThinksSkipsRoutedClassifier 回归（2026-09-09 实抓 #12 的路由版）：
-// quirk 学到 glm-5.3 之后，分类器请求必须**整个改道 light 链**——RouteTier
+// quirk 学到 glm-5.3 之后，分类器请求必须**整个改道 light 链**——Route
 // 在建链之前决定，forward 的链循环把 body 的 model 换成 light 链头
 // （glm-4.5-air）之后 special 才看到它。于是 glm-5.3 的 quirk
 // （NoThinkingDisable）从头到尾没机会掺和：thinking 保持 disabled、
@@ -142,8 +143,8 @@ func TestAlwaysThinksSkipsRoutedClassifier(t *testing.T) {
 		`,"messages":[{"role":"user","content":"classify"}]}`)
 
 	// 1) 路由层：分类器改道 light（forward 在解析链之前问这里）
-	if rt := RouteTier("claude", false, body, nil); rt != "light" {
-		t.Fatalf("分类器应改道 light 链，实际 %q", rt)
+	if decision, ok := Route(body, &Request{Agent: "claude"}, &domain.State{}); !ok || decision.Tier != "light" {
+		t.Fatalf("分类器应改道 light 链，实际 %+v", decision)
 	}
 	// 2) 链循环：body 的 model 换成 light 链头
 	body, err := rewrite.ReplaceTopLevelString(body, "model", "glm-4.5-air")
@@ -185,8 +186,8 @@ func TestBestEffortDisableThinkDumbLightConfig(t *testing.T) {
 		`,"messages":[{"role":"user","content":"classify"}]}`)
 
 	// 路由照走 light（错配下 light 链头就是 glm-5.3 本尊）
-	if rt := RouteTier("claude", false, body, nil); rt != "light" {
-		t.Fatalf("错配不改路由决策，实际 %q", rt)
+	if decision, ok := Route(body, &Request{Agent: "claude"}, &domain.State{}); !ok || decision.Tier != "light" {
+		t.Fatalf("错配不改路由决策，实际 %+v", decision)
 	}
 	// light 链头：r.Model = glm-5.3；BestEffortDisableThink 一个操作完成
 	// 意图落地 + 翻译

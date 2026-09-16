@@ -178,12 +178,20 @@ JSON 保留注释（jsonc）地做字节级替换，不是整份重写。
 
 ### 4.1 路由改道（routing hook）
 
-`special.RouteTier`（`st-claude-bg.go:68`）在建链**之前**问一句：这次请求该按
-哪个档位建链？它只认一件事——Claude Code 的 Bash 安全分类器（system 里自报
-`"You are a security monitor"` 的非流式请求）整条链改走 `light`。
+`special.Route` 在建链**之前**遍历实现了 `RoutePlugin` 的插件，取得结构化
+`RouteDecision`：档位、可选的强制链头、首响应超时、日志说明和指标名都由
+认领请求的插件提供。当前 `claude-bg` 认出 Claude Code 的 Bash 安全分类器
+（system 里自报 `"You are a security monitor"` 的非流式请求），让整条链
+改走 `light`；若配置了 `classifier_override`，它也由该插件声明为最高优先
+链头。
 
 为什么放在建链之前而不是 body 改写里：**改道换的是整条 fallback 链**，body
 改写只能换链头（model 字段），换不了链的尾巴。
+
+插件同时可以实现 `StatusProvider` 和 `MetricProvider`，把自己的状态行和指标
+说明注册给统一 registry。`newgate status` / `newgate metrics` 只遍历结构化
+结果并排版，不出现 `claude-bg`、DeepSeek 等插件名的条件分支。新增插件因此
+不需要再修改 CLI 或转发热路径。
 
 ### 4.2 body 改写（special_treatment 插件）
 
@@ -262,7 +270,7 @@ launch.Launch                                    ← 机制一：argv0 分发
    ▼
 代理 forward                                      ← 机制四：代理侧 hook
    │  ① parseTarget：从路径读 agent / profile
-   │  ② RouteTier：要不要改道（分类器）
+   │  ② special.Route：插件是否贡献路由决策
    │  ③ 建链 → 逐个候选
    │  ④ special 插件改 body（纯字节手术）
    │  ⑤ setAuth：挂上真 key，转发上游

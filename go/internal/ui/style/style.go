@@ -228,6 +228,84 @@ func Truncate(s string, w int) string {
 	return out.String()
 }
 
+// Wrap 按终端显示宽度硬换行，不丢字符。ANSI SGR 序列不计宽度；跨行时
+// 临时 reset，再在下一行恢复颜色，避免颜色污染缩进或后续输出。
+func Wrap(s string, w int) []string {
+	if w <= 0 {
+		return []string{s}
+	}
+	var lines []string
+	var out strings.Builder
+	active := ""
+	cur := 0
+	flush := func() {
+		if active != "" {
+			out.WriteString(cReset)
+		}
+		lines = append(lines, out.String())
+		out.Reset()
+		if active != "" {
+			out.WriteString(active)
+		}
+		cur = 0
+	}
+	for i := 0; i < len(s); {
+		if s[i] == '\n' {
+			flush()
+			i++
+			continue
+		}
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && !(s[j] >= '@' && s[j] <= '~') {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			seq := s[i:j]
+			out.WriteString(seq)
+			if seq == cReset {
+				active = ""
+			} else if strings.HasSuffix(seq, "m") {
+				active += seq
+			}
+			i = j
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		rw := runeWidth(r)
+		if cur > 0 && cur+rw > w {
+			flush()
+		}
+		out.WriteRune(r)
+		cur += rw
+		i += size
+	}
+	if active != "" {
+		out.WriteString(cReset)
+	}
+	lines = append(lines, out.String())
+	return lines
+}
+
+// WrapLine 把一条自由文本限制到 75 列，续行使用指定缩进。
+func WrapLine(s, continuation string) string {
+	lines := Wrap(s, MaxColumns)
+	if len(lines) <= 1 {
+		return s
+	}
+	width := MaxColumns - VisibleWidth(continuation)
+	var out []string
+	out = append(out, lines[0])
+	for _, line := range lines[1:] {
+		for _, part := range Wrap(line, width) {
+			out = append(out, continuation+part)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 // ---------- 结构 ----------
 
 // MaxColumns 是 CLI 版面的硬上限。75 列能在常见的窄终端、分屏和 WSL
@@ -253,9 +331,9 @@ const labelW = 8
 // `unknown` 这种字对用户没有任何用。
 func Title(left, right string) string {
 	if right == "" || right == "unknown" {
-		return limit(Bold(left))
+		return WrapLine(Bold(left), "  ")
 	}
-	return limit(Bold(left) + "  " + Dim(right))
+	return WrapLine(Bold(left)+"  "+Dim(right), "  ")
 }
 
 // Rule 页头下的暗色分隔线。只用在这里——正文里再画线会和表格打架。
@@ -268,7 +346,7 @@ func Rule(w int) string {
 
 // Section 段标题（含前导空行），调用点直接 Println。
 func Section(name string) string {
-	return "\n" + limit(Bold(name))
+	return "\n" + WrapLine(Bold(name), "  ")
 }
 
 // Field 一行「标签 + 值」：标签固定列宽，值可以带颜色。
@@ -279,26 +357,38 @@ func Section(name string) string {
 // 标签补到 labelW 之后**总是**再跟一个空格：标签本身就占满 labelW 时
 // （中文双宽很容易占满），没有这格空格值会紧贴着标签。
 func Field(label, value string) string {
-	return limit("  " + Dim(Pad(label, labelW)) + " " + value)
+	return wrapPrefixed("  "+Dim(Pad(label, labelW))+" ", value)
 }
 
 // Item 缩进一层的一条明细，标记单独上色。
 func Item(mark, text string) string {
-	return limit("  " + Mark(mark) + " " + text)
+	return wrapPrefixed("  "+Mark(mark)+" ", text)
 }
 
 // Bullet 无标记的明细行。
 func Bullet(text string) string {
-	return limit("    " + text)
+	return wrapPrefixed("    ", text)
 }
 
 // Hint 次要说明。整份 CLI 里所有「不是结论的话」都应该走这里——
 // 它们默认是暗的，扫读时自动跳过。一句话为限，不要写成段落。
 func Hint(text string) string {
-	return limit("    " + Dim(text))
+	return wrapPrefixed("    ", Dim(text))
 }
 
-func limit(s string) string { return Truncate(s, MaxColumns) }
+func wrapPrefixed(prefix, text string) string {
+	width := MaxColumns - VisibleWidth(prefix)
+	lines := Wrap(text, width)
+	continuation := strings.Repeat(" ", VisibleWidth(prefix))
+	for i := range lines {
+		if i == 0 {
+			lines[i] = prefix + lines[i]
+		} else {
+			lines[i] = continuation + lines[i]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 
 // ---------- 表格 ----------
 
@@ -370,7 +460,7 @@ func (t *Table) String() string {
 		measure(r)
 	}
 	// 表格总宽不得超过 75 列。优先收缩最宽的列，每列至少保留 4 列；
-	// 表头也可截断，否则一个异常长的动态表头就能突破硬上限。
+	// 超出的单元格在本列内换行，不截断内容。
 	available := MaxColumns - VisibleWidth(t.indent) - 2*(n-1)
 	if available < n {
 		available = n
@@ -391,24 +481,37 @@ func (t *Table) String() string {
 
 	var b strings.Builder
 	line := func(cells []string, dim bool) {
-		b.WriteString(t.indent)
-		var parts []string
+		wrapped := make([][]string, n)
+		height := 1
 		for i, c := range cells {
 			if i >= n {
 				break
 			}
-			c = Truncate(c, widths[i])
 			if dim {
 				c = Dim(c)
 			}
-			if t.aligns[i] == Right {
-				parts = append(parts, PadLeft(c, widths[i]))
-			} else {
-				parts = append(parts, Pad(c, widths[i]))
+			wrapped[i] = Wrap(c, widths[i])
+			if len(wrapped[i]) > height {
+				height = len(wrapped[i])
 			}
 		}
-		b.WriteString(strings.TrimRight(strings.Join(parts, "  "), " "))
-		b.WriteString("\n")
+		for row := 0; row < height; row++ {
+			b.WriteString(t.indent)
+			var parts []string
+			for i := 0; i < n; i++ {
+				c := ""
+				if row < len(wrapped[i]) {
+					c = wrapped[i][row]
+				}
+				if t.aligns[i] == Right {
+					parts = append(parts, PadLeft(c, widths[i]))
+				} else {
+					parts = append(parts, Pad(c, widths[i]))
+				}
+			}
+			b.WriteString(strings.TrimRight(strings.Join(parts, "  "), " "))
+			b.WriteString("\n")
+		}
 	}
 	line(t.headers, true)
 	for _, r := range t.rows {

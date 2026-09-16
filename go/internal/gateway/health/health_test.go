@@ -119,3 +119,41 @@ func TestOpenStateSurvivesRestartAndNeedsProbe(t *testing.T) {
 		t.Fatal("probe 解封结果没有持久化")
 	}
 }
+
+func TestSnapshotReportsEveryContextBucket(t *testing.T) {
+	b := newBreaker()
+	b.ObserveSuccess("relay", "model", 1024, 2*time.Second)
+	b.ObserveSuccess("relay", "model", 16*1024, 4*time.Second)
+	b.ObserveSuccess("relay", "model", 64*1024, 8*time.Second)
+	b.ObserveSuccess("relay", "model", 256*1024, 16*time.Second)
+
+	got := b.Snapshot()
+	if len(got) != 1 {
+		t.Fatalf("Snapshot() returned %d bindings", len(got))
+	}
+	wantScores := [4]int{2000, 4000, 8000, 16000}
+	wantSamples := [4]int{1, 1, 1, 1}
+	if got[0].Scores != wantScores || got[0].Buckets != wantSamples || got[0].Samples != 4 {
+		t.Fatalf("context scores missing from snapshot: %+v", got[0])
+	}
+}
+
+func TestTrafficScoresSurviveRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "health.json")
+	first := newBreaker()
+	if err := first.UseFile(path); err != nil {
+		t.Fatal(err)
+	}
+	first.ObserveSuccess("relay", "model", 16*1024, 4*time.Second)
+	first.ObserveSuccess("relay", "model", 16*1024, 2*time.Second)
+	first.Flush()
+
+	second := newBreaker()
+	if err := second.UseFile(path); err != nil {
+		t.Fatal(err)
+	}
+	got := second.Snapshot()
+	if len(got) != 1 || got[0].Scores[1] != 3400 || got[0].Buckets[1] != 2 {
+		t.Fatalf("traffic score did not survive restart: %+v", got)
+	}
+}
