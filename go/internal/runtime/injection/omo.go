@@ -267,7 +267,8 @@ func WriteOmoSlots(s *OmoSlots) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(paths.OmoSlotsFile(), b)
+	// 0660：注册表要能被**跑 daemon 的那个用户**读到（常常不是写它的这个）
+	return writeAtomicMode(paths.OmoSlotsFile(), b, 0o660)
 }
 
 // ---------- 建议 ----------

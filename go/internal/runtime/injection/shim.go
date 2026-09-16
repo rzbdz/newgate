@@ -241,9 +241,20 @@ func backupRC(path string, content []byte) error {
 
 // writeAtomicMode 带权限位的原子写。config_file.go 里的 writeAtomic
 // 固定 0600（那是配置文件），rc 文件需要 0644。
+//
+// 写**共享配置目录**里的文件（omo-slots.json）用 0660：daemon 常常是另一个
+// 用户跑的（root 装、claude 跑），0600 会让它读不到。2026-09-16 实测踩过：
+// 接管成功、文件也写出来了，daemon 那边一个槽位键都没注册——症状是「文件明明
+// 躺在那儿，daemon 说不认识这个模型」。
+//
+// 显式 chmod 是必要的：WriteFile 只对**新建**文件套 mode，tmp 文件残留时
+// 会沿用旧权限。
 func writeAtomicMode(path string, b []byte, mode os.FileMode) error {
 	tmp := path + ".newgate.tmp"
 	if err := ioutil.WriteFile(tmp, b, mode); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
