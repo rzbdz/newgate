@@ -244,3 +244,123 @@ func pickReasoning(item []byte) ([]byte, bool) {
 	}
 	return nil, false
 }
+
+// clientThinkingText 抽出这条消息 content[] 里 thinking 块的文本。
+//
+// 客户端（开了 interleaved thinking 的 Claude Code）有时会把自己那轮的
+// thinking 块原样带回来——那是推理原文，别浪费。多个块就拼起来。
+// redacted_thinking 没有 thinking 字段，自然取不到文本。
+func clientThinkingText(item []byte) string {
+	content, ok := rewrite.TopLevelRaw(item, "content")
+	if !ok || len(content) == 0 || content[0] != '[' {
+		return ""
+	}
+	blocks, ok := rewrite.ArrayItems(content)
+	if !ok {
+		return ""
+	}
+	var sb strings.Builder
+	for _, b := range blocks {
+		if len(b) == 0 || b[0] != '{' {
+			continue
+		}
+		if t, _ := rewrite.TopLevelString(b, "type"); t == "thinking" {
+			if s, ok := rewrite.TopLevelString(b, "thinking"); ok {
+				sb.WriteString(s)
+			}
+		}
+	}
+	return sb.String()
+}
+
+// reasoningNote 把「补回真实原文的」和「只能占位的」分开报。
+//
+// 必须分开：占位意味着模型这一轮读不到自己上一轮的推理，思考质量会掉。
+// 这不是成功，用户有权在日志里一眼看出发生了多少次（docs/01-product.md 的「不静默」）。
+func reasoningNote(what string, total, restored, placeholders int) string {
+	s := fmt.Sprintf("给 %d 条 assistant 消息补 %s：%d 条用了真实的推理原文",
+		total, what, restored)
+	if placeholders > 0 {
+		s += fmt.Sprintf("，%d 条只能补占位符（缓存里没有、客户端也没带回思考块——"+
+			"这几轮模型看不到自己的推理）", placeholders)
+	}
+	return s
+}
+
+func isAssistant(item []byte) bool {
+	role, _ := rewrite.TopLevelString(item, "role")
+	return role == "assistant"
+}
+
+// anthropicDialect 客户端这次发的是 Anthropic 方言吗（/v1/messages）。
+//
+// 判据用路径，不用 r.Protocol：protocol 说的是「怎么发到上游」（实测聚合
+// 网关的 provider 全标 "openai"，却照样收 /v1/messages 的 Anthropic 方言
+// 请求），而客户端发什么路径才是这次请求本身的方言。
+func anthropicDialect(r *special.Request) bool {
+	return r != nil && strings.HasPrefix(r.Path, "/messages")
+}
+
+// lacksThinking 这条 content[] 里有没有思考内容。
+// redacted_thinking 也算——那是上游自己加密过的思考块，有它就说明思考内容
+// 已经原样回传了，再往前插一个空块只会多一个块。
+func lacksThinking(content []byte) bool {
+	items, ok := rewrite.ArrayItems(content)
+	if !ok {
+		return false // 形状不认识：不动
+	}
+	for _, it := range items {
+		if len(it) == 0 || it[0] != '{' {
+			continue
+		}
+		switch t, _ := rewrite.TopLevelString(it, "type"); t {
+		case "thinking", "redacted_thinking":
+			return false
+		}
+	}
+	return true
+}
+
+// AuditReasoning 产出「本轮回传推理内容」的逐条审计报告，供 400 现场取证用。
+//
+// 直接解析 we-sent 的 messages，逐条 assistant 消息标出 reasoning_content 补的
+// 是真实原文还是占位符。占位符正是这类「must be passed back」400 的直接诱因
+// ——上游要逐字原文，占位符不是原文，必然被拒。所以取证必须能一眼看出是哪
+// 几条补了占位符、它们的 tool_use id 是什么（方便反查缓存该不该有）。
+//
+// 这是纯只读分析，不依赖运行时的缓存状态——缓存此刻可能已经被后续请求顶掉，
+// 但 400 发生时写下的这份报告是当时事实的定格。
+func AuditReasoning(out []byte) string {
+	msgs, ok := rewrite.TopLevelRaw(out, "messages")
+	if !ok {
+		return "（没有 messages 字段，无法审计）\n"
+	}
+	items, ok := rewrite.ArrayItems(msgs)
+	if !ok {
+		return "（messages 不是数组，无法审计）\n"
+	}
+	var b strings.Builder
+	assistant, real, ph, missing := 0, 0, 0, 0
+	for i, it := range items {
+		if !isAssistant(it) {
+			continue
+		}
+		assistant++
+		rc, has := rewrite.TopLevelString(it, "reasoning_content")
+		switch {
+		case !has:
+			missing++
+			fmt.Fprintf(&b, "msg[%d] 缺失 reasoning_content  %s\n", i, msgKeys(it))
+		case rc == reasoningFallback:
+			ph++
+			fmt.Fprintf(&b, "msg[%d] 占位符（非原文，上游会拒）  %s\n", i, msgKeys(it))
+		default:
+			real++
+		}
+	}
+	return fmt.Sprintf("assistant 共 %d 条：真实原文 %d，占位符 %d，缺失 %d\n"+
+		"占位符/缺失就是上游「must be passed back」的直接诱因，逐条：\n%s",
+		assistant, real, ph, missing, b.String())
+}
+
+func (reasoning) AuditResponse(body []byte) string { return AuditReasoning(body) }
