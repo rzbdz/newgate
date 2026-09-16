@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -24,7 +25,8 @@ type Result struct {
 	Model    string        `json:"model"`
 	OK       bool          `json:"ok"`
 	Status   int           `json:"status"`
-	Latency  time.Duration `json:"latency_ms"`
+	Latency  time.Duration `json:"latency_ms"`       // 主探活耗时，健康评分只用它
+	Total    time.Duration `json:"total_latency_ms"` // 含方言/quirk 附加探测
 	Err      string        `json:"error,omitempty"`
 	Cached   bool          `json:"-"` // 同一个 provider/model 只真打一次
 	// Dialects 探明支持的方言（"openai+anthropic"），空 = 主探活没过、没探。
@@ -56,12 +58,13 @@ func (t Target) String() string { return t.Provider + "/" + t.Model }
 type Options struct {
 	Only        string
 	Timeout     time.Duration
+	SlowAfter   time.Duration
 	Concurrency int
 
 	// OnPlan 在开始探测前调用一次，告知总共要打几个目标。
 	OnPlan func(targets []Target)
 	// OnDone 每个目标一完成就立刻调用（完成顺序，非固定顺序）。
-	OnDone func(t Target, status int, lat time.Duration, err error, done, total int)
+	OnDone func(t Target, status int, lat, totalLat time.Duration, err error, done, total int)
 	// OnWaiting 定期告知还卡在哪些目标上，以及各自已等了多久。
 	OnWaiting func(inflight map[Target]time.Duration)
 	// WaitTick OnWaiting 的间隔，0 表示不启用。
@@ -78,6 +81,7 @@ func Run(o Options) ([]Result, error) {
 	if o.Timeout <= 0 {
 		o.Timeout = 120 * time.Second
 	}
+	cache := loadCapabilityCache()
 
 	provs, err := store.LoadProviders()
 	if err != nil {
@@ -135,9 +139,10 @@ func Run(o Options) ([]Result, error) {
 	}
 
 	type outcome struct {
-		status int
-		lat    time.Duration
-		err    error
+		status   int
+		lat      time.Duration
+		totalLat time.Duration
+		err      error
 	}
 	var mu sync.Mutex
 	got := map[Target]outcome{}
@@ -184,30 +189,42 @@ func Run(o Options) ([]Result, error) {
 			mu.Unlock()
 
 			p := provs.Providers[t.Provider]
-			started := time.Now()
-			st, _, err := One(p, t.Model, o.Timeout)
+			totalStarted := time.Now()
+			st, lat, err := One(p, t.Model, o.Timeout)
+			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+				retryStatus, retryLat, retryErr := One(p, t.Model, o.Timeout)
+				st, lat, err = retryStatus, lat+retryLat, retryErr
+			}
+			if err == nil && st == http.StatusOK && o.SlowAfter > 0 && lat > o.SlowAfter {
+				err = fmt.Errorf("极小请求耗时 %s，超过交互阈值 %s",
+					lat.Round(time.Millisecond), o.SlowAfter)
+			}
 
 			if err == nil && st < 400 {
-				// 普通探活通过了，顺手探一发怪癖和方言；这些请求也算 probe 的等待时间。
-				_ = CheckQuirks(t.Provider, p, t.Model, o.Timeout)
-				CheckDialects(t.Provider, p, t.Model, o.Timeout)
+				// 方言/quirk 已学过就直接恢复缓存，不再重复花 token。
+				if !cache.apply(t) {
+					_ = CheckQuirks(t.Provider, p, t.Model, o.Timeout)
+					CheckDialects(t.Provider, p, t.Model, o.Timeout)
+					cache.capture(t)
+				}
 			}
-			lat := time.Since(started)
+			totalLat := time.Since(totalStarted)
 
 			mu.Lock()
 			delete(inflight, t)
-			got[t] = outcome{st, lat, err}
+			got[t] = outcome{st, lat, totalLat, err}
 			doneN++
 			n := doneN
 			mu.Unlock()
 
 			if o.OnDone != nil {
-				o.OnDone(t, st, lat, err, n, total)
+				o.OnDone(t, st, lat, totalLat, err, n, total)
 			}
 		}(t)
 	}
 	wg.Wait()
 	close(stopTick)
+	_ = cache.save()
 
 	// 回填
 	seen := map[Target]bool{}
@@ -218,7 +235,7 @@ func Run(o Options) ([]Result, error) {
 		}
 		t := Target{r.Provider, r.Model}
 		o2 := got[t]
-		r.Status, r.Latency = o2.status, o2.lat
+		r.Status, r.Latency, r.Total = o2.status, o2.lat, o2.totalLat
 		r.OK = o2.err == nil && o2.status == 200
 		if o2.err != nil {
 			r.Err = o2.err.Error()
@@ -335,10 +352,12 @@ type Summary struct {
 	OK      int
 	Bad     int
 	AvgMs   int64
+	Grade   string
 }
 
 func Summarize(rs []Result) []Summary {
 	m := map[string]*Summary{}
+	seen := map[string]bool{}
 	var order []string
 	for _, r := range rs {
 		s, ok := m[r.Profile]
@@ -347,11 +366,22 @@ func Summarize(rs []Result) []Summary {
 			m[r.Profile] = s
 			order = append(order, r.Profile)
 		}
+		target := r.Profile + "\x00" + r.Provider + "\x00" + r.Model
+		if seen[target] {
+			continue
+		}
+		seen[target] = true
 		if r.OK {
 			s.OK++
 			s.AvgMs += r.Latency.Milliseconds()
+			if r.Latency >= 3*time.Second {
+				s.Grade = "usable"
+			} else if s.Grade == "" {
+				s.Grade = "fluent"
+			}
 		} else {
 			s.Bad++
+			s.Grade = "unavailable"
 		}
 	}
 	var out []Summary
@@ -363,6 +393,16 @@ func Summarize(rs []Result) []Summary {
 		out = append(out, *s)
 	}
 	return out
+}
+
+func UniqueCount(rs []Result) int {
+	seen := map[string]bool{}
+	for _, r := range rs {
+		if r.Provider != "" && r.Model != "" {
+			seen[r.Provider+"\x00"+r.Model] = true
+		}
+	}
+	return len(seen)
 }
 
 // CheckDialects 探「这个 (provider, model) 听得懂哪些方言」——包括

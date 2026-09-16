@@ -35,7 +35,10 @@ type Opts struct {
 	// Active 链头。per-agent：不同 agent 可以有不同的链头。
 	Active string
 	// Available 可用性判断（熔断器）。nil = 都可用。
-	Available func(provider string) bool
+	Available func(provider, model string) bool
+	// Rank 最近 probe 的健康档。只重排链头之后的 fallback；值越小越优先，
+	// 相同值保持 profile/list 的原始顺序。nil = 不动态重排。
+	Rank func(provider, model string) int
 	// Disabled 禁用判断。nil = 都没禁。target 形如 "provider/model"。
 	Disabled func(tier, target string) (bool, string)
 	// MaxSteps 0 = 不限。
@@ -69,6 +72,13 @@ func BuildChain(key string, profiles []*domain.Profile, provs *domain.Providers,
 	b := &chainBuilder{profiles: ordered, provs: provs, o: o,
 		seen: map[string]bool{}, visiting: map[string]bool{key: true}, skips: skips}
 	b.expand(key)
+	if o.Rank != nil && len(b.steps) > 2 {
+		sort.SliceStable(b.steps[1:], func(i, j int) bool {
+			a, z := b.steps[i+1], b.steps[j+1]
+			return o.Rank(a.Binding.Provider, a.Binding.Model) <
+				o.Rank(z.Binding.Provider, z.Binding.Model)
+		})
+	}
 	if o.MaxSteps > 0 && len(b.steps) > o.MaxSteps {
 		for _, s := range b.steps[o.MaxSteps:] {
 			b.skips = append(b.skips, Skip{s.Profile, s.Binding.String(),
@@ -138,7 +148,7 @@ func (b *chainBuilder) add(p *domain.Profile, key string, bd domain.Binding) {
 			return
 		}
 	}
-	if b.o.Available != nil && !b.o.Available(bd.Provider) {
+	if b.o.Available != nil && !b.o.Available(bd.Provider, bd.Model) {
 		b.skips = append(b.skips, Skip{p.Name, k, "熔断中"})
 		return
 	}
@@ -167,7 +177,7 @@ func OverrideChain(override domain.Binding, tier string, profiles []*domain.Prof
 	case prov.Key() == "":
 		skips = append(skips, Skip{"(classifier_override)", override.String(), "provider 没有 api_key，覆盖不生效"})
 		return steps, skips, false
-	case o.Available != nil && !o.Available(override.Provider):
+	case o.Available != nil && !o.Available(override.Provider, override.Model):
 		skips = append(skips, Skip{"(classifier_override)", override.String(), "熔断中，覆盖不生效"})
 		return steps, skips, false
 	}

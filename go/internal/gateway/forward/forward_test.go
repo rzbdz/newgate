@@ -354,7 +354,7 @@ func TestClientCancelDuringConnectDoesNotBurnTheChain(t *testing.T) {
 	defer func() { testChain = nil }()
 
 	for _, p := range provs {
-		health.Default.RecordSuccess(p) // 从干净状态开始
+		health.Default.RecordSuccess(p, "real-model-1") // 从干净状态开始
 	}
 
 	srv := &Server{Port: 0}
@@ -392,7 +392,7 @@ func TestClientCancelDuringConnectDoesNotBurnTheChain(t *testing.T) {
 	default:
 	}
 	for _, p := range provs {
-		if !health.Default.Available(p) {
+		if !health.Default.Available(p, "real-model-1") {
 			t.Errorf("provider %s 被一次客户端取消打开了熔断器", p)
 		}
 	}

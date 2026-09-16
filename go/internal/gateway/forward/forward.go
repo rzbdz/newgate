@@ -35,6 +35,7 @@ import (
 	"github.com/rzbdz/newgate/go/internal/gateway/thinkcache"
 	"github.com/rzbdz/newgate/go/internal/platform/logx"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
+	"github.com/rzbdz/newgate/go/internal/probe"
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
 	"github.com/rzbdz/newgate/go/internal/store"
 )
@@ -111,9 +112,14 @@ func (s *Server) logf(format string, a ...interface{}) {
 }
 
 func (s *Server) Start() error {
+	if err := health.Default.UseFile(paths.HealthFile()); err != nil {
+		s.logf("[health] 全局健康表加载失败（继续纯内存）: %v", err)
+	}
+	probe.LoadCachedCapabilities()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__newgate/status", s.handleStatus)
 	mux.HandleFunc("/__newgate/metrics", s.handleMetrics)
+	mux.HandleFunc("/__newgate/health", s.handleHealth)
 	mux.HandleFunc("/__newgate/stop", s.handleControlStop)
 	mux.HandleFunc("/__newgate/upgrade", s.handleControlUpgrade)
 	mux.HandleFunc("/v1/models", s.handleModels)
@@ -201,6 +207,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"port":            s.Port,
 		"requests":        atomic.LoadUint64(&s.requests),
 		"failures":        atomic.LoadUint64(&s.failures),
+		"breakers":        health.Default.Snapshot(),
 		"uptime_s":        int(time.Since(s.started).Seconds()),
 		"tiers":           domain.Roles,
 		// 给 `newgate restart` 探测用：支持优雅交接（socket 移交）。
@@ -217,6 +224,57 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"puts":      tc.Puts,
 			"evictions": tc.Evictions,
 		},
+	})
+}
+
+type probeHealthObservation struct {
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Status    int    `json:"status"`
+	LatencyMs int64  `json:"latency_ms"`
+	Context   int    `json:"context_bytes"`
+	Error     string `json:"error,omitempty"`
+}
+
+// handleHealth 接收 probe 的主动健康结论，写入 daemon 唯一的全局熔断表。
+// probe 是 4-token 极小请求；超过分类器首字节阈值仍未完成，就不具备进入
+// 交互 fallback 链的资格，即使它最终回了 200。
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": "只接受 POST"})
+		return
+	}
+	snap := s.snap()
+	if snap == nil || snap.State.ControlToken == "" ||
+		r.Header.Get("Authorization") != "Bearer "+snap.State.ControlToken {
+		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": "control token 不符"})
+		return
+	}
+	var req struct {
+		Observations []probeHealthObservation `json:"observations"`
+	}
+	dec := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]interface{}{"ok": false, "error": "请求 JSON 无效"})
+		return
+	}
+	threshold := snap.State.Timeouts.ClassifierFirstByte()
+	opened := 0
+	for _, o := range req.Observations {
+		if o.Provider == "" || o.Model == "" {
+			continue
+		}
+		grade, didOpen := health.Default.RecordProbe(o.Provider, o.Model, o.Status, o.Context,
+			time.Duration(o.LatencyMs)*time.Millisecond, threshold, o.Error)
+		if didOpen {
+			opened++
+			s.logf("[probe] 熔断 %s/%s：%s（至少 60s，之后须 probe 成功才回链）",
+				o.Provider, o.Model, grade)
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"ok": true, "opened": opened, "breakers": health.Default.Snapshot(),
 	})
 }
 
@@ -607,6 +665,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		opts := resolve.Opts{
 			Active:    active,
 			Available: health.Default.Available,
+			Rank:      func(provider, model string) int { return health.Default.Rank(provider, model, len(body)) },
 			MaxSteps:  st.Chain.Attempts(),
 		}
 		var rs []resolve.Step
@@ -652,6 +711,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			steps, skips, tier = resolve.ResolveRequest(norm, active, snap.Profiles, snap.Providers, resolve.Opts{
 				Active:    active,
 				Available: health.Default.Available,
+				Rank:      func(provider, model string) int { return health.Default.Rank(provider, model, len(body)) },
 				MaxSteps:  st.Chain.Attempts(),
 			})
 		}
@@ -804,7 +864,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return st.Timeouts.Total()
 		}()}
 
+		attemptStart := time.Now()
 		resp, derr := client.Do(req)
+		attemptTTFT := time.Since(attemptStart)
 		// 路由串按**实际发出的** body model 报——special 插件可能已把
 		// mid 切成 light（claude-bg 的分类器切档），拿链步的模型打日志
 		// 会把人引去查错方向（2026-09-09：日志说 glm-5.3，dump 说 air）。
@@ -838,7 +900,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					metrics.Default.Inc("timeout.first_byte.non_stream")
 				}
 			}
-			opened := health.Default.RecordFailure(a.Binding.Provider)
+			opened := health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
 			if opened {
 				metrics.Default.Inc("breaker.opened")
 			}
@@ -868,7 +930,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if resp.StatusCode >= 400 && health.ShouldAdvance(resp.StatusCode, st.Chain.FallbackOn400) && !isLast {
 			body, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 4096))
 			_ = resp.Body.Close()
-			opened := health.Default.RecordFailure(a.Binding.Provider)
+			opened := health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
 			if opened {
 				metrics.Default.Inc("breaker.opened")
 			}
@@ -886,7 +948,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// 定案：把这个响应交给客户端
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			health.Default.RecordFailure(a.Binding.Provider)
+			health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
 			atomic.AddUint64(&s.failures, 1)
 
 			// 错误响应体一般不大，整个读出来当证据，再原样转给客户端
@@ -928,7 +990,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(eb)
 			return
 		}
-		health.Default.RecordSuccess(a.Binding.Provider)
+		health.Default.ObserveSuccess(a.Binding.Provider, a.Binding.Model, len(newBody), attemptTTFT)
+		health.Default.RecordSuccess(a.Binding.Provider, a.Binding.Model)
 		if i > 0 {
 			metrics.Default.Inc("chain.failover")
 		}

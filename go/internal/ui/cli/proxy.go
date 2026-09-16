@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/rzbdz/newgate/go/internal/gateway/health"
 	"github.com/rzbdz/newgate/go/internal/platform/httpx"
 	"github.com/rzbdz/newgate/go/internal/runtime/daemon"
 )
@@ -17,6 +20,7 @@ type proxyInfo struct {
 	UptimeS  int               `json:"uptime_s"`
 	Requests uint64            `json:"requests"`
 	Failures uint64            `json:"failures"`
+	Breakers []health.Status   `json:"breakers"`
 	Handoff  bool              `json:"handoff"`
 	Default  string            `json:"default_profile"`
 	Active   map[string]string `json:"active"`
@@ -28,6 +32,58 @@ type proxyInfo struct {
 		Misses    int64 `json:"misses"`
 		Evictions int64 `json:"evictions"`
 	} `json:"thinkcache"`
+}
+
+// availableFromProxy 把 daemon 的全局熔断表冻结成一次 CLI 命令内的一致快照。
+// daemon 不在线时不凭空判坏：诊断退化为只看静态配置。
+func availableFromProxy(ps *proxyInfo) func(provider, model string) bool {
+	blocked := map[string]bool{}
+	if ps != nil {
+		for _, b := range ps.Breakers {
+			if b.Open {
+				blocked[b.Provider+"/"+b.Model] = true
+			}
+		}
+	}
+	return func(provider, model string) bool {
+		return !blocked[provider+"/"+model]
+	}
+}
+
+func rankFromProxy(ps *proxyInfo) func(provider, model string) int {
+	scores := map[string]int{}
+	if ps != nil {
+		for _, b := range ps.Breakers {
+			score := 1_000_000
+			switch {
+			case b.Open:
+				score = 3_000_000 + b.ScoreMs
+			case b.ScoreMs > 0 && b.ScoreMs < 3000:
+				score = b.ScoreMs
+			case b.ScoreMs >= 3000 && b.ScoreMs <= 12000:
+				score = 2_000_000 + b.ScoreMs
+			case b.ScoreMs > 12000:
+				score = 3_000_000 + b.ScoreMs
+			}
+			scores[b.Provider+"/"+b.Model] = score
+		}
+	}
+	return func(provider, model string) int {
+		if score, ok := scores[provider+"/"+model]; ok {
+			return score
+		}
+		return 1_000_000
+	}
+}
+
+func healthFromProxy(ps *proxyInfo) map[string]health.Status {
+	out := map[string]health.Status{}
+	if ps != nil {
+		for _, status := range ps.Breakers {
+			out[status.Provider+"/"+status.Model] = status
+		}
+	}
+	return out
 }
 
 // proxyState 代理的进程信息 + 自报状态。
@@ -71,4 +127,30 @@ func localGet(port int, path string, v interface{}) bool {
 		return false
 	}
 	return json.NewDecoder(resp.Body).Decode(v) == nil
+}
+
+func localPost(port int, path, token string, body, out interface{}) error {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d%s", port, path), bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := httpx.LocalClient(3 * time.Second).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("daemon 返回 HTTP %d", resp.StatusCode)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }

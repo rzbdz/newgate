@@ -13,6 +13,8 @@
   tools/                         # 用户自定义/覆盖的 tool 描述符
     hermes.json
   secrets.json                     # 仅当密钥后端为 file 时存在，权限 0600
+  health.json                      # daemon 全局 binding 健康/熔断表，自动维护
+  probe-capabilities.json          # 已学会的方言/quirk，避免重复探测耗费 token
 
 ~/.local/state/newgate/            # 状态：机器本地，不应同步
   journal/<session-id>.json        # 崩溃恢复日志
