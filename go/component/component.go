@@ -42,3 +42,10 @@ func newCapability[T any](name string, count cardinality) Capability[T] {
 		cardinality: count,
 	}}
 }
+
+// Requirement 描述组件启动前必须解析的端口，而不是保存服务实例。
+// optional 只放宽“没有提供者”的情况，不放宽端口类型或基数冲突。
+type Requirement struct {
+	spec     capabilitySpec
+	optional bool
+}
