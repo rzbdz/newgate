@@ -119,3 +119,124 @@ type MetricInfo struct {
 type MetricProvider interface {
 	Metrics() []MetricInfo
 }
+
+// ResponseAuditor 让插件只读检查上游响应，用于发现协议异常而不改写响应。
+type ResponseAuditor interface {
+	AuditResponse(body []byte) string
+}
+
+// Registry 持有当前网关的插件集合、稳定执行顺序和注册所有权 token。
+type Registry struct {
+	mu      sync.RWMutex
+	plugins []Plugin
+	tokens  map[string]uint64
+	next    uint64
+}
+
+var (
+	defaultMu       sync.RWMutex
+	defaultRegistry = &Registry{}
+)
+
+// NewRegistry 创建与其他应用实例隔离的空插件注册表。
+func NewRegistry() *Registry { return &Registry{} }
+
+// SetDefault 设置旧调用面使用的注册表；新组件装配应优先使用有所有权的 InstallDefault。
+func SetDefault(registry *Registry) {
+	if registry == nil {
+		panic("special: nil default registry")
+	}
+	defaultMu.Lock()
+	defaultRegistry = registry
+	defaultMu.Unlock()
+}
+
+// InstallDefault 安装带所有权的兼容注册表并返回恢复函数。
+// 恢复时会核对当前实例，避免旧组件回滚覆盖后来启动的新 owner。
+func InstallDefault(registry *Registry) func() {
+	if registry == nil {
+		panic("special: nil default registry")
+	}
+	defaultMu.Lock()
+	previous := defaultRegistry
+	defaultRegistry = registry
+	defaultMu.Unlock()
+	return func() {
+		defaultMu.Lock()
+		if defaultRegistry == registry {
+			defaultRegistry = previous
+		}
+		defaultMu.Unlock()
+	}
+}
+
+func currentRegistry() *Registry {
+	defaultMu.RLock()
+	registry := defaultRegistry
+	defaultMu.RUnlock()
+	return registry
+}
+
+// Ordered 用插件名声明执行先后约束。这是一张依赖图而不是数字优先级；
+// 新增无关插件不会悄悄改变既有插件的相对顺序。
+type Ordered interface {
+	Before() []string
+	After() []string
+}
+
+// Register 是兼容调用面；生产装配由 Gateway 组件持有 Registry，并把注册端口
+// 注入其他组件。执行顺序由 Ordered 的具名依赖图决定，不依赖加载顺序。
+func Register(p Plugin) {
+	if _, err := currentRegistry().Register(p); err != nil {
+		panic(err)
+	}
+}
+
+// Register 把插件加入实例注册表，并返回只属于本次注册的撤销句柄。
+func (r *Registry) Register(p Plugin) (modules.Release, error) {
+	if p == nil || p.Name() == "" {
+		return nil, fmt.Errorf("special: plugin name is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.plugins {
+		if existing.Name() == p.Name() {
+			return nil, fmt.Errorf("special: duplicate plugin %s", p.Name())
+		}
+	}
+	next := append(append([]Plugin(nil), r.plugins...), p)
+	var orderErr error
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				orderErr = fmt.Errorf("%v", recovered)
+			}
+		}()
+		next = orderPlugins(next)
+	}()
+	if orderErr != nil {
+		return nil, orderErr
+	}
+	if r.tokens == nil {
+		r.tokens = make(map[string]uint64)
+	}
+	r.next++
+	token := r.next
+	r.tokens[p.Name()] = token
+	r.plugins = next
+	return func() error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.tokens[p.Name()] != token {
+			return nil
+		}
+		delete(r.tokens, p.Name())
+		for i, existing := range r.plugins {
+			if existing.Name() == p.Name() {
+				r.plugins = append(r.plugins[:i], r.plugins[i+1:]...)
+				break
+			}
+		}
+		return nil
+	}, nil
+}
