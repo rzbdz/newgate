@@ -1097,3 +1097,140 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// learnQuirks 从上游的报错里学它的毛病，下次请求自动带上补丁。
+//
+// 只在**新学到**的时候打日志——同一件事每个请求刷一行就没人看了。
+// 学到什么必须说，这是「不静默」的一部分：用户得知道我们从下一个请求开始
+// 会往他的请求里多加东西。
+func (s *Server) learnQuirks(reqID uint64, provider, model string, status int, body []byte) {
+	for _, what := range quirk.Learn(provider, model, status, body) {
+		s.logf("[proxy] #%d 学到：%s/%s %s —— 下次请求自动补上（newgate st 可关）",
+			reqID, provider, model, what)
+	}
+}
+
+// dump 在 NEWGATE_DUMP=1 时把「收到的」和「发出的」请求体落盘。
+// 排查「是不是代理改坏了请求」时，这是唯一能拿出证据的手段。
+// 只留最近 30 组——本会话的 transcript 单条就能上 MB，不设上限磁盘
+// 很快就满（和 err-* 错误证据各自独立清理，互不删对方）。
+func (s *Server) dump(reqID uint64, attempt int, in, out []byte) {
+	if os.Getenv("NEWGATE_DUMP") == "" {
+		return
+	}
+	dir := filepath.Join(paths.Config(), "dump")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	base := filepath.Join(dir, fmt.Sprintf("req-%06d-%d", reqID, attempt))
+	_ = ioutil.WriteFile(base+".in.json", in, 0o600)
+	_ = ioutil.WriteFile(base+".out.json", out, 0o600)
+	same := "改写后与原文长度差 " + fmt.Sprint(len(out)-len(in)) + " 字节"
+	s.logf("[proxy] #%d dump → %s.{in,out}.json  (%s)", reqID, base, same)
+	logx.PruneDirBy(dir, "req-", 30)
+}
+
+// redact 把请求/响应里像密钥的东西抹掉，日志和 dump 都用它。
+var secretPat = regexp.MustCompile(`(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+[A-Za-z0-9_\-\.]{8,})`)
+
+func redact(b []byte) []byte {
+	return secretPat.ReplaceAll(b, []byte("[REDACTED]"))
+}
+
+func headerDump(h http.Header) string {
+	var keys []string
+	for k := range h {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	for _, k := range keys {
+		v := strings.Join(h[k], ", ")
+		if k == "Authorization" || k == "X-Api-Key" || k == "Api-Key" {
+			v = "[REDACTED]"
+		}
+		sb.WriteString("\n      " + k + ": " + v)
+	}
+	return sb.String()
+}
+
+// saveErrEvidence 上游报错时把完整证据落盘。这是排查
+// 「是不是代理改坏了请求」唯一能拿出手的东西，所以不设开关。
+func (s *Server) saveErrEvidence(reqID uint64, status int, inBody, outBody, respBody []byte,
+	reqHdr http.Header, respHdr http.Header, routeStr string) string {
+	dir := filepath.Join(paths.Config(), "dump")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	base := filepath.Join(dir, fmt.Sprintf("err-%03d-req%06d", status, reqID))
+	_ = ioutil.WriteFile(base+".client-sent.json", redact(inBody), 0o600)
+	_ = ioutil.WriteFile(base+".we-sent.json", redact(outBody), 0o600)
+	_ = ioutil.WriteFile(base+".upstream-said.json", redact(respBody), 0o600)
+	meta := fmt.Sprintf("route: %s\nstatus: %d\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
+		routeStr, status, headerDump(reqHdr), headerDump(respHdr))
+	_ = ioutil.WriteFile(base+".meta.txt", []byte(meta), 0o600)
+	// 只清 err- 前缀的组：dump 目录里 req-* 也住一起，各设各的上限（见 dump 处
+	// 的 PruneDirBy(dir,"req-",30)），空前缀会把对方的也一起删掉——错误证据刚
+	// 落地几秒就被 req-* 挤没了，等于没存。
+	logx.PruneDirBy(dir, "err-", 20)
+	return base
+}
+
+// saveReasoningEvidence 思考回传被拒（reasoning 400）时把现场存进**专用目录**，
+// 不参与 dump 目录的 req-*/err-* 滚动清理——这类 400 偶发又致命，丢了就再也
+// 复现不了（本会话的 transcript 单条就能上 MB，dump 目录几十组就满了，而
+// 400 往往隔很久才来一次，等不到下一次就被挤没了）。
+//
+// 目录结构：dump/reasoning-400/req-<id>-<unixnano>/，里面放客户端发来的、我们
+// 发出的、上游说的，外加一份逐条 reasoning 审计（哪几条 assistant 补了占位符）。
+// 只按总字节数封顶（512MB，约几百个现场），超了才清最旧的——正常排查用
+// 根本到不了这个量，等于「不删」。
+func (s *Server) saveReasoningEvidence(reqID uint64, inBody, outBody, respBody []byte,
+	reqHdr http.Header, respHdr http.Header, routeStr string) string {
+	dir := filepath.Join(paths.Config(), "dump", "reasoning-400",
+		fmt.Sprintf("req-%06d-%d", reqID, time.Now().UnixNano()))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	_ = ioutil.WriteFile(filepath.Join(dir, "client-sent.json"), redact(inBody), 0o600)
+	_ = ioutil.WriteFile(filepath.Join(dir, "we-sent.json"), redact(outBody), 0o600)
+	_ = ioutil.WriteFile(filepath.Join(dir, "upstream-said.json"), redact(respBody), 0o600)
+	_ = ioutil.WriteFile(filepath.Join(dir, "audit.txt"),
+		[]byte(special.AuditResponse(outBody)), 0o600)
+	meta := fmt.Sprintf("route: %s\nstatus: 400\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
+		routeStr, headerDump(reqHdr), headerDump(respHdr))
+	_ = ioutil.WriteFile(filepath.Join(dir, "meta.txt"), []byte(meta), 0o600)
+	pruneReasoningEvidence(filepath.Dir(dir), 512<<20)
+	return dir
+}
+
+// pruneReasoningEvidence 按总字节数封顶清理 reasoning-400 目录：超了就删最旧的
+// 子目录，直到回到上限以下。比按个数更可预测，磁盘安全——但上限给得很宽，
+// 正常排查根本触不到（见 saveReasoningEvidence）。
+func pruneReasoningEvidence(dir string, maxBytes int64) {
+	ents, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var subdirs []os.FileInfo
+	var total int64
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		subdirs = append(subdirs, e)
+		total += dirSize(filepath.Join(dir, e.Name()))
+	}
+	if total <= maxBytes {
+		return
+	}
+	// ioutil.ReadDir 已按名字排序，子目录名带 unixnano，最旧的在前。
+	for _, e := range subdirs {
+		if total <= maxBytes {
+			break
+		}
+		p := filepath.Join(dir, e.Name())
+		total -= dirSize(p)
+		_ = os.RemoveAll(p)
+	}
+}
