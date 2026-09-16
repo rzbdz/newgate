@@ -438,3 +438,73 @@ func printSkips(skips []resolve.Skip) {
 	}
 	fmt.Print(t.String())
 }
+
+// skipDetail 给整组配一句「所以呢」——光有类目名，用户还是不知道要改什么。
+func skipDetail(s resolve.Skip) string {
+	switch skipKind(s.Reason) {
+	case "excluded":
+		return "excluded profile 只能被显式选中，不参与自动排序"
+	case "未定义":
+		return "该 profile 未定义此档位（稀疏层，正常）"
+	case "没 key":
+		return "provider 缺 api_key"
+	case "熔断":
+		return "provider 被熔断摘除，见 newgate metrics / probe"
+	case "已禁用":
+		return s.Reason
+	case "超出 maxAttempts":
+		return "链的尝试次数已用尽，见 state.json chain.max_attempts"
+	case "去重":
+		return "与链上更靠前的候选重复"
+	case "引用成环":
+		return s.Reason
+	}
+	return s.Reason
+}
+
+// cmdAgents 已知 agent 及其模型槽位。
+//
+// 每个 agent 一个小节：头一行是身份（方言 + 当前 profile），槽位一张表。
+// 以前是一张通铺大表，说明列又长，中文一撑就错位。
+func cmdAgents(agents agentapi.AgentCatalog) int {
+	st := store.LoadState()
+	names := agents.Names()
+	sort.Strings(names)
+
+	fmt.Println(style.Title("newgate agents", fmt.Sprintf("%d 个", len(names))))
+	fmt.Println(style.Rule(72))
+
+	for _, n := range names {
+		a, _ := agents.Get(n)
+		profile := st.ActiveFor(a.ID)
+		if profile == "" {
+			profile = st.DefaultProfile
+		}
+		fmt.Println()
+		fmt.Println("  " + style.Bold(a.ID) +
+			style.Dim("   "+a.Dialect+" 方言") +
+			style.Dim("   profile ") + style.Cyan(profile))
+		if a.Notes != "" {
+			fmt.Println(style.Hint(a.Notes))
+		}
+		if len(a.Slots) == 0 {
+			fmt.Println(style.Hint("槽位在启动时从配置文件发现"))
+			continue
+		}
+		t := style.NewTable("槽位", "档位", "环境变量")
+		for _, s := range a.Slots {
+			t.Row(s.Name, style.Cyan(s.Tier), s.EnvVar)
+		}
+		fmt.Print(t.String())
+		// 说明单独一行：塞进表格会把整张表撑到一百多列，反而没法对读。
+		for _, s := range a.Slots {
+			if s.Desc != "" {
+				fmt.Println(style.Hint(s.Name + "  " + s.Desc))
+			}
+		}
+	}
+
+	fmt.Println()
+	fmt.Println(style.Hint("只切单个 agent：newgate --set-profile <名> --agent <agent>"))
+	return 0
+}
