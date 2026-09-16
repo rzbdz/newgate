@@ -288,3 +288,128 @@ func Wrap(s string, w int) []string {
 	lines = append(lines, out.String())
 	return lines
 }
+
+// WrapLine 把一条自由文本限制到 75 列，续行使用指定缩进。
+func WrapLine(s, continuation string) string {
+	lines := Wrap(s, MaxColumns)
+	if len(lines) <= 1 {
+		return s
+	}
+	width := MaxColumns - VisibleWidth(continuation)
+	var out []string
+	out = append(out, lines[0])
+	for _, line := range lines[1:] {
+		for _, part := range Wrap(line, width) {
+			out = append(out, continuation+part)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// ---------- 结构 ----------
+
+// MaxColumns 是 CLI 版面的硬上限。75 列能在常见的窄终端、分屏和 WSL
+// 窗口里留一列余量，避免第 76 列触发自动折行把表格撕开。
+const MaxColumns = 75
+
+// 版式约定（全 CLI 统一，别在调用点发明新写法）：
+//
+//	Title      一行页头，后面跟一条 Rule 收口
+//	Section    段标题，段内用 Table / Field / Item
+//	Field      定义式一行：固定宽度标签 + 值（左对齐，值里可带颜色与次要信息）
+//	Item       一条结论，前面一个状态标记
+//	Bullet     从属于上一条的明细
+//	Hint       次要说明，默认暗色 —— 扫读时自动跳过
+//
+// 语气也是版式的一部分：一律**陈述句、无主语、带单位、不加语气词**。
+// 「别担心」「其实」「我们」这类词不出现；解释性的长句一律进 Hint 或
+// 只在出错时展开的 details 里。
+
+const labelW = 8
+
+// Title 页面头：左标题 + 右侧次要信息。右侧为空/未知时不占版面——
+// `unknown` 这种字对用户没有任何用。
+func Title(left, right string) string {
+	if right == "" || right == "unknown" {
+		return WrapLine(Bold(left), "  ")
+	}
+	return WrapLine(Bold(left)+"  "+Dim(right), "  ")
+}
+
+// Rule 页头下的暗色分隔线。只用在这里——正文里再画线会和表格打架。
+func Rule(w int) string {
+	if w > MaxColumns {
+		w = MaxColumns
+	}
+	return Dim(strings.Repeat("─", w))
+}
+
+// Section 段标题（含前导空行），调用点直接 Println。
+func Section(name string) string {
+	return "\n" + WrapLine(Bold(name), "  ")
+}
+
+// Field 一行「标签 + 值」：标签固定列宽，值可以带颜色。
+//
+//	Field("代理", "● 运行中   pid 364367")  →
+//	  代理  ● 运行中   pid 364367
+//
+// 标签补到 labelW 之后**总是**再跟一个空格：标签本身就占满 labelW 时
+// （中文双宽很容易占满），没有这格空格值会紧贴着标签。
+func Field(label, value string) string {
+	return wrapPrefixed("  "+Dim(Pad(label, labelW))+" ", value)
+}
+
+// Item 缩进一层的一条明细，标记单独上色。
+func Item(mark, text string) string {
+	return wrapPrefixed("  "+Mark(mark)+" ", text)
+}
+
+// Bullet 无标记的明细行。
+func Bullet(text string) string {
+	return wrapPrefixed("    ", text)
+}
+
+// Hint 次要说明。整份 CLI 里所有「不是结论的话」都应该走这里——
+// 它们默认是暗的，扫读时自动跳过。一句话为限，不要写成段落。
+func Hint(text string) string {
+	return wrapPrefixed("    ", Dim(text))
+}
+
+func wrapPrefixed(prefix, text string) string {
+	width := MaxColumns - VisibleWidth(prefix)
+	lines := Wrap(text, width)
+	continuation := strings.Repeat(" ", VisibleWidth(prefix))
+	for i := range lines {
+		if i == 0 {
+			lines[i] = prefix + lines[i]
+		} else {
+			lines[i] = continuation + lines[i]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ---------- 表格 ----------
+
+type align int
+
+const (
+	Left align = iota
+	Right
+)
+
+// Table 定宽列。列宽按**显示宽度**算（中文双宽），调用点不写格式串。
+//
+// 用法：
+//
+//	t := style.NewTable("档位", "模型")
+//	t.AlignRight(0)
+//	t.Row("heavy", "smt-deepseek/deepseek-flash")
+//	fmt.Print(t.String())
+type Table struct {
+	headers []string
+	rows    [][]string
+	aligns  []align
+	indent  string
+}
