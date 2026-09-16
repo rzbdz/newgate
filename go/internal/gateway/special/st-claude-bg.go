@@ -88,7 +88,7 @@ func (claudeBg) Why() string {
 // Match 认「Claude Code 的后台小调用」这个类：claude 发起 + 非流式。
 // 分类器本体的精确判定（system 标记）在 RouteTier 里，那边管改道。
 func (claudeBg) Match(r *Request) bool {
-	return r != nil && r.Agent == "claude" && !r.Stream
+	return claudeCode(r) && !r.Stream
 }
 
 // Apply 认出后台调用后，把「这次调用不想思考」交给 BestEffortDisableThink

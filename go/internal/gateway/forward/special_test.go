@@ -18,6 +18,8 @@ import (
 // 这就是 400 `The reasoning_content in the thinking mode must be passed back
 // to the API` 的修法。同时断言客户端原本的字节（cache_control、大整数、
 // 中文）一个不动。
+//
+// 走 /a/claude/：关思考只对 Claude Code 生效（见 special.claudeCode）。
 func TestSpecialTreatmentDeepseekOnTheWire(t *testing.T) {
 	var sent []byte
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +46,7 @@ func TestSpecialTreatmentDeepseekOnTheWire(t *testing.T) {
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01"}]},` +
 		`{"role":"assistant","content":"再来一轮"}` +
 		`]}`
-	resp, err := http.Post(front.URL+"/v1/messages", "application/json",
+	resp, err := http.Post(front.URL+"/a/claude/v1/messages", "application/json",
 		strings.NewReader(clientBody))
 	if err != nil {
 		t.Fatal(err)
@@ -137,5 +139,73 @@ func TestSpecialTreatmentSkipsNonDeepseek(t *testing.T) {
 	want := `{"model":"claude-sonnet-4","messages":[{"role":"assistant","content":"a"}]}`
 	if string(sent) != want {
 		t.Errorf("非 DeepSeek 上游的请求被动了\n want: %s\n got:  %s", want, sent)
+	}
+}
+
+// TestSpecialTreatmentOpencodeKeepsThinking 现场回归（2026-09-15）：
+// opencode 的请求（裸 /v1 + OpenAI 方言，见 runtime/injection/config_file.go
+// 注入的 baseURL）不该被关掉思考——它压根不会写 thinking 这个 Anthropic
+// 字段，一旦按「客户端没要思考」处理，它条条请求都被关，用户看到的是
+// 「deepseek 不思考了」。
+//
+// 该补的照旧：思考开着，上游要的推理内容一个不能少。
+func TestSpecialTreatmentOpencodeKeepsThinking(t *testing.T) {
+	var sent []byte
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent, _ = ioutil.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer up.Close()
+
+	testChain = func(role string) []resolve.Step {
+		return []resolve.Step{{Profile: "test",
+			Binding:  domain.Binding{Provider: "smt-deepseek", Model: "deepseek-flash"},
+			Provider: testProvider(up.URL)}}
+	}
+	defer func() { testChain = nil }()
+
+	srv := &Server{Port: 0}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	// opencode 第一轮过后的历史：assistant 消息带着 tool_calls，推理内容
+	// 被它序列化时丢掉了（这正是上游会 400 的形态）。
+	clientBody := `{"model":"newgate/heavy","stream":true,"messages":[` +
+		`{"role":"user","content":"读一下 main.go"},` +
+		`{"role":"assistant","content":"读完了","tool_calls":[` +
+		`{"id":"call_oa_1","type":"function","function":{"name":"Read","arguments":"{}"}}]}` +
+		`]}`
+	resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(clientBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		b, _ := ioutil.ReadAll(resp.Body)
+		t.Fatalf("状态 %d: %s", resp.StatusCode, b)
+	}
+	if len(sent) == 0 {
+		t.Fatal("上游没收到请求体")
+	}
+
+	var got struct {
+		Model    string `json:"model"`
+		Thinking struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+		Messages []struct {
+			ReasoningContent string `json:"reasoning_content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(sent, &got); err != nil {
+		t.Fatalf("发出去的不是合法 JSON: %v\n%s", err, sent)
+	}
+	if got.Thinking.Type != "" {
+		t.Errorf("opencode 的请求被动了 thinking（现场 bug）: %s", sent)
+	}
+	if got.Messages[1].ReasoningContent == "" {
+		t.Errorf("思考没被关，那就必须回传推理内容，缺了上游要 400: %s", sent)
 	}
 }

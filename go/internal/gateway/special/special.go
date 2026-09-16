@@ -78,6 +78,24 @@ var registry []Plugin
 // 顺序 = 注册顺序 = 同包内文件名顺序，是确定的。
 func Register(p Plugin) { registry = append(registry, p) }
 
+// claudeCode 这次调用是不是 Claude Code 发的（/a/claude/ 那条路径）。
+//
+// 只有 Claude Code 能被认出来：接管的 base URL 里只有它带 /a/claude
+// （opencode 那边配置里写的是裸 http://127.0.0.1:8899/v1，见
+// runtime/injection/config_file.go 与 runtime/launch）。
+//
+// 空 Agent（兼容路径、认不出的客户端）按**不是** Claude Code 处理。两边的
+// 代价不对称：误关的代价是「用户配的模型从此不思考」（2026-09-15 opencode
+// 现场），误不关最多是它多想一会儿。
+//
+// 这是插件层唯一允许按「谁在调用」分流的地方，只给**替客户端关思考**那一类
+// 用（claude-bg、deepseek 第 1 手、glm）。它们的共同前提是「客户端有表达
+// 思考意图的能力却没表达」：Claude Code 对非官方端点会剥掉思考块，开着也
+// 回不来，替它关掉是把浪费掉的时间省下来。而 OpenAI 方言的客户端
+// （opencode）**没有 thinking 这个字段可写**，它不发 thinking 是表达能力
+// 问题、不是意图——替它关掉就是篡改用户给这个模型配的行为。
+func claudeCode(r *Request) bool { return r != nil && r.Agent == "claude" }
+
 // Plugins 已注册的插件（副本，调用方改不坏注册表）。
 func Plugins() []Plugin {
 	out := make([]Plugin, len(registry))
