@@ -284,3 +284,131 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "opened": opened, "breakers": health.Default.Snapshot(),
 	})
 }
+
+// handleMetrics 网关计数器（只读，只听 127.0.0.1）。`newgate metrics` 的
+// 数据源；计数随 daemon 重启归零。
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{
+		"uptime_s": int(time.Since(s.started).Seconds()),
+		"metrics":  metrics.Default.Snapshot(),
+	})
+}
+
+// handleControlStop 控制端点：给「读得到共享配置、却发不出信号」的用户
+// 停机用（daemon.Stop 在 EPERM 时的兜底路径）。
+//
+// 鉴权：state.json 里的 ControlToken（Bearer）。端点只听 127.0.0.1，
+// 且令牌与上游 key 同文件同级保密——能拿到它的进程早已越过了这层防护。
+func (s *Server) handleControlStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": "只接受 POST"})
+		return
+	}
+	tok := ""
+	if snap := s.snap(); snap != nil {
+		tok = snap.State.ControlToken
+	}
+	// 常数时间比较：不让本地进程靠响应耗时逐位猜令牌
+	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if tok == "" || subtle.ConstantTimeCompare([]byte(got), []byte(tok)) != 1 {
+		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": "control token 不符"})
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "bye": true})
+	s.logf("[proxy] 收到控制停机请求（来自 %s），退出", r.RemoteAddr)
+	// 先让 200 刷出缓冲区，再触发退出
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		s.RequestStop()
+	}()
+}
+
+// handleControlUpgrade 优雅升级（nginx upgrade 的 Go 版）：把监听 socket
+// 移交给新二进制，新进程接上后旧进程排空在途请求再退。
+//
+// 为什么要有它：开发 newgate 的会话本身就穿行在代理里，stop/start 的
+// 断流窗口会把正在用代理的 Claude Code 直接打断。交接路径下：
+//   - 在途请求（含 SSE 长流）由本进程**流完为止**，不掐断；
+//   - 新连接立刻由新进程 accept，客户端无感知；
+//   - 不摘 shim、不动接管状态——只是换了个进程继续服务。
+//
+// 鉴权与 /__newgate/stop 同源（ControlToken）。
+func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": "只接受 POST"})
+		return
+	}
+	tok := ""
+	if snap := s.snap(); snap != nil {
+		tok = snap.State.ControlToken
+	}
+	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if tok == "" || subtle.ConstantTimeCompare([]byte(got), []byte(tok)) != 1 {
+		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": "control token 不符"})
+		return
+	}
+	if s.ln == nil {
+		writeJSON(w, 503, map[string]interface{}{"ok": false, "error": "监听句柄还没就绪"})
+		return
+	}
+	info, err := daemon.SpawnHandoff(s.Port, s.ln)
+	if err != nil {
+		// 交棒失败：本进程继续独占 socket，服务没受任何影响
+		writeJSON(w, 500, map[string]interface{}{"ok": false, "error": err.Error()})
+		return
+	}
+	// pid/lock 立刻改到新进程名下——排空期间 status 也要指向未来
+	if err := daemon.AdoptRuntime(info); err != nil {
+		_ = syscall.Kill(info.PID, syscall.SIGKILL)
+		writeJSON(w, 500, map[string]interface{}{"ok": false, "error": err.Error()})
+		return
+	}
+	s.logf("[proxy] 优雅交接：socket 已移交新进程 pid %d，本进程开始排空在途请求", info.PID)
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "new_pid": info.PID})
+	// 排空：等在途请求（含 SSE 流）自然结束，上限 10 分钟，然后退。
+	// 两个关键点：
+	//   - 用 Shutdown（等在途），绝不用 srv.Close()（硬掐）；
+	//   - 主循环会在 Serve 返回处等 Drained()——否则 listener 一关主函数
+	//     就 return，进程当场消失，这里等再久也白等。
+	// 退出一律 os.Exit：跳过 Serve 里 defer 的 RemoveLock（pid/lock 已是
+	// 新进程的，不能删）。
+	go func() {
+		atomic.StoreInt32(&s.drainFlag, 1)
+		time.Sleep(100 * time.Millisecond) // 让 200 先刷出去
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if s.srv != nil {
+			_ = s.srv.Shutdown(ctx)
+		}
+		s.drainOnce.Do(func() { close(s.drainCh) })
+		s.logf("[proxy] 排空完成，退出（socket 由 pid %d 继续）", info.PID)
+		os.Exit(0)
+	}()
+}
+
+// handleModels 让 opencode 能发现我们暴露的语义档位。
+//
+// 模块贡献的动态角色键（omo-sisyphus / cat-deep）也列出来：它们同样是客户端
+// 可以点名的 model id，藏着不列只会让 opencode 报「模型不存在」。
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	var data []map[string]interface{}
+	seen := map[string]bool{}
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return // 内置别名（normal→mid）也在角色表里，会与档位重名
+		}
+		seen[id] = true
+		data = append(data, map[string]interface{}{
+			"id": id, "object": "model", "owned_by": "newgate",
+		})
+	}
+	for _, tier := range domain.Roles {
+		add(tier)
+	}
+	for _, extra := range domain.ExtraRoles() {
+		add(extra.Key)
+	}
+	writeJSON(w, 200, map[string]interface{}{"object": "list", "data": data})
+}
