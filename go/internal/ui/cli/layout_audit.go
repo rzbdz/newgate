@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -24,9 +25,7 @@ func shouldAuditLayout(args []string) bool {
 		return explicit || store.LoadState().DebugActive()
 	}
 	switch args[0] {
-	case "__serve", "logs", "log", "alllogs", "all-logs", "tui",
-		"start", "stop", "restart", "on", "off", "takeover", "take",
-		"release", "free", "reload", "init", "run":
+	case "__serve", "logs", "log", "alllogs", "all-logs", "tui", "menuconfig", "run":
 		return false
 	case "probe":
 		if has(args, "--json") {
@@ -88,19 +87,24 @@ func auditStream(wg *sync.WaitGroup, src, dst *os.File, stream string,
 	results chan<- []widthViolation) {
 	defer wg.Done()
 	defer src.Close()
-	scanner := bufio.NewScanner(src)
-	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	reader := bufio.NewReader(src)
 	var violations []widthViolation
 	line := 0
-	for scanner.Scan() {
-		line++
-		text := scanner.Text()
-		fmt.Fprintln(dst, text)
-		if width := style.VisibleWidth(text); width > style.MaxColumns {
-			violations = append(violations, widthViolation{
-				stream: stream, line: line, width: width,
-				text: strings.TrimSpace(text),
-			})
+	for {
+		raw, err := reader.ReadString('\n')
+		if raw != "" {
+			_, _ = io.WriteString(dst, raw)
+			text := strings.TrimSuffix(strings.TrimSuffix(raw, "\n"), "\r")
+			line++
+			if width := style.VisibleWidth(text); width > style.MaxColumns {
+				violations = append(violations, widthViolation{
+					stream: stream, line: line, width: width,
+					text: strings.TrimSpace(text),
+				})
+			}
+		}
+		if err != nil {
+			break
 		}
 	}
 	results <- violations
