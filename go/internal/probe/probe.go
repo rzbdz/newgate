@@ -274,7 +274,9 @@ func One(p domain.Provider, model string, timeout time.Duration) (int, time.Dura
 	if p.Protocol == "anthropic" {
 		suffix = "/messages"
 	}
-	url := strings.TrimRight(p.BaseURL, "/") + suffix
+	// 按方言挑 base：两种方言分家的上游（provider.anthropic_url）只有走对
+	// base 才通，探错 base 会得到一个和真实流量无关的结论。
+	url := p.URL(suffix)
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -422,7 +424,9 @@ func oneDialect(p domain.Provider, model string, c dialect.Cap, timeout time.Dur
 		return 0, err
 	}
 
-	req, err := http.NewRequest("POST", strings.TrimRight(p.BaseURL, "/")+suffix,
+	// URL 构造统一走 provider 自己那份：两种方言分家的上游（anthropic_url）
+	// 靠它选对 base——探的路径必须和 gate 将来发的一模一样。
+	req, err := http.NewRequest("POST", p.URL(suffix),
 		bytes.NewReader(body))
 	if err != nil {
 		return 0, err
@@ -489,7 +493,9 @@ func CheckQuirks(provName string, p domain.Provider, model string, timeout time.
 		return nil
 	}
 
-	req, err := http.NewRequest("POST", strings.TrimRight(p.BaseURL, "/")+suffix,
+	// URL 构造统一走 provider 自己那份：两种方言分家的上游（anthropic_url）
+	// 靠它选对 base——探的路径必须和 gate 将来发的一模一样。
+	req, err := http.NewRequest("POST", p.URL(suffix),
 		bytes.NewReader(body))
 	if err != nil {
 		return nil

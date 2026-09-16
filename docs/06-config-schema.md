@@ -85,6 +85,30 @@
 
 > 上面的 baseUrl 和模型 id 是**示意**，实现时按各家实际文档填，不要照抄。
 
+### 3.1 已落地的形态（M1）
+
+上面那个 `endpoints: [...]` 数组是**设计目标**，当前实现是它的最小子集：
+`providers` 是一个 map，每个 provider 一条 `base_url` + 一个 `protocol`
+（见 `domain.Provider`）。M1 只需要「两种方言分家」这一种情况，所以先加
+一个可选字段而不是马上数组化：
+
+```jsonc
+{
+  "providers": {
+    "ark": {
+      "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3", // openai 方言
+      "anthropic_url": "https://ark.cn-beijing.volces.com/api/coding", // anthropic 方言，写法同 ANTHROPIC_BASE_URL
+      "protocol": "openai",
+      "api_key": "…"
+    }
+  }
+}
+```
+
+`anthropic_url` 为空 = 两种方言同一个 base（聚合网关的老样子）。为什么
+需要它、按什么规则选 base，见 docs/08 §3.1。第三个端点真出现时再谈
+`endpoints` 数组化。
+
 ## 4. defaults.json
 
 对应需求「每个 cli 有 default persist profile」：

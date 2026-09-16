@@ -381,6 +381,11 @@ func cmdAllLogs() int {
 				}
 			}
 			fmt.Printf("  %-14s %-45s protocol=%-10s key=%s\n", n, p.BaseURL, p.Protocol, k)
+			// 两种方言分家的上游：另一个 base 也报出来，否则「claude 的流量
+			// 到底发去哪」在 doctor 里是黑盒。
+			if p.AnthropicURL != "" {
+				fmt.Printf("  %-14s %-45s （anthropic 方言走这条）\n", "", p.AnthropicURL)
+			}
 		}
 	}
 
