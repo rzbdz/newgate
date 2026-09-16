@@ -262,3 +262,76 @@ func AdoptRuntime(i *Info) error {
 	return ioutil.WriteFile(paths.LockFile(),
 		[]byte(strconv.Itoa(i.PID)+"\n"), 0o660)
 }
+
+// Stop 优雅停，等不到就强杀。
+//
+// 共享部署的兜底：daemon 可能是别的用户起的（root 起的、claude 用户来停）。
+// 同一个组只给读文件的权限，不给 kill() 的权限——信号发不出去（EPERM）时
+// 走代理自己的控制端点（POST /__newgate/stop + ControlToken）让它自己退。
+func Stop() (int, error) {
+	i, err := ReadPid()
+	if err != nil {
+		RemoveLock()
+		return 0, nil // 本来就没在跑
+	}
+	if !Alive(i.PID) {
+		RemovePid()
+		RemoveLock()
+		return 0, nil
+	}
+	if err := syscall.Kill(i.PID, syscall.SIGTERM); err == syscall.EPERM {
+		return stopViaHTTP(i)
+	}
+	for k := 0; k < 40; k++ { // 最多等 2s
+		if !Alive(i.PID) {
+			RemovePid()
+			RemoveLock()
+			return i.PID, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = syscall.Kill(i.PID, syscall.SIGKILL)
+	RemovePid()
+	RemoveLock()
+	return i.PID, nil
+}
+
+// stopViaHTTP 让别的用户起的 daemon 自己退出。
+//
+// 令牌在 state.json 里，和 providers 的 key 同级保密（0660、组可读）——
+// 能读到它的组员本来就是这台机器的受信用户，停机权限给得合理。
+func stopViaHTTP(i *Info) (int, error) {
+	st := store.LoadState()
+	if st.ControlToken == "" {
+		return 0, fmt.Errorf("代理 (pid %d) 由其他用户运行且没有控制令牌——"+
+			"请让启动它的用户执行一次 `newgate stop`（之后任意组员都能停）", i.PID)
+	}
+	port := i.Port
+	if port <= 0 {
+		port = st.Port
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d/__newgate/stop", port), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+st.ControlToken)
+	resp, err := httpx.LocalClient(3 * time.Second).Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("向代理 (pid %d) 发停机请求失败: %w", i.PID, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return 0, fmt.Errorf("代理拒绝了停机请求（HTTP %d）", resp.StatusCode)
+	}
+	for k := 0; k < 40; k++ { // 最多等 2s
+		if !Alive(i.PID) {
+			RemovePid()
+			RemoveLock()
+			return i.PID, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return 0, fmt.Errorf("停机请求已被接受，但代理 (pid %d) 2 秒内没有退出（看日志 %s）",
+		i.PID, paths.LogFile())
+}
