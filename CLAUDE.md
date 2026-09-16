@@ -40,7 +40,7 @@ go vet ./... && gofmt -l internal/
 | 目录 | 管什么 | 改这里当你在做… |
 | --- | --- | --- |
 | `component` | typed capability、依赖 DAG、生命周期 | 组件框架本身 |
-| `modules/config/{domain,resolve,store}` | Config 组件、配置语义、fallback 纯函数、持久化 | 档位与配置 |
+| `modules/config/{domain,resolve,roleprov,store}` | Config 组件、配置语义、动态角色、fallback 纯函数、持久化 | 档位与配置 |
 | `modules/gateway/{forward,special,rewrite,thinkcache}` | 网关组件及其内部实现 | 转发、扩展与思维链 |
 | `modules/confighook` | agent/config/state-field 注册端口 | 配置文件接管 |
 | `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
@@ -48,7 +48,9 @@ go vet ./... && gofmt -l internal/
 | `modules/<客户端或模型>` | Claude Code、DeepSeek、组合行为 | 新增可组合组件 |
 
 除 `modules/builtin` 外，每个 `modules/<name>` 都必须在根目录
-提供唯一的 `module.go`，由它声明 `New`、`Component`、`Requires` 和 `Provides`。
+提供唯一的 `module.go`，由它用 `New()` 直接返回 `component.Component`，并声明
+`Requires`、`Provides`、`Start` 和 `Stop`。注册型 capability 必须返回
+`component.Release`，consumer 在 `Stop` 中逆序释放。
 复杂实现可以拆文件或子包，但入口文件名和所在层级不能变化。
 公开 capability 和接口归组件自己的 `api/` 子包；禁止建立中心化 contracts 包。
 

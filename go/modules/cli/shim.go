@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/go/modules/cli/style"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/runtime/injection"
 	"github.com/rzbdz/newgate/go/modules/runtime/takeover"
 )
@@ -21,12 +22,12 @@ import (
 //   - uninstall：连 rc 里那行 PATH 一起删干净（takeover 只摘链接，
 //     留着空目录在 PATH 里是无害的，也让下次 on 不用再动 rc）
 //   - install/off：老命令的别名，直接转给 on/off，免得肌肉记忆报错
-func cmdShim(sub, which string) int {
+func cmdShim(agents agentapi.AgentCatalog, sub, which string) int {
 	switch sub {
 	case "install", "add", "on":
 		fmt.Println(style.Hint("直接用 newgate on " + which + " 即可，机制由 newgate 自行选择"))
 		fmt.Println()
-		return cmdTakeover(which)
+		return cmdTakeover(agents, which)
 
 	case "off", "remove", "rm":
 		fmt.Println(style.Hint("直接用 newgate off " + which + " 即可"))
@@ -57,7 +58,7 @@ func cmdShim(sub, which string) int {
 			// 无关文件是用户自己的事，报出来只是噪音。
 			var shadow []string
 			for _, n := range fg {
-				if _, known := agentCatalog().Get(n); known {
+				if _, known := agents.Get(n); known {
 					shadow = append(shadow, n)
 				}
 			}
@@ -71,12 +72,12 @@ func cmdShim(sub, which string) int {
 		return 0
 
 	default:
-		return shimStatus()
+		return shimStatus(agents)
 	}
 }
 
 // shimStatus 摊开 shim 目录的真实情况，用于排查「装了却没生效」。
-func shimStatus() int {
+func shimStatus(agents agentapi.AgentCatalog) int {
 	fmt.Println(style.Title("newgate shim", injection.Dir()))
 	fmt.Println(style.Rule(72))
 
@@ -92,7 +93,7 @@ func shimStatus() int {
 	} else {
 		t := style.NewTable("shim", "指向")
 		for _, n := range inst {
-			a, ok := agentCatalog().Get(n)
+			a, ok := agents.Get(n)
 			if !ok {
 				t.Row(n, style.Dim("未知 agent"))
 				continue

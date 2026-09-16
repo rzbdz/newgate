@@ -10,6 +10,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/modules/cli/style"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 )
 
 type widthViolation struct {
@@ -19,7 +20,7 @@ type widthViolation struct {
 	text   string
 }
 
-func shouldAuditLayout(args []string) bool {
+func shouldAuditLayout(agents agentapi.AgentCatalog, args []string) bool {
 	explicit := os.Getenv("NEWGATE_LAYOUT_AUDIT") != ""
 	if len(args) == 0 {
 		return explicit || store.LoadState().DebugActive()
@@ -35,7 +36,7 @@ func shouldAuditLayout(args []string) bool {
 		// `profile kv` 是给管道/文件用的原始配置，不是控制面版式。
 		return false
 	}
-	if _, launching := detectLaunch(args); launching {
+	if _, launching := detectLaunch(agents, args); launching {
 		return false
 	}
 	return explicit || store.LoadState().DebugActive()

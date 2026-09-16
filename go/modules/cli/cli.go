@@ -106,15 +106,14 @@ func usageText() string {
 	return b.String()
 }
 
-// Run 是 CLI 的唯一入口。
-func Run(args []string) int {
-	if shouldAuditLayout(args) {
-		return auditLayout(args, func() int { return run(args) })
+func runCLI(service *service, args []string) int {
+	if shouldAuditLayout(service.agents, args) {
+		return auditLayout(args, func() int { return run(service, args) })
 	}
-	return run(args)
+	return run(service, args)
 }
 
-func run(args []string) int {
+func run(service *service, args []string) int {
 	if len(args) == 0 {
 		fmt.Print(usageText())
 		return 0
@@ -135,10 +134,10 @@ func run(args []string) int {
 	// 包装启动：newgate claude --profile=ds / newgate --profile ds claude /
 	// newgate run claude（docs/03 §1）。在子命令 switch 之前判断——agent 名
 	// 与子命令名是互斥的封闭集合，不会撞车。
-	if _, ok := detectLaunch(args); ok {
-		return cmdLaunch(args)
+	if _, ok := detectLaunch(service.agents, args); ok {
+		return cmdLaunch(service.runtime, service.agents, args)
 	}
-	if command, ok := moduleCommand(args[0]); ok {
+	if command, ok := service.moduleCommand(args[0]); ok {
 		return command.Run(moduleCLIHost{}, args[1:])
 	}
 
@@ -147,25 +146,25 @@ func run(args []string) int {
 	// 用户不需要知道背后是 PATH shim 还是改配置文件——那是我们的实现细节。
 	case "start":
 		if a := arg(args, 1); a != "" {
-			return cmdTakeover(a)
+			return cmdTakeover(service.agents, a)
 		}
-		return cmdStart(has(args, "--force"))
+		return cmdStart(service.agents, has(args, "--force"))
 	case "stop":
 		if a := arg(args, 1); a != "" {
 			return cmdRelease(a)
 		}
 		return cmdStop()
 	case "on", "takeover", "take":
-		return cmdTakeover(arg(args, 1))
+		return cmdTakeover(service.agents, arg(args, 1))
 	case "off", "release", "free":
 		if a := arg(args, 1); a != "" {
 			return cmdRelease(a)
 		}
 		return cmdStop()
 	case "restart":
-		return cmdRestart(has(args, "--force"))
+		return cmdRestart(service.agents, has(args, "--force"))
 	case "status":
-		return cmdStatus()
+		return cmdStatus(service.agents)
 	case "reload":
 		return cmdReload()
 	case "profiles", "ls":
@@ -182,17 +181,17 @@ func run(args []string) int {
 	case "metrics", "stat":
 		return cmdMetrics()
 	case "shim":
-		return cmdShim(arg(args, 1), argOr(args, 2, "claude"))
+		return cmdShim(service.agents, arg(args, 1), argOr(args, 2, "claude"))
 	case "agents":
-		return cmdAgents()
+		return cmdAgents(service.agents)
 	case "init":
 		return cmdInit(has(args, "--force"))
 	case "doctor":
-		return cmdDoctor()
+		return cmdDoctor(service)
 	case "logs", "log":
 		return cmdLogs(logCount(args), has(args, "-f") || has(args, "--follow"))
 	case "alllogs", "all-logs":
-		return cmdAllLogs()
+		return cmdAllLogs(service.agents)
 	case "debug":
 		return cmdDebug(args)
 	case "schema-repair", "schema_repair":

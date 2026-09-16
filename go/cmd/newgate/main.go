@@ -3,6 +3,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,12 +16,22 @@ import (
 // main 做 argv0 分发：被当成某个 agent 调用时进 wrapper，被当成
 // newgate-<preset> 调用时按 preset 覆盖进控制 CLI，否则进控制 CLI。
 func main() {
-	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-	if a, ok := agents.Get(name); ok {
-		runWrapper(a, os.Args)
-		return
+	os.Exit(run())
+}
+
+func run() int {
+	app, err := agents.New(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "newgate:", err)
+		return 70
 	}
-	cli := agents.CLI()
+	defer app.Stop(context.Background())
+
+	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	if a, ok := app.Get(name); ok {
+		return runWrapper(a, os.Args)
+	}
+	cli := app.CLI()
 	build := cliapi.BuildInfo{
 		Version: version, BuildTime: buildTime, CommitTime: commitTime,
 	}
@@ -29,10 +41,10 @@ func main() {
 	if strings.HasPrefix(name, "newgate-") {
 		args := append([]string{"--preset", strings.TrimPrefix(name, "newgate-")},
 			os.Args[1:]...)
-		os.Exit(cli.Run(args, build))
+		return cli.Run(args, build)
 	}
 
-	os.Exit(cli.Run(os.Args[1:], build))
+	return cli.Run(os.Args[1:], build)
 }
 
 var (

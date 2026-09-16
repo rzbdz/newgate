@@ -5,16 +5,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 )
 
 func TestLayoutAuditExemptsEveryTUIAlias(t *testing.T) {
 	t.Setenv("NEWGATE_LAYOUT_AUDIT", "1")
 	for _, args := range [][]string{{"tui"}, {"menuconfig"}} {
-		if shouldAuditLayout(args) {
+		if shouldAuditLayout(agentstate.Catalog(), args) {
 			t.Fatalf("shouldAuditLayout(%q) = true; TUI must retain the real terminal", args)
 		}
 	}
-	if !shouldAuditLayout([]string{"restart"}) {
+	if !shouldAuditLayout(agentstate.Catalog(), []string{"restart"}) {
 		t.Fatal("formatted lifecycle output should be audited")
 	}
 }

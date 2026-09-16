@@ -28,8 +28,6 @@ func (catalog testCatalog) Names() []string {
 	return names
 }
 
-func (testCatalog) StateFieldOwner(string) (string, bool) { return "", false }
-
 func TestMain(m *testing.M) {
 	claude := claudecode.Agent()
 	open := opencode.Agent()

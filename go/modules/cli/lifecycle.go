@@ -18,6 +18,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/forward"
 	"github.com/rzbdz/newgate/go/modules/gateway/thinkcache"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
@@ -153,7 +154,7 @@ func Serve(port int) int {
 	return 0
 }
 
-func cmdStart(force bool) int {
+func cmdStart(agents agentapi.AgentCatalog, force bool) int {
 	if _, err := os.Stat(paths.ProvidersFile()); os.IsNotExist(err) {
 		fmt.Println(style.Dim("首次运行，初始化配置"))
 		if _, err := store.Init(false); err != nil {
@@ -214,7 +215,7 @@ func cmdStart(force bool) int {
 	printResults(rs)
 	for _, r := range rs {
 		if r.Mechanism == takeover.MechShim && r.Err == nil && !r.Skipped && len(r.Lines) > 0 {
-			warnShellEnvConflict(r.Agent)
+			warnShellEnvConflict(agents, r.Agent)
 		}
 	}
 
@@ -258,7 +259,7 @@ func printResults(rs []takeover.Result) {
 //
 // 用户不该关心机制：claude 靠 PATH shim、opencode 靠改配置文件，这是我们的
 // 实现细节。对外只有「接管」和「释放」，机制由 runtime/takeover 挑。
-func cmdTakeover(agent string) int {
+func cmdTakeover(agents agentapi.AgentCatalog, agent string) int {
 	if agent == "" {
 		return die(64, "要接管谁？例：newgate on claude")
 	}
@@ -269,7 +270,7 @@ func cmdTakeover(agent string) int {
 	}
 	printResults([]takeover.Result{r})
 	if r.Mechanism == takeover.MechShim {
-		warnShellEnvConflict(agent)
+		warnShellEnvConflict(agents, agent)
 	}
 	if daemon.Running() == nil {
 		fmt.Println(style.Hint("代理未运行 · newgate start 之后才生效"))
@@ -332,13 +333,13 @@ func cmdStop() int {
 // newgate 的 Claude Code）完全不受影响，接管状态也不动。
 // 运行中的是旧版 daemon（没有交接能力）时退回 stop+start：有短暂断流
 // 窗口，会提示一句。
-func cmdRestart(force bool) int {
+func cmdRestart(agents agentapi.AgentCatalog, force bool) int {
 	if tryHandoff() {
 		return 0
 	}
 	cmdStop()
 	fmt.Println()
-	return cmdStart(force)
+	return cmdStart(agents, force)
 }
 
 // tryHandoff 让运行中的 daemon 把监听 socket 交接给磁盘上的新二进制。

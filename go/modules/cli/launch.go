@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	"github.com/rzbdz/newgate/go/modules/runtime/launch"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime/api"
 )
 
 // detectLaunch 判断这串 argv 是否像「包装启动」，而不是控制面子命令。
@@ -16,7 +17,7 @@ import (
 //   - 或以 `--profile` / `--preset` 开头（`newgate --profile ds claude`）。
 //
 // 返回的 string 是检测到的 agent 名（可能为空，交给 cmdLaunch 再解析）。
-func detectLaunch(args []string) (string, bool) {
+func detectLaunch(agents agentapi.AgentCatalog, args []string) (string, bool) {
 	if len(args) == 0 {
 		return "", false
 	}
@@ -24,7 +25,7 @@ func detectLaunch(args []string) (string, bool) {
 	if a0 == "run" {
 		return "", true
 	}
-	if _, ok := agentCatalog().Get(a0); ok {
+	if _, ok := agents.Get(a0); ok {
 		return a0, true
 	}
 	switch {
@@ -44,12 +45,12 @@ func detectLaunch(args []string) (string, bool) {
 //	newgate --profile ds claude
 //	newgate run claude --profile=ds
 //	newgate claude --resume abc          # --resume abc 透传给 claude
-func cmdLaunch(args []string) int {
-	agentName, profile, passthrough, err := splitLaunch(args)
+func cmdLaunch(runtime runtimeapi.Runtime, agents agentapi.AgentCatalog, args []string) int {
+	agentName, profile, passthrough, err := splitLaunch(agents, args)
 	if err != nil {
 		return die(64, err.Error())
 	}
-	a, _ := agentCatalog().Get(agentName)
+	a, _ := agents.Get(agentName)
 
 	// profile 不存在立刻报错，绝不静默回落到默认——那正是「切了没生效」的来源。
 	if profile != "" {
@@ -60,7 +61,7 @@ func cmdLaunch(args []string) int {
 		}
 	}
 
-	return launch.Launch(a, passthrough, launch.Options{Profile: profile})
+	return runtime.Launch(a, passthrough, profile)
 }
 
 // splitLaunch 把启动 argv 切成 (agent, profile, 透传参数)。
@@ -74,7 +75,7 @@ func cmdLaunch(args []string) int {
 //  3. 第一个既不是 newgate 选项、也不是其值的 token 是 agent；
 //  4. agent 之后、且不是 newgate 选项的 token 一律原样透传；
 //  5. agent 确定之前的未知 `-` 选项按拼错处理（报错）。
-func splitLaunch(args []string) (agent, profile string, passthrough []string, err error) {
+func splitLaunch(agents agentapi.AgentCatalog, args []string) (agent, profile string, passthrough []string, err error) {
 	if len(args) > 0 && args[0] == "run" {
 		args = args[1:]
 	}
@@ -124,9 +125,9 @@ func splitLaunch(args []string) (agent, profile string, passthrough []string, er
 	if agent == "" {
 		return "", "", nil, fmt.Errorf("要启动哪个 agent？例：newgate claude 或 newgate run claude")
 	}
-	if _, ok := agentCatalog().Get(agent); !ok {
+	if _, ok := agents.Get(agent); !ok {
 		return "", "", nil, fmt.Errorf("不认识的 agent %q（已知：%s）",
-			agent, strings.Join(agentCatalog().Names(), ", "))
+			agent, strings.Join(agents.Names(), ", "))
 	}
 	return agent, profile, rest, nil
 }

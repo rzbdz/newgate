@@ -21,7 +21,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
-	"github.com/rzbdz/newgate/go/modules/confighook/roleprov"
+	"github.com/rzbdz/newgate/go/modules/config/roleprov"
 )
 
 // Snapshot 一次性读齐的配置快照。解析阶段只看它，不再回头读盘。

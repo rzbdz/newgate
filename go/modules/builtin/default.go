@@ -1,25 +1,39 @@
 package builtin
 
 import (
+	"context"
+
 	modules "github.com/rzbdz/newgate/go/component"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/api"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 )
 
-// manager is the process-wide default module set. Alternative loaders use
-// component directly instead of mutating this singleton.
-var manager = modules.Must(Loader{})
+type App struct{ manager *modules.Manager }
 
 type Agent = agentapi.Agent
 type Slot = agentapi.Slot
 
-func catalog() agentapi.AgentCatalog {
-	return modules.MustGet(manager.Context(), agentapi.AgentCatalogCapability)
+func New(ctx context.Context) (*App, error) {
+	manager, err := modules.NewContext(ctx, Loader{})
+	if err != nil {
+		return nil, err
+	}
+	return &App{manager: manager}, nil
 }
 
-func Get(id string) (*agentapi.Agent, bool) { return catalog().Get(id) }
-func Names() []string                       { return catalog().Names() }
+func (a *App) Context() modules.Context { return a.manager.Context() }
 
-func CLI() cliapi.CLI {
-	return modules.MustGet(manager.Context(), cliapi.Capability)
+func (a *App) ComponentNames() []string { return a.manager.ComponentNames() }
+
+func (a *App) Stop(ctx context.Context) error { return a.manager.Stop(ctx) }
+
+func (a *App) catalog() agentapi.AgentCatalog {
+	return modules.MustGet(a.manager.Context(), agentapi.AgentCatalogCapability)
+}
+
+func (a *App) Get(id string) (*agentapi.Agent, bool) { return a.catalog().Get(id) }
+func (a *App) Names() []string                       { return a.catalog().Names() }
+
+func (a *App) CLI() cliapi.CLI {
+	return modules.MustGet(a.manager.Context(), cliapi.Capability)
 }

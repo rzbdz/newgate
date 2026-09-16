@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/modules/config/paths"
-	"github.com/rzbdz/newgate/go/modules/confighook/roleprov"
+	"github.com/rzbdz/newgate/go/modules/config/roleprov"
 )
 
 // Watcher 在内存里持有配置快照，后台监测磁盘变化并原子换页。
