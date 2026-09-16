@@ -24,3 +24,7 @@ type capabilitySpec struct {
 	valueType   reflect.Type
 	cardinality cardinality
 }
+
+// Capability 是提供者与消费者共同引用的有类型端口身份。
+// 模块依赖这个端口而不是依赖具体实现，因此实现可以被替换、组合和独立测试。
+type Capability[T any] struct{ spec capabilitySpec }
