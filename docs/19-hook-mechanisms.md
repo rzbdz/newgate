@@ -149,6 +149,29 @@ JSON 保留注释（jsonc）地做字节级替换，不是整份重写。
    已被接管的文件当成「原始」存起来，之后 off 还原出来的就是脏版本，用户
    的原配置永久丢失。宁可不备份也不污染。
 
+### 3.1 保留槽位身份：omo 的 intra-agent 不再被压成档位
+
+`oh-my-openagent.json` 里每个 `"model"` 带着两层信息：**这是哪个槽位**
+（agents.sisyphus / categories.deep）和**它有多强**。老做法只留下后者——按
+模型名归体格写成 `newgate/normal`，于是 sisyphus 和 librarian 在配置里长得
+一模一样，用户想单独调其中一个时无处可写。
+
+现在留身份：槽位拿到一个稳定键（`omo-sisyphus` / `cat-deep`），配置文件里写
+`newgate/omo-sisyphus`，体格与建议记在 `omo-slots.json`（docs/06 §9）。键是
+**模块贡献的动态角色**——omo 模块通过 `roleprov.Register` 报给框架，core
+不认识 omo，解析路径与档位完全一致（docs/18 §1.3）。
+
+四个细节：
+
+- **幂等**：已是 `newgate/xxx` 的不再翻译；原模型名从 `backups/original/`
+  找回，所以反复接管不丢信息。
+- **老接管平滑升级**：文件里写着 `newgate/heavy` 的，`current` 就是 `heavy`
+  （现状原样保留），只是从此这个档位挂在它自己的键上，可以单独改。
+- **`fallback_models` 收敛成一条**（同一个键）：链已经由 newgate 在服务端
+  兜底，配置里的多条 fallback 只会让一次失败重试同一件事。原列表记进注册表。
+- **`opencode.json` 的 `provider.newgate.models` 要同步登记这些键**，否则
+  opencode 认不出这个模型 id——登记的是键名，不是档位。
+
 ## 4. 机制四：代理侧 hook（请求进来之后）
 
 前三节是「怎么把请求骗到代理」。请求到了之后，代理内部还有几层 hook：

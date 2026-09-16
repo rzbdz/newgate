@@ -115,13 +115,26 @@ type Providers struct {
 	Providers map[string]Provider `json:"providers"`
 }
 
-// Binding 一个具体的 (provider, model) 对。
+// Binding 一个具体的 (provider, model) 对，或者一条**引用**（Ref 非空）。
 type Binding struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
+	// Ref 非空 = 这一条不是具体绑定，而是引用另一个键（写作 `@normal` /
+	// `{"ref":"normal"}`）：解析时把那个键的链**就地展开**在这一位。
+	// 让「一个槽位绑定到某条档位链」和「槽位自己是一条链」用同一套语法。
+	// 展开规则见 docs/18 §1.2、实现见 resolve.BuildChain。
+	Ref string `json:"ref,omitempty"`
 }
 
-func (b Binding) String() string { return b.Provider + "/" + b.Model }
+func (b Binding) String() string {
+	if b.Ref != "" {
+		return "@" + b.Ref
+	}
+	return b.Provider + "/" + b.Model
+}
+
+// IsRef 这一条是引用而不是具体绑定。
+func (b Binding) IsRef() bool { return b.Ref != "" }
 
 // Profile 一套档位绑定 + 它在 fallback 链里的位置。
 // 可以是**稀疏的**——只定义关心的档位，其余跳到链上下一个 profile。
@@ -133,7 +146,7 @@ type Profile struct {
 	// Pinned 「我当链头时，链到我为止」——不好用就报错，别偷偷换。
 	Pinned bool `json:"pinned,omitempty"`
 	// Excluded 「别人别自动掉到我这」——只能被显式选中。
-	Excluded bool `json:"excluded,omitempty"`
+	Excluded bool                  `json:"excluded,omitempty"`
 	Roles    map[string]Candidates `json:"roles"`
 	// Fallback 本 profile 内所有未定义档位的兜底，等价于 roles["*"]。
 	Fallback *Binding `json:"fallback,omitempty"`
@@ -219,21 +232,20 @@ func (p *Profile) Prio() int {
 	return *p.Priority
 }
 
-// CandidatesFor 返回这个 profile 为某档位提供的候选列表（空 = 稀疏）。
+// CandidatesFor 返回这个 profile 为某个键提供的候选列表（空 = 稀疏）。
 //
-// normal 是 2026-09-16 新加的档（四档化的主力档），老配置里没有它。缺省时
-// **用 mid 顶上**，而不是整层跳过：跳过会让「没写 normal 的配置」在主力档
-// 上变成没有候选（整条链空转 → 404），而它的语义本来就该跟 mid 一样
-// ——四档化之前，主循环跑的就是 mid 那一档的资源。写了 normal 的配置按自己
-// 的来，互不影响。
+// 「键」既可以是档位（heavy…），也可以是模块贡献的动态角色键（omo-sisyphus）。
+// 缺省（内置别名 normal→mid、模块给的槽位缺省）在这里统一落地：没写这个键
+// 就看它等价于哪条绑定。规则只有一条，没有第二套机制。
+//
+// 注意缺省可能是**引用**（omo-sisyphus 缺省 @normal），继续展开是 BuildChain
+// 的事（带环检测与去重）——这里只是把「等价于谁」翻译成候选的第一项。
 func (p *Profile) CandidatesFor(role string) Candidates {
 	if c, ok := p.Roles[role]; ok && len(c) > 0 {
 		return c
 	}
-	if role == "normal" {
-		if c, ok := p.Roles["mid"]; ok && len(c) > 0 {
-			return c
-		}
+	if bd, ok := DefaultBindingFor(role); ok {
+		return Candidates{bd}
 	}
 	if c, ok := p.Roles["*"]; ok && len(c) > 0 {
 		return c
@@ -244,13 +256,26 @@ func (p *Profile) CandidatesFor(role string) Candidates {
 	return nil
 }
 
-// Resolve 取第一个候选。给只需要单个绑定的调用点（status / tui）。
+// Resolve 取第一个候选，且一定是一条**具体绑定**（引用会被走到底）。
+// 给只需要单个绑定、且要拿它去干活的调用点（probe 要真去请求、status/tui
+// 要显示真实模型名）——它们拿不得引用。
 func (p *Profile) Resolve(role string) (Binding, bool) {
+	return p.resolve(role, 0)
+}
+
+func (p *Profile) resolve(role string, depth int) (Binding, bool) {
 	c := p.CandidatesFor(role)
 	if len(c) == 0 {
 		return Binding{}, false
 	}
-	return c[0], true
+	bd := c[0]
+	if !bd.IsRef() {
+		return bd, true
+	}
+	if depth >= 8 {
+		return Binding{}, false // 引用成环 / 套得太深
+	}
+	return p.resolve(bd.Ref, depth+1)
 }
 
 // ChainLimits 防止一个请求把整条链串一遍（6 家 × 40s = 4 分钟才失败）。

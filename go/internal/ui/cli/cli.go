@@ -64,6 +64,8 @@ const usage = `newgate — AI CLI 的语义模型层
   agent      被接管的 CLI —— claude / opencode
   tier       能力档 —— heavy / normal / mid / light / vision
   profile    一套 (tier → provider/model) 绑定
+  槽位键     模块贡献的动态角色（omo 的 intra-agent：omo-sisyphus / cat-deep）
+             和档位一样能在 profile 里写，缺省归属见 newgate omo
   st         special_treatment：只对某家上游生效的请求补丁
 
 配置  ~/.config/newgate/{providers.json, mappings/*.json, state.json}
@@ -130,6 +132,8 @@ func Run(args []string) int {
 		return die(64, "用法：newgate profile kv <名> [--write]")
 	case "tier", "tiers", "role", "roles":
 		return cmdTier(arg(args, 1))
+	case "omo", "slots":
+		return cmdOmo(args[1:])
 	case "probe":
 		return cmdProbe(arg(args, 1), has(args, "--json"))
 	case "metrics", "stat":

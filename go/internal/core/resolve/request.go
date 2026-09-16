@@ -36,8 +36,8 @@ var realNameRoleOrder = []string{"mid", "normal", "light", "heavy", "vision"}
 //
 // 两种形态（docs/18 §5）：
 //
-//   - 档位名（"heavy"、"newgate/heavy"、"heavy[1m]" 归一化后）→ 走该档位的链，
-//     与旧行为一致；
+//   - 角色名（"heavy"、"newgate/heavy"、"heavy[1m]" 归一化后；也包括模块贡献
+//     的动态角色如 "omo-sisyphus"）→ 走该角色的链，与旧行为一致；
 //   - 具体模型名（"deepseek-chat"）→ 找出哪个档位的链里有这个模型，把它挪到
 //     链头（客户端点名要它，就先试它），其余按该档位的链跟随。
 //
@@ -50,7 +50,9 @@ var realNameRoleOrder = []string{"mid", "normal", "light", "heavy", "vision"}
 func ResolveRequest(model string, active string, profiles []*domain.Profile,
 	provs *domain.Providers, o Opts) ([]Step, []Skip, string) {
 
-	if domain.IsRole(model) {
+	// 档位名或模块贡献的动态角色键（omo-sisyphus 这种）——都是「角色」，
+	// 走同一条建链路径。判断不了是不是角色时才算具体模型名（见下）。
+	if domain.IsKnownRole(model) {
 		steps, skips := BuildChain(model, profiles, provs, o)
 		return steps, skips, model
 	}

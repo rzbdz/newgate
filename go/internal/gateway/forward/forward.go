@@ -324,12 +324,21 @@ func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleModels 让 opencode 能发现我们暴露的语义档位。
+//
+// 模块贡献的动态角色键（omo-sisyphus / cat-deep）也列出来：它们同样是客户端
+// 可以点名的 model id，藏着不列只会让 opencode 报「模型不存在」。
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	var data []map[string]interface{}
-	for _, tier := range domain.Roles {
+	add := func(id string) {
 		data = append(data, map[string]interface{}{
-			"id": tier, "object": "model", "owned_by": "newgate",
+			"id": id, "object": "model", "owned_by": "newgate",
 		})
+	}
+	for _, tier := range domain.Roles {
+		add(tier)
+	}
+	for _, extra := range domain.ExtraRoles() {
+		add(extra.Key)
 	}
 	writeJSON(w, 200, map[string]interface{}{"object": "list", "data": data})
 }
