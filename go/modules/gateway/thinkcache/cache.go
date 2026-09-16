@@ -118,3 +118,123 @@ func (c *Cache) Put(keys []string, blob []byte) {
 		c.disk.appendKeys(keys, cp, now)
 	}
 }
+
+// putMem 只写内存热层。回灌磁盘冷层时走这里，避免「回灌又写回磁盘」的死循环。
+func (c *Cache) putMem(keys []string, cp []byte, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, k := range keys {
+		if k == "" {
+			continue
+		}
+		if el, ok := c.items[k]; ok {
+			e := el.Value.(*entry)
+			c.bytes += int64(len(cp)) - int64(len(e.blob))
+			e.blob, e.at = cp, now
+			c.ll.MoveToFront(el)
+			continue
+		}
+		el := c.ll.PushFront(&entry{key: k, blob: cp, at: now})
+		c.items[k] = el
+		c.bytes += int64(len(cp))
+	}
+	c.puts++
+	c.evictLocked(now)
+}
+
+// Get 取回推理内容。过期的当没有；热层 miss 时落到冷层找，命中再提升回热层。
+func (c *Cache) Get(key string) ([]byte, bool) {
+	if key == "" {
+		return nil, false
+	}
+	c.mu.Lock()
+	el, ok := c.items[key]
+	if ok {
+		e := el.Value.(*entry)
+		if c.ttl > 0 && time.Since(e.at) > c.ttl {
+			c.removeLocked(el)
+			c.misses++
+		} else {
+			c.ll.MoveToFront(el)
+			c.hits++
+			c.mu.Unlock()
+			return e.blob, true
+		}
+	}
+	c.misses++
+	hasDisk := c.disk != nil
+	c.mu.Unlock()
+
+	if !hasDisk {
+		return nil, false
+	}
+	blob, ok := c.disk.get(key)
+	if !ok {
+		return nil, false
+	}
+	// 冷层命中：提升回热层（不再落盘——它本来就在盘上）
+	c.putMem([]string{key}, blob, time.Now())
+	return blob, true
+}
+
+func (c *Cache) evictLocked(now time.Time) {
+	// 先清过期的（从队尾开始，那边最旧）
+	if c.ttl > 0 {
+		for el := c.ll.Back(); el != nil; {
+			prev := el.Prev()
+			if now.Sub(el.Value.(*entry).at) <= c.ttl {
+				break
+			}
+			c.removeLocked(el)
+			c.evictions++
+			el = prev
+		}
+	}
+	for c.bytes > c.maxBytes {
+		el := c.ll.Back()
+		if el == nil {
+			return
+		}
+		c.removeLocked(el)
+		c.evictions++
+	}
+}
+
+func (c *Cache) removeLocked(el *list.Element) {
+	e := el.Value.(*entry)
+	c.ll.Remove(el)
+	delete(c.items, e.key)
+	c.bytes -= int64(len(e.blob))
+}
+
+// Stats 给 newgate status / st 展示。不含内容。
+type Stats struct {
+	Entries   int
+	Bytes     int64
+	MaxBytes  int64
+	Hits      uint64
+	Misses    uint64
+	Puts      uint64
+	Evictions uint64
+}
+
+func (c *Cache) Stats() Stats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return Stats{
+		Entries: c.ll.Len(), Bytes: c.bytes, MaxBytes: c.maxBytes,
+		Hits: c.hits, Misses: c.misses, Puts: c.puts, Evictions: c.evictions,
+	}
+}
+
+// ToolKey 按 tool_call id 做 key。
+//
+// 这是最稳的 key：id 由上游生成，客户端**必须**逐字回传（tool_result 要靠
+// 它对上号），所以它在两次请求里必然一致。而「请求带了 tools」正是上游要求
+// 回传推理内容的唯一场景，两者刚好重合。
+func ToolKey(id string) string {
+	if id == "" {
+		return ""
+	}
+	return "tool:" + id
+}
