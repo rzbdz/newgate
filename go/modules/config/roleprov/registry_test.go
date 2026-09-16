@@ -1,32 +1,29 @@
-package special
+package roleprov
 
-import "testing"
+import (
+	"testing"
 
-type registryPlugin struct{ name string }
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
+)
 
-func (p registryPlugin) Name() string { return p.name }
-func (registryPlugin) Why() string    { return "test" }
-func (registryPlugin) Match(*Request) bool {
-	return true
-}
-func (registryPlugin) Apply(body []byte, _ *Request) ([]byte, []string, error) {
-	return body, nil, nil
+type registryProvider struct{ source string }
+
+func (p registryProvider) Source() string { return p.source }
+func (registryProvider) Roles() ([]configapi.ExtraRole, error) {
+	return nil, nil
 }
 
 func TestInstallDefaultRestoresOnlyItsOwnRegistry(t *testing.T) {
 	original := currentRegistry()
 	first := NewRegistry()
 	restoreFirst := InstallDefault(first)
-	if currentRegistry() != first {
-		t.Fatal("first registry was not installed")
-	}
-
 	second := NewRegistry()
 	restoreSecond := InstallDefault(second)
 	restoreFirst()
 	if currentRegistry() != second {
 		t.Fatal("stale restore replaced the current registry")
 	}
+
 	restoreSecond()
 	if currentRegistry() != first {
 		t.Fatal("nested registry did not restore its predecessor")
@@ -39,28 +36,28 @@ func TestInstallDefaultRestoresOnlyItsOwnRegistry(t *testing.T) {
 
 func TestRegisterReleaseOwnsOnlyItsRegistration(t *testing.T) {
 	registry := NewRegistry()
-	releaseFirst, err := registry.Register(registryPlugin{name: "owned"})
+	releaseFirst, err := registry.Register(registryProvider{source: "owned"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.plugins) != 1 {
-		t.Fatal("registered plugin is not visible")
+	if len(registry.providers) != 1 {
+		t.Fatal("registered provider is not visible")
 	}
 	if err := releaseFirst(); err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.plugins) != 0 {
-		t.Fatal("released plugin remains visible")
+	if len(registry.providers) != 0 {
+		t.Fatal("released provider remains visible")
 	}
 
-	releaseSecond, err := registry.Register(registryPlugin{name: "owned"})
+	releaseSecond, err := registry.Register(registryProvider{source: "owned"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := releaseFirst(); err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.plugins) != 1 {
+	if len(registry.providers) != 1 {
 		t.Fatal("stale release removed a newer registration")
 	}
 	if err := releaseSecond(); err != nil {

@@ -62,8 +62,8 @@ go/
     builtin/              # 默认 Loader 与进程组件图
     gateway/              # 网关组件；forward/rewrite/special/thinkcache 是其内部包
       api/                # Gateway 自己拥有的 capability contract
-    confighook/           # 配置 Hook 组件；agent/state-field/role 注册
-    config/               # 配置语义、resolve、store
+    confighook/           # 配置 Hook 组件；agent/takeover/state-field 注册
+    config/               # 配置语义、resolve、store、动态 role 注册
     runtime/              # daemon、launch、takeover
     cli/                  # CLI 组件；style/tui 是其内部包
     claudecode/           # 客户端组件
@@ -77,7 +77,8 @@ go/
 
 除 `builtin`（装配器）外，每个
 `go/modules/<name>/` 都是一个组件，并以根目录的 **`module.go`** 作为唯一标准
-入口。`module.go` 声明 `New()`、`Component()`、`Requires` 和 `Provides`；
+入口。`module.go` 的 `New()` 直接返回 `component.Component`，并声明
+`Requires`、`Provides`、`Start` 和 `Stop`；
 复杂组件可以有任意内部文件和子包，但不能把入口改叫 `component.go`、散落到子目录，
 或让装配器依赖文件布局猜测入口。
 
@@ -88,14 +89,19 @@ go/
 
 ### 2.1 整个运行时是一张组件图
 
-newgate 没有“框架知道的特殊模块类型”。参与运行时装配的对象都实现同一个
-`modules.Provider`，返回 `modules.Component`：
+newgate 没有“框架知道的特殊模块类型”，也没有只包一层
+`Component()` 的 Provider 壳。参与运行时装配的对象都直接构造同一种
+`component.Component`：
 
 - `Name`：稳定组件名，只用于诊断；
 - `Requires`：消费哪些**有类型的 capability**；
 - `Provides`：提供哪些 capability 及其值；
-- `Start(Context)`：provider 启动后，从 Context 取得依赖并向它注册扩展；
+- `Start(context.Context, Context)`：组件启动后，从 Context 取得依赖并向它注册扩展；
 - `Stop(context.Context)`：按启动逆序释放资源。
+
+注册型 capability 返回带所有权的 `component.Release`。consumer 必须保存它，
+并在 `Stop` 中逆序释放；这样组件停止后不会把 hook、agent 或动态角色遗留在
+provider 中，旧实例的 stale release 也不能删掉新实例注册的同名扩展。
 
 依赖的是 capability，不是组件名。`claudecode-deepseek` 消费
 `client-family.claudecode`、`model-family.deepseek` 和 `gateway`，并不 import
@@ -112,8 +118,8 @@ state field、doctor 或 CLI command 是什么。
    Runtime、CLI 和需要直接操作配置的组件显式消费它。
 2. `gateway` 组件消费 `config`，提供请求扩展端口和本地入口；模型、客户端及交叉组件消费它，
    把 request/route/response hook 注册进去。
-3. `config-hook` 消费 `config` 和 `gateway`，提供 agent/config/state-field/role 注册端口；
-   客户端及其配置扩展消费它。
+3. `config-hook` 独立提供 agent/takeover/state-field 注册端口；客户端及其配置
+   扩展消费它。动态角色属于配置语义，由 `config` 自己的端口注册。
 
 因此每个组件既可做 provider，也可做 consumer。`opencode-omo` 消费
 `config-hooks` 和 `client-family.opencode`，再向配置管理器注入 takeover 与动态
@@ -121,7 +127,8 @@ state field、doctor 或 CLI command 是什么。
 统一渲染/调用。增加这种能力不需要修改 Manager。
 
 具体组件平铺在 `go/modules/<name>/`；`modules/builtin` 只保存框架默认
-Loader、链接期组件清单和进程默认实例。实现文件用
+Loader 和链接期组件清单。`main` 显式创建并停止 `builtin.App`，package init
+不得偷偷启动进程级组件图。实现文件用
 `var _ Interface = (*implementation)(nil)` 标明接入的标准契约，未导出函数只是
 组件内部 helper。
 

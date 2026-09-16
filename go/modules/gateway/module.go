@@ -5,7 +5,6 @@ package gateway
 
 import (
 	"context"
-	"fmt"
 
 	modules "github.com/rzbdz/newgate/go/component"
 	configapi "github.com/rzbdz/newgate/go/modules/config/api"
@@ -14,43 +13,31 @@ import (
 )
 
 type port struct{ registry *special.Registry }
-type provider struct {
-	port    *port
-	restore func()
-}
 
-var (
-	_ gatewayapi.Gateway = (*port)(nil)
-	_ modules.Provider   = (*provider)(nil)
-)
+var _ gatewayapi.Gateway = (*port)(nil)
 
-func New() modules.Provider {
-	return provider{port: &port{registry: special.NewRegistry()}}
-}
-
-func (p provider) Component() modules.Component {
-	instance := &p
+func New() modules.Component {
+	port := &port{registry: special.NewRegistry()}
+	var restore func()
 	return modules.Component{
 		Name:     "gateway",
 		Requires: []modules.Requirement{modules.Need(configapi.Capability)},
 		Provides: []modules.Provision{
-			modules.Provide(gatewayapi.Capability, gatewayapi.Gateway(p.port)),
+			modules.Provide(gatewayapi.Capability, gatewayapi.Gateway(port)),
 		},
-		Start: func(modules.Context) error {
-			instance.restore = special.InstallDefault(instance.port.registry)
+		Start: func(context.Context, modules.Context) error {
+			restore = special.InstallDefault(port.registry)
 			return nil
 		},
 		Stop: func(context.Context) error {
-			if instance.restore != nil {
-				instance.restore()
+			if restore != nil {
+				restore()
 			}
 			return nil
 		},
 	}
 }
 
-func (p *port) RegisterRequestHook(hook gatewayapi.Plugin) { p.registry.Register(hook) }
-
-func (*port) AgentBaseURL(port int, agentID string) string {
-	return fmt.Sprintf("http://127.0.0.1:%d/a/%s", port, agentID)
+func (p *port) RegisterRequestHook(hook gatewayapi.Plugin) (modules.Release, error) {
+	return p.registry.Register(hook)
 }

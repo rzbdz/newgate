@@ -1,6 +1,7 @@
 package opencodeomo
 
 import (
+	"context"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -14,16 +15,13 @@ import (
 )
 
 type configTakeover struct{}
-type moduleProvider struct{}
 
 var _ agentapi.ConfigTakeover = (*configTakeover)(nil)
-var _ modules.Provider = (*moduleProvider)(nil)
 
 func Takeover() agentapi.ConfigTakeover { return configTakeover{} }
 
-func New() modules.Provider { return moduleProvider{} }
-
-func (moduleProvider) Component() modules.Component {
+func New() modules.Component {
+	var releases []modules.Release
 	return modules.Component{
 		Name: "opencode-omo",
 		Requires: []modules.Requirement{
@@ -37,14 +35,23 @@ func (moduleProvider) Component() modules.Component {
 			modules.Provide(cliapi.CommandsCapability,
 				cliapi.Command(omoCommand{})),
 		},
-		Start: func(ctx modules.Context) error {
+		Start: func(_ context.Context, ctx modules.Context) error {
 			config := modules.MustGet(ctx, agentapi.ConfigHooksCapability)
-			if err := config.BindTakeover("opencode", Takeover()); err != nil {
+			configStore := modules.MustGet(ctx, configapi.Capability)
+			client := modules.MustGet(ctx, opencodeapi.Capability)
+			release, err := config.BindTakeover(client.AgentID, Takeover())
+			if err != nil {
 				return err
 			}
-			config.RegisterRoleProvider(omoRolesProvider{})
+			releases = append(releases, release)
+			release, err = configStore.RegisterRoleProvider(omoRolesProvider{})
+			if err != nil {
+				return err
+			}
+			releases = append(releases, release)
 			return nil
 		},
+		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/health"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
@@ -465,16 +466,16 @@ func skipDetail(s resolve.Skip) string {
 //
 // 每个 agent 一个小节：头一行是身份（方言 + 当前 profile），槽位一张表。
 // 以前是一张通铺大表，说明列又长，中文一撑就错位。
-func cmdAgents() int {
+func cmdAgents(agents agentapi.AgentCatalog) int {
 	st := store.LoadState()
-	names := agentCatalog().Names()
+	names := agents.Names()
 	sort.Strings(names)
 
 	fmt.Println(style.Title("newgate agents", fmt.Sprintf("%d 个", len(names))))
 	fmt.Println(style.Rule(72))
 
 	for _, n := range names {
-		a, _ := agentCatalog().Get(n)
+		a, _ := agents.Get(n)
 		profile := st.ActiveFor(a.ID)
 		if profile == "" {
 			profile = st.DefaultProfile

@@ -22,8 +22,7 @@ type Plugin interface {
 }
 
 type Gateway interface {
-	RegisterRequestHook(Plugin)
-	AgentBaseURL(port int, agentID string) string
+	RegisterRequestHook(Plugin) (modules.Release, error)
 }
 
 var Capability = modules.One[Gateway]("gateway")

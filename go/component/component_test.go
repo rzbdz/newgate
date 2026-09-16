@@ -17,7 +17,7 @@ func TestManagerInjectsCapabilitiesAndReversesLifecycle(t *testing.T) {
 	manager, err := New(fakeLoader{components: []Component{
 		{
 			Name: "consumer", Requires: []Requirement{Need(service)},
-			Start: func(ctx Context) error {
+			Start: func(_ context.Context, ctx Context) error {
 				events = append(events, "start consumer "+MustGet(ctx, service))
 				return nil
 			},
@@ -28,7 +28,7 @@ func TestManagerInjectsCapabilitiesAndReversesLifecycle(t *testing.T) {
 		},
 		{
 			Name: "provider", Provides: []Provision{Provide(service, "ready")},
-			Start: func(Context) error {
+			Start: func(context.Context, Context) error {
 				events = append(events, "start provider")
 				return nil
 			},
@@ -107,7 +107,7 @@ func TestManyCapabilityInjectsAllProviders(t *testing.T) {
 		{Name: "two", Provides: []Provision{Provide(hooks, "two")}},
 		{
 			Name: "consumer", Requires: []Requirement{Need(hooks)},
-			Start: func(ctx Context) error {
+			Start: func(_ context.Context, ctx Context) error {
 				if got := GetAll(ctx, hooks); !reflect.DeepEqual(got, []string{"one", "two"}) {
 					t.Fatalf("hooks = %v", got)
 				}
@@ -126,7 +126,7 @@ func TestFailedComponentParticipatesInRollback(t *testing.T) {
 	_, err := New(fakeLoader{components: []Component{
 		{
 			Name: "provider",
-			Start: func(Context) error {
+			Start: func(context.Context, Context) error {
 				events = append(events, "start provider")
 				return nil
 			},
@@ -137,7 +137,7 @@ func TestFailedComponentParticipatesInRollback(t *testing.T) {
 		},
 		{
 			Name: "partial",
-			Start: func(Context) error {
+			Start: func(context.Context, Context) error {
 				events = append(events, "start partial")
 				return context.Canceled
 			},
@@ -154,4 +154,71 @@ func TestFailedComponentParticipatesInRollback(t *testing.T) {
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
 	}
+}
+
+func TestManagerRejectsTypedNilCapability(t *testing.T) {
+	service := One[*string]("service")
+	var value *string
+	_, err := New(fakeLoader{components: []Component{{
+		Name: "provider", Provides: []Provision{Provide(service, value)},
+	}}})
+	if err == nil || !strings.Contains(err.Error(), "provides nil service") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCapabilityAccessEnforcesCardinality(t *testing.T) {
+	one := One[string]("one")
+	many := Many[string]("many")
+	ctx := Context{values: map[string][]any{
+		"one":  {"value"},
+		"many": {"a", "b"},
+	}}
+	assertPanics(t, func() { Get(ctx, many) })
+	assertPanics(t, func() { GetAll(ctx, one) })
+}
+
+func TestStartReceivesManagerContext(t *testing.T) {
+	key := struct{}{}
+	want := "value"
+	ctx := context.WithValue(context.Background(), key, want)
+	_, err := NewContext(ctx, fakeLoader{components: []Component{{
+		Name: "consumer",
+		Start: func(ctx context.Context, _ Context) error {
+			if got := ctx.Value(key); got != want {
+				t.Fatalf("context value = %v", got)
+			}
+			return nil
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartReportsRollbackFailure(t *testing.T) {
+	_, err := New(fakeLoader{components: []Component{
+		{
+			Name: "provider",
+			Stop: func(context.Context) error { return context.DeadlineExceeded },
+		},
+		{
+			Name:  "consumer",
+			Start: func(context.Context, Context) error { return context.Canceled },
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "rollback:") ||
+		!strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func assertPanics(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	fn()
 }

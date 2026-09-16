@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 )
 
 func TestSplitLaunch(t *testing.T) {
@@ -31,7 +33,7 @@ func TestSplitLaunch(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			agent, profile, passthrough, err := splitLaunch(c.args)
+			agent, profile, passthrough, err := splitLaunch(agentstate.Catalog(), c.args)
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("期望报错，却成功了（agent=%q profile=%q）", agent, profile)
@@ -78,7 +80,7 @@ func TestDetectLaunch(t *testing.T) {
 		{[]string{"--set-profile", "cheap"}, false},
 	}
 	for _, c := range cases {
-		_, got := detectLaunch(c.args)
+		_, got := detectLaunch(agentstate.Catalog(), c.args)
 		if got != c.want {
 			t.Errorf("detectLaunch(%v) = %v，应为 %v", c.args, got, c.want)
 		}

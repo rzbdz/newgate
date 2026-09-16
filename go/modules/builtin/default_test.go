@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -8,23 +9,33 @@ import (
 )
 
 func TestDefaultGraphStartsWithConfigGatewayAndConfigHook(t *testing.T) {
-	names := manager.ComponentNames()
+	app, err := New(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
+	names := app.ComponentNames()
 	if len(names) < 3 ||
 		names[0] != "config" ||
 		names[1] != "gateway" ||
 		names[2] != "config-hook" {
 		t.Fatalf("component order = %v", names)
 	}
-	if got, want := Names(), []string{"claude", "opencode"}; !reflect.DeepEqual(got, want) {
+	if got, want := app.Names(), []string{"claude", "opencode"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("agents = %v, want %v", got, want)
 	}
-	opencode, ok := Get("opencode")
+	opencode, ok := app.Get("opencode")
 	if !ok || opencode.Config == nil {
 		t.Fatal("opencode takeover was not injected by opencode-omo")
 	}
 }
 
 func TestGatewayReceivesModuleHooks(t *testing.T) {
+	app, err := New(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	var names []string
 	for _, plugin := range special.Plugins() {
 		names = append(names, plugin.Name())

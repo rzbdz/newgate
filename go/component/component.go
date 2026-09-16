@@ -66,21 +66,35 @@ type Component struct {
 	Name     string
 	Requires []Requirement
 	Provides []Provision
-	Start    func(Context) error
+	Start    func(context.Context, Context) error
 	Stop     func(context.Context) error
+}
+
+type Release func() error
+
+func ReleaseAll(releases []Release) error {
+	var first error
+	for i := len(releases) - 1; i >= 0; i-- {
+		if releases[i] == nil {
+			continue
+		}
+		if err := releases[i](); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 type Loader interface {
 	Load() ([]Component, error)
 }
 
-type Provider interface {
-	Component() Component
-}
-
 type Context struct{ values map[string][]any }
 
 func Get[T any](ctx Context, capability Capability[T]) (T, bool) {
+	if capability.spec.cardinality != single {
+		panic("component: Get called with many capability " + capability.spec.name)
+	}
 	var zero T
 	values := ctx.values[capability.spec.name]
 	if len(values) == 0 {
@@ -93,12 +107,15 @@ func Get[T any](ctx Context, capability Capability[T]) (T, bool) {
 func MustGet[T any](ctx Context, capability Capability[T]) T {
 	value, ok := Get(ctx, capability)
 	if !ok {
-		panic("modules: capability unavailable: " + capability.spec.name)
+		panic("component: capability unavailable: " + capability.spec.name)
 	}
 	return value
 }
 
 func GetAll[T any](ctx Context, capability Capability[T]) []T {
+	if capability.spec.cardinality != many {
+		panic("component: GetAll called with single capability " + capability.spec.name)
+	}
 	values := ctx.values[capability.spec.name]
 	out := make([]T, 0, len(values))
 	for _, value := range values {
@@ -117,6 +134,10 @@ type Manager struct {
 }
 
 func New(loaders ...Loader) (*Manager, error) {
+	return NewContext(context.Background(), loaders...)
+}
+
+func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 	var components []Component
 	for _, loader := range loaders {
 		loaded, err := loader.Load()
@@ -135,11 +156,15 @@ func New(loaders ...Loader) (*Manager, error) {
 	}
 	for i, component := range manager.components {
 		if component.Start != nil {
-			if err := component.Start(manager.context); err != nil {
+			if err := component.Start(ctx, manager.context); err != nil {
 				// Start may have registered some capabilities before failing.
 				// Stop must therefore tolerate partial initialization.
 				manager.started = i + 1
-				_ = manager.Stop(context.Background())
+				rollbackErr := manager.Stop(ctx)
+				if rollbackErr != nil {
+					return nil, fmt.Errorf("start component %s: %w; rollback: %v",
+						component.Name, err, rollbackErr)
+				}
 				return nil, fmt.Errorf("start component %s: %w", component.Name, err)
 			}
 		}
@@ -151,7 +176,7 @@ func New(loaders ...Loader) (*Manager, error) {
 func Must(loaders ...Loader) *Manager {
 	manager, err := New(loaders...)
 	if err != nil {
-		panic(fmt.Sprintf("modules: load failed: %v", err))
+		panic(fmt.Sprintf("component: load failed: %v", err))
 	}
 	return manager
 }
@@ -199,7 +224,7 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 			if err := validateSpec(specs, provision.spec); err != nil {
 				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
 			}
-			if provision.value == nil {
+			if isNil(provision.value) {
 				return nil, nil, fmt.Errorf("component %s provides nil %s",
 					component.Name, provision.spec.name)
 			}
@@ -274,6 +299,19 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 		return nil, nil, fmt.Errorf("component capability dependency cycle")
 	}
 	return ordered, values, nil
+}
+
+func isNil(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
 }
 
 func validateSpec(known map[string]capabilitySpec, spec capabilitySpec) error {

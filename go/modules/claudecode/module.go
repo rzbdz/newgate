@@ -1,6 +1,8 @@
 package claudecode
 
 import (
+	"context"
+
 	modules "github.com/rzbdz/newgate/go/component"
 	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
@@ -8,13 +10,8 @@ import (
 	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking/api"
 )
 
-type moduleProvider struct{}
-
-var _ modules.Provider = (*moduleProvider)(nil)
-
-func New() modules.Provider { return moduleProvider{} }
-
-func (moduleProvider) Component() modules.Component {
+func New() modules.Component {
+	var releases []modules.Release
 	return modules.Component{
 		Name: "claudecode",
 		Requires: []modules.Requirement{
@@ -24,22 +21,31 @@ func (moduleProvider) Component() modules.Component {
 		},
 		Provides: []modules.Provision{
 			modules.Provide(claudeapi.Capability,
-				claudeapi.Client{Name: "claudecode", AgentID: ID}),
+				claudeapi.Client{AgentID: ID}),
 		},
-		Start: func(ctx modules.Context) error {
+		Start: func(_ context.Context, ctx modules.Context) error {
 			config := modules.MustGet(ctx, confighookapi.ConfigHooksCapability)
-			if err := config.RegisterAgent(Agent()); err != nil {
+			release, err := config.RegisterAgent(Agent())
+			if err != nil {
 				return err
 			}
-			if err := config.RegisterStateField("claudecode", "classifier_override"); err != nil {
+			releases = append(releases, release)
+			release, err = config.RegisterStateField("claudecode", "classifier_override")
+			if err != nil {
 				return err
 			}
+			releases = append(releases, release)
 			gateway := modules.MustGet(ctx, gatewayapi.Capability)
 			thinking := modules.MustGet(ctx, thinkingapi.Capability)
 			for _, treatment := range Treatments(thinking) {
-				gateway.RegisterRequestHook(treatment)
+				release, err = gateway.RegisterRequestHook(treatment)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
 			}
 			return nil
 		},
+		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },
 	}
 }

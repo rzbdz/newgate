@@ -22,7 +22,7 @@ import (
 type Loader struct{}
 
 func (Loader) Load() ([]modules.Component, error) {
-	providers := []modules.Provider{
+	return []modules.Component{
 		config.New(),
 		gatewaycomponent.New(),
 		confighook.New(),
@@ -36,10 +36,5 @@ func (Loader) Load() ([]modules.Component, error) {
 		opencode.New(),
 		opencodeomo.New(),
 		cli.New(),
-	}
-	components := make([]modules.Component, 0, len(providers))
-	for _, provider := range providers {
-		components = append(components, provider.Component())
-	}
-	return components, nil
+	}, nil
 }

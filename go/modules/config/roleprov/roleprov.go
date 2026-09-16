@@ -8,7 +8,7 @@
 //
 // 分工：
 //
-//	模块实现 Provider，经 Config Hook 组件的 capability 注册；
+//	模块实现 Provider，经 Config 组件的 capability 注册；
 //	框架（store 每次装快照、CLI 启动）调 Refresh，把结果灌进 domain。
 //
 // core 只认「键 → 缺省绑定」这张表，解析时与内置别名一视同仁。
@@ -19,16 +19,19 @@ import (
 	"sort"
 	"sync"
 
+	modules "github.com/rzbdz/newgate/go/component"
+	configapi "github.com/rzbdz/newgate/go/modules/config/api"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
-	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 )
 
-type Provider = confighookapi.RoleProvider
-type WatchProvider = confighookapi.RoleWatchProvider
+type Provider = configapi.RoleProvider
+type WatchProvider = configapi.RoleWatchProvider
 
 type Registry struct {
 	mu        sync.RWMutex
 	providers []Provider
+	tokens    map[string]uint64
+	next      uint64
 }
 
 var (
@@ -71,24 +74,46 @@ func currentRegistry() *Registry {
 	return registry
 }
 
-// Register 模块在 init() 里登记自己。重复登记同一个 Source 会被忽略
-// （测试里反复 init 同一包不会叠出多份）。
+// Register 是旧数据面的兼容入口；生产装配通过 Config capability 注册。
 func Register(p Provider) {
-	currentRegistry().Register(p)
+	if _, err := currentRegistry().Register(p); err != nil {
+		panic(err)
+	}
 }
 
-func (r *Registry) Register(p Provider) {
+func (r *Registry) Register(p Provider) (modules.Release, error) {
 	if p == nil || p.Source() == "" {
-		return
+		return nil, fmt.Errorf("roleprov: provider source is required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, q := range r.providers {
 		if q.Source() == p.Source() {
-			return
+			return nil, fmt.Errorf("roleprov: duplicate provider %s", p.Source())
 		}
 	}
+	if r.tokens == nil {
+		r.tokens = make(map[string]uint64)
+	}
+	r.next++
+	token := r.next
+	r.tokens[p.Source()] = token
 	r.providers = append(r.providers, p)
+	return func() error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.tokens[p.Source()] != token {
+			return nil
+		}
+		delete(r.tokens, p.Source())
+		for i, provider := range r.providers {
+			if provider.Source() == p.Source() {
+				r.providers = append(r.providers[:i], r.providers[i+1:]...)
+				break
+			}
+		}
+		return nil
+	}, nil
 }
 
 // Refresh 重新问一遍每个已登记的 provider，把结果灌进 domain。

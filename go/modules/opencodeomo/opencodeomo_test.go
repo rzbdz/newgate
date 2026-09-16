@@ -9,7 +9,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
-	"github.com/rzbdz/newgate/go/modules/confighook/roleprov"
+	"github.com/rzbdz/newgate/go/modules/config/roleprov"
 )
 
 func init() {

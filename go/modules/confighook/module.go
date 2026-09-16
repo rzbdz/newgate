@@ -4,120 +4,125 @@
 package confighook
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"sync"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	configapi "github.com/rzbdz/newgate/go/modules/config/api"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
-	"github.com/rzbdz/newgate/go/modules/confighook/roleprov"
-	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
 )
 
 type registry struct {
-	mu      sync.RWMutex
-	gateway gatewayapi.Gateway
-	roles   *roleprov.Registry
-	agents  map[string]*agentapi.Agent
-	fields  map[string]string
+	mu     sync.RWMutex
+	agents map[string]*agentapi.Agent
+	fields map[string]string
+	tokens map[string]uint64
+	next   uint64
 }
-
-type provider struct{ registry *registry }
 
 var (
 	_ agentapi.ConfigHooks  = (*registry)(nil)
 	_ agentapi.AgentCatalog = (*registry)(nil)
-	_ modules.Provider      = (*provider)(nil)
 )
 
-func New() modules.Provider {
-	return provider{registry: &registry{
+func New() modules.Component {
+	registry := &registry{
 		agents: make(map[string]*agentapi.Agent),
 		fields: make(map[string]string),
-		roles:  roleprov.NewRegistry(),
-	}}
-}
-
-func (p provider) Component() modules.Component {
-	var restoreRoles func()
+		tokens: make(map[string]uint64),
+	}
 	return modules.Component{
 		Name: "config-hook",
-		Requires: []modules.Requirement{
-			modules.Need(configapi.Capability),
-			modules.Need(gatewayapi.Capability),
-		},
 		Provides: []modules.Provision{
-			modules.Provide(agentapi.ConfigHooksCapability, agentapi.ConfigHooks(p.registry)),
-			modules.Provide(agentapi.AgentCatalogCapability, agentapi.AgentCatalog(p.registry)),
-		},
-		Start: func(ctx modules.Context) error {
-			p.registry.gateway = modules.MustGet(ctx, gatewayapi.Capability)
-			restoreRoles = roleprov.InstallDefault(p.registry.roles)
-			return nil
-		},
-		Stop: func(context.Context) error {
-			if restoreRoles != nil {
-				restoreRoles()
-			}
-			return nil
+			modules.Provide(agentapi.ConfigHooksCapability, agentapi.ConfigHooks(registry)),
+			modules.Provide(agentapi.AgentCatalogCapability, agentapi.AgentCatalog(registry)),
 		},
 	}
 }
 
-func (r *registry) RegisterAgent(agent *agentapi.Agent) error {
+func (r *registry) RegisterAgent(agent *agentapi.Agent) (modules.Release, error) {
 	if agent == nil || agent.ID == "" {
-		return fmt.Errorf("agent ID is required")
+		return nil, fmt.Errorf("agent ID is required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.agents[agent.ID]; exists {
-		return fmt.Errorf("duplicate agent %s", agent.ID)
+		return nil, fmt.Errorf("duplicate agent %s", agent.ID)
 	}
+	token := r.newToken("agent:" + agent.ID)
 	r.agents[agent.ID] = agent
-	return nil
+	return r.release("agent:"+agent.ID, token, func() {
+		delete(r.agents, agent.ID)
+	}), nil
 }
 
-func (r *registry) BindTakeover(agentID string, takeover agentapi.ConfigTakeover) error {
+func (r *registry) BindTakeover(agentID string, takeover agentapi.ConfigTakeover) (modules.Release, error) {
 	if takeover == nil {
-		return fmt.Errorf("nil config takeover for agent %s", agentID)
+		return nil, fmt.Errorf("nil config takeover for agent %s", agentID)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	agent, ok := r.agents[agentID]
 	if !ok {
-		return fmt.Errorf("config takeover targets unknown agent %s", agentID)
+		return nil, fmt.Errorf("config takeover targets unknown agent %s", agentID)
 	}
 	if agent.Config != nil {
-		return fmt.Errorf("agent %s has multiple config takeovers", agentID)
+		return nil, fmt.Errorf("agent %s has multiple config takeovers", agentID)
 	}
+	token := r.newToken("takeover:" + agentID)
 	agent.Config = takeover
-	return nil
+	return r.release("takeover:"+agentID, token, func() {
+		agent.Config = nil
+	}), nil
 }
 
-func (r *registry) RegisterRoleProvider(provider agentapi.RoleProvider) {
-	r.roles.Register(provider)
-}
-
-func (r *registry) RegisterStateField(owner, name string) error {
+func (r *registry) RegisterStateField(owner, name string) (modules.Release, error) {
 	if name == "" {
-		return fmt.Errorf("state field name is required")
+		return nil, fmt.Errorf("state field name is required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if owner, exists := r.fields[name]; exists {
-		return fmt.Errorf("state field %s already registered by %s", name, owner)
+		return nil, fmt.Errorf("state field %s already registered by %s", name, owner)
 	}
+	token := r.newToken("field:" + name)
 	r.fields[name] = owner
-	return nil
+	return r.release("field:"+name, token, func() {
+		delete(r.fields, name)
+	}), nil
+}
+
+func (r *registry) newToken(key string) uint64 {
+	r.next++
+	r.tokens[key] = r.next
+	return r.next
+}
+
+func (r *registry) release(key string, token uint64, remove func()) modules.Release {
+	return func() error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.tokens[key] != token {
+			return nil
+		}
+		delete(r.tokens, key)
+		remove()
+		return nil
+	}
 }
 
 func (r *registry) Get(id string) (*agentapi.Agent, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	agent, ok := r.agents[id]
-	return agent, ok
+	if !ok {
+		return nil, false
+	}
+	clone := *agent
+	clone.Bin = append([]string(nil), agent.Bin...)
+	clone.Slots = append([]agentapi.Slot(nil), agent.Slots...)
+	clone.UnsetEnv = append([]string(nil), agent.UnsetEnv...)
+	return &clone, true
 }
 
 func (r *registry) Names() []string {
@@ -129,11 +134,4 @@ func (r *registry) Names() []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func (r *registry) StateFieldOwner(name string) (string, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	owner, ok := r.fields[name]
-	return owner, ok
 }

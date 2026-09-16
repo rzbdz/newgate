@@ -8,16 +8,16 @@ import (
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime/api"
+	"github.com/rzbdz/newgate/go/modules/runtime/launch"
 )
 
-type provider struct{}
+type service struct{}
 
-var _ modules.Provider = (*provider)(nil)
+var _ runtimeapi.Runtime = (*service)(nil)
 
-func New() modules.Provider { return provider{} }
-
-func (provider) Component() modules.Component {
+func New() modules.Component {
 	var restore func()
+	service := &service{}
 	return modules.Component{
 		Name: "runtime",
 		Requires: []modules.Requirement{
@@ -25,9 +25,9 @@ func (provider) Component() modules.Component {
 			modules.Need(confighookapi.AgentCatalogCapability),
 		},
 		Provides: []modules.Provision{
-			modules.Provide(runtimeapi.Capability, runtimeapi.Runtime{}),
+			modules.Provide(runtimeapi.Capability, runtimeapi.Runtime(service)),
 		},
-		Start: func(ctx modules.Context) error {
+		Start: func(_ context.Context, ctx modules.Context) error {
 			restore = agentstate.Set(modules.MustGet(ctx, confighookapi.AgentCatalogCapability))
 			return nil
 		},
@@ -38,4 +38,8 @@ func (provider) Component() modules.Component {
 			return nil
 		},
 	}
+}
+
+func (*service) Launch(agent *confighookapi.Agent, args []string, profile string) int {
+	return launch.Launch(agent, args, launch.Options{Profile: profile})
 }

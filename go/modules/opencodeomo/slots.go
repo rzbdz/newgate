@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
-	"github.com/rzbdz/newgate/go/modules/confighook/roleprov"
+	"github.com/rzbdz/newgate/go/modules/config/roleprov"
 )
 
 // omo 槽位：opencode 插件 oh-my-openagent 的 intra-agent 键体系。

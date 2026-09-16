@@ -18,6 +18,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/dialect"
 	"github.com/rzbdz/newgate/go/modules/gateway/health"
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
@@ -26,8 +27,8 @@ import (
 	"github.com/rzbdz/newgate/go/modules/runtime/takeover"
 )
 
-func warnShellEnvConflict(toolID string) {
-	a, ok := agentCatalog().Get(toolID)
+func warnShellEnvConflict(agents agentapi.AgentCatalog, toolID string) {
+	a, ok := agents.Get(toolID)
 	if !ok {
 		return
 	}
@@ -596,7 +597,7 @@ func (c check) print() {
 	}
 }
 
-func cmdDoctor() int {
+func cmdDoctor(service *service) int {
 	fmt.Println(style.Title("newgate doctor", Version))
 	fmt.Println(style.Rule(64))
 	checks := []check{
@@ -604,10 +605,10 @@ func cmdDoctor() int {
 		checkChain(),
 		checkEnv(),
 		checkProxy(),
-		checkTakeover(),
+		checkTakeover(service.agents),
 		checkBackups(),
 	}
-	for _, item := range moduleDiagnostics() {
+	for _, item := range service.moduleDiagnostics() {
 		mark := style.Skip
 		switch item.State {
 		case "ok":
@@ -754,11 +755,11 @@ func checkProxy() check {
 }
 
 // checkTakeover 被改写的目标文件。
-func checkTakeover() check {
+func checkTakeover(agents agentapi.AgentCatalog) check {
 	c := check{label: "接管"}
 	var on, off []string
-	for _, id := range agentCatalog().Names() {
-		agent, ok := agentCatalog().Get(id)
+	for _, id := range agents.Names() {
+		agent, ok := agents.Get(id)
 		if !ok || agent.Config == nil {
 			continue
 		}
@@ -904,7 +905,7 @@ func logCount(args []string) int {
 	return intArg(args, 1, 0)
 }
 
-func cmdAllLogs() int {
+func cmdAllLogs(agents agentapi.AgentCatalog) int {
 	line := func(t string) { fmt.Printf("\n===== %s =====\n", t) }
 
 	line("版本与环境")
@@ -919,7 +920,7 @@ func cmdAllLogs() int {
 	}
 
 	line("状态")
-	cmdStatus()
+	cmdStatus(agents)
 
 	line("providers.json（密钥脱敏）")
 	if provs, err := store.LoadProviders(); err == nil {
@@ -966,8 +967,8 @@ func cmdAllLogs() int {
 
 	line("接管后的目标文件（newgate 相关片段）")
 	var configTargets []string
-	for _, id := range agentCatalog().Names() {
-		agent, ok := agentCatalog().Get(id)
+	for _, id := range agents.Names() {
+		agent, ok := agents.Get(id)
 		if !ok || agent.Config == nil {
 			continue
 		}
@@ -1057,7 +1058,7 @@ func firstLine(s string) string {
 	return s
 }
 
-func cmdStatus() int {
+func cmdStatus(agents agentapi.AgentCatalog) int {
 	st := store.LoadState()
 	info, ps := proxyState()
 
@@ -1083,7 +1084,7 @@ func cmdStatus() int {
 	fmt.Println(style.Field("接管", takeoverStatusLine(ps)))
 
 	// 配置：用哪个 profile。
-	fmt.Println(style.Field("配置", configLine(st)))
+	fmt.Println(style.Field("配置", configLine(agents, st)))
 	for _, item := range special.Statuses(st) {
 		fmt.Println(style.Field(item.Label, item.Value))
 	}
@@ -1184,11 +1185,11 @@ func countActive() int {
 }
 
 // configLine 一行说清用哪个 profile，有 per-agent 覆盖才展开。
-func configLine(st *domain.State) string {
+func configLine(agents agentapi.AgentCatalog, st *domain.State) string {
 	line := style.Cyan(st.DefaultProfile) + style.Dim(" 默认")
 	over := 0
 	var parts []string
-	for _, id := range sortedAgentIDs() {
+	for _, id := range sortedAgentIDs(agents) {
 		if p := st.Active[id]; p != "" && p != st.DefaultProfile {
 			parts = append(parts, id+" → "+style.Cyan(p))
 			over++
@@ -1268,18 +1269,10 @@ func statusFlags(st *domain.State) string {
 }
 
 // sortedAgentIDs 稳定顺序的已知 agent 列表。
-func sortedAgentIDs() []string {
-	ids := agentCatalog().Names()
+func sortedAgentIDs(agents agentapi.AgentCatalog) []string {
+	ids := agents.Names()
 	sort.Strings(ids)
 	return ids
-}
-
-func firstAgent() string {
-	ids := sortedAgentIDs()
-	if len(ids) == 0 {
-		return "claude"
-	}
-	return ids[0]
 }
 
 // routingOf 已被 runtime/takeover.List() 取代——那里是接管状态的唯一事实源，

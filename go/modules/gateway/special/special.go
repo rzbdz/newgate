@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	modules "github.com/rzbdz/newgate/go/component"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
@@ -120,6 +121,8 @@ type ResponseAuditor interface {
 type Registry struct {
 	mu      sync.RWMutex
 	plugins []Plugin
+	tokens  map[string]uint64
+	next    uint64
 }
 
 var (
@@ -176,19 +179,57 @@ type Ordered interface {
 // Register 是兼容调用面；生产装配由 Gateway 组件持有 Registry，并把注册端口
 // 注入其他组件。执行顺序由 Ordered 的具名依赖图决定，不依赖加载顺序。
 func Register(p Plugin) {
-	currentRegistry().Register(p)
+	if _, err := currentRegistry().Register(p); err != nil {
+		panic(err)
+	}
 }
 
-func (r *Registry) Register(p Plugin) {
+func (r *Registry) Register(p Plugin) (modules.Release, error) {
+	if p == nil || p.Name() == "" {
+		return nil, fmt.Errorf("special: plugin name is required")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.plugins {
 		if existing.Name() == p.Name() {
-			panic("special: duplicate plugin " + p.Name())
+			return nil, fmt.Errorf("special: duplicate plugin %s", p.Name())
 		}
 	}
-	r.plugins = append(r.plugins, p)
-	r.plugins = orderPlugins(r.plugins)
+	next := append(append([]Plugin(nil), r.plugins...), p)
+	var orderErr error
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				orderErr = fmt.Errorf("%v", recovered)
+			}
+		}()
+		next = orderPlugins(next)
+	}()
+	if orderErr != nil {
+		return nil, orderErr
+	}
+	if r.tokens == nil {
+		r.tokens = make(map[string]uint64)
+	}
+	r.next++
+	token := r.next
+	r.tokens[p.Name()] = token
+	r.plugins = next
+	return func() error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.tokens[p.Name()] != token {
+			return nil
+		}
+		delete(r.tokens, p.Name())
+		for i, existing := range r.plugins {
+			if existing.Name() == p.Name() {
+				r.plugins = append(r.plugins[:i], r.plugins[i+1:]...)
+				break
+			}
+		}
+		return nil
+	}, nil
 }
 
 func orderPlugins(plugins []Plugin) []Plugin {
