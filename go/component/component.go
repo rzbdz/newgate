@@ -66,3 +66,8 @@ type Provision struct {
 	spec  capabilitySpec
 	value any
 }
+
+// Provide 创建端口绑定；值的动态类型会在构图阶段再次校验。
+func Provide[T any](capability Capability[T], value T) Provision {
+	return Provision{spec: capability.spec, value: value}
+}
