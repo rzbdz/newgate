@@ -239,3 +239,154 @@ func (b *Breaker) Rank(provider, model string, contextBytes int) int {
 		return 3_000_000 + ms
 	}
 }
+
+func (b *Breaker) scoreLocked(key string, contextBytes int) (int, bool) {
+	s := b.scores[key]
+	bucket := contextBucket(contextBytes)
+	if s.Samples[bucket] > 0 {
+		return int(s.EWMA[bucket]), true
+	}
+	for distance := 1; distance < len(s.Samples); distance++ {
+		if i := bucket - distance; i >= 0 && s.Samples[i] > 0 {
+			return int(s.EWMA[i]), true
+		}
+		if i := bucket + distance; i < len(s.Samples) && s.Samples[i] > 0 {
+			return int(s.EWMA[i]), true
+		}
+	}
+	return 0, false
+}
+
+func contextBucket(n int) int {
+	switch {
+	case n <= 4*1024:
+		return 0
+	case n <= 32*1024:
+		return 1
+	case n <= 128*1024:
+		return 2
+	default:
+		return 3
+	}
+}
+
+type Status struct {
+	Provider string        `json:"provider"`
+	Model    string        `json:"model"`
+	Fails    int           `json:"fails"`
+	Open     bool          `json:"open"`
+	OpenFor  time.Duration `json:"open_for_ns"`
+	Reason   string        `json:"reason,omitempty"`
+	Grade    ProbeGrade    `json:"grade,omitempty"`
+	Latency  int64         `json:"latency_ms,omitempty"`
+	Checked  time.Time     `json:"checked_at,omitempty"`
+	ScoreMs  int           `json:"score_ms"`
+	Samples  int           `json:"samples"`
+	Scores   [4]int        `json:"scores_ms,omitempty"`
+	Buckets  [4]int        `json:"samples_by_bucket,omitempty"`
+	OpenedAt time.Time     `json:"opened_at,omitempty"`
+}
+
+func (b *Breaker) Snapshot() []Status {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []Status
+	keys := map[string]bool{}
+	for key := range b.openedAt {
+		keys[key] = true
+	}
+	for key := range b.scores {
+		keys[key] = true
+	}
+	for key := range b.probes {
+		keys[key] = true
+	}
+	for key := range keys {
+		provider, model := splitBindingKey(key)
+		s := Status{
+			Provider: provider,
+			Model:    model,
+			Fails:    b.fails[key],
+			Reason:   b.reasons[key],
+		}
+		if opened, ok := b.openedAt[key]; ok {
+			s.Open = true
+			s.OpenFor = time.Since(opened)
+			s.OpenedAt = opened
+		}
+		if p, ok := b.probes[key]; ok {
+			s.Grade, s.Latency, s.Checked = p.Grade, p.LatencyMs, p.CheckedAt
+		}
+		score := b.scores[key]
+		if score.Samples[0] > 0 {
+			s.ScoreMs = int(score.EWMA[0])
+		}
+		for i, n := range score.Samples {
+			if n > 0 {
+				s.Scores[i] = int(score.EWMA[i])
+			}
+			s.Buckets[i] = n
+			s.Samples += n
+		}
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		return out[i].Model < out[j].Model
+	})
+	return out
+}
+
+// UseFile 让 daemon 的健康表跨优雅重启存活。只有 daemon 写这个文件；
+// probe 通过控制端点提交，避免多进程并发覆盖。
+func (b *Breaker) UseFile(path string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.file = path
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var entries []Status
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return err
+	}
+	for _, s := range entries {
+		key := bindingKey(s.Provider, s.Model)
+		if s.Open {
+			b.openedAt[key] = s.OpenedAt
+			if b.openedAt[key].IsZero() {
+				b.openedAt[key] = time.Now().Add(-b.Cooldown)
+			}
+			b.reasons[key] = s.Reason
+			b.fails[key] = s.Fails
+			if b.fails[key] < 1 {
+				b.fails[key] = 1
+			}
+		}
+		if s.Grade != "" {
+			b.probes[key] = probeResult{
+				Grade: s.Grade, LatencyMs: s.Latency, CheckedAt: s.Checked,
+			}
+		}
+		score := b.scores[key]
+		for i, n := range s.Buckets {
+			if n > 0 {
+				score.EWMA[i], score.Samples[i] = float64(s.Scores[i]), n
+			}
+		}
+		// 兼容旧 health.json：当时只保存 ≤4KB 的一个分数。
+		if score.Samples[0] == 0 && s.ScoreMs > 0 {
+			score.EWMA[0], score.Samples[0] = float64(s.ScoreMs), 1
+		}
+		if score.Samples != [4]int{} {
+			b.scores[key] = score
+		}
+	}
+	return nil
+}
