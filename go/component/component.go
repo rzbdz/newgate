@@ -149,3 +149,12 @@ func GetAll[T any](ctx Context, capability Capability[T]) []T {
 	}
 	return out
 }
+
+// Manager 拥有一张已经验证并排序的组件图，以及它的完整启停状态。
+// 进程只需持有 Manager，就能保证启动失败回滚和正常退出使用同一套逆序语义。
+type Manager struct {
+	components []Component
+	context    Context
+	started    int
+	stopOnce   sync.Once
+}
