@@ -1267,3 +1267,13 @@ func statusFlags(st *domain.State) string {
 	}
 	return strings.Join(f, "   ")
 }
+
+// sortedAgentIDs 稳定顺序的已知 agent 列表。
+func sortedAgentIDs(agents agentapi.AgentCatalog) []string {
+	ids := agents.Names()
+	sort.Strings(ids)
+	return ids
+}
+
+// routingOf 已被 runtime/takeover.List() 取代——那里是接管状态的唯一事实源，
+// CLI / TUI / Web 都读同一份，不再各自判断一遍机制。
