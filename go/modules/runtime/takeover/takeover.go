@@ -254,3 +254,40 @@ func apply(a *agentapi.Agent, port int) Result {
 	}
 	return res
 }
+
+func release(a *agentapi.Agent) Result {
+	res := Result{Agent: a.ID, Mechanism: mechanismOf(a)}
+	switch res.Mechanism {
+	case MechShim:
+		installed := false
+		for _, n := range injection.Installed() {
+			if n == a.ID {
+				installed = true
+			}
+		}
+		if !installed {
+			return res
+		}
+		if err := injection.Uninstall(a.ID); err != nil {
+			res.Err = err
+			return res
+		}
+		res.Lines = append(res.Lines, fmt.Sprintf(
+			"摘掉 PATH shim（PATH 优先级回到真实 %s）", a.ID))
+
+	case MechConfig:
+		restored, err := a.Config.Restore()
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		for _, f := range restored {
+			res.Lines = append(res.Lines, "还原 "+f)
+		}
+	}
+	return res
+}
+
+func unknown(agent string) error {
+	return fmt.Errorf("不认识的 agent %q（已知：%v）", agent, Agents())
+}
