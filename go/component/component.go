@@ -100,3 +100,9 @@ func ReleaseAll(releases []Release) error {
 	}
 	return first
 }
+
+// Loader 在构图前贡献一组组件。它只负责声明组合，不负责自行启动组件，
+// 因而所有组件仍由同一个 Manager 统一验证和回滚。
+type Loader interface {
+	Load() ([]Component, error)
+}
