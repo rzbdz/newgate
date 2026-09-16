@@ -267,3 +267,139 @@ func Run(o Options) ([]Result, error) {
 	})
 	return results, nil
 }
+
+func timeoutRetry(attempt func() (int, time.Duration, error)) (int, time.Duration, error) {
+	status, latency, err := attempt()
+	if networkErr, ok := err.(net.Error); !ok || !networkErr.Timeout() {
+		return status, latency, err
+	}
+	// 主延迟表示最终这次探测请求本身；第一次超时属于命令总耗时，
+	// 不能叠到成功重试上把健康评分凭空翻倍。
+	return attempt()
+}
+
+// Light 给一次探测结果配灯。
+func Light(ok bool, lat time.Duration) string {
+	switch {
+	case ok && lat < 3*time.Second:
+		return "🟢"
+	case ok:
+		return "🟡"
+	}
+	return "🔴"
+}
+
+// One 对一个 (provider, model) 打一次最小请求。
+func One(p domain.Provider, model string, timeout time.Duration) (int, time.Duration, error) {
+	body, _ := json.Marshal(map[string]interface{}{
+		"model":      model,
+		"max_tokens": 4,
+		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+	})
+	suffix := "/chat/completions"
+	if p.Protocol == "anthropic" {
+		suffix = "/messages"
+	}
+	// 按方言挑 base：两种方言分家的上游（provider.anthropic_url）只有走对
+	// base 才通，探错 base 会得到一个和真实流量无关的结论。
+	url := p.URL(suffix)
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return 0, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if p.Protocol == "anthropic" {
+		req.Header.Set("x-api-key", p.Key())
+		req.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+p.Key())
+	}
+
+	start := time.Now()
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	lat := time.Since(start)
+	if err != nil {
+		return 0, lat, err
+	}
+	defer resp.Body.Close()
+	raw, _ := ioutil.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return resp.StatusCode, lat, fmt.Errorf("%s", extractErr(raw))
+	}
+	return resp.StatusCode, lat, nil
+}
+
+func extractErr(raw []byte) string {
+	var e struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &e) == nil && e.Error.Message != "" {
+		return e.Error.Message
+	}
+	s := strings.TrimSpace(string(raw))
+	if len(s) > 160 {
+		s = s[:160] + "…"
+	}
+	return s
+}
+
+func roleIdx(r string) int {
+	for i, x := range domain.Roles {
+		if x == r {
+			return i
+		}
+	}
+	return 99
+}
+
+// Summary 按 profile 汇总，用于给出「该切哪个」的建议。
+type Summary struct {
+	Profile string
+	OK      int
+	Bad     int
+	AvgMs   int64
+	Grade   string
+}
+
+func Summarize(rs []Result) []Summary {
+	m := map[string]*Summary{}
+	seen := map[string]bool{}
+	var order []string
+	for _, r := range rs {
+		s, ok := m[r.Profile]
+		if !ok {
+			s = &Summary{Profile: r.Profile}
+			m[r.Profile] = s
+			order = append(order, r.Profile)
+		}
+		target := r.Profile + "\x00" + r.Provider + "\x00" + r.Model
+		if seen[target] {
+			continue
+		}
+		seen[target] = true
+		if r.OK {
+			s.OK++
+			s.AvgMs += r.Latency.Milliseconds()
+			if r.Latency >= 3*time.Second {
+				s.Grade = "usable"
+			} else if s.Grade == "" {
+				s.Grade = "fluent"
+			}
+		} else {
+			s.Bad++
+			s.Grade = "unavailable"
+		}
+	}
+	var out []Summary
+	for _, n := range order {
+		s := m[n]
+		if s.OK > 0 {
+			s.AvgMs /= int64(s.OK)
+		}
+		out = append(out, *s)
+	}
+	return out
+}
