@@ -138,3 +138,127 @@ func AcquireLock() error {
 	_, err = f.WriteString(strconv.Itoa(os.Getpid()) + "\n")
 	return err
 }
+
+// Running 返回当前活着的实例信息。
+func Running() *Info {
+	i, err := ReadPid()
+	if err != nil || i == nil {
+		return nil
+	}
+	if !Alive(i.PID) {
+		return nil
+	}
+	return i
+}
+
+// Spawn 把自己以 __serve 模式重新拉起，作为后台守护进程。
+func Spawn(port int) (*Info, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	// 0660：共享部署下别的用户也能读日志排查（目录 setgid 保证组一致）
+	logf, err := os.OpenFile(paths.LogFile(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o660)
+	if err != nil {
+		return nil, err
+	}
+	defer logf.Close()
+
+	cmd := exec.Command(exe, "__serve", "--port", strconv.Itoa(port))
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // 脱离终端
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	info := &Info{PID: cmd.Process.Pid, Port: port,
+		StartedAt: time.Now().Format(time.RFC3339), Exe: exe}
+	if err := WritePid(info); err != nil {
+		return nil, err
+	}
+	_ = cmd.Process.Release()
+	return info, nil
+}
+
+// SpawnHandoff 是 nginx 式优雅升级的核心动作：把监听 socket 作为 fd 交给
+// 新二进制，等它接管成功（ready 字节）后返回新进程信息。
+//
+// 为什么这能零停机：socket 的可用性由内核维护，和进程生死解耦。父进程
+// 把 fd dup 给子进程，两个进程短暂同时在同一个 socket 上 accept（内核
+// 分流），随后父进程只负责把在途请求流完——客户端自始至终没有任何一毫秒
+// 面对过「连接被拒」。开发 newgate 的 Claude Code 会话本身就穿行在代理
+// 里，restart 杀掉自己脚下这条线的事不能再发生。
+//
+// 约定（Serve 端配合）：
+//   - fd3 = 监听 socket；fd4 = ready 管道写端
+//   - 子进程绑好 socket、即将进入 accept 循环时往 fd4 写一个字节
+func SpawnHandoff(port int, ln net.Listener) (*Info, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	tcp, ok := ln.(*net.TCPListener)
+	if !ok {
+		return nil, fmt.Errorf("交接需要 TCP 监听器，实际 %T", ln)
+	}
+	// File() 返回 dup 出来的新 fd——父进程自己的 listener 不受影响，
+	// 之后的 Shutdown 关的是父进程那份。
+	listenerFile, err := tcp.File()
+	if err != nil {
+		return nil, fmt.Errorf("提取监听 fd 失败: %w", err)
+	}
+	defer listenerFile.Close()
+
+	// ready 管道：子进程接上 socket 的唯一凭证。等不到它就交棒失败。
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	defer readyR.Close()
+
+	// 0660：共享部署下别的用户也能读日志排查（目录 setgid 保证组一致）
+	logf, err := os.OpenFile(paths.LogFile(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o660)
+	if err != nil {
+		return nil, err
+	}
+	defer logf.Close()
+
+	cmd := exec.Command(exe, "__serve", "--port", strconv.Itoa(port))
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // 脱离终端
+	cmd.ExtraFiles = []*os.File{listenerFile, readyW}    // fd3=socket, fd4=ready
+	cmd.Env = append(os.Environ(),
+		"NEWGATE_LISTENER_FD=3", "NEWGATE_READY_FD=4")
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	// 父进程立刻放下写端：否则子进程就算死了，读端也等不来 EOF。
+	readyW.Close()
+	if err := readyR.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		_ = cmd.Process.Kill()
+		return nil, err
+	}
+	var b [1]byte
+	if _, err := io.ReadFull(readyR, b[:]); err != nil {
+		// 新进程没接上：杀掉它，本进程继续独占 socket，服务未受任何影响
+		_ = cmd.Process.Kill()
+		return nil, fmt.Errorf("新进程 5 秒内没接上监听 socket: %v", err)
+	}
+	info := &Info{PID: cmd.Process.Pid, Port: port,
+		StartedAt: time.Now().Format(time.RFC3339), Exe: exe}
+	_ = cmd.Process.Release()
+	return info, nil
+}
+
+// AdoptRuntime 把 pid 文件和锁的归属改到新进程——优雅交接后由它持有。
+// 只动共享目录：legacy 的 $HOME 位置在交接时早就迁移完了。
+func AdoptRuntime(i *Info) error {
+	if err := WritePid(i); err != nil {
+		return err
+	}
+	return ioutil.WriteFile(paths.LockFile(),
+		[]byte(strconv.Itoa(i.PID)+"\n"), 0o660)
+}
