@@ -1137,3 +1137,133 @@ func cmdStatus(agents agentapi.AgentCatalog) int {
 	}
 	return 0
 }
+
+// takeoverStatusLine 一行说清谁在走 newgate，有异常才展开。
+func takeoverStatusLine(ps *proxyInfo) string {
+	var on, off []string
+	wanted := 0
+	for _, s := range takeover.List() {
+		if s.Wanted {
+			wanted++
+		}
+		switch {
+		case s.Active:
+			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.OK))
+		case s.Wanted:
+			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.Bad))
+		default:
+			off = append(off, s.Agent)
+		}
+	}
+	if len(on) == 0 {
+		line := style.Dim("全部直连")
+		if len(off) > 0 {
+			line += "   " + style.Dim("newgate start / on <agent>")
+		}
+		return line
+	}
+	line := "   " + strings.Join(on, "   ")
+	if len(off) > 0 {
+		line += "   " + style.Dim(strings.Join(off, " ")+" off")
+	}
+	// 代理在跑却有 agent 想接管没接管上：start/build 之后漏了一步，
+	// 不补的话那个工具会静默直连。
+	if ps != nil && countActive() < wanted {
+		line += "\n" + style.Hint(style.Yellow("有 agent 声明接管但未生效，重跑 newgate start"))
+	}
+	return line
+}
+
+func countActive() int {
+	n := 0
+	for _, s := range takeover.List() {
+		if s.Active {
+			n++
+		}
+	}
+	return n
+}
+
+// configLine 一行说清用哪个 profile，有 per-agent 覆盖才展开。
+func configLine(agents agentapi.AgentCatalog, st *domain.State) string {
+	line := style.Cyan(st.DefaultProfile) + style.Dim(" 默认")
+	over := 0
+	var parts []string
+	for _, id := range sortedAgentIDs(agents) {
+		if p := st.Active[id]; p != "" && p != st.DefaultProfile {
+			parts = append(parts, id+" → "+style.Cyan(p))
+			over++
+		}
+	}
+	if over > 0 {
+		line += "   " + strings.Join(parts, "   ")
+	}
+	return line
+}
+
+// chainTail 链尾的一句话总结：还有多少候选被跳过、去哪儿看原因。
+func chainTail(steps []resolve.Step, skips []resolve.Skip) string {
+	if len(skips) == 0 {
+		return fmt.Sprintf("链上 %d 站", len(steps))
+	}
+	reasons := map[string]int{}
+	for _, s := range skips {
+		reasons[skipKind(s.Reason)]++
+	}
+	var parts []string
+	for _, k := range skipKinds {
+		if n := reasons[k]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", k, n))
+		}
+	}
+	return fmt.Sprintf("链上 %d 站；跳过 %d（%s）   newgate tier normal",
+		len(steps), len(skips), strings.Join(parts, " · "))
+}
+
+// skipKind 把 skip 的自由文本归成几个可数的类目。
+func skipKind(reason string) string {
+	switch {
+	case strings.Contains(reason, "excluded"):
+		return "excluded"
+	case strings.Contains(reason, "熔断"):
+		return "熔断"
+	case strings.Contains(reason, "maxAttempts"):
+		return "超出 maxAttempts"
+	case strings.Contains(reason, "重复") || strings.Contains(reason, "去重"):
+		return "去重"
+	case strings.Contains(reason, "未定义"):
+		return "未定义"
+	case strings.Contains(reason, "api_key"):
+		return "没 key"
+	case strings.Contains(reason, "已禁用"):
+		return "已禁用"
+	case strings.Contains(reason, "成环"):
+		return "引用成环"
+	}
+	return "其他"
+}
+
+// statusFlags 一行列出非默认开关。默认状态不占版面。
+func statusFlags(st *domain.State) string {
+	var f []string
+	switch {
+	case st.DebugActive():
+		s := style.Yellow("debug=on")
+		if st.DebugUntil != "" {
+			s += style.Dim("（到 " + st.DebugUntil + "）")
+		}
+		f = append(f, s)
+	case st.Debug:
+		f = append(f, style.Yellow("debug=已过期"))
+	}
+	if !st.RepairEnabled() {
+		f = append(f, style.Yellow("schema-repair=off"))
+	}
+	switch {
+	case !st.SpecialEnabled():
+		f = append(f, style.Yellow("special_treatment=off"))
+	case len(st.SpecialOff) > 0:
+		f = append(f, style.Yellow("special 关了 "+strings.Join(st.SpecialOff, ",")))
+	}
+	return strings.Join(f, "   ")
+}
