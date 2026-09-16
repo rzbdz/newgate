@@ -240,3 +240,136 @@ func (r *Registry) Register(p Plugin) (modules.Release, error) {
 		return nil
 	}, nil
 }
+
+func orderPlugins(plugins []Plugin) []Plugin {
+	byName := make(map[string]Plugin, len(plugins))
+	index := make(map[string]int, len(plugins))
+	edges := make(map[string]map[string]bool, len(plugins))
+	indegree := make(map[string]int, len(plugins))
+	for i, plugin := range plugins {
+		byName[plugin.Name()] = plugin
+		index[plugin.Name()] = i
+		edges[plugin.Name()] = map[string]bool{}
+	}
+	addEdge := func(from, to string) {
+		if _, ok := byName[from]; !ok {
+			return
+		}
+		if _, ok := byName[to]; !ok || edges[from][to] {
+			return
+		}
+		edges[from][to] = true
+		indegree[to]++
+	}
+	for _, plugin := range plugins {
+		ordered, ok := plugin.(Ordered)
+		if !ok {
+			continue
+		}
+		for _, before := range ordered.Before() {
+			addEdge(plugin.Name(), before)
+		}
+		for _, after := range ordered.After() {
+			addEdge(after, plugin.Name())
+		}
+	}
+
+	var ready []string
+	for name := range byName {
+		if indegree[name] == 0 {
+			ready = append(ready, name)
+		}
+	}
+	sort.Slice(ready, func(i, j int) bool { return index[ready[i]] < index[ready[j]] })
+	out := make([]Plugin, 0, len(plugins))
+	for len(ready) > 0 {
+		name := ready[0]
+		ready = ready[1:]
+		out = append(out, byName[name])
+		for next := range edges[name] {
+			indegree[next]--
+			if indegree[next] == 0 {
+				ready = append(ready, next)
+				sort.Slice(ready, func(i, j int) bool {
+					return index[ready[i]] < index[ready[j]]
+				})
+			}
+		}
+	}
+	if len(out) != len(plugins) {
+		panic(fmt.Sprintf("special: plugin ordering cycle among %v", pluginNames(plugins)))
+	}
+	return out
+}
+
+func pluginNames(plugins []Plugin) []string {
+	names := make([]string, 0, len(plugins))
+	for _, plugin := range plugins {
+		names = append(names, plugin.Name())
+	}
+	return names
+}
+
+// Plugins 已注册的插件（副本，调用方改不坏注册表）。
+func Plugins() []Plugin {
+	registry := currentRegistry()
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	out := make([]Plugin, len(registry.plugins))
+	copy(out, registry.plugins)
+	return out
+}
+
+// Route 按注册顺序询问路由插件；第一个明确认领请求的决定生效。
+func Route(body []byte, request *Request, state *domain.State) (RouteDecision, bool) {
+	if state == nil || !state.SpecialEnabled() {
+		return RouteDecision{}, false
+	}
+	for _, p := range Plugins() {
+		if state.SpecialPluginOff(p.Name()) {
+			continue
+		}
+		router, ok := p.(RoutePlugin)
+		if !ok {
+			continue
+		}
+		if decision, matched := router.Route(body, request, state); matched {
+			decision.Plugin = p.Name()
+			return decision, true
+		}
+	}
+	return RouteDecision{}, false
+}
+
+// Statuses 汇总所有启用插件贡献的状态行。
+func Statuses(state *domain.State) []StatusItem {
+	if state == nil || !state.SpecialEnabled() {
+		return nil
+	}
+	var out []StatusItem
+	for _, p := range Plugins() {
+		if state.SpecialPluginOff(p.Name()) {
+			continue
+		}
+		if reporter, ok := p.(StatusProvider); ok {
+			out = append(out, reporter.Status(state)...)
+		}
+	}
+	return out
+}
+
+func Bindings(state *domain.State) []domain.Binding {
+	if state == nil || !state.SpecialEnabled() {
+		return nil
+	}
+	var out []domain.Binding
+	for _, p := range Plugins() {
+		if state.SpecialPluginOff(p.Name()) {
+			continue
+		}
+		if provider, ok := p.(BindingProvider); ok {
+			out = append(out, provider.Bindings(state)...)
+		}
+	}
+	return out
+}
