@@ -124,3 +124,13 @@ func Get[T any](ctx Context, capability Capability[T]) (T, bool) {
 	value, ok := values[0].(T)
 	return value, ok
 }
+
+// MustGet 读取已经由 Need 保证存在的 single 端口。
+// 若声明与使用不一致则立即 panic，暴露组件自身的编程错误。
+func MustGet[T any](ctx Context, capability Capability[T]) T {
+	value, ok := Get(ctx, capability)
+	if !ok {
+		panic("component: capability unavailable: " + capability.spec.name)
+	}
+	return value
+}
