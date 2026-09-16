@@ -54,3 +54,8 @@ type Requirement struct {
 func Need[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec}
 }
+
+// Optional 建立可选依赖；存在提供者时仍会建立生命周期顺序。
+func Optional[T any](capability Capability[T]) Requirement {
+	return Requirement{spec: capability.spec, optional: true}
+}
