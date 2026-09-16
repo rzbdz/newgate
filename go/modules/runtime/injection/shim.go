@@ -263,3 +263,14 @@ func writeAtomicMode(path string, b []byte, mode os.FileMode) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// InPath 当前进程的 PATH 里有没有我们的 shim 目录，且在真实工具之前。
+func InPath() bool {
+	want := filepath.Clean(Dir())
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		if filepath.Clean(d) == want {
+			return true
+		}
+	}
+	return false
+}
