@@ -12,6 +12,7 @@ package style
 import (
 	"os"
 	"strings"
+	"unicode/utf8"
 )
 
 // ---------- 颜色 ----------
@@ -196,19 +197,42 @@ func Truncate(s string, w int) string {
 	if w <= 1 {
 		return "…"
 	}
-	out, cur := "", 0
-	for _, r := range s {
+	var out strings.Builder
+	cur := 0
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && !(s[j] >= '@' && s[j] <= '~') {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			out.WriteString(s[i:j])
+			i = j
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
 		rw := runeWidth(r)
 		if cur+rw > w-1 {
 			break
 		}
-		out += string(r)
+		out.WriteRune(r)
 		cur += rw
+		i += size
 	}
-	return out + "…"
+	out.WriteRune('…')
+	if strings.Contains(s, "\033") {
+		out.WriteString(cReset)
+	}
+	return out.String()
 }
 
 // ---------- 结构 ----------
+
+// MaxColumns 是 CLI 版面的硬上限。75 列能在常见的窄终端、分屏和 WSL
+// 窗口里留一列余量，避免第 76 列触发自动折行把表格撕开。
+const MaxColumns = 75
 
 // 版式约定（全 CLI 统一，别在调用点发明新写法）：
 //
@@ -229,17 +253,22 @@ const labelW = 8
 // `unknown` 这种字对用户没有任何用。
 func Title(left, right string) string {
 	if right == "" || right == "unknown" {
-		return Bold(left)
+		return limit(Bold(left))
 	}
-	return Bold(left) + "  " + Dim(right)
+	return limit(Bold(left) + "  " + Dim(right))
 }
 
 // Rule 页头下的暗色分隔线。只用在这里——正文里再画线会和表格打架。
-func Rule(w int) string { return Dim(strings.Repeat("─", w)) }
+func Rule(w int) string {
+	if w > MaxColumns {
+		w = MaxColumns
+	}
+	return Dim(strings.Repeat("─", w))
+}
 
 // Section 段标题（含前导空行），调用点直接 Println。
 func Section(name string) string {
-	return "\n" + Bold(name)
+	return "\n" + limit(Bold(name))
 }
 
 // Field 一行「标签 + 值」：标签固定列宽，值可以带颜色。
@@ -250,24 +279,26 @@ func Section(name string) string {
 // 标签补到 labelW 之后**总是**再跟一个空格：标签本身就占满 labelW 时
 // （中文双宽很容易占满），没有这格空格值会紧贴着标签。
 func Field(label, value string) string {
-	return "  " + Dim(Pad(label, labelW)) + " " + value
+	return limit("  " + Dim(Pad(label, labelW)) + " " + value)
 }
 
 // Item 缩进一层的一条明细，标记单独上色。
 func Item(mark, text string) string {
-	return "  " + Mark(mark) + " " + text
+	return limit("  " + Mark(mark) + " " + text)
 }
 
 // Bullet 无标记的明细行。
 func Bullet(text string) string {
-	return "    " + text
+	return limit("    " + text)
 }
 
 // Hint 次要说明。整份 CLI 里所有「不是结论的话」都应该走这里——
 // 它们默认是暗的，扫读时自动跳过。一句话为限，不要写成段落。
 func Hint(text string) string {
-	return "    " + Dim(text)
+	return limit("    " + Dim(text))
 }
+
+func limit(s string) string { return Truncate(s, MaxColumns) }
 
 // ---------- 表格 ----------
 
@@ -338,6 +369,25 @@ func (t *Table) String() string {
 	for _, r := range t.rows {
 		measure(r)
 	}
+	// 表格总宽不得超过 75 列。优先收缩最宽的列，每列至少保留 4 列；
+	// 表头也可截断，否则一个异常长的动态表头就能突破硬上限。
+	available := MaxColumns - VisibleWidth(t.indent) - 2*(n-1)
+	if available < n {
+		available = n
+	}
+	for sum(widths) > available {
+		widest, room := -1, 0
+		for i, w := range widths {
+			const minW = 4
+			if w-minW > room {
+				widest, room = i, w-minW
+			}
+		}
+		if widest < 0 {
+			break
+		}
+		widths[widest]--
+	}
 
 	var b strings.Builder
 	line := func(cells []string, dim bool) {
@@ -347,6 +397,7 @@ func (t *Table) String() string {
 			if i >= n {
 				break
 			}
+			c = Truncate(c, widths[i])
 			if dim {
 				c = Dim(c)
 			}
@@ -364,4 +415,12 @@ func (t *Table) String() string {
 		line(r, false)
 	}
 	return b.String()
+}
+
+func sum(ns []int) int {
+	total := 0
+	for _, n := range ns {
+		total += n
+	}
+	return total
 }

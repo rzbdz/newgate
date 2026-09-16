@@ -139,6 +139,30 @@ func TestChainSparseProfileIsSkipped(t *testing.T) {
 	}
 }
 
+func TestNormalFallbackToMidStaysWithinEachProfile(t *testing.T) {
+	ps := []*domain.Profile{
+		{Name: "head", Roles: map[string]domain.Candidates{
+			"mid": one("pA", "sonnet-a")}},
+		{Name: "next", Roles: map[string]domain.Candidates{
+			"mid": one("pB", "sonnet-b")}},
+		{Name: "heavy-only", Roles: map[string]domain.Candidates{
+			"heavy": one("pC", "fable")}},
+	}
+	steps, skips := BuildChain("normal", ps, mkProvs("pA", "pB", "pC"),
+		Opts{Active: "head"})
+	eq(t, names(steps), "head:pA/sonnet-a", "next:pB/sonnet-b")
+
+	var duplicateSkips int
+	for _, skip := range skips {
+		if strings.Contains(skip.Reason, "重复") {
+			duplicateSkips++
+		}
+	}
+	if duplicateSkips != 0 {
+		t.Fatalf("profile 内 normal→mid 不应反复展开全链，得到 %+v", skips)
+	}
+}
+
 func TestChainDedup(t *testing.T) {
 	ps := []*domain.Profile{
 		{Name: "a", Priority: prio(10), Roles: map[string]domain.Candidates{"h": list("pA/m", "pB/m")}},

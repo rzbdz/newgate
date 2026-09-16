@@ -49,8 +49,10 @@ Claude 自己就是 `fable / opus / sonnet / haiku` 四档，语义档位按它�
 | `light` | haiku | 起标题这类小活 |
 | `vision` | — | 多模态，与上面的阶梯正交 |
 
-`normal` 是后加的档：**没写 `normal` 的配置，直接用 `mid` 顶上**
-（`domain.CandidatesFor`），不是「整层跳过」。跳过会让老配置在主力档上
+`normal` 是后加的档：**没写 `normal` 的配置，直接用同一 profile 的 `mid`
+顶上**（`domain.CandidatesFor`），不是「整层跳过」。这里不能实现成 `@mid`：
+引用会展开跨 profile 的整条链，每个 profile 都来一次就会制造大量假重复。
+跳过会让老配置在主力档上
 没有候选、链空转；而四档化之前主循环用的本来就是 mid 那一档的资源，语义
 上就该跟 mid 一样。写了 `normal` 的配置按自己的来。
 
@@ -87,8 +89,9 @@ Claude 自己就是 `fable / opus / sonnet / haiku` 四档，语义档位按它�
 
 为什么值得引入这一层：**档位会漂**。用户今天觉得 sisyphus 该用主力档，
 明天主力档从 opus 换成 fable——写 `@normal` 的槽位跟着走，写死
-`relay/opus-5` 的不会。缺省机制（内置别名 `normal→mid`、模块槽位的缺省）
-在实现上就是「这个键等价于 `@那一档`」，只有这一条路径（`domain.DefaultBindingFor`）。
+`relay/opus-5` 的不会。模块槽位的缺省在实现上就是「这个键等价于
+`@那一档`」（`domain.DefaultBindingFor`）；`normal→mid` 是上节所述的
+profile 内向后兼容，不走跨 profile 引用。
 
 ### 1.3 模块贡献的键：omo 的槽位就是一组动态角色
 
