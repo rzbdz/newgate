@@ -258,7 +258,9 @@ func tierReport(which string) int {
 			steps, skips := resolve.BuildChain(name, snap.Profiles, snap.Providers, resolve.Opts{
 				Active:    head,
 				Available: health.Default.Available,
-				MaxSteps:  st.Chain.Attempts(),
+				// tier 展示的是完整候选链；maxAttempts 是执行约束，不是
+				// membership。否则后续 profile 会被误解成根本没进链。
+				MaxSteps: 0,
 			})
 			rows = append(rows, tierView{name, steps, skips})
 		}
@@ -302,6 +304,12 @@ func tierReport(which string) int {
 			}
 			fmt.Print(t.String())
 			fmt.Println(style.Hint("按序尝试；同 (provider, model) 全链仅一次"))
+			if limit := st.Chain.Attempts(); limit < len(r.steps) {
+				fmt.Println(style.Hint(fmt.Sprintf(
+					"单次请求最多尝试前 %d 站；后续 %d 站仍在链中",
+					limit, len(r.steps)-limit)))
+				fmt.Println(style.Hint("调高 state.json chain.max_attempts 可扩大实际尝试范围"))
+			}
 		}
 		if len(r.skips) > 0 {
 			fmt.Println()

@@ -64,6 +64,10 @@ func TestTruncate(t *testing.T) {
 	if got := Truncate("abc", 10); got != "abc" {
 		t.Errorf("不该给够短的串加省略号: %q", got)
 	}
+	colored := "\033[31mabcdefgh\033[0m"
+	if got := Truncate(colored, 5); VisibleWidth(got) != 5 || !strings.Contains(got, "\033[31m") {
+		t.Errorf("带色截断损坏: %q (%d)", got, VisibleWidth(got))
+	}
 }
 
 // TestTableColumnsAlign 表格的判据是**列起点对齐**，不是各行等宽——
@@ -101,6 +105,42 @@ func TestTableColumnsAlign(t *testing.T) {
 	for _, l := range lines {
 		if strings.HasSuffix(l, " ") {
 			t.Errorf("行尾有空格: %q", l)
+		}
+	}
+}
+
+func TestTableNeverExceedsMaxColumns(t *testing.T) {
+	tbl := NewTable("profile", "绑定", "说明")
+	tbl.Row(
+		"a-profile-with-a-very-long-name",
+		"smt-provider/a-model-name-that-is-deliberately-far-too-long-for-a-narrow-terminal",
+		"这是一段很长的中文说明，用来确认显示宽度而不是 UTF-8 字节数决定截断位置",
+	)
+	for _, line := range strings.Split(strings.TrimRight(tbl.String(), "\n"), "\n") {
+		if got := VisibleWidth(line); got > MaxColumns {
+			t.Fatalf("表格宽度 = %d，超过 %d：%q", got, MaxColumns, line)
+		}
+	}
+}
+
+func TestRuleClampsToMaxColumns(t *testing.T) {
+	if got := VisibleWidth(Rule(200)); got != MaxColumns {
+		t.Fatalf("Rule 宽度 = %d，想要 %d", got, MaxColumns)
+	}
+}
+
+func TestLinePrimitivesNeverExceedMaxColumns(t *testing.T) {
+	long := strings.Repeat("很长", 50)
+	lines := []string{
+		Title(long, long),
+		Field("标签", long),
+		Item(Warn, long),
+		Bullet(long),
+		Hint(long),
+	}
+	for _, line := range lines {
+		if got := VisibleWidth(line); got > MaxColumns {
+			t.Fatalf("行宽 = %d，超过 %d：%q", got, MaxColumns, line)
 		}
 	}
 }

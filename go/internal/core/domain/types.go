@@ -235,8 +235,8 @@ func (p *Profile) Prio() int {
 // CandidatesFor 返回这个 profile 为某个键提供的候选列表（空 = 稀疏）。
 //
 // 「键」既可以是档位（heavy…），也可以是模块贡献的动态角色键（omo-sisyphus）。
-// 缺省（内置别名 normal→mid、模块给的槽位缺省）在这里统一落地：没写这个键
-// 就看它等价于哪条绑定。规则只有一条，没有第二套机制。
+// normal→mid 是 profile 内兼容：老 profile 没写 normal 时，复用自己的 mid。
+// 模块贡献的槽位缺省则是跨 profile 的引用，由 BuildChain 展开。
 //
 // 注意缺省可能是**引用**（omo-sisyphus 缺省 @normal），继续展开是 BuildChain
 // 的事（带环检测与去重）——这里只是把「等价于谁」翻译成候选的第一项。
@@ -244,9 +244,23 @@ func (p *Profile) CandidatesFor(role string) Candidates {
 	if c, ok := p.Roles[role]; ok && len(c) > 0 {
 		return c
 	}
+	// normal 是 2026-09-16 后加的主力档。兼容老配置时必须只借当前
+	// profile 的 mid；若返回 @mid，BuildChain 会对每个 profile 反复展开
+	// 整条跨-profile mid 链，制造大量假重复，还会破坏稀疏 profile 语义。
+	if role == "normal" {
+		if c, ok := p.Roles["mid"]; ok && len(c) > 0 {
+			return c
+		}
+	}
 	if bd, ok := DefaultBindingFor(role); ok {
+		// normal 的内置缺省已在上面按 profile 处理。当前 profile 连 mid
+		// 都没有时，应继续走它自己的通配/fallback，而不是展开全局 mid 链。
+		if role == "normal" && bd.Ref == "mid" {
+			goto profileFallback
+		}
 		return Candidates{bd}
 	}
+profileFallback:
 	if c, ok := p.Roles["*"]; ok && len(c) > 0 {
 		return c
 	}
