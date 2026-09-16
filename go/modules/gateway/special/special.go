@@ -516,3 +516,12 @@ func Apply(body []byte, r *Request, off func(name string) bool) Result {
 	}
 	return res
 }
+
+// syncContextModel 让上下文跟上 body：从 body 读回顶层 model 写进 r.Model。
+// 这是链上唯一需要维护的派生字段（其余字段不来自 body）。读不出就保持
+// 原值——绝不让一个改坏了的 body 把上下文也带坏。
+func syncContextModel(body []byte, r *Request) {
+	if m, has := rewrite.TopLevelString(body, "model"); has && m != "" && m != r.Model {
+		r.Model = m
+	}
+}
