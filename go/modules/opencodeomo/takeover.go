@@ -329,3 +329,134 @@ func ApplyOpenagent(target string, port int) (*Report, error) {
 	}
 	return rep, writeAtomic(target, out)
 }
+
+// currentTier 「现状」= 不启用建议时这个槽位落在哪一档——也就是老版本的行为。
+//
+//	newgate/<档位>  老版本接管过的文件：原样保留，用户现在的行为不变
+//	newgate/<键>    新版本接管过的：沿用注册表里记的现状
+//	其余（真名字）  第一次接管：按体格归类，模糊命中要说不出来路
+func currentTier(model, key string, prev *OmoSlots, was string) (tier, note string) {
+	if strings.HasPrefix(model, ProviderID+"/") {
+		rest := strings.TrimPrefix(model, ProviderID+"/")
+		if domain.IsRole(rest) {
+			return rest, "沿用老版本接管写下的档位"
+		}
+		if p, ok := prev.SlotOf(key); ok && p.Current != "" {
+			return p.Current, ""
+		}
+	}
+	name := firstNonEmpty(was, model)
+	t, exact := ClassifyModel(name)
+	if !exact {
+		return t, "模型名 " + name + " 没命中规则，按 mid 兜底"
+	}
+	return t, ""
+}
+
+func slotKey(kind, name string) string {
+	if kind == "category" {
+		return OmoCatPrefix + name
+	}
+	return OmoAgentPrefix + name
+}
+
+func isTakenOver(model string) bool {
+	return strings.HasPrefix(model, ProviderID+"/") || strings.HasPrefix(model, "@")
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func joinWhy(note, why string) string {
+	switch {
+	case note == "":
+		return why
+	case why == "":
+		return note
+	default:
+		return note + "；" + why
+	}
+}
+
+func suggestTag(suggested, current string) string {
+	if suggested == "" || suggested == current {
+		return ""
+	}
+	return "，建议 " + suggested
+}
+
+// ---------- 编排 ----------
+
+func IsTakenOver(target string) bool {
+	b, err := ioutil.ReadFile(target)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(b), `"`+ProviderID+`/`) ||
+		strings.Contains(string(b), `"`+ProviderID+`"`)
+}
+
+// ApplyAll 接管所有目标文件。找不到的文件跳过并记录，不视为错误。
+func ApplyAll(port int) ([]*Report, error) {
+	// 先发现模块槽位键（omo 的 intra-agent）。opencode.json 的 provider 块
+	// 要把这些 id 先登记出来，改 omo 配置时引用它们才认得出。哪些键、叫什么
+	// 由模块决定（omo.go），这里只是把两边对起来。
+	var reps []*Report
+	var extra []string
+	if t := omoTargetPath(); t != "" {
+		slots, err := DiscoverSlots(t)
+		if err != nil {
+			// 发现失败就说出来，别让接管「成功」了却什么都没改
+			reps = append(reps, &Report{File: t, Skipped: err.Error()})
+		}
+		for _, s := range slots {
+			extra = append(extra, s.Key())
+		}
+	}
+	if reg := ReadOmoSlots(); reg != nil {
+		for _, s := range reg.Slots {
+			extra = append(extra, s.Key)
+		}
+	}
+
+	for _, t := range TargetFiles() {
+		if _, err := os.Stat(t); os.IsNotExist(err) {
+			reps = append(reps, &Report{File: t, Skipped: "文件不存在"})
+			continue
+		}
+		var rep *Report
+		var err error
+		if strings.Contains(filepath.Base(t), "openagent") {
+			rep, err = ApplyOpenagent(t, port)
+		} else {
+			rep, err = ApplyOpencode(t, port, extra)
+		}
+		if err != nil {
+			return reps, fmt.Errorf("接管 %s 失败: %w", t, err)
+		}
+		reps = append(reps, rep)
+	}
+	return reps, nil
+}
+
+// RestoreAll 从 original/ 还原。这是逃生舱：还原后删掉 newgate 也能正常用。
+func RestoreAll() ([]string, error) {
+	var done []string
+	for _, t := range TargetFiles() {
+		orig := originalPath(t)
+		b, err := ioutil.ReadFile(orig)
+		if err != nil {
+			continue // 没备份说明没接管过
+		}
+		if err := writeAtomic(t, b); err != nil {
+			return done, fmt.Errorf("还原 %s 失败: %w", t, err)
+		}
+		done = append(done, t)
+	}
+	ClearOmoSlots() // 槽位键随释放失效；用户手写的 overrides 留着
+	return done, nil
+}
