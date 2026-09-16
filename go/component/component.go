@@ -201,3 +201,12 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 	}
 	return manager, nil
 }
+
+// Must 是组合根的 fail-fast 入口；库代码应优先使用 New 返回可处理的错误。
+func Must(loaders ...Loader) *Manager {
+	manager, err := New(loaders...)
+	if err != nil {
+		panic(fmt.Sprintf("component: load failed: %v", err))
+	}
+	return manager
+}
