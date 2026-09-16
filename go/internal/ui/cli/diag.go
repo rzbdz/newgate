@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,6 @@ import (
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
 	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
-	"github.com/rzbdz/newgate/go/internal/gateway/health"
 	"github.com/rzbdz/newgate/go/internal/gateway/metrics"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/probe"
@@ -52,10 +52,12 @@ func warnShellEnvConflict(toolID string) {
 func cmdProbe(only string, asJSON bool) int {
 	quiet := asJSON // JSON 模式不打进度，免得污染输出
 	started := time.Now()
+	st := store.LoadState()
 
 	opts := probe.Options{
 		Only:        only,
-		Timeout:     120 * time.Second,
+		Timeout:     st.Timeouts.ClassifierFirstByte(),
+		SlowAfter:   st.Timeouts.ClassifierFirstByte(),
 		Concurrency: 8,
 		WaitTick:    5 * time.Second,
 	}
@@ -68,7 +70,8 @@ func cmdProbe(only string, asJSON bool) int {
 			}
 			fmt.Fprintln(os.Stderr)
 		}
-		opts.OnDone = func(t probe.Target, status int, lat time.Duration, err error, done, total int) {
+		opts.OnDone = func(t probe.Target, status int, lat, totalLat time.Duration,
+			err error, done, total int) {
 			mark := style.Mark(probeMark(err == nil && status == 200))
 			st := "  -"
 			if status > 0 {
@@ -78,8 +81,10 @@ func cmdProbe(only string, asJSON bool) int {
 			if err != nil {
 				msg = "   " + firstLine(err.Error(), 64)
 			}
-			fmt.Fprintf(os.Stderr, "[%2d/%2d] %s %-44s %s %6dms%s\n",
-				done, total, mark, t, st, lat.Milliseconds(), msg)
+			line := fmt.Sprintf("[完成 %d/%d] %s %s %s 主%dms 总%dms%s",
+				done, total, mark, style.Pad(style.Truncate(t.String(), 34), 34),
+				st, lat.Milliseconds(), totalLat.Milliseconds(), msg)
+			fmt.Fprintln(os.Stderr, style.Truncate(line, style.MaxColumns))
 		}
 		opts.OnWaiting = func(inflight map[probe.Target]time.Duration) {
 			var parts []string
@@ -87,13 +92,20 @@ func cmdProbe(only string, asJSON bool) int {
 				parts = append(parts, fmt.Sprintf("%s %ds", t, int(d.Seconds())))
 			}
 			sort.Strings(parts)
-			fmt.Fprintf(os.Stderr, "        %s 等待中: %s\n", style.Mark(style.Skip), strings.Join(parts, ", "))
+			for _, part := range parts {
+				fmt.Fprintln(os.Stderr, style.Truncate(
+					"        "+style.Mark(style.Skip)+" 等待中: "+part, style.MaxColumns))
+			}
 		}
 	}
 
 	results, err := probe.Run(opts)
 	if err != nil {
 		return die(65, err.Error())
+	}
+	opened, healthErr := publishProbeHealth(results)
+	if healthErr != nil && !quiet {
+		fmt.Fprintln(os.Stderr, style.Item(style.Warn, "全局熔断表未更新："+healthErr.Error()))
 	}
 	if asJSON {
 		b, _ := json.MarshalIndent(results, "", "  ")
@@ -106,11 +118,11 @@ func cmdProbe(only string, asJSON bool) int {
 		head = "profile " + only
 	}
 	fmt.Println(style.Title("newgate probe", fmt.Sprintf("%s · %d 目标 · %s",
-		head, len(results), time.Since(started).Round(time.Millisecond))))
+		head, probe.UniqueCount(results), time.Since(started).Round(time.Millisecond))))
 	fmt.Println(style.Rule(72))
 
 	// 明细：同一 profile 的后续行不再重复 profile 名（视觉分组，省一列宽度）。
-	t := style.NewTable("profile", "档位", "上游/模型", "状态", "延迟", "错误")
+	t := style.NewTable("profile", "档位", "上游/模型", "状态", "评级", "主延迟", "总耗时", "错误")
 	t.AlignRight(3)
 	last := ""
 	for _, r := range results {
@@ -135,9 +147,15 @@ func cmdProbe(only string, asJSON bool) int {
 		if r.Err != "" {
 			e = style.Dim(style.Truncate(firstLine(r.Err, 90), 48))
 		}
-		t.Row(p, r.Role, r.Provider+"/"+r.Model, status, lat, e)
+		totalLat := style.Dim("-")
+		if r.Total > 0 {
+			totalLat = fmt.Sprintf("%dms", r.Total.Milliseconds())
+		}
+		t.Row(p, r.Role, r.Provider+"/"+r.Model, status,
+			probeGrade(r, opts.SlowAfter), lat, totalLat, e)
 	}
 	fmt.Print(t.String())
+	fmt.Println(style.Hint("健康评分只用主探活延迟；总耗时还包含方言和 quirk 检查"))
 
 	// 方言能力：probe 顺带探明的。count_tokens ✗ 的上游，Claude Code 的
 	// 水位条走本地粗估（forward 层 lazy probe 也会自己学到这一点）。
@@ -167,6 +185,8 @@ func cmdProbe(only string, asJSON bool) int {
 			concl = style.Red("不可用")
 		case sm.Bad > 0:
 			concl = style.Yellow("部分可用")
+		case sm.Grade == "fluent":
+			concl = style.Green("流畅")
 		}
 		avg := style.Dim("-")
 		if sm.OK > 0 {
@@ -179,8 +199,15 @@ func cmdProbe(only string, asJSON bool) int {
 	}
 	fmt.Print(s.String())
 
-	st := store.LoadState()
 	fmt.Println(style.Hint("当前 profile：" + st.DefaultProfile))
+	if healthErr == nil {
+		fmt.Println(style.Hint(fmt.Sprintf(
+			"全局熔断表已更新：%d 个 binding 被摘除（慢阈值 %s）",
+			opened, st.Timeouts.ClassifierFirstByte())))
+		if opened > 0 {
+			fmt.Println(style.Hint("至少隔离 60s；之后仅成功 probe 可以恢复"))
+		}
+	}
 
 	// 当前 profile 有挂的就给出建议
 	for _, sm := range sums {
@@ -198,6 +225,48 @@ func cmdProbe(only string, asJSON bool) int {
 	return 0
 }
 
+func publishProbeHealth(results []probe.Result) (int, error) {
+	info, _ := proxyState()
+	if info == nil || info.Port <= 0 {
+		return 0, fmt.Errorf("daemon 未运行")
+	}
+	st := store.LoadState()
+	type observation struct {
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+		Status    int    `json:"status"`
+		LatencyMs int64  `json:"latency_ms"`
+		Context   int    `json:"context_bytes"`
+		Error     string `json:"error,omitempty"`
+	}
+	byTarget := map[string]observation{}
+	for _, r := range results {
+		if r.Provider == "" || r.Model == "" {
+			continue
+		}
+		key := r.Provider + "/" + r.Model
+		byTarget[key] = observation{
+			Provider: r.Provider, Model: r.Model, Status: r.Status,
+			LatencyMs: r.Latency.Milliseconds(), Context: 1, Error: r.Err,
+		}
+	}
+	var keys []string
+	for key := range byTarget {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var observations []observation
+	for _, key := range keys {
+		observations = append(observations, byTarget[key])
+	}
+	var response struct {
+		Opened int `json:"opened"`
+	}
+	err := localPost(info.Port, "/__newgate/health", st.ControlToken,
+		map[string]interface{}{"observations": observations}, &response)
+	return response.Opened, err
+}
+
 // probeMark 探活结果的标记。跟 probe.Light() 的灯同义，但用本 CLI 统一的
 // 符号集——表格里塞 emoji 会撑坏对齐，也不 geek。
 func probeMark(ok bool) string {
@@ -205,6 +274,19 @@ func probeMark(ok bool) string {
 		return style.OK
 	}
 	return style.Bad
+}
+
+func probeGrade(r probe.Result, slowAfter time.Duration) string {
+	switch {
+	case r.Status != http.StatusOK:
+		return style.Red("不可用")
+	case r.Latency > slowAfter:
+		return style.Red("卡顿")
+	case r.Latency >= 3*time.Second:
+		return style.Yellow("可用")
+	default:
+		return style.Green("流畅")
+	}
 }
 
 // cmdMetrics 打网关计数器：请求在路径上遇到的每一类「被网关处理过的事」
@@ -906,7 +988,8 @@ func cmdStatus() int {
 
 	if snap, err := store.Load(); err == nil {
 		steps, skips := resolve.BuildChain("normal", snap.Profiles, snap.Providers, resolve.Opts{
-			Active: st.DefaultProfile, Available: health.Default.Available,
+			Active: st.DefaultProfile, Available: availableFromProxy(ps),
+			Rank:     rankFromProxy(ps),
 			MaxSteps: st.Chain.Attempts()})
 		fmt.Print(style.Section("fallback 链") + style.Dim("   normal 档，按序尝试") + "\n")
 		if len(steps) == 0 {

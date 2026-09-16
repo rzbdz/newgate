@@ -8,7 +8,6 @@ import (
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
 	"github.com/rzbdz/newgate/go/internal/core/resolve"
-	"github.com/rzbdz/newgate/go/internal/gateway/health"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 	"github.com/rzbdz/newgate/go/internal/runtime/injection"
 	"github.com/rzbdz/newgate/go/internal/store"
@@ -287,11 +286,15 @@ func omoExplain(key string) int {
 		}
 	}
 
+	_, live := proxyState()
+	available := availableFromProxy(live)
+	rank := rankFromProxy(live)
 	for _, head := range names {
 		fmt.Print(style.Section("链头 "+head) + style.Dim("   "+strings.Join(heads[head], ", ")) + "\n")
 		steps, skips := resolve.BuildChain(key, snap.Profiles, snap.Providers, resolve.Opts{
 			Active:    head,
-			Available: health.Default.Available,
+			Available: available,
+			Rank:      rank,
 			MaxSteps:  st.Chain.Attempts(),
 		})
 		if len(steps) == 0 {

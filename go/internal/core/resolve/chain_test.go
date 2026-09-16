@@ -114,6 +114,28 @@ func TestChainOrder_ProfileMajorListMinor(t *testing.T) {
 	eq(t, names(steps), "cheap:pA/m1", "cheap:pB/m2", "rich:pC/m3", "rich:pD/m4")
 }
 
+func TestProbeRankReordersFallbackButNotHead(t *testing.T) {
+	ps := []*domain.Profile{
+		{Name: "head", Roles: map[string]domain.Candidates{"h": one("pA", "m1")}},
+		{Name: "first", Roles: map[string]domain.Candidates{"h": one("pB", "usable")}},
+		{Name: "second", Roles: map[string]domain.Candidates{"h": one("pC", "fluent")}},
+		{Name: "third", Roles: map[string]domain.Candidates{"h": one("pD", "unknown")}},
+	}
+	ranks := map[string]int{"pA/m1": 2, "pB/usable": 2, "pC/fluent": 0, "pD/unknown": 1}
+	steps, _ := BuildChain("h", ps, mkProvs("pA", "pB", "pC", "pD"), Opts{
+		Active: "head",
+		Rank: func(provider, model string) int {
+			return ranks[provider+"/"+model]
+		},
+	})
+	eq(t, names(steps),
+		"head:pA/m1",
+		"second:pC/fluent",
+		"third:pD/unknown",
+		"first:pB/usable",
+	)
+}
+
 func TestChainSparseProfileIsSkipped(t *testing.T) {
 	ps := []*domain.Profile{
 		{Name: "onlyheavy", Priority: prio(5), Roles: map[string]domain.Candidates{
@@ -217,7 +239,7 @@ func TestBreakerFiltersStep(t *testing.T) {
 	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{"h": list("pA/m1", "pB/m2")}}}
 	steps, skips := BuildChain("h", ps, mkProvs("pA", "pB"), Opts{
 		Active:    "a",
-		Available: func(p string) bool { return p != "pA" },
+		Available: func(p, _ string) bool { return p != "pA" },
 	})
 	eq(t, names(steps), "a:pB/m2")
 	if len(skips) == 0 || !strings.Contains(skips[0].Reason, "熔断") {
@@ -356,7 +378,7 @@ func TestOverrideChainFallsBackOnBreaker(t *testing.T) {
 	steps, _, applied := OverrideChain(domain.Binding{Provider: "pC", Model: "m3"},
 		"light", ps, mkProvs("pA", "pC"), Opts{
 			Active:    "a",
-			Available: func(p string) bool { return p != "pC" },
+			Available: func(p, _ string) bool { return p != "pC" },
 		})
 	eq(t, names(steps), "a:pA/m1")
 	if applied {

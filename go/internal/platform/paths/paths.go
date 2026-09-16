@@ -24,12 +24,14 @@ func root() string {
 	return filepath.Join(Home(), ".config", "newgate")
 }
 
-func Config() string        { return root() }
-func Mappings() string      { return filepath.Join(root(), "mappings") }
-func ProvidersFile() string { return filepath.Join(root(), "providers.json") }
-func StateFile() string     { return filepath.Join(root(), "state.json") }
-func BackupDir() string     { return filepath.Join(root(), "backups") }
-func LogFile() string       { return filepath.Join(root(), "newgate.log") }
+func Config() string         { return root() }
+func Mappings() string       { return filepath.Join(root(), "mappings") }
+func ProvidersFile() string  { return filepath.Join(root(), "providers.json") }
+func StateFile() string      { return filepath.Join(root(), "state.json") }
+func HealthFile() string     { return filepath.Join(root(), "health.json") }
+func ProbeCacheFile() string { return filepath.Join(root(), "probe-capabilities.json") }
+func BackupDir() string      { return filepath.Join(root(), "backups") }
+func LogFile() string        { return filepath.Join(root(), "newgate.log") }
 
 // OmoSlotsFile 接管 opencode 插件 oh-my-openagent 时写下的**槽位登记表**。
 //

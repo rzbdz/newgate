@@ -244,6 +244,10 @@ func tierReport(which string) int {
 	if which != "" {
 		names = []string{which}
 	}
+	_, live := proxyState()
+	available := availableFromProxy(live)
+	rank := rankFromProxy(live)
+	liveHealth := healthFromProxy(live)
 
 	for _, head := range headNames {
 		sort.Strings(heads[head])
@@ -257,7 +261,8 @@ func tierReport(which string) int {
 		for _, name := range names {
 			steps, skips := resolve.BuildChain(name, snap.Profiles, snap.Providers, resolve.Opts{
 				Active:    head,
-				Available: health.Default.Available,
+				Available: available,
+				Rank:      rank,
 				// tier 展示的是完整候选链；maxAttempts 是执行约束，不是
 				// membership。否则后续 profile 会被误解成根本没进链。
 				MaxSteps: 0,
@@ -297,13 +302,15 @@ func tierReport(which string) int {
 		} else {
 			fmt.Println(style.Field("最终", style.Cyan(r.steps[0].Binding.String())))
 			fmt.Println()
-			t := style.NewTable("#", "profile", "绑定")
+			t := style.NewTable("#", "profile", "绑定", "实时评分")
 			t.AlignRight(0)
 			for i, s := range r.steps {
-				t.Row(fmt.Sprintf("%d", i+1), s.Profile, s.Binding.String())
+				t.Row(fmt.Sprintf("%d", i+1), s.Profile, s.Binding.String(),
+					bindingHealthLabel(liveHealth[s.Binding.String()]))
 			}
 			fmt.Print(t.String())
-			fmt.Println(style.Hint("按序尝试；同 (provider, model) 全链仅一次"))
+			fmt.Println(style.Hint("链头固定；fallback 按当前上下文的预测 TTFT 排序"))
+			fmt.Println(style.Hint("同 (provider, model) 全链仅一次"))
 			if limit := st.Chain.Attempts(); limit < len(r.steps) {
 				fmt.Println(style.Hint(fmt.Sprintf(
 					"单次请求最多尝试前 %d 站；后续 %d 站仍在链中",
@@ -317,6 +324,24 @@ func tierReport(which string) int {
 		}
 	}
 	return 0
+}
+
+func bindingHealthLabel(h health.Status) string {
+	if h.Open {
+		return style.Red("熔断")
+	}
+	switch {
+	case h.ScoreMs > 0 && h.ScoreMs < 3000:
+		return style.Green(fmt.Sprintf("流畅 %dms", h.ScoreMs))
+	case h.ScoreMs >= 3000 && h.ScoreMs <= 12000:
+		return style.Yellow(fmt.Sprintf("可用 %dms", h.ScoreMs))
+	case h.ScoreMs > 12000:
+		return style.Red(fmt.Sprintf("卡顿 %dms", h.ScoreMs))
+	case h.Grade == health.ProbeUnavailable:
+		return style.Red("不可用")
+	default:
+		return style.Dim("未探")
+	}
 }
 
 func chainSig(steps []resolve.Step) string {
