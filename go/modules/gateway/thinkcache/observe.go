@@ -139,3 +139,104 @@ func (o *Observer) feedChunk(payload []byte) {
 		}
 	}
 }
+
+func (o *Observer) addTool(id string) {
+	if id == "" || o.seenID[id] {
+		return
+	}
+	o.seenID[id] = true
+	o.toolIDs = append(o.toolIDs, id)
+}
+
+// ObserveBody 非流式响应：整个 body 一次看完。
+func (o *Observer) ObserveBody(body []byte) {
+	var r struct {
+		// OpenAI
+		Choices []struct {
+			Message struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
+				ToolCalls        []struct {
+					ID string `json:"id"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+		// Anthropic
+		Content []struct {
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Thinking string `json:"thinking"`
+			ID       string `json:"id"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(body, &r) != nil {
+		return
+	}
+	for _, ch := range r.Choices {
+		m := ch.Message
+		if m.ReasoningContent != "" {
+			o.reason.WriteString(m.ReasoningContent)
+		} else if m.Reasoning != "" {
+			o.reason.WriteString(m.Reasoning)
+		}
+		o.text.WriteString(m.Content)
+		for _, tc := range m.ToolCalls {
+			o.addTool(tc.ID)
+		}
+	}
+	for _, b := range r.Content {
+		switch b.Type {
+		case "thinking":
+			o.reason.WriteString(b.Thinking)
+		case "text":
+			o.text.WriteString(b.Text)
+		case "tool_use":
+			o.addTool(b.ID)
+		}
+	}
+}
+
+// Keys 这一轮的推理内容该挂在哪些 key 上。
+func (o *Observer) Keys() []string {
+	var keys []string
+	for _, id := range o.toolIDs {
+		keys = append(keys, ToolKey(id))
+	}
+	if k := TextKey(o.text.String()); k != "" {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// Commit 入库。返回缓存了多少字节、挂了几个 key；没看到推理内容就是 (0,0)。
+// 调用方拿这两个数字写日志——**不要打内容**。
+func (o *Observer) Commit(c *Cache) (nbytes, nkeys int) {
+	return o.CommitWithOrigin(c, Origin{})
+}
+
+// CommitWithOrigin 除推理原文外，还记录 tool call 的实际产生上游。即使这一轮
+// 没有 reasoning，也要记 origin：tool loop 的方言状态仍不能安全跨 provider。
+func (o *Observer) CommitWithOrigin(c *Cache, origin Origin) (nbytes, nkeys int) {
+	if o == nil || c == nil {
+		return 0, 0
+	}
+	c.PutOrigin(o.toolIDs, origin)
+	if o.reason.Len() == 0 {
+		return 0, 0
+	}
+	keys := o.Keys()
+	if len(keys) == 0 {
+		return 0, 0 // 没有能对上号的 key，存了也找不回来
+	}
+	c.Put(keys, o.reason.Bytes())
+	return o.reason.Len(), len(keys)
+}
+
+// Reasoning 观测到的推理内容（测试与非流式路径用）。
+func (o *Observer) Reasoning() string { return o.reason.String() }
+
+// LooksLikeSSE 粗判一个 Content-Type 是不是事件流。
+func LooksLikeSSE(contentType string) bool {
+	return strings.Contains(strings.ToLower(contentType), "event-stream")
+}
