@@ -550,3 +550,550 @@ func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 	s.logf("[proxy] #%d count_tokens → %s 上游真值: %s", reqID, head.Binding, trim(string(rb)))
 	return true
 }
+
+// mainLoopHead 主循环档（normal）的链头（含完整 provider 记录）。
+// count_tokens 不带 model，转发时按它补。用 PrimaryBinding（忽略熔断器）：
+// 数 token 用配置里排第一的就行，不值得为它触发 fallback 语义。
+func (s *Server) mainLoopHead(tgt Target) (resolve.Step, bool) {
+	if testChain != nil {
+		if steps := testChain("normal"); len(steps) > 0 {
+			return steps[0], true
+		}
+		return resolve.Step{}, false
+	}
+	snap := s.snap()
+	if snap == nil {
+		return resolve.Step{}, false
+	}
+	active := tgt.Profile
+	if active == "" {
+		active = snap.State.ActiveFor(tgt.TaskCreate)
+	}
+	b, ok := resolve.PrimaryBinding("normal", snap.Profiles, snap.Providers, active)
+	if !ok {
+		return resolve.Step{}, false
+	}
+	p, ok := snap.Providers.Providers[b.Provider]
+	if !ok {
+		return resolve.Step{}, false
+	}
+	return resolve.Step{Profile: active, Binding: b, Provider: p}, true
+}
+
+func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	atomic.AddUint64(&s.requests, 1)
+	metrics.Default.Inc("requests.total")
+
+	// /api/hello：Claude Code 的连通性探针（HEAD/GET，无 body）。探的是
+	// 「API 基地址活着吗」——我们就是它的 API，本地应 200；掉进下面的
+	// model 解析只会刷一串 400 日志（2026-09-09 实抓）。
+	if strings.HasSuffix(r.URL.Path, "/api/hello") {
+		w.WriteHeader(200)
+		return
+	}
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		s.fail(w, 400, "读请求体失败: "+err.Error())
+		return
+	}
+	_ = r.Body.Close()
+
+	tgt := parseTarget(r.URL.Path)
+
+	// count_tokens：Anthropic 协议的私有端点，Claude Code 拿它算上下文水位。
+	// 必须在 model 检查**之前**拦——有客户端发这个请求时不带 model 字段。
+	// 上游有这个端点就转发拿真值（按 provider 学，见 forwardCountTokens），
+	// 没有（聚合器 404）退回本地粗估。
+	if strings.HasSuffix(r.URL.Path, "/count_tokens") {
+		reqID := atomic.LoadUint64(&s.requests)
+		metrics.Default.Inc("count_tokens.total")
+		if s.forwardCountTokens(w, r, body, tgt, reqID) {
+			return
+		}
+		metrics.Default.Inc("count_tokens.local")
+		s.handleCountTokens(w, reqID, body)
+		return
+	}
+
+	// 不做任何 JSON 往返。只在原始字节里读出 model，后面也只替换那一段。
+	inModel, ok := rewrite.TopLevelString(body, "model")
+	if !ok || inModel == "" {
+		// 带上方法与路径：这一类「形状不认识」的请求，没有路径就没法排查
+		// 是哪个客户端、哪个端点发来的。
+		s.fail(w, 400, fmt.Sprintf("请求体顶层没有 model 字符串字段（%s %s）",
+			r.Method, r.URL.Path))
+		return
+	}
+	norm := protocol.NormalizeRole(inModel)
+	snap := s.snap()
+	if snap == nil {
+		s.fail(w, 400, "配置读不出 ← 跑 `newgate doctor`")
+		return
+	}
+	st := snap.State
+	stream0 := rewrite.TopLevelBool(body, "stream")
+	reqID := atomic.LoadUint64(&s.requests)
+	// 进来就记——否则「请求没到」和「到了在等上游」在日志里长得一样。
+	// req= 是客户端请求体字节数：跟上游日志对账（300k compact 这种大输入）时
+	// 靠它定位「同一发请求」，没有它就只剩 reqID 一个数，跨系统对不上。
+	s.logf("[proxy] #%d ← %s stream=%v req=%d字节  开始", reqID, inModel, stream0, len(body))
+	if st.DebugActive() {
+		s.logf("[proxy] #%d 客户端请求 %s %s%s\n    body(%d字节): %s",
+			reqID, r.Method, r.URL.Path, headerDump(r.Header), len(body),
+			truncate(string(redact(body)), 4000))
+	}
+
+	// ---- per-agent 路由 + fallback 链 ----
+	// 每个 agent 有自己的链头；URL 里的 /p/ 是本次调用的覆盖
+	active := tgt.Profile
+	if active == "" {
+		active = st.ActiveFor(tgt.TaskCreate)
+	}
+	suffix := tgt.Suffix
+	stream := stream0
+
+	var steps []resolve.Step
+	var skips []resolve.Skip
+	tier := norm
+	toolOrigin, hasToolOrigin := thinkcache.Default.ContinuationOrigin(body)
+	// special 路由插件在常规解析前贡献结构化决策。热路径不知道具体插件名，
+	// 也不解释它为什么改道；档位、覆盖链头、超时和可观测性都由插件声明。
+	route, routed := special.Route(body, &special.Request{
+		InModel: inModel, Tier: norm, Stream: stream0, Agent: tgt.TaskCreate,
+	}, st)
+	routeTier := ""
+	if routed {
+		routeTier = route.Tier
+	}
+	if routeTier != "" {
+		opts := resolve.Opts{
+			Active:    active,
+			Available: health.Default.Available,
+			Rank:      func(provider, model string) int { return health.Default.Rank(provider, model, len(body)) },
+			MaxSteps:  st.Chain.Attempts(),
+		}
+		var rs []resolve.Step
+		applied := false
+		switch {
+		case testChain != nil:
+			rs = testChain(routeTier)
+		case route.Head != nil:
+			rs, skips, applied = resolve.OverrideChain("special:"+route.Plugin,
+				*route.Head, routeTier,
+				snap.Profiles, snap.Providers, opts)
+			if !applied && route.OverrideFailNote != "" {
+				s.logf("[proxy] #%d special_treatment %s: %s",
+					reqID, route.Plugin, route.OverrideFailNote)
+			}
+		default:
+			rs, skips = resolve.BuildChain(routeTier, snap.Profiles, snap.Providers, opts)
+		}
+		if len(rs) > 0 {
+			steps, tier = rs, routeTier
+			note := route.Note
+			if applied && route.OverrideNote != "" {
+				note = route.OverrideNote
+			}
+			if note != "" {
+				s.logf("[proxy] #%d special_treatment %s: %s",
+					reqID, route.Plugin, note)
+			}
+			if key := route.MetricKey(); key != "" {
+				metrics.Default.Inc(key)
+			}
+		} else {
+			// 插件要求的链为空时回落到常规解析：路由插件不能切断请求。
+			routeTier = ""
+			routed = false
+		}
+	}
+	if routeTier == "" {
+		if testChain != nil {
+			steps = testChain(norm)
+		} else {
+			// 档位名走档位链；具体模型名反解回它所属档位，并把点名的模型放最前
+			// （docs/04-configuration.md）——这支持「工具界面显示真实模型名」。
+			steps, skips, tier = resolve.ResolveRequest(norm, active, snap.Profiles, snap.Providers, resolve.Opts{
+				Active:    active,
+				Available: health.Default.Available,
+				Rank:      func(provider, model string) int { return health.Default.Rank(provider, model, len(body)) },
+				MaxSteps:  st.Chain.Attempts(),
+			})
+		}
+	}
+	if len(steps) == 0 {
+		s.logf("[proxy] #%d 无可用候选。跳过原因：%s", reqID, fmtSkips(skips))
+		if tier == "" {
+			s.fail(w, 404, fmt.Sprintf(
+				"模型 %q 既不是已知档位（%s），也不在任何 profile 的绑定里。跑 `newgate tier` 看可用绑定",
+				norm, strings.Join(domain.Roles, ", ")))
+		} else {
+			s.fail(w, 404, fmt.Sprintf(
+				"档位 %q 在 profile %q 下没有可用候选（档位：%s）。跑 `newgate tier %s` 看每个候选为什么被跳过",
+				tier, active, strings.Join(domain.Roles, ", "), tier))
+		}
+		return
+	}
+	deadline := start.Add(time.Duration(st.Chain.Budget()) * time.Millisecond)
+
+	var lastMsg string
+	var lastCode int
+	var trail []string // 给 X-Newgate-Chain
+	for i, a := range steps {
+		isLast := i == len(steps)-1
+		if i > 0 && time.Now().After(deadline) {
+			metrics.Default.Inc("chain.budget_exhausted")
+			s.logf("[proxy] #%d 链总预算 %dms 用尽，停在第 %d 步",
+				reqID, st.Chain.Budget(), i)
+			trail = append(trail, "budget-exhausted")
+			isLast = true
+		}
+		// 纯字节手术：只替换顶层 model 的值，其余每个字节原样保留
+		newBody, merr := rewrite.ReplaceTopLevelString(body, "model", a.Binding.Model)
+		if merr != nil {
+			s.fail(w, 500, "改写 model 失败: "+merr.Error())
+			return
+		}
+		if hasToolOrigin {
+			candidate := &special.Request{
+				InModel: inModel, Tier: tier, Model: a.Binding.Model,
+				Provider: a.Binding.Provider, BaseURL: a.Provider.Base(suffix),
+				Protocol: a.Provider.Protocol, Path: suffix, Stream: stream,
+				Agent: tgt.TaskCreate,
+			}
+			if res := special.RebaseToolLoop(newBody, toolOrigin.Provider, toolOrigin.Model,
+				candidate, st.SpecialPluginOff); len(res.Notes) > 0 {
+				for _, note := range res.Notes {
+					s.logf("[proxy] #%d special_treatment %s", reqID, note)
+				}
+				if res.Changed {
+					newBody = res.Body
+				}
+				for _, event := range res.Events {
+					if key := event.MetricKey(); key != "" {
+						metrics.Default.Inc(key)
+					}
+				}
+			}
+		}
+
+		// tool schema 修补：只在真有东西要补时才重写 tools 这一个值，
+		// messages / system / cache_control 仍然逐字节不动。
+		if st.RepairEnabled() {
+			if toolsRaw, ok := rewrite.TopLevelRaw(newBody, "tools"); ok {
+				repaired, changes, rerr := schema.Repair(toolsRaw)
+				switch {
+				case rerr != nil:
+					s.logf("[proxy] #%d tools 修补跳过（解析失败，按原样发）: %v", reqID, rerr)
+				case len(changes) > 0:
+					if nb, serr := rewrite.ReplaceTopLevelRaw(newBody, "tools", repaired); serr == nil {
+						newBody = nb
+						s.logf("[proxy] #%d 补了 %d 个 tool 的 \"required\": []（语义无操作，"+
+							"为通过严格校验器）: %v", reqID, len(changes), changes)
+					} else {
+						s.logf("[proxy] #%d tools 回写失败，按原样发: %v", reqID, serr)
+					}
+				}
+			}
+		}
+
+		// special_treatment：每家上游的怪癖补丁（gateway/special）。
+		// 与 schema 修补的分工——那边是所有严格校验器都需要的通用修补，
+		// 这边是「只有某家上游才需要」的，由插件自己 Match 认领。
+		// （分类器改走 light 链的路由决策不在这——见上面 special.Route。）
+		if st.SpecialEnabled() {
+			res := special.Apply(newBody, &special.Request{
+				InModel:  inModel,
+				Tier:     tier,
+				Model:    a.Binding.Model,
+				Provider: a.Binding.Provider,
+				// 按这次请求实际会去的 base 报——两种方言分家的上游
+				// （provider.anthropic_url）要让插件看到真实那一个。
+				BaseURL:  a.Provider.Base(suffix),
+				Protocol: a.Provider.Protocol,
+				Path:     suffix,
+				Stream:   stream,
+				Agent:    tgt.TaskCreate,
+			}, st.SpecialPluginOff)
+			counted := map[string]bool{}
+			for _, n := range res.Notes {
+				s.logf("[proxy] #%d special_treatment %s", reqID, n)
+			}
+			for _, event := range res.Events {
+				key := event.MetricKey()
+				if key != "" && !counted[key] {
+					counted[key] = true
+					metrics.Default.Inc(key)
+				}
+			}
+			if res.Changed {
+				newBody = res.Body
+			}
+		}
+
+		target := a.Provider.URL(suffix)
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		// 挂上客户端的 context：opencode 里按 ESC 取消时，上游请求也立刻中断，
+		// 而不是让它跑完整个响应照样计费
+		req, rerr := http.NewRequestWithContext(r.Context(), r.Method, target,
+			bytes.NewReader(newBody))
+		if rerr != nil {
+			s.fail(w, 500, rerr.Error())
+			return
+		}
+		s.dump(reqID, i, body, newBody)
+		if st.DebugActive() {
+			s.logf("[proxy] #%d 发往上游 %s\n    body(%d字节, 与原文差 %+d): %s",
+				reqID, target, len(newBody), len(newBody)-len(body),
+				truncate(string(redact(newBody)), 4000))
+		}
+		copyHeaders(req.Header, r.Header)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Del("Content-Length")
+		setAuth(req.Header, a.Provider)
+
+		// 流式不能设总超时（长响应会被砍断），但必须限制首字节等待时间，
+		// 否则上游装死就永久挂住。ResponseHeaderTimeout 正好只管到响应头。
+		// 紧上限只给**分类器**（它挡在交互通路上，挂住 = 冻住会话，靠
+		// system marker 精确认出）；其他请求——包括 /compact 这种 500KB+
+		// 的非流式大输入——一律标准 150s：大 prefill 合法地慢，一刀切
+		// 紧超时只会在链上连环掐死（2026-09-09 实抓教训）。全部从
+		// state.json 的 timeouts 热加载，误杀率看 newgate metrics。
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.ResponseHeaderTimeout = st.Timeouts.FirstByte()
+		if routed && route.FirstByteTimeout > 0 {
+			tr.ResponseHeaderTimeout = route.FirstByteTimeout
+		}
+		client := &http.Client{Transport: tr, Timeout: func() time.Duration {
+			if stream {
+				return 0
+			}
+			return st.Timeouts.Total()
+		}()}
+
+		attemptStart := time.Now()
+		resp, derr := client.Do(req)
+		attemptTTFT := time.Since(attemptStart)
+		// 路由串按**实际发出的** body model 报——special 插件可能已把
+		// mid 切成 light（claude-bg 的分类器切档），拿链步的模型打日志
+		// 会把人引去查错方向（2026-09-09：日志说 glm-5.3，dump 说 air）。
+		sentModel := a.Binding.Model
+		if m, has := rewrite.TopLevelString(newBody, "model"); has && m != "" {
+			sentModel = m
+		}
+		routeStr := fmt.Sprintf("%s -> %s/%s", inModel, a.Binding.Provider, sentModel)
+
+		if derr != nil {
+			// 客户端自己走了（按 ESC、关窗口、客户端侧超时）不是上游的错。
+			//
+			// 不加这一闸的后果实测过：一次取消会被当成 smt-claude 连接失败 →
+			// 记一次失败 → 沿链走到 smt-deepseek，用的还是那个已经死掉的
+			// context，于是**每个候选都瞬间失败**，一次 ESC 就把整条链上所有
+			// provider 的熔断器全打开（日志里三个 provider 一起「暂时摘掉」）。
+			// 之后真正的请求反而没候选可用，回 502——用户看到的是「取消一下
+			// 之后全挂了」，根本查不到源头。
+			//
+			// 所以：不记失败、不开熔断、不往下走链、也不写 502（对面已经没人了）。
+			if cerr := r.Context().Err(); cerr != nil {
+				metrics.Default.Inc("client.cancel")
+				s.logf("[proxy] #%d %s 客户端在连接阶段就取消了（%v），停止整条链",
+					reqID, routeStr, cerr)
+				return
+			}
+			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
+				if stream {
+					metrics.Default.Inc("timeout.first_byte.stream")
+				} else {
+					metrics.Default.Inc("timeout.first_byte.non_stream")
+				}
+			}
+			opened := health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
+			if opened {
+				metrics.Default.Inc("breaker.opened")
+			}
+			atomic.AddUint64(&s.failures, 1)
+			hint := ""
+			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
+				waitLimit := st.Timeouts.FirstByte()
+				if routed && route.FirstByteTimeout > 0 {
+					waitLimit = route.FirstByteTimeout
+				}
+				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
+			}
+			s.logf("[proxy] #%d %s 连接失败: %v%s%s", reqID, routeStr, derr,
+				breakerNote(opened, a.Binding.Provider), hint)
+			lastMsg, lastCode = fmt.Sprintf("上游 %s 连接失败: %v", a.Binding.Provider, derr), 502
+			trail = append(trail, fmt.Sprintf("%s(conn)", a.Binding))
+			if !isLast {
+				metrics.Default.Inc("chain.step_failed")
+				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
+				continue
+			}
+			s.fail(w, 502, lastMsg)
+			return
+		}
+
+		// 可转移的失败：还没往客户端写任何字节，安全
+		if resp.StatusCode >= 400 && health.ShouldAdvance(resp.StatusCode, st.Chain.FallbackOn400) && !isLast {
+			body, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 4096))
+			_ = resp.Body.Close()
+			opened := health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
+			if opened {
+				metrics.Default.Inc("breaker.opened")
+			}
+			atomic.AddUint64(&s.failures, 1)
+			s.logf("[proxy] %s -> %d%s  上游说: %s", routeStr, resp.StatusCode,
+				breakerNote(opened, a.Binding.Provider), trim(string(body)))
+			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, body)
+			s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
+			metrics.Default.Inc("chain.step_failed")
+			lastMsg, lastCode = trim(string(body)), resp.StatusCode
+			trail = append(trail, fmt.Sprintf("%s(%d)", a.Binding, resp.StatusCode))
+			continue
+		}
+
+		// 定案：把这个响应交给客户端
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
+			atomic.AddUint64(&s.failures, 1)
+
+			// 错误响应体一般不大，整个读出来当证据，再原样转给客户端
+			eb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 256*1024))
+			base := s.saveErrEvidence(reqID, resp.StatusCode, body, newBody, eb,
+				r.Header, resp.Header, routeStr)
+			s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
+			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
+			if isReasoningPassthroughError(eb) {
+				// 专属标记：这类 400 不是客户端 schema 错，是我们补的思考内容
+				// 被上游严格节点拒了（DeepSeek 灰度），要能一眼 grep 出来。
+				s.logf("[reasoning-400] #%d %s 上游拒收思考内容回传（证据 %s.*）",
+					reqID, a.Binding.String(), filepath.Base(base))
+				// 现场单独存档：这类 400 偶发又致命，dump 目录的 req-*/err-*
+				// 滚动清理会把它挤掉，所以另存一份到不参与滚动清理的专用目录，
+				// 并附逐条 reasoning 审计（哪几条补了占位符）。
+				if rdir := s.saveReasoningEvidence(reqID, body, newBody, eb,
+					r.Header, resp.Header, routeStr); rdir != "" {
+					s.logf("[reasoning-400] #%d 现场已存档 %s/", reqID, rdir)
+				}
+			}
+			s.logf("[proxy] #%d 上游原文: %s", reqID, truncate(string(redact(eb)), 2000))
+			s.logf("[proxy] #%d 我们发出的 body(%d字节): %s", reqID, len(newBody),
+				truncate(string(redact(newBody)), 4000))
+
+			for k, vs := range resp.Header {
+				if respHopHeaders[http.CanonicalHeaderKey(k)] || http.CanonicalHeaderKey(k) == "Content-Length" {
+					continue
+				}
+				for _, v := range vs {
+					w.Header().Add(k, v)
+				}
+			}
+			w.Header().Set("X-Newgate-Route", routeStr)
+			w.Header().Set("X-Newgate-Profile", a.Profile)
+			w.Header().Set("X-Newgate-Chain", chainHeader(trail, a))
+			w.Header().Set("X-Newgate-Evidence", filepath.Base(base))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(eb)
+			return
+		}
+		health.Default.ObserveSuccess(a.Binding.Provider, a.Binding.Model, len(newBody), attemptTTFT)
+		health.Default.RecordSuccess(a.Binding.Provider, a.Binding.Model)
+		if i > 0 {
+			metrics.Default.Inc("chain.failover")
+		}
+		if st.DebugActive() {
+			s.logf("[proxy] #%d 上游响应头 %d%s", reqID, resp.StatusCode, headerDump(resp.Header))
+		}
+		s.logf("[proxy] #%d %s  %s  %d  首字节%dms  stream=%v  profile=%s%s",
+			reqID, routeStr, suffix, resp.StatusCode, time.Since(start).Milliseconds(),
+			stream, a.Profile, map[bool]string{true: "  (已转移)"}[i > 0])
+
+		for k, vs := range resp.Header {
+			if respHopHeaders[http.CanonicalHeaderKey(k)] {
+				continue // Transfer-Encoding / Connection 由 Go 的 server 自己管
+			}
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.Header().Set("X-Newgate-Route", routeStr)
+		w.Header().Set("X-Newgate-Profile", a.Profile)
+		w.Header().Set("X-Newgate-Chain", chainHeader(trail, a))
+		if i > 0 {
+			// 转移了必须明确告知，绝不静默（docs/05-gateway.md）
+			// HTTP header 只能装 latin-1，中文会乱码——只放 ASCII，详情在日志里
+			w.Header().Set("X-Newgate-Failover", fmt.Sprintf("%s -> %s (upstream %d; see: newgate logs)",
+				steps[0].Profile, a.Profile, lastCode))
+		}
+		w.WriteHeader(resp.StatusCode)
+
+		// 逐块转发。响应体一个字节都不改，也绝不缓冲整个响应。
+		//
+		// 旁路挂一个观测者，把上游吐出来的推理内容记进 thinkcache，供下一轮
+		// 补回去（客户端会把它剥掉，见 modules/deepseek/st-reasoning.go）。
+		// 它是**纯只读**的：拿到的是已经写给客户端的那一份字节，不参与转发，
+		// 看错了最坏结果是这轮没缓存上。
+		flusher, canFlush := w.(http.Flusher)
+		ob := thinkcache.NewObserver()
+		var nonStream []byte // 非流式：整个 body 才能解析，攒完再看（有上限）
+		buf := make([]byte, 32*1024)
+		var chunks int
+		var bytesOut int64
+		for {
+			n, rderr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, werr := w.Write(buf[:n]); werr != nil {
+					metrics.Default.Inc("client.cancel")
+					s.logf("[proxy] #%d 客户端断开（已转发 %d 块 / %d 字节）: %v",
+						reqID, chunks, bytesOut, werr)
+					return
+				}
+				if stream {
+					ob.Write(buf[:n])
+				} else if len(nonStream) < 8<<20 {
+					nonStream = append(nonStream, buf[:n]...)
+				}
+				chunks++
+				bytesOut += int64(n)
+				if canFlush {
+					flusher.Flush() // 每读到就吐，不等缓冲区满
+				}
+			}
+			if rderr != nil {
+				switch {
+				case rderr == io.EOF:
+					if !stream && len(nonStream) > 0 {
+						ob.ObserveBody(nonStream)
+					}
+					origin := thinkcache.Origin{
+						Profile: a.Profile, Provider: a.Binding.Provider, Model: a.Binding.Model,
+					}
+					if nb, nk := ob.CommitWithOrigin(thinkcache.Default, origin); nb > 0 {
+						// 只打字节数和 key 数，绝不打内容
+						s.logf("[proxy] #%d 记下本轮推理内容 %d 字节 / %d 个 key，"+
+							"下一轮替客户端补回去", reqID, nb, nk)
+					}
+					if stream {
+						s.logf("[proxy] #%d 流正常结束：%d 块 / %d 字节 / 总 %dms",
+							reqID, chunks, bytesOut, time.Since(start).Milliseconds())
+					} else {
+						s.logf("[proxy] #%d 非流式响应结束：%d 字节 / 总 %dms",
+							reqID, bytesOut, time.Since(start).Milliseconds())
+					}
+				case r.Context().Err() != nil:
+					metrics.Default.Inc("client.cancel")
+					s.logf("[proxy] #%d 客户端取消，已掐断上游（省下后续 token）", reqID)
+				default:
+					s.logf("[proxy] #%d 上游断流（已转发 %d 块 / %d 字节）: %v",
+						reqID, chunks, bytesOut, rderr)
+				}
+				return
+			}
+		}
+	}
+}
