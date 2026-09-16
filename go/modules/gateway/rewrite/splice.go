@@ -181,3 +181,152 @@ func EnsureArrayItemFieldFunc(body []byte, arrayKey, field string,
 	out = append(out, body[prev:]...)
 	return out, len(points), nil
 }
+
+// EnsureArrayItemArrayHead 往顶层数组 arrayKey（messages）里满足 match 的每个
+// 对象元素的**子数组**字段 field（content）的**开头**插入 rawVal，
+// 且只在 need(childArr) 为真时插。返回插了几条。
+//
+// 为什么要单独一个原语：EnsureArrayItemField 只能往元素对象上补顶层字段，
+// 够不着元素里面那个 content 数组。而 Anthropic 协议里 thinking 是
+// content[] 的一个**块**，且必须排在 text / tool_use 之前——位置是协议的
+// 一部分，不能随便追加到末尾。
+//
+// 依旧是纯字节手术：先把所有插入点收集齐，再一次拼接。除了插进去的那几段，
+// 每个块的 cache_control、tool_use 的 input、缩进、转义形式逐字节不变。
+//
+// 跳过（不算错，也不算改）：元素不是对象、没有 field 字段、field 的值不是
+// 数组（content 是纯字符串时就是这样）。
+func EnsureArrayItemArrayHead(body []byte, arrayKey, field string, rawVal []byte,
+	match func(item []byte) bool, need func(childArr []byte) bool) ([]byte, int, error) {
+
+	return EnsureArrayItemArrayHeadFunc(body, arrayKey, field,
+		func([]byte) []byte { return rawVal }, match, need)
+}
+
+// EnsureArrayItemArrayHeadFunc 同上，但值逐条算（val 返回 nil = 跳过）。
+// 理由同 EnsureArrayItemFieldFunc：每条 assistant 消息要插的是它自己那轮的
+// thinking 块。
+func EnsureArrayItemArrayHeadFunc(body []byte, arrayKey, field string,
+	val func(item []byte) []byte,
+	match func(item []byte) bool, need func(childArr []byte) bool) ([]byte, int, error) {
+
+	s, e, err := findTopLevelValue(body, arrayKey)
+	if err != nil {
+		return body, 0, err
+	}
+	arr := body[s:e]
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
+		return body, 0, errNotArray
+	}
+
+	type point struct {
+		off   int    // body 里的绝对偏移（子数组 `[` 之后）
+		raw   []byte // 这条元素要插的块
+		comma bool   // 子数组非空时要补逗号
+	}
+	var points []point
+
+	for _, sp := range spans {
+		item := arr[sp[0]:sp[1]]
+		if len(item) == 0 || item[0] != '{' {
+			continue
+		}
+		if match != nil && !match(item) {
+			continue
+		}
+		cs, ce, err := findTopLevelValue(item, field)
+		if err != nil {
+			continue // 没有 content 字段
+		}
+		child := item[cs:ce]
+		if len(child) == 0 || child[0] != '[' {
+			continue // content 是字符串：没有块可插
+		}
+		if need != nil && !need(child) {
+			continue
+		}
+		raw := val(item)
+		if raw == nil {
+			continue
+		}
+		j := skipWS(child, 1)
+		points = append(points, point{
+			off:   s + sp[0] + cs + 1,
+			raw:   raw,
+			comma: j < len(child) && child[j] != ']',
+		})
+	}
+
+	if len(points) == 0 {
+		return body, 0, nil
+	}
+
+	out := make([]byte, 0, len(body)+len(points)*32)
+	prev := 0
+	for _, p := range points {
+		out = append(out, body[prev:p.off]...)
+		out = append(out, p.raw...)
+		if p.comma {
+			out = append(out, ',')
+		}
+		prev = p.off
+	}
+	out = append(out, body[prev:]...)
+	return out, len(points), nil
+}
+
+// AppendLastArrayItemArray 往顶层数组最后一个对象元素的子数组末尾追加 rawVal。
+// match 用来确认最后一项确实是调用方要处理的形状。只插入这一段字节，其余
+// 请求（包括大整数、字段顺序和未知字段）保持原样。
+func AppendLastArrayItemArray(body []byte, arrayKey, field string, rawVal []byte,
+	match func(item []byte) bool) ([]byte, bool, error) {
+	s, e, err := findTopLevelValue(body, arrayKey)
+	if err != nil {
+		return body, false, err
+	}
+	arr := body[s:e]
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
+		return body, false, errNotArray
+	}
+	if len(spans) == 0 {
+		return body, false, nil
+	}
+	sp := spans[len(spans)-1]
+	item := arr[sp[0]:sp[1]]
+	if len(item) == 0 || item[0] != '{' || (match != nil && !match(item)) {
+		return body, false, nil
+	}
+	cs, ce, err := findTopLevelValue(item, field)
+	if err != nil {
+		return body, false, err
+	}
+	child := item[cs:ce]
+	if len(child) == 0 || child[0] != '[' {
+		return body, false, errNotArray
+	}
+	close := len(child) - 1
+	for close > 0 {
+		switch child[close] {
+		case ' ', '\t', '\r', '\n':
+			close--
+			continue
+		}
+		break
+	}
+	if child[close] != ']' {
+		return body, false, errNotArray
+	}
+	j := skipWS(child, 1)
+	ins := rawVal
+	if j < len(child) && child[j] != ']' {
+		ins = append([]byte(","), rawVal...)
+	}
+	off := s + sp[0] + cs + close
+	out := make([]byte, 0, len(body)+len(ins))
+	out = append(out, body[:off]...)
+	out = append(out, ins...)
+	out = append(out, body[off:]...)
+	return out, true, nil
+}
