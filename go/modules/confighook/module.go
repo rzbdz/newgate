@@ -121,3 +121,30 @@ func (r *registry) release(key string, token uint64, remove func()) modules.Rele
 		return nil
 	}
 }
+
+// Get 返回描述符副本，防止只读消费者修改注册表持有的切片。
+func (r *registry) Get(id string) (*agentapi.Agent, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	agent, ok := r.agents[id]
+	if !ok {
+		return nil, false
+	}
+	clone := *agent
+	clone.Bin = append([]string(nil), agent.Bin...)
+	clone.Slots = append([]agentapi.Slot(nil), agent.Slots...)
+	clone.UnsetEnv = append([]string(nil), agent.UnsetEnv...)
+	return &clone, true
+}
+
+// Names 返回稳定排序的客户端名，使 CLI 输出和测试结果可复现。
+func (r *registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.agents))
+	for name := range r.agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
