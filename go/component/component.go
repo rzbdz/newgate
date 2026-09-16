@@ -158,3 +158,8 @@ type Manager struct {
 	started    int
 	stopOnce   sync.Once
 }
+
+// New 使用后台 context 构建并启动组件图，适合没有启动取消需求的组合根。
+func New(loaders ...Loader) (*Manager, error) {
+	return NewContext(context.Background(), loaders...)
+}
