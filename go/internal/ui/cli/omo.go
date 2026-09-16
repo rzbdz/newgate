@@ -85,9 +85,7 @@ func omoList() int {
 		if s.Suggested != "" && s.Suggested != s.Current {
 			sug = style.Yellow(s.Suggested)
 		}
-		fmt.Println(style.Item(style.Skip, s.Key))
-		fmt.Println(style.Hint(style.Dim(s.Kind+"/"+s.Name) + " · 接管前 " + style.Dim(was)))
-		fmt.Println(style.Hint("现状 " + s.Current + " · 建议 " + sug + " · 生效 " + eff))
+		fmt.Print(omoSlotCard(s.Key, s.Kind+"/"+s.Name, was, s.Current, sug, eff))
 	}
 	if len(reg.Overrides) > 0 {
 		fmt.Println(style.Hint("* 有覆盖（newgate omo use 写入），优先级最高"))
@@ -114,6 +112,20 @@ func omoList() int {
 	fmt.Println()
 	fmt.Println(style.Hint("profile 里直接写键名同样有效：omo-sisyphus=@normal, terra/medium"))
 	return 0
+}
+
+func omoSlotCard(key, slot, was, current, suggested, effective string) string {
+	var out strings.Builder
+	identifierLine := func(label, value string) {
+		out.WriteString("    " + style.Dim(label) + " " + value + "\n")
+	}
+	out.WriteString("  " + style.Mark(style.Skip) + " " + key + "\n")
+	identifierLine("槽位", slot)
+	identifierLine("接管前", was)
+	identifierLine("现状", current)
+	identifierLine("建议", suggested)
+	identifierLine("生效", effective)
+	return out.String()
 }
 
 func omoModeName(reg *injection.OmoSlots) string {

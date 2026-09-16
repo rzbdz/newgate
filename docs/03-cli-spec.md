@@ -270,7 +270,8 @@ omo（opencode 的 oh-my-openagent 插件）自带一层 intra-agent 槽位。�
 布局回归有运行时保险：`newgate debug on` 期间，控制命令会审计 stdout/stderr
 每个物理行的 ANSI/CJK 显示宽度；也可单次设置 `NEWGATE_LAYOUT_AUDIT=1`。
 超过 75 列会在 stderr 打出命令、流、行号和实际宽度。`logs` / `alllogs`、
-`probe --json`、TUI 与被包装 agent 的原始输出不属于 CLI 布局，明确豁免。
+`probe --json`、`profile kv`、TUI 与被包装 agent 的原始输出不属于 CLI
+布局，明确豁免；`start` / `restart` 等有格式化结果的生命周期命令仍会审计。
 
 `logs` 对齐 journalctl：默认交给分页器（`$PAGER` → `less -FRX` → `more`），
 `-f` 跟随，`-n N` 限行；stdout 不是终端时退化成直接打印末尾 40 行。
