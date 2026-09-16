@@ -10,3 +10,15 @@ import (
 	glmapi "github.com/rzbdz/newgate/go/modules/glm/api"
 )
 
+// New 声明纯模型身份组件。它没有生命周期副作用，
+// 只把 GLM 目标判定能力提供给需要组合客户端行为的组件。
+func New() modules.Component {
+	return modules.Component{
+		Name: "glm",
+		Provides: []modules.Provision{
+			modules.Provide(glmapi.Capability, glmapi.Model{
+				MatchTarget: MatchTarget,
+			}),
+		},
+	}
+}
