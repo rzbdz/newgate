@@ -28,8 +28,9 @@
 ```
 for P in profiles(按 priority 升序, 已过滤):
     for C in P.roles[role]:            # 单个绑定视为长度 1 的 list
-        if 准入(C): 用它
-    # P 没定义这个 role → 直接跳到下一个 P（稀疏）
+        if C 是引用: 把被引用的键整条展开在这里（深度优先，带环检测）
+        elif 准入(C): 用它
+    # P 没定义这个 role → 有缺省就跟缺省（normal→mid），否则跳到下一个 P（稀疏）
 全都不合格 → 见 §8
 ```
 
@@ -56,6 +57,70 @@ Claude 自己就是 `fable / opus / sonnet / haiku` 四档，语义档位按它�
 一个后果值得单独说：**只写了 `heavy`、没写 `mid` 的 profile，在主力档上
 没有候选**，链会掉到后面 priority 的 profile 去。老配置里「只写 heavy」
 很常见（懒），四档化之后要补一行 `normal=`（或 `mid=`）才留得住主力档。
+
+### 1.2 引用：一个键可以指向另一条链
+
+候选元素除了「具体绑定」，还可以是**引用**——`@另一个键`：
+
+```jsonc
+{
+  "roles": {
+    "normal": ["relay/opus-5", "relay/sonnet-5"],
+    // 槽位自己也是一条链：先跟主力档走，主力档全挂了再用自己的兜底
+    "omo-sisyphus": ["@normal", "relay/gpt-5.6-terra"]
+  }
+}
+```
+
+展开规则只有一条：**引用在自己的位置上把被引用的链整条插进来**，其余候选的
+相对次序不变。上面这个键展开出来是 `[opus-5, sonnet-5, terra]`——前两个
+来自 `@normal`（跨 profile 的整条链，不是某一个 profile 里的那一格），
+第三个是自己的。
+
+三条边界：
+
+| 情况 | 行为 |
+| --- | --- |
+| 引用成环（a→b→a） | 停下来，记一条 skip 说明原因，不无限展开 |
+| 展开出来的候选与外面重复 | 全链去重，只试一次（与 §12 边界 6 同一条规则） |
+| 键整个就是一条引用 | 等价于「这个键有别名到那里」，与缺省机制是同一件事 |
+
+为什么值得引入这一层：**档位会漂**。用户今天觉得 sisyphus 该用主力档，
+明天主力档从 opus 换成 fable——写 `@normal` 的槽位跟着走，写死
+`relay/opus-5` 的不会。缺省机制（内置别名 `normal→mid`、模块槽位的缺省）
+在实现上就是「这个键等价于 `@那一档`」，只有这一条路径（`domain.DefaultBindingFor`）。
+
+### 1.3 模块贡献的键：omo 的槽位就是一组动态角色
+
+opencode 的插件 oh-my-openagent 自带一套更细的槽位体系：`agents.*`
+（sisyphus / librarian / explore …）和 `categories.*`（deep / quick …）。
+这些是**那个模块的知识**，不该 hard-code 进 core：
+
+```
+模块（omo 接管）  →  roleprov.Register(Provider)  →  报出「键 → 缺省绑定」
+core              →  domain.ExtraRole（一张表）    →  与档位一视同仁地解析
+```
+
+于是 core 全程不认识 omo：它只看到一批角色键，命名、数量、缺省归属由模块
+自己决定（`internal/runtime/injection/omo.go`）。插件哪天加了个新 agent，
+重新接管就自动多出一个键，框架一行都不用改。
+
+`.model` 里留下的是**身份**（`newgate/omo-sisyphus`），不是体格——老做法写
+`newgate/normal`，sisyphus 和 librarian 从此长得一模一样，用户想「sisyphus
+用贵的、librarian 用便宜的」时没有地方可以写。体格与建议记在
+`omo-slots.json`（docs/06 §9）。三种改法，优先级从高到低：
+
+```jsonc
+// 1. profile 里直接写这个键（最强，跟人走）
+"omo-sisyphus": ["@heavy", "relay/gpt-5.6-terra"]
+// 2. newgate omo use omo-sisyphus @normal    → 写进注册表的 overrides
+// 3. 注册表里的 current / suggested（默认 current：接管不改行为）
+```
+
+接管时两种档位的含义：**current**（现状）＝老版本会算出来的那一档，保证升级
+不改变用户当前的模型选择；**suggested**（建议）＝模型体格 + `variant` 强度
+（`max`/`xhigh` 上调一级、`low` 下调一级），而且模型名没命中规则就不建议——
+那本来就是猜的，再叠一层 variant 只会把猜测说得更像结论。
 
 ## 2. 两级各管什么
 
@@ -84,15 +149,18 @@ Claude 自己就是 `fable / opus / sonnet / haiku` 四档，语义档位按它�
 
 ### 兼容现有格式
 
-现在的 `mappings/*.json` 是 `{"provider": "...", "model": "..."}`。新格式要同时接受三种写法，全部等价：
+现在的 `mappings/*.json` 是 `{"provider": "...", "model": "..."}`。新格式要同时接受四种写法，全部等价：
 
 ```jsonc
 "heavy": {"provider":"deepseek-relay","model":"deepseek-v4-pro"}   // 现状，继续支持
 "heavy": "deepseek-relay/deepseek-v4-pro"                          // 简写
 "heavy": ["deepseek-relay/deepseek-v4-pro", "gemini-relay/..."]      // list
+"heavy": ["@normal", "relay/terra"]                                // 引用（§1.2）可与绑定混写
 ```
 
-前两种在内部一律转成长度 1 的 list，之后代码里只有一条路径。
+前两种在内部一律转成长度 1 的 list，引用是 list 里的一等元素，之后代码里只有一条路径。
+
+KV 格式（`newgate profile kv`，docs/03 §5）同样认引用：`omo-sisyphus=@normal, relay/terra`。
 
 ## 3. 任务档位：`cheap` vs `cheap-priority` 就是 `pinned`
 

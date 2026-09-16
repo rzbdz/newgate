@@ -143,6 +143,13 @@ newgate on opencode    # 重写 opencode.json / oh-my-openagent.json
 omo 的 intra-agent 槽位按新规则重分类，得走一轮
 `newgate off opencode && newgate on opencode`（会先还原原始配置再改写）。
 
+**omo 槽位（2026-09-16 起）**：`newgate on opencode` 给每个 intra-agent 分配
+一个稳定键（`newgate/omo-sisyphus` / `newgate/cat-deep`），体格与建议写进
+`~/.config/newgate/omo-slots.json`（docs/06 §9）。重跑 `on` 是安全的：`current`
+沿用它现在的档位（**不改行为**），原模型名从 `backups/original/` 找回。
+**顺序不能反**：先换二进制、重启 daemon，再 `on opencode`——老 daemon 不认识
+槽位键，配置先改了会让 opencode 的请求打空。看现状/调归属：`newgate omo`。
+
 ---
 
 ## 4. 代码约定
@@ -157,6 +164,11 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
   种做法」。这是这个仓库最重要的资产。
 - **文档同步**：动了行为就改 `docs/`（`00-index.md` 有全表）。新机制写进
   `docs/19-hook-mechanisms.md`，配置字段写进 `docs/06` / `docs/08`。
+- **模块的键不 hard-code 进 core**：客户端插件自带的东西（omo 的
+  sisyphus/librarian 槽位）由模块实现 `core/roleprov.Provider` 注册成动态角色
+  键（`domain.ExtraRole`），命名与缺省归属留在模块里（`runtime/injection/omo.go`）。
+  core 只认「键 → 缺省绑定」这张表，解析路径与档位完全一样（引用展开，见
+  `resolve.BuildChain`）。接一个新插件 = 新注册一个 Provider，core 不动。
 - **提交**：英文 subject（`fix(scope): …` / `feat(scope): …`）+ 中文正文说清
   「现场是什么样、为什么这么改、验证了什么」，结尾带
   `Co-Authored-By: Claude Code <noreply@anthropic.com>`。一次提交一件事。

@@ -193,3 +193,51 @@ class Secret {
 - 提供 `newgate config validate`。
 - 提供 `$schema` 字段导出，让编辑器有补全：`newgate schema > newgate.schema.json`。
 - 版本迁移：`store/migrations/v1-to-v2.ts`，启动时自动迁移并先备份到 `state/backups/config-migration-<ts>/`。
+
+## 9. 模块槽位注册表：omo-slots.json
+
+**模块贡献的角色键**落在这个文件里（`~/.config/newgate/omo-slots.json`）。
+它是「omo 有哪些 intra-agent 槽位」这条知识的唯一出处：core 不 hard-code
+槽位名，daemon 通过 `core/roleprov` 读它把 `omo-sisyphus` / `cat-deep` 注册成
+动态角色（docs/18 §1.3）。改了它 1 秒内生效（watcher 的指纹含这个文件）。
+
+```jsonc
+{
+  "version": 1,
+  "source": "omo",
+  "updated": "2026-09-16T09:12:00+08:00",
+  "mode": "current",                  // current（现状，默认）| suggested（建议）
+  "overrides": { "omo-sisyphus": "@heavy" },   // 人手写的覆盖，优先级最高
+  "slots": [
+    {
+      "key": "omo-sisyphus",          // profile 里写的键名
+      "kind": "agent", "name": "sisyphus",
+      "was": "smt/gpt-5.6-sol",       // 接管前的真实模型名
+      "was_fallbacks": ["smt/..."],   // 接管前的 fallback 列表（留档，便于还原）
+      "variant": "max",               // 接管前的强度标记
+      "current": "normal",            // 现状：老版本会算出来的档位
+      "suggested": "heavy",           // 建议：模型体格 + variant 强度
+      "default": "normal",            // 实际生效（overrides > mode 决定的）
+      "why": "variant=max 上调一级（normal → heavy）"
+    }
+  ]
+}
+```
+
+规则：
+
+- **缺省 `current`**：接管不改行为——老版本把每个槽位按体格翻成档位，`current`
+  就是那个结果，`default` 默认等于它。
+- 显式写进 profile 的键**赢过注册表**（profile 是最强的意图表达）。
+- `@引用` / 「档位名」/「provider/模型」三种值都支持，语义见 docs/18 §1.2。
+- 释放接管（`newgate off opencode`）清空 `slots` 但**保留 `overrides`**——
+  键没了，用户手写的意图不该跟着丢。
+- 接管时若原文件已被改写过，「接管前是什么模型」从 `backups/original/` 找回，
+  所以反复接管不会丢信息。
+
+```bash
+newgate omo                          # 列槽位：接管前模型 / 现状 / 建议 / 生效
+newgate omo use omo-sisyphus @heavy  # 改一个槽位的归属
+newgate omo mode suggested           # 全部按建议（觉得不好再 mode current）
+newgate omo explain omo-sisyphus     # 这个键现在展开成哪条链、为什么
+```

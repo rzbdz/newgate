@@ -6,11 +6,12 @@ import (
 	"strings"
 )
 
-// Candidates 一个档位的候选列表。接受三种 JSON 写法，内部统一成 list：
+// Candidates 一个键的候选列表。接受四种 JSON 写法，内部统一成 list：
 //
 //	"heavy": {"provider":"p","model":"m"}      对象（现状，继续支持）
 //	"heavy": "p/m"                             字符串简写
-//	"heavy": ["p/m1", {"provider":"p2",...}]    列表
+//	"heavy": "@normal"                         引用另一个键（就地展开那条链）
+//	"heavy": ["@normal", {"provider":"p2",…}]   列表（引用与绑定可混写）
 //
 // 统一之后代码里只有一条路径。
 type Candidates []Binding
@@ -71,15 +72,31 @@ func parseBinding(raw json.RawMessage) (Binding, error) {
 	if err := json.Unmarshal(raw, &b); err != nil {
 		return Binding{}, err
 	}
-	if b.Provider == "" || b.Model == "" {
+	switch {
+	case b.Ref != "" && (b.Provider != "" || b.Model != ""):
+		return Binding{}, fmt.Errorf("引用（ref）与 provider/model 不能混着写: %s", s)
+	case b.Ref != "":
+		return b, nil
+	case b.Provider == "" || b.Model == "":
 		return Binding{}, fmt.Errorf("provider 和 model 都不能为空: %s", s)
 	}
 	return b, nil
 }
 
-// ParseBindingString 解析 "provider/model"。model 里可以再含 /（有些模型名带斜杠）。
+// ParseBindingString 解析 "provider/model" 或 "@另一个键"。
+// model 里可以再含 /（有些模型名带斜杠）。
 func ParseBindingString(s string) (Binding, error) {
 	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "@") {
+		ref := strings.TrimSpace(s[1:])
+		if ref == "" {
+			return Binding{}, fmt.Errorf("引用要写成 @键名，得到 %q", s)
+		}
+		if strings.ContainsAny(ref, "/ ") {
+			return Binding{}, fmt.Errorf("引用只写键名，不带 provider/模型：%q", s)
+		}
+		return Binding{Ref: ref}, nil
+	}
 	i := strings.Index(s, "/")
 	if i <= 0 || i == len(s)-1 {
 		return Binding{}, fmt.Errorf("绑定要写成 provider/model，得到 %q", s)

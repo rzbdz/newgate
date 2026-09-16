@@ -42,10 +42,13 @@ type Opts struct {
 	MaxSteps int
 }
 
-// BuildChain 为某个档位构造 fallback 链。
+// BuildChain 为某个键构造 fallback 链。
+//
+// 「键」可以是档位（heavy/normal/mid/light/vision），也可以是模块贡献的
+// 动态角色（omo-sisyphus，见 domain.ExtraRole）；解析路径完全同一条。
 //
 // 顺序：**profile 为主序（链头优先，其余按 priority），list 为次序**。
-// 语义是「先在当前任务档位内部找替代，找不到才降到下一个 profile」——
+// 语义是「先在当前任务键内部找替代，找不到才降到下一个 profile」——
 // 「我要便宜的」应该先在便宜的里面挑，而不是一失败就跳到贵的。
 //
 // 规则：
@@ -53,59 +56,93 @@ type Opts struct {
 //     保证可复现
 //   - excluded 的 profile 不进链，除非它就是链头（显式选中优先）
 //   - 链头是 pinned 时链只有它自己（含它内部的 list），不往下掉
-//   - profile 可稀疏：没定义这个档位就整层跳过
+//   - profile 可稀疏：没定义这个键就整层跳过（有别名时先走别名，见
+//     domain.Profile.CandidatesFor）
+//   - 候选里的**引用**（`@normal`）就地展开成那条链，深度优先，带环检测
 //   - (provider, model) 全链去重，只试一次
-func BuildChain(tier string, profiles []*domain.Profile, provs *domain.Providers, o Opts) ([]Step, []Skip) {
+//
+// 展开后的结果就是一条扁平的 fallback 序列：所有 profile、所有候选（含引用
+// 展开出来的）按「profile 优先级 → list 次序」排好。引用没有引入第二套
+// fallback 语义，只是让键之间能互相指。见 docs/18 §1.2。
+func BuildChain(key string, profiles []*domain.Profile, provs *domain.Providers, o Opts) ([]Step, []Skip) {
 	ordered, skips := orderProfiles(profiles, o.Active)
-
-	var steps []Step
-	seen := map[string]bool{}
-
-	for _, p := range ordered {
-		cands := p.CandidatesFor(tier)
-		if len(cands) == 0 {
-			skips = append(skips, Skip{p.Name, "", "未定义 " + tier + " 档位"})
-			continue
-		}
-		for _, b := range cands {
-			key := b.String()
-			if seen[key] {
-				skips = append(skips, Skip{p.Name, key, "与链上更前面的重复，已去重"})
-				continue
-			}
-			seen[key] = true
-
-			prov, ok := provs.Providers[b.Provider]
-			if !ok {
-				skips = append(skips, Skip{p.Name, key, "provider 未定义"})
-				continue
-			}
-			if prov.Key() == "" {
-				skips = append(skips, Skip{p.Name, key, "provider 没有 api_key"})
-				continue
-			}
-			if o.Disabled != nil {
-				if yes, why := o.Disabled(tier, key); yes {
-					skips = append(skips, Skip{p.Name, key, "已禁用：" + why})
-					continue
-				}
-			}
-			if o.Available != nil && !o.Available(b.Provider) {
-				skips = append(skips, Skip{p.Name, key, "熔断中"})
-				continue
-			}
-			steps = append(steps, Step{Profile: p.Name, Binding: b, Provider: prov})
-		}
-	}
-
-	if o.MaxSteps > 0 && len(steps) > o.MaxSteps {
-		for _, s := range steps[o.MaxSteps:] {
-			skips = append(skips, Skip{s.Profile, s.Binding.String(),
+	b := &chainBuilder{profiles: ordered, provs: provs, o: o,
+		seen: map[string]bool{}, visiting: map[string]bool{key: true}, skips: skips}
+	b.expand(key)
+	if o.MaxSteps > 0 && len(b.steps) > o.MaxSteps {
+		for _, s := range b.steps[o.MaxSteps:] {
+			b.skips = append(b.skips, Skip{s.Profile, s.Binding.String(),
 				fmt.Sprintf("超出 maxAttempts=%d", o.MaxSteps)})
 		}
-		steps = steps[:o.MaxSteps]
+		b.steps = b.steps[:o.MaxSteps]
 	}
-	return steps, skips
+	return b.steps, b.skips
+}
+
+type chainBuilder struct {
+	profiles []*domain.Profile
+	provs    *domain.Providers
+	o        Opts
+	seen     map[string]bool
+	visiting map[string]bool // 正在展开的键（防引用成环）
+	steps    []Step
+	skips    []Skip
+}
+
+// expand 把 key 的候选按 profile 优先、list 次序展开进 steps。
+func (b *chainBuilder) expand(key string) {
+	for _, p := range b.profiles {
+		cands := p.CandidatesFor(key)
+		if len(cands) == 0 {
+			b.skips = append(b.skips, Skip{p.Name, "", "未定义 " + key})
+			continue
+		}
+		for _, bd := range cands {
+			if bd.IsRef() {
+				if b.visiting[bd.Ref] {
+					b.skips = append(b.skips, Skip{p.Name, bd.String(),
+						"引用成环（" + key + " → " + bd.Ref + "），已跳过"})
+					continue
+				}
+				b.visiting[bd.Ref] = true
+				b.expand(bd.Ref)
+				delete(b.visiting, bd.Ref)
+				continue
+			}
+			b.add(p, key, bd)
+		}
+	}
+}
+
+// add 一条具体候选过准入检查后进链。
+func (b *chainBuilder) add(p *domain.Profile, key string, bd domain.Binding) {
+	k := bd.String()
+	if b.seen[k] {
+		b.skips = append(b.skips, Skip{p.Name, k, "与链上更前面的重复，已去重"})
+		return
+	}
+	b.seen[k] = true
+
+	prov, ok := b.provs.Providers[bd.Provider]
+	if !ok {
+		b.skips = append(b.skips, Skip{p.Name, k, "provider 未定义"})
+		return
+	}
+	if prov.Key() == "" {
+		b.skips = append(b.skips, Skip{p.Name, k, "provider 没有 api_key"})
+		return
+	}
+	if b.o.Disabled != nil {
+		if yes, why := b.o.Disabled(key, k); yes {
+			b.skips = append(b.skips, Skip{p.Name, k, "已禁用：" + why})
+			return
+		}
+	}
+	if b.o.Available != nil && !b.o.Available(bd.Provider) {
+		b.skips = append(b.skips, Skip{p.Name, k, "熔断中"})
+		return
+	}
+	b.steps = append(b.steps, Step{Profile: p.Name, Binding: bd, Provider: prov})
 }
 
 // OverrideChain 构造「覆盖绑定为链头、tier 档链为 fallback」的链。

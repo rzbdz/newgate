@@ -137,7 +137,9 @@ func (w *Watcher) Reload(force bool) bool {
 func signature() string {
 	h := sha256.New()
 	var files []string
-	files = append(files, paths.ProvidersFile(), paths.StateFile())
+	// omo-slots.json 也是配置：它是模块贡献的角色键（omo-sisyphus 跟哪一档走）
+	// 的唯一来源。接管 omo 会写它，改了就该在 1 秒内生效（见 core/roleprov）。
+	files = append(files, paths.ProvidersFile(), paths.StateFile(), paths.OmoSlotsFile())
 	if ents, err := ioutil.ReadDir(paths.Mappings()); err == nil {
 		var names []string
 		for _, e := range ents {

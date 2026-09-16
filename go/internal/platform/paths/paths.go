@@ -31,6 +31,14 @@ func StateFile() string     { return filepath.Join(root(), "state.json") }
 func BackupDir() string     { return filepath.Join(root(), "backups") }
 func LogFile() string       { return filepath.Join(root(), "newgate.log") }
 
+// OmoSlotsFile 接管 opencode 插件 oh-my-openagent 时写下的**槽位登记表**。
+//
+// 它同时是两个东西：给人看的清单（每个 intra-agent 槽位接管前是什么模型、
+// 现在算哪一档、建议算哪一档），以及给框架读的**角色键来源**——daemon 通过
+// roleprov 读它，把 omo-sisyphus 这类键注册成动态角色（domain.ExtraRole）。
+// 于是「omo 有哪些槽位」这条知识只存在这一个文件里，core 不需要认识 omo。
+func OmoSlotsFile() string { return filepath.Join(root(), "omo-slots.json") }
+
 // ThinkCacheFile thinkcache 的落盘冷层文件：滚动 100MB，撑过 daemon 重启。
 // 内容是推理原文（= 对话内容），和 dump 一样是明文，权限 0660 随目录的
 // 组共享模型走（developer 组内可见）。

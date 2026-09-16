@@ -30,6 +30,9 @@ import (
 )
 
 // tierKeys 档位缩写 → roles key。
+//
+// 只留给「这是不是内置档位」的判断用；profile 里能写的 key 集合更宽——模块
+// 贡献的动态角色键（omo-sisyphus、cat-deep）同样能当 key 写，见 IsKnownRole。
 var tierKeys = map[string]bool{"heavy": true, "normal": true, "mid": true, "light": true, "vision": true}
 
 // ParseProfileKV 把 KV 文本解析成 Profile（Extends 的合并不在这做，
@@ -76,7 +79,9 @@ func ParseProfileKV(text string) (*domain.Profile, error) {
 			if c, err = parseCandidates(val); err == nil {
 				p.Fallback = &c[0]
 			}
-		case tierKeys[key]:
+		case domain.IsKnownRole(key):
+			// 档位，或模块贡献的动态角色键（omo-sisyphus：omo 的 intra-agent 槽位）。
+			// 两类都是「角色」，解析路径完全一样（docs/18 §1.2/1.3）。
 			var c domain.Candidates
 			if c, err = parseCandidates(val); err == nil {
 				p.Roles[key] = c
@@ -88,7 +93,7 @@ func ParseProfileKV(text string) (*domain.Profile, error) {
 				p.Roles[key[len("role."):]] = c
 			}
 		default:
-			return nil, fmt.Errorf("第 %d 行不认识的 key %q（写错字会被静默忽略，" +
+			return nil, fmt.Errorf("第 %d 行不认识的 key %q（写错字会被静默忽略，"+
 				"所以这里宁可报错）", ln+1, key)
 		}
 		if err != nil {
@@ -108,13 +113,22 @@ func parseBool(v string) (bool, error) {
 	return false, fmt.Errorf("布尔值只认 true/false，不猜")
 }
 
-// parseCandidates `provider/model` 或裸模型名，逗号分隔多个候选。
+// parseCandidates `provider/model`、`@别的键`（引用）或裸模型名，逗号分隔多个候选。
 // 裸名的 provider 由 Extends 合并时补（fillBareProviders）。
 func parseCandidates(val string) (domain.Candidates, error) {
 	var out domain.Candidates
 	for _, item := range strings.Split(val, ",") {
 		item = strings.TrimSpace(item)
 		if item == "" {
+			continue
+		}
+		if strings.HasPrefix(item, "@") {
+			// 引用：整条候选就是这个键的链（就地展开，见 resolve.BuildChain）
+			if bd, err := domain.ParseBindingString(item); err == nil {
+				out = append(out, bd)
+			} else {
+				return nil, err
+			}
 			continue
 		}
 		if i := strings.IndexByte(item, '/'); i >= 0 {

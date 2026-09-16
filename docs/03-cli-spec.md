@@ -196,6 +196,24 @@ newgate use --list
 实现分层：`runtime/takeover` 是接管的唯一实现，CLI / TUI / Web 三个壳都只调它
 （docs/02 §2、docs/12 §1）。
 
+### 4.2 模块槽位：`newgate omo`（M1 已实现）
+
+omo（opencode 的 oh-my-openagent 插件）自带一层 intra-agent 槽位。接管时它们
+被保留成**动态角色键**（`omo-sisyphus` / `cat-deep`），这个命令是它们的接口
+——用户不需要记键名，不带参数就是列表：
+
+| 子命令 | 说明 |
+| --- | --- |
+| `omo` / `omo ls` | 列槽位：接管前的模型、现状档位、建议档位、实际生效归属 |
+| `omo use <键> <@别的键\|档位\|provider/模型>` | 改一个槽位的缺省归属（写进注册表的 `overrides`） |
+| `omo unset <键>` | 删掉覆盖，回到 `current` / `suggested` |
+| `omo mode [current\|suggested]` | 全局：按接管时的现状（默认，不改行为）/ 按建议 |
+| `omo explain <键>` | 这个键现在展开成哪条链、为什么（与 `tier` 同构） |
+
+键的解析与档位**完全同一条路径**（docs/18 §1.3）：profile 里可以直接写
+`omo-sisyphus=@normal, relay/terra`，那比 `overrides` 更强。注册表格式见
+[docs/06 §9](06-config-schema.md)。
+
 ### Shell 补全的特殊性
 
 补全必须知道：第一个非选项 token 之后不要再补 newgate 的选项，而应该**委托给 tool 自己的补全**（如果它有）。至少要做到「不给出误导性的 newgate 选项补全」。

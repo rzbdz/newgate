@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/internal/core/domain"
+	"github.com/rzbdz/newgate/go/internal/core/roleprov"
 	"github.com/rzbdz/newgate/go/internal/platform/paths"
 )
 
@@ -32,6 +33,12 @@ type Snapshot struct {
 // Load 读取完整快照。坏掉的 profile 文件跳过而不是让整体失败——
 // 一个手改坏的文件不该让所有 agent 停摆；doctor 会报出来。
 func Load() (*Snapshot, error) {
+	// 模块贡献的动态角色键（omo 的 omo-sisyphus / cat-deep …）跟着快照一起
+	// 刷新：它们也是配置——键是谁、缺省跟哪一档走，都写在模块自己的文件里。
+	// 读失败不挡住加载（失败开放）：那个模块的键退化成「没注册」，
+	// 用户在 `newgate omo` / doctor 里能看到原因。
+	_ = roleprov.Refresh()
+
 	provs, err := LoadProviders()
 	if err != nil {
 		return nil, err
