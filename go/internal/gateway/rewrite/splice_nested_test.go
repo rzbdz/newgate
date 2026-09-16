@@ -77,3 +77,29 @@ func TestArrayItems(t *testing.T) {
 		t.Fatal("对象被当成数组了")
 	}
 }
+
+func TestAppendLastArrayItemArray(t *testing.T) {
+	body := []byte("{\n  \"messages\":[" +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"t1"}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1"}]}` +
+		`],"max_tokens":9007199254740993}` + "\n")
+	isUser := func(item []byte) bool {
+		role, _ := TopLevelString(item, "role")
+		return role == "user"
+	}
+	block := []byte(`{"type":"text","text":"continue"}`)
+	out, changed, err := AppendLastArrayItemArray(body, "messages", "content", block, isUser)
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if !json.Valid(out) {
+		t.Fatalf("结果不是合法 JSON:\n%s", out)
+	}
+	if !strings.Contains(string(out),
+		`{"type":"tool_result","tool_use_id":"t1"},{"type":"text","text":"continue"}`) {
+		t.Fatalf("没有追加到最后一条消息的 content 尾部:\n%s", out)
+	}
+	if !strings.Contains(string(out), `"max_tokens":9007199254740993`) {
+		t.Fatalf("无关的大整数被改写:\n%s", out)
+	}
+}

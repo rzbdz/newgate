@@ -72,6 +72,14 @@ type Plugin interface {
 	Apply(body []byte, r *Request) (out []byte, notes []string, err error)
 }
 
+// ToolLoopMigrator 是可选的路由约束：某些上游不能原样接手别家尚未闭合的
+// reasoning/tool 状态，但可以在安全候选都失败后做一次显式的有损重建。
+// 它属于具体上游的 quirk，不应变成全局 fallback 规则。
+type ToolLoopMigrator interface {
+	NeedsToolLoopRebase(originProvider, originModel string, candidate *Request) (bool, string)
+	RebaseToolLoop(body []byte, candidate *Request) ([]byte, string, error)
+}
+
 var registry []Plugin
 
 // Register 注册一个插件。只在 init() 里调用，所以不用加锁。
@@ -101,6 +109,58 @@ func Plugins() []Plugin {
 	out := make([]Plugin, len(registry))
 	copy(out, registry)
 	return out
+}
+
+// ToolLoopNeedsRebase 询问匹配 candidate 的插件是否需要先有损重建，才能接手
+// origin 产生的未闭合 tool loop。
+func ToolLoopNeedsRebase(originProvider, originModel string, candidate *Request,
+	off func(name string) bool) (bool, string) {
+	for _, p := range registry {
+		if off != nil && off(p.Name()) {
+			continue
+		}
+		migrator, ok := p.(ToolLoopMigrator)
+		if !ok || !p.Match(candidate) {
+			continue
+		}
+		if needed, why := migrator.NeedsToolLoopRebase(
+			originProvider, originModel, candidate); needed {
+			return true, p.Name() + ": " + why
+		}
+	}
+	return false, ""
+}
+
+// RebaseToolLoop 让声明需要 rebase 的插件改写请求。失败开放：插件出错时返回
+// 原 body 和一条可见 note，由上游给出真实错误，不让补丁本身切断整条链。
+func RebaseToolLoop(body []byte, originProvider, originModel string, candidate *Request,
+	off func(name string) bool) Result {
+	res := Result{Body: body}
+	for _, p := range registry {
+		if off != nil && off(p.Name()) {
+			continue
+		}
+		migrator, ok := p.(ToolLoopMigrator)
+		if !ok || !p.Match(candidate) {
+			continue
+		}
+		needed, _ := migrator.NeedsToolLoopRebase(originProvider, originModel, candidate)
+		if !needed {
+			continue
+		}
+		out, note, err := migrator.RebaseToolLoop(body, candidate)
+		if err != nil {
+			res.Notes = []string{p.Name() + ": 有损 tool loop 重建跳过（" + err.Error() + "）"}
+			return res
+		}
+		if note == "" || out == nil {
+			return res
+		}
+		res.Body, res.Changed = out, true
+		res.Notes = []string{p.Name() + ": " + note}
+		return res
+	}
+	return res
 }
 
 // Result 一次 special_treatment 的结果。

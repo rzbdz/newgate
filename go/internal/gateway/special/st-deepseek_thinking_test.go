@@ -366,3 +366,38 @@ func TestDeepSeekNoThinkingBlockInOpenAIDialect(t *testing.T) {
 		t.Fatalf("reasoning_content 该照补:\n%s", out)
 	}
 }
+
+func TestDeepSeekToolLoopMigrationIsScopedAndRebased(t *testing.T) {
+	ds := deepseek{}
+	candidate := &Request{
+		Model: "deepseek-flash", Provider: "smt-deepseek",
+		BaseURL: "https://gw.example.com/v1", Path: "/messages",
+	}
+	if needed, _ := ds.NeedsToolLoopRebase("ark", "ark-code-latest", candidate); !needed {
+		t.Fatal("DeepSeek 接手 Ark tool loop 应要求 rebase")
+	}
+	if needed, _ := ds.NeedsToolLoopRebase(
+		"smt-deepseek", "deepseek-flash", candidate); needed {
+		t.Fatal("DeepSeek 续自己的 tool loop 不该 rebase")
+	}
+	ark := &Request{Model: "ark-code-latest", Provider: "ark",
+		BaseURL: "https://ark.example.com", Path: "/messages"}
+	if needed, _ := ds.NeedsToolLoopRebase("smt-deepseek", "deepseek-flash", ark); needed {
+		t.Fatal("deepseek special 不该约束迁出到 Ark")
+	}
+
+	body := []byte(`{"model":"deepseek-flash","messages":[` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"t1"}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}` +
+		`]}`)
+	out, note, err := ds.RebaseToolLoop(body, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), toolLoopRebasePrompt) {
+		t.Fatalf("没有追加 rebase 指令:\n%s", out)
+	}
+	if !strings.Contains(note, "有损重建") {
+		t.Fatalf("rebase 没有明确回报: %q", note)
+	}
+}

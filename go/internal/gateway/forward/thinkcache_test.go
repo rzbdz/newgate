@@ -306,3 +306,105 @@ func TestThinkingBlockRoundTripAnthropicDialect(t *testing.T) {
 	}
 	t.Logf("Anthropic 方言：%d 字节 thinking 块已逐字补回 content[] 开头", len(sawThinking))
 }
+
+// TestDeepseekRebasesForeignToolLoop 复刻真实迁移故障：
+//
+//  1. 链头 DeepSeek 失败，fallback Ark 产出 thinking + tool_use；
+//  2. 客户端带 tool_result 回来时，普通建链重新从 DeepSeek 开始；
+//  3. fallback 顺序保持不变，deepseek special 追加普通用户继续指令，
+//     把外来 hidden reasoning 有损重建成 DeepSeek 能接手的新回合。
+func TestDeepseekRebasesForeignToolLoop(t *testing.T) {
+	isolate(t)
+
+	var mu sync.Mutex
+	dsHits, arkHits := 0, 0
+	ds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := ioutil.ReadAll(r.Body)
+		mu.Lock()
+		dsHits++
+		n := dsHits
+		mu.Unlock()
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"initial failure"}}`)
+			return
+		}
+		if !strings.Contains(string(body), "Re-evaluate them as a new step") {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"reasoning_content must be passed back"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"content":[{"type":"text","text":"rebased"}]}`)
+	}))
+	defer ds.Close()
+
+	ark := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		arkHits++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, ev := range []string{
+			`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"reason"}}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_rebase","name":"Read","input":{}}}`,
+			`{"type":"message_stop"}`,
+		} {
+			_, _ = io.WriteString(w, "data: "+ev+"\n\n")
+		}
+	}))
+	defer ark.Close()
+
+	testChain = func(tier string) []resolve.Step {
+		return []resolve.Step{
+			{
+				Profile:  "ds",
+				Binding:  domain.Binding{Provider: "smt-deepseek", Model: "deepseek-flash"},
+				Provider: domain.Provider{BaseURL: ds.URL, APIKey: "sk-ds", Protocol: "anthropic"},
+			},
+			{
+				Profile:  "ark",
+				Binding:  domain.Binding{Provider: "ark", Model: "ark-code-latest"},
+				Provider: domain.Provider{BaseURL: ark.URL, APIKey: "sk-ark", Protocol: "anthropic"},
+			},
+		}
+	}
+	defer func() { testChain = nil }()
+
+	srv := &Server{Port: 0}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	first := `{"model":"normal","stream":true,"messages":[{"role":"user","content":"read"}]}`
+	resp, err := http.Post(front.URL+"/v1/messages", "application/json", strings.NewReader(first))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("第一轮状态 %d", resp.StatusCode)
+	}
+
+	second := `{"model":"normal","stream":false,"messages":[` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"call_rebase","name":"Read","input":{}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_rebase","content":"ok"}]}` +
+		`]}`
+	resp, err = http.Post(front.URL+"/v1/messages", "application/json", strings.NewReader(second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("有损 rebase 后仍失败：status=%d body=%s", resp.StatusCode, got)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if dsHits != 2 || arkHits != 1 {
+		t.Fatalf("fallback 顺序被改了：deepseek=%d ark=%d", dsHits, arkHits)
+	}
+	if route := resp.Header.Get("X-Newgate-Route"); !strings.Contains(route, "smt-deepseek/deepseek-flash") {
+		t.Fatalf("有损重建后没有按原链头走 DeepSeek：route=%q", route)
+	}
+}

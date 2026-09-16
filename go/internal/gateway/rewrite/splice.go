@@ -276,6 +276,61 @@ func EnsureArrayItemArrayHeadFunc(body []byte, arrayKey, field string,
 	return out, len(points), nil
 }
 
+// AppendLastArrayItemArray 往顶层数组最后一个对象元素的子数组末尾追加 rawVal。
+// match 用来确认最后一项确实是调用方要处理的形状。只插入这一段字节，其余
+// 请求（包括大整数、字段顺序和未知字段）保持原样。
+func AppendLastArrayItemArray(body []byte, arrayKey, field string, rawVal []byte,
+	match func(item []byte) bool) ([]byte, bool, error) {
+	s, e, err := findTopLevelValue(body, arrayKey)
+	if err != nil {
+		return body, false, err
+	}
+	arr := body[s:e]
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
+		return body, false, errNotArray
+	}
+	if len(spans) == 0 {
+		return body, false, nil
+	}
+	sp := spans[len(spans)-1]
+	item := arr[sp[0]:sp[1]]
+	if len(item) == 0 || item[0] != '{' || (match != nil && !match(item)) {
+		return body, false, nil
+	}
+	cs, ce, err := findTopLevelValue(item, field)
+	if err != nil {
+		return body, false, err
+	}
+	child := item[cs:ce]
+	if len(child) == 0 || child[0] != '[' {
+		return body, false, errNotArray
+	}
+	close := len(child) - 1
+	for close > 0 {
+		switch child[close] {
+		case ' ', '\t', '\r', '\n':
+			close--
+			continue
+		}
+		break
+	}
+	if child[close] != ']' {
+		return body, false, errNotArray
+	}
+	j := skipWS(child, 1)
+	ins := rawVal
+	if j < len(child) && child[j] != ']' {
+		ins = append([]byte(","), rawVal...)
+	}
+	off := s + sp[0] + cs + close
+	out := make([]byte, 0, len(body)+len(ins))
+	out = append(out, body[:off]...)
+	out = append(out, ins...)
+	out = append(out, body[off:]...)
+	return out, true, nil
+}
+
 // ArrayItems 把一个 JSON 数组的原始字节切成各元素的原始字节（只读判断用，
 // 比如「这条 content[] 里有没有 thinking 块」）。切片指向原字节，不拷贝。
 func ArrayItems(arr []byte) ([][]byte, bool) {

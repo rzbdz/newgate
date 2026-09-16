@@ -592,6 +592,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var steps []resolve.Step
 	var skips []resolve.Skip
 	tier := norm
+	toolOrigin, hasToolOrigin := thinkcache.Default.ContinuationOrigin(body)
 	// special 层的路由改道（如 claude-bg 把 Bash 分类器整条链改走 light）。
 	// 必须在 ResolveRequest 之前：改道换的是整条 fallback 链，body 改写只能
 	// 换链头。用户 `newgate st off claude-bg` 时改道一起停（off 传进去）。
@@ -687,6 +688,24 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if merr != nil {
 			s.fail(w, 500, "改写 model 失败: "+merr.Error())
 			return
+		}
+		if hasToolOrigin {
+			candidate := &special.Request{
+				InModel: inModel, Tier: tier, Model: a.Binding.Model,
+				Provider: a.Binding.Provider, BaseURL: a.Provider.Base(suffix),
+				Protocol: a.Provider.Protocol, Path: suffix, Stream: stream,
+				Agent: tgt.TaskCreate,
+			}
+			if res := special.RebaseToolLoop(newBody, toolOrigin.Provider, toolOrigin.Model,
+				candidate, st.SpecialPluginOff); len(res.Notes) > 0 {
+				for _, note := range res.Notes {
+					s.logf("[proxy] #%d special_treatment %s", reqID, note)
+				}
+				if res.Changed {
+					newBody = res.Body
+					metrics.Default.Inc("special.deepseek.tool_loop_rebase")
+				}
+			}
 		}
 
 		// tool schema 修补：只在真有东西要补时才重写 tools 这一个值，
@@ -977,7 +996,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					if !stream && len(nonStream) > 0 {
 						ob.ObserveBody(nonStream)
 					}
-					if nb, nk := ob.Commit(thinkcache.Default); nb > 0 {
+					origin := thinkcache.Origin{
+						Profile: a.Profile, Provider: a.Binding.Provider, Model: a.Binding.Model,
+					}
+					if nb, nk := ob.CommitWithOrigin(thinkcache.Default, origin); nb > 0 {
 						// 只打字节数和 key 数，绝不打内容
 						s.logf("[proxy] #%d 记下本轮推理内容 %d 字节 / %d 个 key，"+
 							"下一轮替客户端补回去", reqID, nb, nk)

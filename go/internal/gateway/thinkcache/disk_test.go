@@ -33,6 +33,34 @@ func TestDiskStoreSurvivesReopen(t *testing.T) {
 	}
 }
 
+func TestOriginSurvivesReopen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "thinkcache.bin")
+	want := Origin{Profile: "ark", Provider: "ark", Model: "ark-code-latest"}
+
+	c1 := New(1<<20, time.Hour)
+	d1, err := openDisk(path, 1<<20, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1.disk = d1
+	c1.PutOrigin([]string{"call_restart"}, want)
+	if err := d1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	c2 := New(1<<20, time.Hour)
+	d2, err := openDisk(path, 1<<20, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d2.Close()
+	c2.disk = d2
+	if got, ok := c2.GetOrigin("call_restart"); !ok || got != want {
+		t.Fatalf("重启后 tool origin 丢了: ok=%v got=%+v", ok, got)
+	}
+}
+
 // 过期项在 replay 时就被跳过，不占索引。
 func TestDiskStoreDropsExpiredOnReopen(t *testing.T) {
 	dir := t.TempDir()
