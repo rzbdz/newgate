@@ -238,3 +238,68 @@ func ToolKey(id string) string {
 	}
 	return "tool:" + id
 }
+
+const originKeyPrefix = "origin:"
+
+// Origin 是产生某个 tool call 的实际上游。思考模式下，assistant 的 reasoning
+// 与整组 tool calls 属于同一个未闭合状态；在 tool_result 回来之前不能把它们
+// 搬给另一家上游。只存路由身份，不存请求或响应正文。
+type Origin struct {
+	Profile  string `json:"profile,omitempty"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+func originKey(id string) string {
+	if id == "" {
+		return ""
+	}
+	return originKeyPrefix + id
+}
+
+// PutOrigin 把响应里的 tool call 绑定到实际产生它的上游。复用 Cache/DiskStore
+// 的 TTL、容量与落盘机制，因此 daemon 重启后未闭合 tool loop 仍能回到原上游。
+func (c *Cache) PutOrigin(toolIDs []string, origin Origin) {
+	if c == nil || origin.Provider == "" || origin.Model == "" {
+		return
+	}
+	blob, err := json.Marshal(origin)
+	if err != nil {
+		return
+	}
+	var keys []string
+	for _, id := range toolIDs {
+		if k := originKey(id); k != "" {
+			keys = append(keys, k)
+		}
+	}
+	c.Put(keys, blob)
+}
+
+// GetOrigin 取回一个 tool call 的产生上游。
+func (c *Cache) GetOrigin(toolID string) (Origin, bool) {
+	var origin Origin
+	blob, ok := c.Get(originKey(toolID))
+	if !ok || json.Unmarshal(blob, &origin) != nil ||
+		origin.Provider == "" || origin.Model == "" {
+		return Origin{}, false
+	}
+	return origin, true
+}
+
+// TextKey 按 assistant 正文的哈希做 key，用于**没有** tool_call 的那些轮。
+//
+// 文档说得很明确：一旦请求带了 tools，历史里每条 assistant 消息都要带推理
+// 内容，哪怕那一轮没做 tool call。所以纯文本轮也得能找回来，而它身上唯一
+// 会被客户端原样带回的东西就是正文。
+//
+// 弱点：客户端要是改写过正文（截断、加前缀）就 miss。接受它——主路径
+// （带 tool_call 的轮）走 ToolKey，那条是稳的。
+func TextKey(text string) string {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(t))
+	return "text:" + hex.EncodeToString(h[:12])
+}
