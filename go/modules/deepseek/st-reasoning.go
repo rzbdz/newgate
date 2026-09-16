@@ -364,3 +364,25 @@ func AuditReasoning(out []byte) string {
 }
 
 func (reasoning) AuditResponse(body []byte) string { return AuditReasoning(body) }
+
+// msgKeys 抽出这条 assistant 消息的 tool_use id（缓存找回的 key 就靠它），
+// 纯文本轮没有 tool_use，靠正文哈希。取证时拿 id 反查 thinkcache 该不该有。
+func msgKeys(item []byte) string {
+	var toolIDs []string
+	if c, ok := rewrite.TopLevelRaw(item, "content"); ok {
+		if bs, ok := rewrite.ArrayItems(c); ok {
+			for _, blk := range bs {
+				if t, _ := rewrite.TopLevelString(blk, "type"); t != "tool_use" {
+					continue
+				}
+				if id, _ := rewrite.TopLevelString(blk, "id"); id != "" {
+					toolIDs = append(toolIDs, id)
+				}
+			}
+		}
+	}
+	if len(toolIDs) == 0 {
+		return "（纯文本轮，无 tool_use）"
+	}
+	return "tool_use ids: " + strings.Join(toolIDs, " ")
+}
