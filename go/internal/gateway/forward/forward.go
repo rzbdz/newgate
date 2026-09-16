@@ -329,7 +329,12 @@ func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
 // 可以点名的 model id，藏着不列只会让 opencode 报「模型不存在」。
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	var data []map[string]interface{}
+	seen := map[string]bool{}
 	add := func(id string) {
+		if id == "" || seen[id] {
+			return // 内置别名（normal→mid）也在角色表里，会与档位重名
+		}
+		seen[id] = true
 		data = append(data, map[string]interface{}{
 			"id": id, "object": "model", "owned_by": "newgate",
 		})
