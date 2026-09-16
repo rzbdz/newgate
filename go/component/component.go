@@ -240,3 +240,99 @@ func (m *Manager) Stop(ctx context.Context) error {
 	})
 	return first
 }
+
+// resolve 在任何副作用发生前验证端口并生成稳定拓扑顺序。
+// 同序候选按原始声明位置排序，使 many 扩展点和诊断输出可复现。
+func resolve(components []Component) ([]Component, map[string][]any, error) {
+	byName := make(map[string]int, len(components))
+	specs := make(map[string]capabilitySpec)
+	providers := make(map[string][]int)
+	values := make(map[string][]any)
+	for i, component := range components {
+		if component.Name == "" {
+			return nil, nil, fmt.Errorf("component name is required")
+		}
+		if _, exists := byName[component.Name]; exists {
+			return nil, nil, fmt.Errorf("duplicate component %s", component.Name)
+		}
+		byName[component.Name] = i
+		for _, provision := range component.Provides {
+			if err := validateSpec(specs, provision.spec); err != nil {
+				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
+			}
+			if isNil(provision.value) {
+				return nil, nil, fmt.Errorf("component %s provides nil %s",
+					component.Name, provision.spec.name)
+			}
+			if !reflect.TypeOf(provision.value).AssignableTo(provision.spec.valueType) {
+				return nil, nil, fmt.Errorf("component %s provides %s as %T, want %s",
+					component.Name, provision.spec.name, provision.value, provision.spec.valueType)
+			}
+			providers[provision.spec.name] = append(providers[provision.spec.name], i)
+			values[provision.spec.name] = append(values[provision.spec.name], provision.value)
+		}
+	}
+	for name, indexes := range providers {
+		if specs[name].cardinality == single && len(indexes) > 1 {
+			return nil, nil, fmt.Errorf("capability %s has multiple providers: %s",
+				name, componentList(components, indexes))
+		}
+	}
+
+	edges := make([]map[int]bool, len(components))
+	indegree := make([]int, len(components))
+	for consumer, component := range components {
+		for _, requirement := range component.Requires {
+			if err := validateSpec(specs, requirement.spec); err != nil {
+				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
+			}
+			indexes := providers[requirement.spec.name]
+			if len(indexes) == 0 && !requirement.optional {
+				return nil, nil, fmt.Errorf("component %s requires missing capability %s",
+					component.Name, requirement.spec.name)
+			}
+			for _, provider := range indexes {
+				if provider == consumer {
+					continue
+				}
+				if edges[provider] == nil {
+					edges[provider] = make(map[int]bool)
+				}
+				if !edges[provider][consumer] {
+					edges[provider][consumer] = true
+					indegree[consumer]++
+				}
+			}
+		}
+	}
+
+	var ready []int
+	for i := range components {
+		if indegree[i] == 0 {
+			ready = append(ready, i)
+		}
+	}
+	sort.Ints(ready)
+	ordered := make([]Component, 0, len(components))
+	for len(ready) > 0 {
+		current := ready[0]
+		ready = ready[1:]
+		ordered = append(ordered, components[current])
+		var next []int
+		for dependent := range edges[current] {
+			next = append(next, dependent)
+		}
+		sort.Ints(next)
+		for _, dependent := range next {
+			indegree[dependent]--
+			if indegree[dependent] == 0 {
+				ready = append(ready, dependent)
+				sort.Ints(ready)
+			}
+		}
+	}
+	if len(ordered) != len(components) {
+		return nil, nil, fmt.Errorf("component capability dependency cycle")
+	}
+	return ordered, values, nil
+}
