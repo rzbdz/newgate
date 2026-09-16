@@ -306,3 +306,135 @@ func tierReport(which string) int {
 	}
 	return 0
 }
+
+func bindingHealthLabel(h health.Status) string {
+	if h.Open {
+		return style.Red("熔断")
+	}
+	switch {
+	case h.ScoreMs > 0 && h.ScoreMs < 3000:
+		return style.Green(fmt.Sprintf("流畅 %dms", h.ScoreMs))
+	case h.ScoreMs >= 3000 && h.ScoreMs <= 12000:
+		return style.Yellow(fmt.Sprintf("可用 %dms", h.ScoreMs))
+	case h.ScoreMs > 12000:
+		return style.Red(fmt.Sprintf("卡顿 %dms", h.ScoreMs))
+	case h.Grade == health.ProbeUnavailable:
+		return style.Red("不可用")
+	default:
+		return style.Dim("未探")
+	}
+}
+
+func chainSig(steps []resolve.Step) string {
+	var b strings.Builder
+	for _, s := range steps {
+		b.WriteString(s.Binding.String())
+		b.WriteByte('|')
+	}
+	return b.String()
+}
+
+func bindingChain(steps []resolve.Step, indent string) string {
+	var out strings.Builder
+	for i, step := range steps {
+		out.WriteString(indent)
+		if i > 0 {
+			out.WriteString(style.Dim("→ "))
+		}
+		out.WriteString(step.Binding.String())
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
+func numberedBindingChain(steps []resolve.Step, extra func(resolve.Step) string) string {
+	var out strings.Builder
+	for i, step := range steps {
+		out.WriteString(fmt.Sprintf("  %d. %s\n", i+1, step.Binding.String()))
+		detail := "profile " + step.Profile
+		if extra != nil {
+			if value := extra(step); value != "" {
+				detail += " · " + value
+			}
+		}
+		out.WriteString(style.Hint(detail))
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
+func tierOverview(rows []tierView) string {
+	var out strings.Builder
+	out.WriteString("  " + style.Dim(style.Pad("档位", 6)) + "  " + style.Dim("链") + "\n")
+	firstOf := map[string]string{}
+	for _, row := range rows {
+		prefix := "  " + style.Cyan(style.Pad(row.name, 6)) + "  "
+		switch {
+		case len(row.steps) == 0:
+			out.WriteString(prefix + style.Red("无可用候选") + "\n")
+		case firstOf[chainSig(row.steps)] != "":
+			out.WriteString(prefix + style.Dim("= "+firstOf[chainSig(row.steps)]) + "\n")
+		default:
+			firstOf[chainSig(row.steps)] = row.name
+			for i, step := range row.steps {
+				if i == 0 {
+					out.WriteString(prefix + step.Binding.String() + "\n")
+				} else {
+					out.WriteString("          " + style.Dim("→ ") + step.Binding.String() + "\n")
+				}
+			}
+		}
+	}
+	return out.String()
+}
+
+func countSkips(rows []tierView) int {
+	n := 0
+	for _, r := range rows {
+		n += len(r.skips)
+	}
+	return n
+}
+
+// skipSummary 跳过原因按类目计数。用户真正想问的是「为什么没轮到它」，
+// 一百行里其实只有三五类原因。
+func skipSummary(rows []tierView) string {
+	reasons := map[string]int{}
+	for _, r := range rows {
+		for _, s := range r.skips {
+			reasons[skipKind(s.Reason)]++
+		}
+	}
+	var parts []string
+	for _, k := range skipKinds {
+		if n := reasons[k]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", k, n))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// printSkips 跳过**汇总**。永远只给按原因分组的计数与一句解释——
+// 逐条铺开是候选全集的流水账，真正的结论是上面那条链。
+//
+// 需要一个个看的时候有别的口子：newgate profiles 看标志、doctor 看链路、
+// metrics / probe 看熔断，那些才是可操作的信息。
+func printSkips(skips []resolve.Skip) {
+	reasons := map[string][]resolve.Skip{}
+	for _, s := range skips {
+		k := skipKind(s.Reason)
+		reasons[k] = append(reasons[k], s)
+	}
+	fmt.Println(style.Item(style.Skip, fmt.Sprintf("%d 个候选被跳过", len(skips))))
+
+	t := style.NewTable("原因", "数量", "说明")
+	t.AlignRight(1)
+	for _, k := range skipKinds {
+		group := reasons[k]
+		if len(group) == 0 {
+			continue
+		}
+		t.Row(k, fmt.Sprintf("%d", len(group)), style.Dim(skipDetail(group[0])))
+	}
+	fmt.Print(t.String())
+}
