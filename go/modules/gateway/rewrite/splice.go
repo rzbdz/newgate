@@ -330,3 +330,123 @@ func AppendLastArrayItemArray(body []byte, arrayKey, field string, rawVal []byte
 	out = append(out, body[off:]...)
 	return out, true, nil
 }
+
+// ArrayItems 把一个 JSON 数组的原始字节切成各元素的原始字节（只读判断用，
+// 比如「这条 content[] 里有没有 thinking 块」）。切片指向原字节，不拷贝。
+func ArrayItems(arr []byte) ([][]byte, bool) {
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
+		return nil, false
+	}
+	out := make([][]byte, 0, len(spans))
+	for _, sp := range spans {
+		out = append(out, arr[sp[0]:sp[1]])
+	}
+	return out, true
+}
+
+// arrayItemSpans 返回数组里每个元素相对 arr 的 [start,end)。
+// 扫不动（不是数组、或值残缺）时返回 false——调用方一律按「形状不认识，
+// 不动它」处理，绝不去猜。
+func arrayItemSpans(arr []byte) ([][2]int, bool) {
+	if len(arr) == 0 || arr[0] != '[' {
+		return nil, false
+	}
+	var out [][2]int
+	i := 1
+	for {
+		i = skipWS(arr, i)
+		if i >= len(arr) {
+			return nil, false
+		}
+		if arr[i] == ']' {
+			return out, true
+		}
+		if arr[i] == ',' {
+			i++
+			continue
+		}
+		ve, ok := scanValue(arr, i)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, [2]int{i, ve})
+		i = ve
+	}
+}
+
+var (
+	errNotObject = errors.New("请求体顶层不是 JSON 对象")
+	errNoKey     = errors.New("顶层找不到该字段")
+	errNotString = errors.New("该字段的值不是字符串")
+	errNotArray  = errors.New("该字段的值不是数组")
+	errDupKey    = errors.New("顶层已经有这个字段了")
+)
+
+// findTopLevelStringValue 同 findTopLevelValue，但要求值是字符串。
+func findTopLevelStringValue(body []byte, key string) (int, int, error) {
+	s, e, err := findTopLevelValue(body, key)
+	if err != nil {
+		return 0, 0, err
+	}
+	if body[s] != '"' {
+		return 0, 0, errNotString
+	}
+	return s, e, nil
+}
+
+// findTopLevelValue 返回顶层 key 的值在 body 中的字节区间 [start,end)。
+// 只看深度 1 的键，所以嵌套在 tools 里的同名 "model" 不会被误伤。
+func findTopLevelValue(body []byte, key string) (int, int, error) {
+	i := skipWS(body, 0)
+	if i >= len(body) || body[i] != '{' {
+		return 0, 0, errNotObject
+	}
+	i++ // 进入对象，深度 = 1
+
+	for {
+		i = skipWS(body, i)
+		if i >= len(body) {
+			return 0, 0, errNoKey
+		}
+		if body[i] == '}' {
+			return 0, 0, errNoKey
+		}
+		if body[i] == ',' {
+			i++
+			continue
+		}
+		if body[i] != '"' {
+			return 0, 0, errNotObject
+		}
+
+		// 读 key
+		kStart := i
+		kEnd, ok := scanString(body, i)
+		if !ok {
+			return 0, 0, errNotObject
+		}
+		var k string
+		if err := json.Unmarshal(body[kStart:kEnd], &k); err != nil {
+			return 0, 0, errNotObject
+		}
+		i = skipWS(body, kEnd)
+		if i >= len(body) || body[i] != ':' {
+			return 0, 0, errNotObject
+		}
+		i = skipWS(body, i+1)
+		if i >= len(body) {
+			return 0, 0, errNotObject
+		}
+
+		vStart := i
+		vEnd, ok := scanValue(body, i)
+		if !ok {
+			return 0, 0, errNotObject
+		}
+		if k == key {
+			return vStart, vEnd, nil
+		}
+		i = vEnd
+	}
+}
