@@ -640,3 +640,149 @@ func cmdDoctor(service *service) int {
 	fmt.Printf("%s %d 项异常\n", style.Mark(style.Bad), bad)
 	return 1
 }
+
+// checkConfig 三个必需文件在不在。
+func checkConfig() check {
+	c := check{label: "文件"}
+	var missing, ok []string
+	for _, p := range []string{paths.ProvidersFile(), paths.StateFile(), paths.Mappings()} {
+		if _, err := os.Stat(p); err != nil {
+			missing = append(missing, filepath.Base(p))
+		} else {
+			ok = append(ok, filepath.Base(p))
+		}
+	}
+	extra := ""
+	if names, err := store.ListProfiles(); err == nil {
+		extra = fmt.Sprintf(" · %d 个 profile", len(names))
+	}
+	if len(missing) > 0 {
+		c.mark = style.Bad
+		c.line = strings.Join(missing, " · ") + " 不存在"
+		c.details = append(c.details, "newgate init 铺开默认配置")
+		return c
+	}
+	c.mark = style.OK
+	c.line = strings.Join(ok, " · ") + extra
+	return c
+}
+
+// checkChain profile 引用的 provider 与 key 齐不齐。
+func checkChain() check {
+	c := check{label: "链路"}
+	probs := store.Validate()
+	names, _ := store.ListProfiles()
+	if len(probs) == 0 {
+		c.mark = style.OK
+		c.line = fmt.Sprintf("%d 个 profile 的 provider 与 key 均可用", len(names))
+		return c
+	}
+	c.mark = style.Bad
+	c.line = fmt.Sprintf("%d 处配置问题", len(probs))
+	c.details = probs
+	return c
+}
+
+// checkEnv 出站代理会不会把 loopback 请求劫走。
+//
+// 这是最隐蔽的一类故障：newgate 日志里一条请求都没有，因为请求根本没到我们
+// 这——客户端发给了 http_proxy，代理连不上 127.0.0.1 就回 502。
+func checkEnv() check {
+	c := check{label: "环境"}
+	set := proxyEnvSet()
+	if len(set) == 0 {
+		c.mark = style.OK
+		c.line = "无出站代理变量"
+		return c
+	}
+	noProxy := os.Getenv("no_proxy") + "," + os.Getenv("NO_PROXY")
+	covered := 0
+	for _, want := range []string{"127.0.0.1", "localhost"} {
+		if strings.Contains(noProxy, want) {
+			covered++
+		}
+	}
+	if covered == 2 {
+		c.mark = style.OK
+		c.line = "有出站代理；NO_PROXY 已放行 loopback"
+		c.details = append(c.details, set...)
+		return c
+	}
+	c.mark = style.Bad
+	c.line = "有出站代理；NO_PROXY 未放行 127.0.0.1 / localhost"
+	c.details = append(c.details, set...)
+	c.details = append(c.details,
+		"后果：客户端把 127.0.0.1:8899 的请求交给出站代理，连不上即 502；",
+		"      newgate 日志不会留下任何记录。",
+		"修复（写进 shell rc 后重开客户端）：",
+		`  export NO_PROXY="127.0.0.1,localhost,::1,$NO_PROXY"`,
+		`  export no_proxy="$NO_PROXY"`)
+	return c
+}
+
+func proxyEnvSet() []string {
+	var out []string
+	for _, n := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
+		"all_proxy", "ALL_PROXY"} {
+		if v := os.Getenv(n); v != "" {
+			out = append(out, n+"="+v)
+		}
+	}
+	return out
+}
+
+// checkProxy 代理进程与端口的两种失败要分开说：进程死了可以重启，
+// 端口在听却探不通是环境问题，重启一百次也没用。
+func checkProxy() check {
+	c := check{label: "代理"}
+	st := store.LoadState()
+	info, ps := proxyState()
+	switch {
+	case info == nil:
+		c.mark = style.Skip
+		c.line = fmt.Sprintf("未运行（端口 %d）", st.Port)
+		c.details = append(c.details, "newgate start")
+	case ps != nil:
+		c.mark = style.OK
+		c.line = fmt.Sprintf("pid %d · 127.0.0.1:%d · %s", info.PID, info.Port, prettyDur(ps.UptimeS))
+	default:
+		c.mark = style.Bad
+		c.line = fmt.Sprintf("pid %d 存活，127.0.0.1:%d HTTP 探活失败", info.PID, info.Port)
+		c.details = append(c.details,
+			"进程正常，请求到不了它；常见于出站代理劫持 loopback（见「环境」一项）。")
+	}
+	return c
+}
+
+// checkTakeover 被改写的目标文件。
+func checkTakeover(agents agentapi.AgentCatalog) check {
+	c := check{label: "接管"}
+	var on, off []string
+	for _, id := range agents.Names() {
+		agent, ok := agents.Get(id)
+		if !ok || agent.Config == nil {
+			continue
+		}
+		for _, target := range agent.Config.Targets() {
+			if _, err := os.Stat(target); err != nil {
+				continue
+			}
+			if agent.Config.IsTakenOver(target) {
+				on = append(on, filepath.Base(target))
+			} else {
+				off = append(off, filepath.Base(target))
+			}
+		}
+	}
+	if len(on) == 0 {
+		c.mark = style.Skip
+		c.line = "无文件被改写"
+		return c
+	}
+	c.mark = style.OK
+	c.line = strings.Join(on, " · ")
+	if len(off) > 0 {
+		c.details = append(c.details, "未接管："+strings.Join(off, " · "))
+	}
+	return c
+}
