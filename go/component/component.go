@@ -31,3 +31,6 @@ type Capability[T any] struct{ spec capabilitySpec }
 
 // One 声明只能有一个提供者的端口；重复提供会在构图阶段失败，避免隐式选边。
 func One[T any](name string) Capability[T] { return newCapability[T](name, single) }
+
+// Many 声明可由多个组件共同贡献的扩展点，读取顺序服从稳定的组件顺序。
+func Many[T any](name string) Capability[T] { return newCapability[T](name, many) }
