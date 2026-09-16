@@ -210,3 +210,6 @@ func Must(loaders ...Loader) *Manager {
 	}
 	return manager
 }
+
+// Context 返回已解析端口的只读视图，供组合根访问最终入口服务。
+func (m *Manager) Context() Context { return m.context }
