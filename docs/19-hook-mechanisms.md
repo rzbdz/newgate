@@ -69,7 +69,7 @@ env 注入是 newgate 的心脏。它做的事：**把「模型」这件事从 C
 | --- | --- | --- | --- |
 | baseURL | `ANTHROPIC_BASE_URL` | `http://127.0.0.1:8899/a/claude` | 所有请求 |
 | 鉴权 | `ANTHROPIC_AUTH_TOKEN` | `newgate-local`（**占位串**） | 所有请求 |
-| opus 槽 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | `heavy` 或真实模型名 | 主循环、plan |
+| opus 槽 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | `normal` 或真实模型名 | 主循环、plan（**主力档**） |
 | fable 槽 | `ANTHROPIC_DEFAULT_FABLE_MODEL` | `heavy` | 第三方 provider 识别兜底 |
 | sonnet 槽 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `mid` | Bash 分类器、/compact |
 | haiku 槽 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `light` | 后台小活 |
@@ -101,12 +101,12 @@ API key**。真 key 在 `providers.json`，代理转发时在
 
 ### 2.3 动态档位名 vs 钉死真实名（`launch.go:86-139`）
 
-这是最容易看错的一处。**默认注入的是档位名**（`heavy`/`mid`/`light`），
+这是最容易看错的一处。**默认注入的是档位名**（`heavy`/`normal`/`mid`/`light`），
 不是真实模型名。
 
-- **默认（动态）**：槽位 = 档位名。会话把 `heavy` 发回来，代理按**请求时**的
+- **默认（动态）**：槽位 = 档位名。会话把 `normal` 发回来，代理按**请求时**的
   当前配置解析成真实模型。于是 `newgate --set-profile glm` 对**已经跑着的
-  会话立刻生效**——因为它发的一直是 `heavy`，变的只是代理怎么解释 `heavy`。
+  会话立刻生效**——因为它发的一直是 `normal`，变的只是代理怎么解释它。
 - **钉死**（显式 `--profile` / `NEWGATE_PROFILE` / argv0 分发）：槽位换成该
   profile 链头的**真实模型名**。本次调用已被钉住，界面显示的就是真用的。
 

@@ -13,9 +13,15 @@ func ClassifyModel(s string) (tier string, exact bool) {
 		m = m[i+1:]
 	}
 	switch {
+	case strings.Contains(m, "fable"):
+		return "heavy", true
 	case strings.Contains(m, "opus"), strings.Contains(m, "-sol"),
 		strings.Contains(m, "flagship"):
-		return "heavy", true
+		// 四档化（2026-09-16）：opus 从最顶档降为**主力档** normal，
+		// 顶上留给 fable。第三方名字里 "-sol" / "flagship" 这类
+		// 「厂商最强」的同义词跟着 opus 一起走——它们原本就是按 opus
+		// 的体格归的类，别因为档位改名就换体格。
+		return "normal", true
 	case strings.Contains(m, "gemini") && strings.Contains(m, "pro"),
 		strings.Contains(m, "vision"):
 		return "vision", true
