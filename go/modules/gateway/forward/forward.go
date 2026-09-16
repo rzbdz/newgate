@@ -412,3 +412,141 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]interface{}{"object": "list", "data": data})
 }
+
+// Target 从 URL 路径里解析出的路由意图。
+//
+// 路径文法：
+//
+//	/a/<agent>[/p/<profile>]/v1/...   带 agent 身份
+//	/v1/...                           兼容：用全局默认 profile
+//
+// 为什么用路径而不是 header：claude / opencode 都不允许我们往它们的请求里
+// 塞自定义 header，但 baseURL 是 bootstrap 时我们自己写进去的。路径方案
+// 完全无状态——不需要注册会话、不需要令牌生命周期，代理重启也不受影响。
+type Target struct {
+	TaskCreate string // 空 = 未指定
+	Profile    string // 非空 = 本次调用显式覆盖，不改全局状态
+	Suffix     string // 转发给上游的路径后缀，形如 /chat/completions
+}
+
+func parseTarget(p string) Target {
+	var t Target
+	for {
+		switch {
+		case strings.HasPrefix(p, "/a/"):
+			rest := p[3:]
+			if i := strings.IndexByte(rest, '/'); i < 0 {
+				t.TaskCreate, p = rest, ""
+			} else {
+				t.TaskCreate, p = rest[:i], rest[i:]
+			}
+		case strings.HasPrefix(p, "/p/"):
+			rest := p[3:]
+			if i := strings.IndexByte(rest, '/'); i < 0 {
+				t.Profile, p = rest, ""
+			} else {
+				t.Profile, p = rest[:i], rest[i:]
+			}
+		default:
+			t.Suffix = strings.TrimPrefix(p, "/v1")
+			return t
+		}
+	}
+}
+
+// testChain 仅供测试注入，绕过磁盘配置与真实上游。生产路径永远是 nil。
+// 有它才能保证单测不出网——docs/10-testing-security.md「测试不出网，出网即失败」。
+var testChain func(tier string) []resolve.Step
+
+// handleCountTokens 本地应答 count_tokens（粗估兜底）。
+//
+// Claude Code 周期性地问 token 数（上下文水位条、自动压缩阈值都靠它），
+// 但不是所有上游都有这个端点——聚合器实测（2026-09，api.rvcompute.com）
+// /messages 200 而 /messages/count_tokens 404。所以先试转发拿真值
+// （forwardCountTokens，按 provider 学），接不住再走到这里：按请求体
+// 字节数 / 4 粗估（英文 ≈ 4 字符/token；中文 UTF-8 ≈ 3 字节/字、
+// 1 字/token，估出来偏大——对水位条来说宁可早压缩，无害）。
+//
+// 逐轮的真实计数走 /messages 响应里的 usage，不经过这里。
+func (s *Server) handleCountTokens(w http.ResponseWriter, reqID uint64, body []byte) {
+	n := len(body) / 4
+	s.logf("[proxy] #%d count_tokens（%d 字节）→ 本地粗估 %d tokens", reqID, len(body), n)
+	writeJSON(w, 200, map[string]interface{}{"input_tokens": n})
+}
+
+// forwardCountTokens 把 count_tokens 转发给上游拿真值。接住了返回 true。
+//
+// 为什么值得：本地只有粗估，上游的 tokenizer 才是真值——水位条和自动
+// 压缩阈值都靠它。但它是 anthropic 方言的私有端点，openai 方言上游和
+// 很多聚合器没有，所以按 (provider, model) 学，gate 层面 lazy probe：
+//
+//	没探过 → 试发一发（这本身就是 probe）；404/405 = 明确没有，记下，
+//	          此后退回本地粗估不再白跑；2xx = 有，记下，此后一直拿真值
+//	连接失败 / 429 / 401 → 不学（「现在不行」≠「没有」），本次退回本地
+//
+// 模型注入：count_tokens 请求不带 model 字段，补**主力档**链头——
+// Claude Code 的主循环跑在 opus 槽（四档化后 opus 槽 = normal 档，
+// 2026-09-16；之前是 heavy），数出来的才是将要处理这段对话的 tokenizer。不走链、
+// 不碰熔断器：数 token 失败不算上游病。
+func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
+	body []byte, tgt Target, reqID uint64) bool {
+
+	head, ok := s.mainLoopHead(tgt)
+	if !ok {
+		return false
+	}
+	if ctOK, known := dialect.Supports(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens); known && !ctOK {
+		return false // 探过了：这个上游没有 count_tokens
+	}
+
+	// 补 model 字段（请求通常不带）；带了就尊重客户端的
+	var out []byte
+	if m, has := rewrite.TopLevelString(body, "model"); has && m != "" {
+		out = body
+	} else {
+		nb, err := rewrite.InsertTopLevelRaw(body, "model", []byte(strconv.Quote(head.Binding.Model)))
+		if err != nil {
+			return false
+		}
+		out = nb
+	}
+
+	target := head.Provider.URL("/messages/count_tokens")
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(out))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setAuth(req.Header, head.Provider)
+
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		if r.Context().Err() == nil {
+			s.logf("[proxy] #%d count_tokens 转发失败（%v），本次退回本地粗估", reqID, err)
+		}
+		return false
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == 404 || resp.StatusCode == 405:
+		if dialect.MarkUnsupported(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens) {
+			s.logf("[proxy] #%d 学到：%s 没有 count_tokens 端点（上游 %d）——退回本地粗估，不再试",
+				reqID, head.Binding, resp.StatusCode)
+		}
+		metrics.Default.Inc("count_tokens.probe_404")
+		return false
+	case resp.StatusCode >= 400:
+		s.logf("[proxy] #%d count_tokens 上游 %d，退回本地粗估", reqID, resp.StatusCode)
+		return false
+	}
+	dialect.Mark(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens)
+	metrics.Default.Inc("count_tokens.forwarded")
+
+	rb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Newgate-Route", "count_tokens -> "+head.Binding.String())
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(rb)
+	s.logf("[proxy] #%d count_tokens → %s 上游真值: %s", reqID, head.Binding, trim(string(rb)))
+	return true
+}
