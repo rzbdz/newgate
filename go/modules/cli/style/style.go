@@ -118,3 +118,173 @@ func Width(s string) int {
 	}
 	return w
 }
+
+// runeWidth 单字符宽度。基于 Unicode East Asian Width 的实用子集——
+// 覆盖我们真的会打出来的东西（CJK、全角标点、常用 emoji），不做全表。
+func runeWidth(r rune) int {
+	switch {
+	case r == 0:
+		return 0
+	case r < 32 || (r >= 0x7f && r < 0xa0):
+		return 0 // 控制字符（含剥不干净的 ESC 残渣）
+	case r >= 0x0300 && r <= 0x036f, r >= 0x200b && r <= 0x200f:
+		return 0 // 组合记号与零宽字符
+	case r >= 0x1100 && (r <= 0x115f || // 谚文字母
+		r == 0x2329 || r == 0x232a || // 〈 〉
+		(r >= 0x2e80 && r <= 0xa4cf && r != 0x303f) || // CJK 部首 … 彝文
+		(r >= 0xac00 && r <= 0xd7a3) || // 谚文音节
+		(r >= 0xf900 && r <= 0xfaff) || // CJK 兼容
+		(r >= 0xfe30 && r <= 0xfe6f) || // CJK 兼容标点
+		(r >= 0xff00 && r <= 0xff60) || // 全角形式
+		(r >= 0xffe0 && r <= 0xffe6) || // 全角符号
+		(r >= 0x1f300 && r <= 0x1f5ff) || // 杂项符号与象形
+		(r >= 0x1f600 && r <= 0x1f64f) || // 表情
+		(r >= 0x1f680 && r <= 0x1f6ff) || // 交通与地图
+		(r >= 0x1f7e0 && r <= 0x1f7eb) || // 彩色圆/方（🟢🔴）
+		(r >= 0x1f90c && r <= 0x1f9ff) || // 补充符号与象形
+		(r >= 0x1fa70 && r <= 0x1faff) || // 扩展 A（含大量新 emoji）
+		(r >= 0x20000 && r <= 0x3fffd)): // CJK 扩展
+		return 2
+	}
+	return 1
+}
+
+// stripANSI 去掉 SGR 序列——量宽度前必须先剥，否则颜色码会被算成字符。
+func stripANSI(s string) string {
+	if !strings.Contains(s, "\033") {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && !(s[j] >= '@' && s[j] <= '~') {
+				j++
+			}
+			i = j + 1
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// VisibleWidth 剥掉颜色后的显示宽度。
+func VisibleWidth(s string) int { return Width(stripANSI(s)) }
+
+// Pad 把 s 补齐到 w 列（超出则原样返回，绝不截断内容）。
+func Pad(s string, w int) string {
+	if n := w - VisibleWidth(s); n > 0 {
+		return s + strings.Repeat(" ", n)
+	}
+	return s
+}
+
+// PadLeft 右对齐补齐。
+func PadLeft(s string, w int) string {
+	if n := w - VisibleWidth(s); n > 0 {
+		return strings.Repeat(" ", n) + s
+	}
+	return s
+}
+
+// Truncate 按显示宽度截断并加省略号。表格里给"可能很长"的列用。
+func Truncate(s string, w int) string {
+	if VisibleWidth(s) <= w {
+		return s
+	}
+	if w <= 1 {
+		return "…"
+	}
+	var out strings.Builder
+	cur := 0
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && !(s[j] >= '@' && s[j] <= '~') {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			out.WriteString(s[i:j])
+			i = j
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		rw := runeWidth(r)
+		if cur+rw > w-1 {
+			break
+		}
+		out.WriteRune(r)
+		cur += rw
+		i += size
+	}
+	out.WriteRune('…')
+	if strings.Contains(s, "\033") {
+		out.WriteString(cReset)
+	}
+	return out.String()
+}
+
+// Wrap 按终端显示宽度硬换行，不丢字符。ANSI SGR 序列不计宽度；跨行时
+// 临时 reset，再在下一行恢复颜色，避免颜色污染缩进或后续输出。
+func Wrap(s string, w int) []string {
+	if w <= 0 {
+		return []string{s}
+	}
+	var lines []string
+	var out strings.Builder
+	active := ""
+	cur := 0
+	flush := func() {
+		if active != "" {
+			out.WriteString(cReset)
+		}
+		lines = append(lines, out.String())
+		out.Reset()
+		if active != "" {
+			out.WriteString(active)
+		}
+		cur = 0
+	}
+	for i := 0; i < len(s); {
+		if s[i] == '\n' {
+			flush()
+			i++
+			continue
+		}
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && !(s[j] >= '@' && s[j] <= '~') {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			seq := s[i:j]
+			out.WriteString(seq)
+			if seq == cReset {
+				active = ""
+			} else if strings.HasSuffix(seq, "m") {
+				active += seq
+			}
+			i = j
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		rw := runeWidth(r)
+		if cur > 0 && cur+rw > w {
+			flush()
+		}
+		out.WriteRune(r)
+		cur += rw
+		i += size
+	}
+	if active != "" {
+		out.WriteString(cReset)
+	}
+	lines = append(lines, out.String())
+	return lines
+}
