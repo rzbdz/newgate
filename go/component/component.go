@@ -82,3 +82,7 @@ type Component struct {
 	Start    func(context.Context, Context) error
 	Stop     func(context.Context) error
 }
+
+// Release 撤销一次注册所有权。返回句柄而不是暴露全局 Remove，
+// 可以确保组件只释放自己创建的贡献，并让 Stop 自然成为 Start 的逆操作。
+type Release func() error
