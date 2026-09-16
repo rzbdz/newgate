@@ -1,0 +1,52 @@
+// Package thinking 管理与具体模型无关的思考模式策略。
+//
+// “模型是否支持 thinking”与“某家上游要求怎样回传 reasoning”是两件事：
+// 本模块提供通用的安全降级和通用插件；DeepSeek 等模型家族保留自己的协议
+// 约束；Claude Code × DeepSeek 之类交叉问题由交叉组件处理。
+//
+// 这种拆分使单方模块不需要猜测另一方行为，也让每条修补都能独立注册、观测
+// 和撤销。
+package thinking
+
+import (
+	"context"
+
+	modules "github.com/rzbdz/newgate/go/component"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
+	"github.com/rzbdz/newgate/go/modules/gateway/special"
+	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking/api"
+)
+
+type service struct{}
+
+var _ thinkingapi.Service = (*service)(nil)
+
+// New 声明通用 thinking 组件：它既提供跨模型降级端口，
+// 也把与模型无关的处理器注册进网关，并在 Stop 时逆序撤销。
+func New() modules.Component {
+	var releases []modules.Release
+	return modules.Component{
+		Name:     "thinking",
+		Requires: []modules.Requirement{modules.Need(gatewayapi.Capability)},
+		Provides: []modules.Provision{
+			modules.Provide(thinkingapi.Capability, thinkingapi.Service(service{})),
+		},
+		Start: func(_ context.Context, ctx modules.Context) error {
+			gateway := modules.MustGet(ctx, gatewayapi.Capability)
+			for _, treatment := range Treatments() {
+				release, err := gateway.RegisterRequestHook(treatment)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
+			}
+			return nil
+		},
+		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },
+	}
+}
+
+// BestEffortDisable 暴露保守降级：无法安全改写时返回原请求和明确错误，而非猜测结构。
+func (service) BestEffortDisable(body []byte, request *special.Request) ([]byte, []string, error) {
+	return BestEffortDisableThink(body, request)
+}
