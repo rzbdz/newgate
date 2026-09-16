@@ -118,3 +118,124 @@ func (b *Breaker) Open(provider, model, reason string) {
 	b.reasons[key] = reason
 	b.persistLocked()
 }
+
+// RecordProbe 记录主动探活的四档结论，并返回评级和是否熔断。
+func (b *Breaker) RecordProbe(provider, model string, status, contextBytes int,
+	latency, slowAfter time.Duration, probeErr string) (ProbeGrade, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := bindingKey(provider, model)
+	grade := ProbeFluent
+	reason := ""
+	switch {
+	case status == 200 && latency > slowAfter:
+		grade, reason = ProbeLaggy,
+			"probe "+latency.Round(time.Millisecond).String()+" 超过 "+slowAfter.String()
+	case probeErr != "":
+		grade, reason = ProbeUnavailable, "probe 失败："+probeErr
+	case status != 200:
+		grade, reason = ProbeUnavailable, "probe HTTP "+strconv.Itoa(status)
+	case latency >= 3*time.Second:
+		grade = ProbeUsable
+	}
+	b.probes[key] = probeResult{
+		Grade: grade, LatencyMs: latency.Milliseconds(), CheckedAt: time.Now(),
+	}
+	if latency > 0 {
+		b.observeLocked(key, contextBytes, latency)
+	}
+	if reason != "" {
+		b.fails[key] = b.Threshold
+		b.openedAt[key] = time.Now()
+		b.reasons[key] = reason
+		b.persistLocked()
+		return grade, true
+	}
+	if opened, ok := b.openedAt[key]; ok && time.Since(opened) < b.Cooldown {
+		b.persistLocked()
+		return grade, true
+	}
+	b.fails[key] = 0
+	delete(b.openedAt, key)
+	delete(b.reasons, key)
+	b.persistLocked()
+	return grade, false
+}
+
+// ObserveSuccess 把真实请求的首响应延迟写进对应上下文桶。EWMA 让近期表现
+// 权重大，同时避免单次抖动把顺序永久改变。
+func (b *Breaker) ObserveSuccess(provider, model string, contextBytes int, ttft time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.observeLocked(bindingKey(provider, model), contextBytes, ttft)
+	// 延迟样本来自热路径，不能每发请求都落盘；最多每 5 秒写一次。
+	// breaker/probe 状态变化仍会立即调用 persistLocked。
+	const interval = 5 * time.Second
+	if time.Since(b.persistedAt) >= interval {
+		b.persistLocked()
+	} else if b.file != "" && b.persistTimer == nil {
+		wait := interval - time.Since(b.persistedAt)
+		b.persistTimer = time.AfterFunc(wait, func() {
+			b.mu.Lock()
+			b.persistTimer = nil
+			b.persistLocked()
+			b.mu.Unlock()
+		})
+	}
+}
+
+// Flush 把节流窗口内尚未落盘的延迟样本同步写出，供 daemon 优雅退出使用。
+func (b *Breaker) Flush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.persistTimer != nil {
+		b.persistTimer.Stop()
+		b.persistTimer = nil
+	}
+	b.persistLocked()
+}
+
+func (b *Breaker) observeLocked(key string, contextBytes int, ttft time.Duration) {
+	bucket := contextBucket(contextBytes)
+	s := b.scores[key]
+	ms := float64(ttft.Milliseconds())
+	if s.Samples[bucket] == 0 {
+		s.EWMA[bucket] = ms
+	} else {
+		const recentWeight = 0.30
+		s.EWMA[bucket] = recentWeight*ms + (1-recentWeight)*s.EWMA[bucket]
+	}
+	s.Samples[bucket]++
+	b.scores[key] = s
+}
+
+// Score 返回当前上下文桶的预测 TTFT（毫秒）。没有同桶样本时取最近的相邻桶；
+// 完全未观测用 6s 中性值，排在流畅之后、可用档中部。
+func (b *Breaker) Score(provider, model string, contextBytes int) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if score, ok := b.scoreLocked(bindingKey(provider, model), contextBytes); ok {
+		return score
+	}
+	return 6000
+}
+
+// Rank 把延迟档位编码进排序键：流畅最前，未观测居中，可用最后。
+// 卡顿/不可用正常已被 Available 摘除；若调用方只拿到分数快照，仍沉底。
+func (b *Breaker) Rank(provider, model string, contextBytes int) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := bindingKey(provider, model)
+	ms, known := b.scoreLocked(key, contextBytes)
+	if !known {
+		return 1_000_000
+	}
+	switch {
+	case ms < 3000:
+		return ms
+	case ms <= 12000:
+		return 2_000_000 + ms
+	default:
+		return 3_000_000 + ms
+	}
+}
