@@ -71,3 +71,14 @@ type Provision struct {
 func Provide[T any](capability Capability[T], value T) Provision {
 	return Provision{spec: capability.spec, value: value}
 }
+
+// Component 是运行时依赖图中的一个生命周期节点。
+// Requires/Provides 描述静态拓扑，Start/Stop 只处理获得依赖后的副作用；
+// 这样依赖关系可在执行前验证，停止顺序也能由同一张图可靠推导。
+type Component struct {
+	Name     string
+	Requires []Requirement
+	Provides []Provision
+	Start    func(context.Context, Context) error
+	Stop     func(context.Context) error
+}
