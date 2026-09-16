@@ -362,3 +362,64 @@ func SetSpecialTreatment(on bool) error {
 	s.SpecialTreatment = &on
 	return SaveState(s)
 }
+
+// SetSpecialPlugin 单独开关一个插件。关 = 记进 SpecialOff，开 = 从里面删掉。
+func SetSpecialPlugin(name string, on bool) error {
+	s := LoadState()
+	out := make([]string, 0, len(s.SpecialOff))
+	for _, n := range s.SpecialOff {
+		if n != name {
+			out = append(out, n)
+		}
+	}
+	if !on {
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		out = nil
+	}
+	s.SpecialOff = out
+	return SaveState(s)
+}
+
+// ---------- 校验 ----------
+
+// Validate 检查所有 profile 引用的 provider 都存在、都有 key。
+func Validate() []string {
+	var problems []string
+	provs, err := LoadProviders()
+	if err != nil {
+		return []string{"providers.json 读不出: " + err.Error()}
+	}
+	names, _ := ListProfiles()
+	for _, n := range names {
+		pr, err := LoadProfile(n)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("profile %s: %v", n, err))
+			continue
+		}
+		for tier, cands := range pr.Roles {
+			for _, b := range cands {
+				p, ok := provs.Providers[b.Provider]
+				if !ok {
+					problems = append(problems,
+						fmt.Sprintf("profile %s 档位 %s: provider %q 未定义", n, tier, b.Provider))
+					continue
+				}
+				if p.Key() == "" {
+					hint := "providers.json 里填 api_key"
+					if p.APIKeyEnv != "" {
+						hint = "设环境变量 " + p.APIKeyEnv + " 或填 api_key"
+					}
+					problems = append(problems,
+						fmt.Sprintf("provider %s 没有 key → %s", b.Provider, hint))
+				}
+				if b.Model == "" {
+					problems = append(problems,
+						fmt.Sprintf("profile %s 档位 %s: model 为空", n, tier))
+				}
+			}
+		}
+	}
+	return problems
+}
