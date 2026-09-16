@@ -5,3 +5,12 @@ package opencode
 import agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 
 const ID = "opencode"
+
+func Agent() *agentapi.Agent {
+	return &agentapi.Agent{
+		ID:      ID,
+		Bin:     []string{"opencode"},
+		Dialect: "openai",
+		Notes:   "槽位由配置扩展模块发现",
+	}
+}
