@@ -213,3 +213,12 @@ func Must(loaders ...Loader) *Manager {
 
 // Context 返回已解析端口的只读视图，供组合根访问最终入口服务。
 func (m *Manager) Context() Context { return m.context }
+
+// ComponentNames 按实际启动顺序返回组件名，主要用于诊断依赖图。
+func (m *Manager) ComponentNames() []string {
+	names := make([]string, 0, len(m.components))
+	for _, component := range m.components {
+		names = append(names, component.Name)
+	}
+	return names
+}
