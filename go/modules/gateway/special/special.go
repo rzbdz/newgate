@@ -373,3 +373,146 @@ func Bindings(state *domain.State) []domain.Binding {
 	}
 	return out
 }
+
+// MetricHint 让指标说明跟着产生指标的插件走，避免 CLI 维护插件名 switch。
+func MetricHint(key string) (string, bool) {
+	for _, p := range Plugins() {
+		provider, ok := p.(MetricProvider)
+		if !ok {
+			continue
+		}
+		for _, metric := range provider.Metrics() {
+			if key == "special."+p.Name()+"."+metric.Action {
+				return metric.Hint, true
+			}
+		}
+	}
+	return "", false
+}
+
+func AuditResponse(body []byte) string {
+	var reports []string
+	for _, plugin := range Plugins() {
+		if auditor, ok := plugin.(ResponseAuditor); ok {
+			if report := auditor.AuditResponse(body); report != "" {
+				reports = append(reports, plugin.Name()+":\n"+report)
+			}
+		}
+	}
+	return strings.Join(reports, "\n")
+}
+
+// ToolLoopNeedsRebase 询问匹配 candidate 的插件是否需要先有损重建，才能接手
+// origin 产生的未闭合 tool loop。
+func ToolLoopNeedsRebase(originProvider, originModel string, candidate *Request,
+	off func(name string) bool) (bool, string) {
+	for _, p := range Plugins() {
+		if off != nil && off(p.Name()) {
+			continue
+		}
+		migrator, ok := p.(ToolLoopMigrator)
+		if !ok || !p.Match(candidate) {
+			continue
+		}
+		if needed, why := migrator.NeedsToolLoopRebase(
+			originProvider, originModel, candidate); needed {
+			return true, p.Name() + ": " + why
+		}
+	}
+	return false, ""
+}
+
+// RebaseToolLoop 让声明需要 rebase 的插件改写请求。失败开放：插件出错时返回
+// 原 body 和一条可见 note，由上游给出真实错误，不让补丁本身切断整条链。
+func RebaseToolLoop(body []byte, originProvider, originModel string, candidate *Request,
+	off func(name string) bool) Result {
+	res := Result{Body: body}
+	for _, p := range Plugins() {
+		if off != nil && off(p.Name()) {
+			continue
+		}
+		migrator, ok := p.(ToolLoopMigrator)
+		if !ok || !p.Match(candidate) {
+			continue
+		}
+		needed, _ := migrator.NeedsToolLoopRebase(originProvider, originModel, candidate)
+		if !needed {
+			continue
+		}
+		out, note, err := migrator.RebaseToolLoop(body, candidate)
+		if err != nil {
+			note := "有损 tool loop 重建跳过（" + err.Error() + "）"
+			res.Notes = []string{p.Name() + ": " + note}
+			return res
+		}
+		if note == "" || out == nil {
+			return res
+		}
+		res.Body, res.Changed = out, true
+		res.Notes = []string{p.Name() + ": " + note}
+		res.Events = []Event{{Plugin: p.Name(), Action: "tool_loop_rebase", Note: note}}
+		return res
+	}
+	return res
+}
+
+// Result 一次 special_treatment 的结果。
+type Result struct {
+	Body    []byte   // Changed 为 false 时等于传进来的 body
+	Notes   []string // 形如 "deepseek: 注入 thinking…"，逐条写日志
+	Events  []Event
+	Changed bool
+}
+
+type Event struct {
+	Plugin string
+	Action string
+	Note   string
+}
+
+func (e Event) MetricKey() string {
+	if e.Plugin == "" {
+		return ""
+	}
+	if e.Action == "" || e.Action == "rewrite" {
+		return "special." + e.Plugin
+	}
+	return "special." + e.Plugin + "." + e.Action
+}
+
+// Apply 按注册顺序跑一遍所有匹配的插件，串联改写。
+//
+// 装饰器链的完整语义：body 一路传（res.Body = out），上下文跟着 body 走
+// （每步后 syncContextModel）——下一个插件拿到的 body 和 r.Model 都是上
+// 一个插件改过的最新版，不存在「body 已被改、上下文还是旧的」的窗口。
+//
+// off 用来跳过被用户单独关掉的插件（可以传 nil）。
+// 任何一个插件报错都只影响它自己：记一条 note，body 保持上一个插件的结果。
+func Apply(body []byte, r *Request, off func(name string) bool) Result {
+	res := Result{Body: body}
+	for _, p := range Plugins() {
+		if off != nil && off(p.Name()) {
+			continue
+		}
+		if !p.Match(r) {
+			continue
+		}
+		out, notes, err := p.Apply(res.Body, r)
+		if err != nil {
+			note := "跳过（" + err.Error() + "），按原样发"
+			res.Notes = append(res.Notes, p.Name()+": "+note)
+			continue
+		}
+		if len(notes) == 0 || out == nil {
+			continue // 这个插件这次没什么要补的
+		}
+		res.Body = out
+		res.Changed = true
+		for _, n := range notes {
+			res.Notes = append(res.Notes, p.Name()+": "+n)
+			res.Events = append(res.Events, Event{Plugin: p.Name(), Action: "rewrite", Note: n})
+		}
+		syncContextModel(res.Body, r)
+	}
+	return res
+}
