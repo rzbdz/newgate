@@ -116,7 +116,11 @@ func TestTableNeverExceedsMaxColumns(t *testing.T) {
 		"smt-provider/a-model-name-that-is-deliberately-far-too-long-for-a-narrow-terminal",
 		"这是一段很长的中文说明，用来确认显示宽度而不是 UTF-8 字节数决定截断位置",
 	)
-	for _, line := range strings.Split(strings.TrimRight(tbl.String(), "\n"), "\n") {
+	out := tbl.String()
+	if strings.Contains(out, "…") {
+		t.Fatalf("表格不应截断内容:\n%s", out)
+	}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if got := VisibleWidth(line); got > MaxColumns {
 			t.Fatalf("表格宽度 = %d，超过 %d：%q", got, MaxColumns, line)
 		}
@@ -139,9 +143,32 @@ func TestLinePrimitivesNeverExceedMaxColumns(t *testing.T) {
 		Hint(long),
 	}
 	for _, line := range lines {
-		if got := VisibleWidth(line); got > MaxColumns {
-			t.Fatalf("行宽 = %d，超过 %d：%q", got, MaxColumns, line)
+		if strings.Contains(line, "…") {
+			t.Fatalf("单行原语不应截断内容: %q", line)
 		}
+		for _, physical := range strings.Split(line, "\n") {
+			if got := VisibleWidth(physical); got > MaxColumns {
+				t.Fatalf("行宽 = %d，超过 %d：%q", got, MaxColumns, physical)
+			}
+		}
+	}
+}
+
+func TestWrapPreservesANSIAndContent(t *testing.T) {
+	in := Red("abcdefgh")
+	lines := Wrap(in, 3)
+	if len(lines) != 3 {
+		t.Fatalf("Wrap 行数 = %d，想要 3: %#v", len(lines), lines)
+	}
+	var plain strings.Builder
+	for _, line := range lines {
+		if VisibleWidth(line) > 3 {
+			t.Fatalf("换行后仍超宽: %q", line)
+		}
+		plain.WriteString(stripANSI(line))
+	}
+	if plain.String() != "abcdefgh" {
+		t.Fatalf("换行丢内容: %q", plain.String())
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/rzbdz/newgate/go/internal/core/domain"
 )
 
 // sysMarker 复刻实抓的分类器 system 开头（cc 2.1.263）。
@@ -97,10 +99,10 @@ func TestClaudeBgApply(t *testing.T) {
 	})
 }
 
-// TestRouteTier 改道是**路由决策**（建链之前，forward 在解析链前问这里）：
+// TestRoutePlugin 改道是**路由决策**（建链之前，forward 在解析链前问这里）：
 // 分类器 → 整条 light 链——含 fallback，不是只换链头。特征只认
 // claude + 非流式 + system 标记；off 开关与 Apply 同源（st off 一起停）。
-func TestRouteTier(t *testing.T) {
+func TestRoutePlugin(t *testing.T) {
 	classifier := []byte(`{"model":"glm-5.3","max_tokens":2112,` + sysMarker +
 		`,"messages":[{"role":"user","content":"classify"}]}`)
 	summary := []byte(`{"model":"glm-5.3","max_tokens":2112,` +
@@ -112,23 +114,50 @@ func TestRouteTier(t *testing.T) {
 		agent  string
 		stream bool
 		body   []byte
-		off    func(string) bool
+		off    bool
 		want   string
 	}{
-		{"分类器（claude 非流式 + 标记）→ light", "claude", false, classifier, nil, "light"},
-		{"其他后台调用（无标记）不改道", "claude", false, summary, nil, ""},
-		{"流式主循环不改道", "claude", true, classifier, nil, ""},
-		{"opencode 不碰", "opencode", false, classifier, nil, ""},
-		{"兼容路径（无 agent）不碰", "", false, classifier, nil, ""},
-		{"用户关掉 claude-bg → 改道一起停", "claude", false, classifier,
-			func(string) bool { return true }, ""},
-		{"没有 system 字段", "claude", false, []byte(`{"model":"glm-5.3","messages":[]}`), nil, ""},
-		{"nil body", "claude", false, nil, nil, ""},
+		{"分类器（claude 非流式 + 标记）→ light", "claude", false, classifier, false, "light"},
+		{"其他后台调用（无标记）不改道", "claude", false, summary, false, ""},
+		{"流式主循环不改道", "claude", true, classifier, false, ""},
+		{"opencode 不碰", "opencode", false, classifier, false, ""},
+		{"兼容路径（无 agent）不碰", "", false, classifier, false, ""},
+		{"用户关掉 claude-bg → 改道一起停", "claude", false, classifier, true, ""},
+		{"没有 system 字段", "claude", false, []byte(`{"model":"glm-5.3","messages":[]}`), false, ""},
+		{"nil body", "claude", false, nil, false, ""},
 	}
 	for _, c := range cases {
-		if got := RouteTier(c.agent, c.stream, c.body, c.off); got != c.want {
-			t.Errorf("%s: RouteTier=%q want %q", c.name, got, c.want)
+		state := &domain.State{}
+		if c.off {
+			state.SpecialOff = []string{"claude-bg"}
 		}
+		decision, ok := Route(c.body, &Request{Agent: c.agent, Stream: c.stream}, state)
+		got := ""
+		if ok {
+			got = decision.Tier
+		}
+		if got != c.want {
+			t.Errorf("%s: Route=%q want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestClaudeBgOwnsRouteStatusAndMetricMetadata(t *testing.T) {
+	override := domain.Binding{Provider: "smt-deepseek", Model: "deepseek-flash"}
+	state := &domain.State{ClassifierOverride: &override}
+	items := Statuses(state)
+	if len(items) != 1 || items[0].Label != "分类器覆盖" ||
+		!strings.Contains(items[0].Value, override.String()) ||
+		!strings.Contains(items[0].Value, "先于任何 profile") {
+		t.Fatalf("插件状态不完整: %+v", items)
+	}
+	if hint, ok := MetricHint("special.claude-bg.route_light"); !ok ||
+		!strings.Contains(hint, "light") {
+		t.Fatalf("插件指标说明未注册: %q, %v", hint, ok)
+	}
+	bindings := Bindings(state)
+	if len(bindings) != 1 || bindings[0] != override {
+		t.Fatalf("插件 binding 未注册: %+v", bindings)
 	}
 }
 

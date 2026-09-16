@@ -112,6 +112,9 @@ func (s *Server) logf(format string, a ...interface{}) {
 }
 
 func (s *Server) Start() error {
+	health.Default.SetErrorHandler(func(err error) {
+		s.logf("[health] 全局健康表写入失败（继续使用内存状态）: %v", err)
+	})
 	if err := health.Default.UseFile(paths.HealthFile()); err != nil {
 		s.logf("[health] 全局健康表加载失败（继续纯内存）: %v", err)
 	}
@@ -187,6 +190,7 @@ func (s *Server) signalReady() {
 }
 
 func (s *Server) Shutdown() {
+	health.Default.Flush()
 	if s.srv != nil {
 		_ = s.srv.Close()
 	}
@@ -651,16 +655,15 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var skips []resolve.Skip
 	tier := norm
 	toolOrigin, hasToolOrigin := thinkcache.Default.ContinuationOrigin(body)
-	// special 层的路由改道（如 claude-bg 把 Bash 分类器整条链改走 light）。
-	// 必须在 ResolveRequest 之前：改道换的是整条 fallback 链，body 改写只能
-	// 换链头。用户 `newgate st off claude-bg` 时改道一起停（off 传进去）。
+	// special 路由插件在常规解析前贡献结构化决策。热路径不知道具体插件名，
+	// 也不解释它为什么改道；档位、覆盖链头、超时和可观测性都由插件声明。
+	route, routed := special.Route(body, &special.Request{
+		InModel: inModel, Tier: norm, Stream: stream0, Agent: tgt.TaskCreate,
+	}, st)
 	routeTier := ""
-	if st.SpecialEnabled() {
-		routeTier = special.RouteTier(tgt.TaskCreate, stream0, body, st.SpecialPluginOff)
+	if routed {
+		routeTier = route.Tier
 	}
-	// 分类器身份：紧超时只认它（RouteTier 认出的就是它——同一个 marker）。
-	// 用户 st off claude-bg 时改道和紧超时一起停。
-	isClassifier := routeTier != ""
 	if routeTier != "" {
 		opts := resolve.Opts{
 			Active:    active,
@@ -673,33 +676,34 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case testChain != nil:
 			rs = testChain(routeTier)
-		case st.ClassifierOverride != nil && st.ClassifierOverride.Provider != "" &&
-			st.ClassifierOverride.Model != "":
-			// 全局覆盖：分类器不管客户端点的哪个档位，链头都用 classifier_override，
-			// 它挂了再沿 light 档 fallback（OverrideChain 内部回落）。
-			rs, skips, applied = resolve.OverrideChain(*st.ClassifierOverride, routeTier,
+		case route.Head != nil:
+			rs, skips, applied = resolve.OverrideChain("special:"+route.Plugin,
+				*route.Head, routeTier,
 				snap.Profiles, snap.Providers, opts)
-			if !applied {
-				s.logf("[proxy] #%d classifier_override 未生效（%s），回落 light 档链",
-					reqID, st.ClassifierOverride)
+			if !applied && route.OverrideFailNote != "" {
+				s.logf("[proxy] #%d special_treatment %s: %s",
+					reqID, route.Plugin, route.OverrideFailNote)
 			}
 		default:
 			rs, skips = resolve.BuildChain(routeTier, snap.Profiles, snap.Providers, opts)
 		}
 		if len(rs) > 0 {
 			steps, tier = rs, routeTier
-			if applied {
-				s.logf("[proxy] #%d special_treatment claude-bg: 分类器覆盖 → %s（全局 classifier_override）",
-					reqID, st.ClassifierOverride)
-			} else {
-				s.logf("[proxy] #%d special_treatment claude-bg: 分类器改道 → %s 档链（含 fallback）",
-					reqID, routeTier)
+			note := route.Note
+			if applied && route.OverrideNote != "" {
+				note = route.OverrideNote
 			}
-			metrics.Default.Inc("special.claude-bg.route_light")
+			if note != "" {
+				s.logf("[proxy] #%d special_treatment %s: %s",
+					reqID, route.Plugin, note)
+			}
+			if key := route.MetricKey(); key != "" {
+				metrics.Default.Inc(key)
+			}
 		} else {
-			// light 链是空的（谁都没绑 light）：回落到正常解析——分类器留在
-			// 客户端点名的模型上 + 禁思考，慢而不死（fail-open）。
+			// 插件要求的链为空时回落到常规解析：路由插件不能切断请求。
 			routeTier = ""
+			routed = false
 		}
 	}
 	if routeTier == "" {
@@ -763,7 +767,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				}
 				if res.Changed {
 					newBody = res.Body
-					metrics.Default.Inc("special.deepseek.tool_loop_rebase")
+				}
+				for _, event := range res.Events {
+					if key := event.MetricKey(); key != "" {
+						metrics.Default.Inc(key)
+					}
 				}
 			}
 		}
@@ -791,7 +799,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// special_treatment：每家上游的怪癖补丁（gateway/special）。
 		// 与 schema 修补的分工——那边是所有严格校验器都需要的通用修补，
 		// 这边是「只有某家上游才需要」的，由插件自己 Match 认领。
-		// （分类器改走 light 链的路由决策不在这——见上面 special.RouteTier。）
+		// （分类器改走 light 链的路由决策不在这——见上面 special.Route。）
 		if st.SpecialEnabled() {
 			res := special.Apply(newBody, &special.Request{
 				InModel:  inModel,
@@ -809,12 +817,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			counted := map[string]bool{}
 			for _, n := range res.Notes {
 				s.logf("[proxy] #%d special_treatment %s", reqID, n)
-				// 一个插件一次请求只记一笔（notes 可能多条）
-				if j := strings.IndexByte(n, ':'); j > 0 {
-					if pn := n[:j]; !counted[pn] {
-						counted[pn] = true
-						metrics.Default.Inc("special." + pn)
-					}
+			}
+			for _, event := range res.Events {
+				key := event.MetricKey()
+				if key != "" && !counted[key] {
+					counted[key] = true
+					metrics.Default.Inc(key)
 				}
 			}
 			if res.Changed {
@@ -854,8 +862,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// state.json 的 timeouts 热加载，误杀率看 newgate metrics。
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.ResponseHeaderTimeout = st.Timeouts.FirstByte()
-		if isClassifier {
-			tr.ResponseHeaderTimeout = st.Timeouts.ClassifierFirstByte()
+		if routed && route.FirstByteTimeout > 0 {
+			tr.ResponseHeaderTimeout = route.FirstByteTimeout
 		}
 		client := &http.Client{Transport: tr, Timeout: func() time.Duration {
 			if stream {
@@ -908,8 +916,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			hint := ""
 			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
 				waitLimit := st.Timeouts.FirstByte()
-				if isClassifier {
-					waitLimit = st.Timeouts.ClassifierFirstByte()
+				if routed && route.FirstByteTimeout > 0 {
+					waitLimit = route.FirstByteTimeout
 				}
 				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
 			}

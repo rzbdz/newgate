@@ -328,7 +328,7 @@ type Timeouts struct {
 	// 总结、起标题）不挡交互，还常常是 500KB+ 的大输入，prefill 合法地
 	// 慢，套 12s 只会在链上连环掐死（2026-09-09 实抓：compact 三连超时
 	// + 熔断，客户端报「can't help」）。分类器靠 system marker 精确认出
-	// （special.RouteTier）。默认 12s，误杀率看 newgate metrics。
+	// （special.Route）。默认 12s，误杀率看 newgate metrics。
 	ClassifierFirstByteMs int `json:"classifier_first_byte_ms,omitempty"`
 	// TotalMs 非流式请求的总超时（流式不设总超时——长响应会被砍断）。
 	TotalMs int `json:"total_ms,omitempty"`

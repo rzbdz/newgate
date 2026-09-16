@@ -1,7 +1,9 @@
 package probe
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/rzbdz/newgate/go/internal/gateway/dialect"
 	"github.com/rzbdz/newgate/go/internal/gateway/quirk"
@@ -42,6 +44,37 @@ func TestCapabilityCacheSurvivesProcessStateReset(t *testing.T) {
 	}
 }
 
+type fakeTimeout struct{}
+
+func (fakeTimeout) Error() string   { return "timeout" }
+func (fakeTimeout) Timeout() bool   { return true }
+func (fakeTimeout) Temporary() bool { return true }
+
+func TestTimeoutRetryOnlyRetriesTimeoutOnce(t *testing.T) {
+	calls := 0
+	status, latency, err := timeoutRetry(func() (int, time.Duration, error) {
+		calls++
+		if calls == 1 {
+			return 0, 12 * time.Second, fakeTimeout{}
+		}
+		return 200, 2 * time.Second, nil
+	})
+	if calls != 2 || status != 200 || latency != 2*time.Second || err != nil {
+		t.Fatalf("timeout retry = calls:%d status:%d latency:%s err:%v",
+			calls, status, latency, err)
+	}
+
+	calls = 0
+	wantErr := errors.New("connection refused")
+	_, _, err = timeoutRetry(func() (int, time.Duration, error) {
+		calls++
+		return 0, time.Millisecond, wantErr
+	})
+	if calls != 1 || !errors.Is(err, wantErr) {
+		t.Fatalf("non-timeout retried: calls:%d err:%v", calls, err)
+	}
+}
+
 func TestSummarizeCountsUniqueModels(t *testing.T) {
 	results := []Result{
 		{Profile: "gpt", Role: "normal", Provider: "p", Model: "terra", OK: false},
@@ -56,5 +89,8 @@ func TestSummarizeCountsUniqueModels(t *testing.T) {
 	}
 	if got := UniqueCount(results); got != 3 {
 		t.Fatalf("UniqueCount = %d，想要 3", got)
+	}
+	if got := FailedCount(results); got != 1 {
+		t.Fatalf("FailedCount = %d，想要 1", got)
 	}
 }

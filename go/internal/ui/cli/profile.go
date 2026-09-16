@@ -109,7 +109,7 @@ func cmdProfiles() int {
 			name = style.Cyan(p.Name)
 		}
 		t.Row(fmt.Sprintf("%d", p.Prio()), name, strings.Join(flags, " "),
-			style.Dim(style.Truncate(p.Description, 52)))
+			style.Dim(p.Description))
 	}
 	fmt.Print(t.String())
 	fmt.Println(style.Hint("pinned 停在链首不替换 · excluded 只能被显式选中 · ←agent 该 agent 单独用这个 profile"))
@@ -273,22 +273,7 @@ func tierReport(which string) int {
 		fmt.Println()
 		if which == "" {
 			// 概览：链一样的档位合并成 `= <先出现的那个>`
-			t := style.NewTable("档位", "链")
-			firstOf := map[string]string{}
-			for _, r := range rows {
-				if len(r.steps) == 0 {
-					t.Row(style.Cyan(r.name), style.Red("无可用候选"))
-					continue
-				}
-				sig := chainSig(r.steps)
-				if ref, ok := firstOf[sig]; ok {
-					t.Row(style.Cyan(r.name), style.Dim("= "+ref))
-					continue
-				}
-				firstOf[sig] = r.name
-				t.Row(style.Cyan(r.name), tableChain(r.steps))
-			}
-			fmt.Print(t.String())
+			fmt.Print(tierOverview(rows))
 			if n := countSkips(rows); n > 0 {
 				fmt.Println(style.Hint(fmt.Sprintf("跳过 %d 个候选：%s", n, skipSummary(rows))))
 				fmt.Println(style.Hint("明细：newgate tier <档位>"))
@@ -353,17 +338,29 @@ func chainSig(steps []resolve.Step) string {
 	return b.String()
 }
 
-// tableChain 一行放下整条链。站多时截断——要看全用 `newgate tier <档位>`。
-func tableChain(steps []resolve.Step) string {
-	var parts []string
-	for i, s := range steps {
-		if i >= 4 {
-			parts = append(parts, style.Dim(fmt.Sprintf("…还有 %d 站", len(steps)-i)))
-			break
+func tierOverview(rows []tierView) string {
+	var out strings.Builder
+	out.WriteString("  " + style.Dim(style.Pad("档位", 6)) + "  " + style.Dim("链") + "\n")
+	firstOf := map[string]string{}
+	for _, row := range rows {
+		prefix := "  " + style.Cyan(style.Pad(row.name, 6)) + "  "
+		switch {
+		case len(row.steps) == 0:
+			out.WriteString(prefix + style.Red("无可用候选") + "\n")
+		case firstOf[chainSig(row.steps)] != "":
+			out.WriteString(prefix + style.Dim("= "+firstOf[chainSig(row.steps)]) + "\n")
+		default:
+			firstOf[chainSig(row.steps)] = row.name
+			for i, step := range row.steps {
+				if i == 0 {
+					out.WriteString(prefix + step.Binding.String() + "\n")
+				} else {
+					out.WriteString("          " + style.Dim("→ ") + step.Binding.String() + "\n")
+				}
+			}
 		}
-		parts = append(parts, s.Binding.String())
 	}
-	return strings.Join(parts, style.Dim(" → "))
+	return out.String()
 }
 
 func countSkips(rows []tierView) int {

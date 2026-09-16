@@ -83,6 +83,13 @@ func (deepseek) Why() string {
 		"外来未闭合 tool loop 先从可见工具结果有损重建，再由 DeepSeek 接手"
 }
 
+func (deepseek) Metrics() []MetricInfo {
+	return []MetricInfo{{
+		Action: "tool_loop_rebase",
+		Hint:   "接手外来未闭合 tool loop 前做了有损重建",
+	}}
+}
+
 // NeedsToolLoopRebase 标出 DeepSeek 接手别家未闭合 tool loop 时需要有损重建。
 //
 // 这不是通用限制。2026-09-16 对同一份真实 thinking + tool_use 做 A/B：

@@ -438,7 +438,7 @@ fallback 链的资格：结果立即写入 daemon 的全局 binding 熔断表。
 消耗 token。CLI 分别显示“主延迟”和“总耗时”，后者仅在首次学习能力时更长。
 
 每个 binding 还维护四个上下文大小桶（≤4KB、≤32KB、≤128KB、其余）的
-TTFT EWMA。真实请求和 probe 都实时更新对应桶；构链时保持显式链头不动，
+首响应延迟 EWMA。真实请求和 probe 都实时更新对应桶；构链时保持显式链头不动，
 其余 fallback 按当前请求所在桶的预测 TTFT 做稳定排序：`流畅（<3s）→
 未探 → 可用（3–12s）`，同档仍按 profile priority/list 顺序；卡顿与不可用
 已经在排序前摘除。因此大上下文的合法 prefill 不会污染小请求评分，
