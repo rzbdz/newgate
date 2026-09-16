@@ -267,3 +267,164 @@ profileFallback:
 	}
 	return nil
 }
+
+// Resolve 取第一个候选，且一定是一条**具体绑定**（引用会被走到底）。
+// 给只需要单个绑定、且要拿它去干活的调用点（probe 要真去请求、status/tui
+// 要显示真实模型名）——它们拿不得引用。
+func (p *Profile) Resolve(role string) (Binding, bool) {
+	return p.resolve(role, 0)
+}
+
+func (p *Profile) resolve(role string, depth int) (Binding, bool) {
+	c := p.CandidatesFor(role)
+	if len(c) == 0 {
+		return Binding{}, false
+	}
+	bd := c[0]
+	if !bd.IsRef() {
+		return bd, true
+	}
+	if depth >= 8 {
+		return Binding{}, false // 引用成环 / 套得太深
+	}
+	return p.resolve(bd.Ref, depth+1)
+}
+
+// ChainLimits 防止一个请求把整条链串一遍（6 家 × 40s = 4 分钟才失败）。
+type ChainLimits struct {
+	MaxAttempts   int  `json:"max_attempts"` // 实际发出的请求数上限，跨两级累计
+	TotalBudgetMs int  `json:"total_budget_ms"`
+	FallbackOn400 bool `json:"fallback_on_400"` // 见 docs/04-configuration.md：默认关
+}
+
+func (c ChainLimits) Attempts() int {
+	if c.MaxAttempts <= 0 {
+		return 3
+	}
+	return c.MaxAttempts
+}
+
+func (c ChainLimits) Budget() int {
+	if c.TotalBudgetMs <= 0 {
+		return 120000
+	}
+	return c.TotalBudgetMs
+}
+
+// Timeouts 网关等上游的时间参数（毫秒）。为什么是配置不是常量：这些值
+// 要按上游表现调（比如非流式首字节 12s 是不是太紧），改一次编一次是
+// 反模式——写进 state.json，watcher 热加载，改完即生效（docs/04-configuration.md）。
+// 全部可省略，缺省用内置默认（见各 accessor）。
+type Timeouts struct {
+	// FirstByteMs 流式请求等响应头的上限。默认 150s：实测某些通道
+	// （anthropic-relay）有固定 ~43s 开销，设太短会把本来能成功的请求
+	// 误杀。
+	FirstByteMs int `json:"first_byte_ms,omitempty"`
+	// ClassifierFirstByteMs **分类器专用**的紧首字节上限。为什么按身份
+	// 不按「非流式」一刀切：只有 Bash 权限分类器在交互通路上——用户
+	// 终端等它放行才能动，挂住它 = 冻住会话；而其他非流式请求（/compact
+	// 总结、起标题）不挡交互，还常常是 500KB+ 的大输入，prefill 合法地
+	// 慢，套 12s 只会在链上连环掐死（2026-09-09 实抓：compact 三连超时
+	// + 熔断，客户端报「can't help」）。分类器靠 system marker 精确认出
+	// （special.Route）。默认 12s，误杀率看 newgate metrics。
+	ClassifierFirstByteMs int `json:"classifier_first_byte_ms,omitempty"`
+	// TotalMs 非流式请求的总超时（流式不设总超时——长响应会被砍断）。
+	TotalMs int `json:"total_ms,omitempty"`
+}
+
+func (t Timeouts) FirstByte() time.Duration {
+	if t.FirstByteMs <= 0 {
+		return 150 * time.Second
+	}
+	return time.Duration(t.FirstByteMs) * time.Millisecond
+}
+
+// ClassifierFirstByte 分类器请求的首字节上限（见字段注释）。
+func (t Timeouts) ClassifierFirstByte() time.Duration {
+	if t.ClassifierFirstByteMs <= 0 {
+		return 12 * time.Second
+	}
+	return time.Duration(t.ClassifierFirstByteMs) * time.Millisecond
+}
+
+func (t Timeouts) Total() time.Duration {
+	if t.TotalMs <= 0 {
+		return 15 * time.Minute
+	}
+	return time.Duration(t.TotalMs) * time.Millisecond
+}
+
+// Key 返回这个 provider 的密钥。
+//
+// APIKeyEnv 的查找需要读环境变量——那是 IO，core 不该做。所以由
+// store 层在加载时把 env 里的值填进 APIKey，core 只看最终结果。
+// 这是「core 不 import 任何 IO」这条规则的一个具体落地。
+func (p Provider) Key() string { return p.APIKey }
+
+// 当前密钥仍以字符串驻留内存；所有日志和 dump 出口必须在 gateway 层统一脱敏。
+
+// State 机器本地的运行时状态。经常改，不进 dotfiles。
+type State struct {
+	// Active per-agent 链头：每个 agent 独立选自己的 profile。
+	// claude 用 expensive、opencode 用 cheap，各切各的——这是 M1 的
+	// 「per-agent 切换」。
+	Active map[string]string `json:"active,omitempty"`
+	// DefaultProfile Active 里没列的 agent 用它。
+	DefaultProfile string `json:"default_profile"`
+
+	// ActiveProfile / FallbackProfile 是 v0 的旧字段，保留只为迁移。
+	// 旧 state.json 用单一 active_profile 表示链头、fallback_profile 表示
+	// 备用。新模型里链头是 default_profile，fallback 由 profile 的 priority
+	// 链表达。Normalize() 会把旧字段迁过来。
+	ActiveProfile   string `json:"active_profile,omitempty"`
+	FallbackProfile string `json:"fallback_profile,omitempty"`
+
+	Port      int  `json:"port"`
+	TakenOver bool `json:"taken_over"`
+
+	// ControlToken 控制端点（/__newgate/stop）的 Bearer 令牌。
+	// 为什么需要它：共享部署里同组用户读得到这份 state（0660），却对
+	// 别人起的 daemon 没有 kill() 权限——停机只能靠代理自己的 HTTP 端点，
+	// 而端点必须验明来意。令牌和 providers 的 key 同级保密：能读到它的
+	// 组员本来就被信任到了「能拿走上游 key」的程度，停机权限不构成新暴露。
+	ControlToken string `json:"control_token,omitempty"`
+
+	// Takeover per-agent 接管意愿（期望态）。没有条目 = 想接管，所以
+	// `newgate start` 默认全面接管；显式 false = 用户 `newgate off <agent>`
+	// 过它，start 也不该再碰它。
+	//
+	// 为什么必须持久化：接管 claude 用的是 PATH shim，而 stop 必须把它摘掉
+	// ——不然 `claude` 还是命中 shim，wrapper 又把代理懒启动回来，等于没停。
+	// 但摘掉之后得记得「用户本来是要接管 claude 的」，否则下次 start 起来了
+	// 却不接管，claude 静默直连——同一个不对称，只是反了个方向。
+	// 期望态让 start = 插上、stop = 拔掉，两边都不丢用户的意图。
+	Takeover map[string]bool `json:"takeover,omitempty"`
+
+	// Chain 链的成本上界。
+	Chain ChainLimits `json:"chain"`
+
+	// Timeouts 网关等上游的时间参数（热加载，见 Timeouts 的注释）。
+	Timeouts Timeouts `json:"timeouts,omitempty"`
+
+	// ModuleConfig 保存 core 不认识的顶层配置原文。store 负责无损读写，
+	// 具体模块按自己声明的字段解码；core 不因此知道 Claude、OMO 等概念。
+	ModuleConfig map[string][]byte `json:"-"`
+
+	// Debug 打印每个请求的完整头/体（密钥脱敏）。出错时无论如何都会记全。
+	Debug bool `json:"debug"`
+	// DebugUntil 自动过期时刻（RFC3339）。debug 单条能记 8KB+，
+	// 忘了关会把磁盘写满，所以默认只开一段时间。
+	DebugUntil string `json:"debug_until,omitempty"`
+
+	// SchemaRepair 给缺 required 的 tool schema 补 "required": []。
+	// 按 JSON Schema 规范这是语义无操作，所以默认开。
+	// 用指针以区分「没配」和「显式关闭」。
+	SchemaRepair *bool `json:"schema_repair,omitempty"`
+
+	// SpecialTreatment special_treatment 插件层总开关（默认开）。
+	// 插件只对认领的上游生效（gateway/special），所以开着不影响别人。
+	SpecialTreatment *bool `json:"special_treatment,omitempty"`
+	// SpecialOff 单独关掉的插件名。排查「是不是 newgate 改坏了请求」时
+	// 关掉某一个比关掉整层更精确。名字见 `newgate st`。
+	SpecialOff []string `json:"special_treatment_off,omitempty"`
+}
