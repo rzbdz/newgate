@@ -915,8 +915,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					metrics.Default.Inc("timeout.first_byte.non_stream")
 				}
 			}
-			opened := s.Health.RecordFailure(a.Binding.Provider, a.Binding.Model)
-			if opened {
+			res := s.Health.Report(a.Binding.Provider, a.Binding.Model, breaker.Input{
+				Kind:   breaker.KindConnError,
+				IsLast: isLast,
+			})
+			if res.Opened {
 				metrics.Default.Inc("breaker.opened")
 			}
 			atomic.AddUint64(&s.failures, 1)
@@ -929,10 +932,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
 			}
 			s.logf("[proxy] #%d %s 连接失败: %v%s%s", reqID, routeStr, derr,
-				breakerNote(opened, a.Binding.Provider), hint)
+				breakerNote(res.Opened, a.Binding.Provider), hint)
 			lastMsg, lastCode = fmt.Sprintf("上游 %s 连接失败: %v", a.Binding.Provider, derr), 502
 			trail = append(trail, fmt.Sprintf("%s(conn)", a.Binding))
-			if !isLast {
+			if res.Verdict.Advance {
 				metrics.Default.Inc("chain.step_failed")
 				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
 				continue
@@ -941,38 +944,45 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 可转移的失败：还没往客户端写任何字节，安全
-		if resp.StatusCode >= 400 && breaker.ShouldAdvance(resp.StatusCode, st.Chain.FallbackOn400) && !isLast {
-			body, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 4096))
-			_ = resp.Body.Close()
-			opened := s.Health.RecordFailure(a.Binding.Provider, a.Binding.Model)
-			if opened {
-				metrics.Default.Inc("breaker.opened")
-			}
-			atomic.AddUint64(&s.failures, 1)
-			s.logf("[proxy] %s -> %d%s  上游说: %s", routeStr, resp.StatusCode,
-				breakerNote(opened, a.Binding.Provider), trim(string(body)))
-			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, body)
-			s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
-			metrics.Default.Inc("chain.step_failed")
-			lastMsg, lastCode = trim(string(body)), resp.StatusCode
-			trail = append(trail, fmt.Sprintf("%s(%d)", a.Binding, resp.StatusCode))
-			continue
-		}
-
 		// 定案：把这个响应交给客户端
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			// 错误响应体一般不大，整个读出来当证据，再原样转给客户端。
-			// 必须**先**于 RecordFailure：reasoning-400 是请求形状问题，不该记
-			// 进熔断器（连续两发会把能用的 deepseek 摘掉，2026-09-17 实测）。
+			// 上游说了话。先把错误原文整个读出来当证据，再**一次性**把
+			// 「沿不沿链走 / 记不记账 / 记进哪一本账」交给 breaker 的决策表。
+			//
+			// 2026-09-17 之前这里是两个分支各判一次：可转移的那条无条件记账，
+			// 定案的那条先豁免形状错误。判据不一致的后果是同一个 reasoning-400
+			// 在链中间会摘牌、在链尾不会——链中间那发会把还能用的 deepseek
+			// 摘掉。现在只有一处判据，且它是纯函数，能被穷举测完。
 			eb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 256*1024))
-			resp.Body.Close()
-			if !breaker.IsRequestShapeError(eb, resp.StatusCode) {
-				s.Health.RecordFailure(a.Binding.Provider, a.Binding.Model)
-				atomic.AddUint64(&s.failures, 1)
-			} else {
+			_ = resp.Body.Close()
+			res := s.Health.Report(a.Binding.Provider, a.Binding.Model, breaker.Input{
+				Kind:          breaker.KindUpstreamStatus,
+				Status:        resp.StatusCode,
+				Body:          eb,
+				IsLast:        isLast,
+				FallbackOn400: st.Chain.FallbackOn400,
+			})
+			switch res.Verdict.Bucket {
+			case breaker.BucketNone:
+				// 请求本身有问题（非形状 400 等），不是上游的账。
+			case breaker.BucketShape:
 				metrics.Default.Inc("breaker.skipped.shape_error")
+			default:
+				atomic.AddUint64(&s.failures, 1)
+			}
+			if res.Opened {
+				metrics.Default.Inc("breaker.opened")
+			}
+			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
+			if res.Verdict.Advance {
+				s.logf("[proxy] %s -> %d%s  上游说: %s", routeStr, resp.StatusCode,
+					breakerNote(res.Opened, a.Binding.Provider), trim(string(eb)))
+				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
+				metrics.Default.Inc("chain.step_failed")
+				lastMsg, lastCode = trim(string(eb)), resp.StatusCode
+				trail = append(trail, fmt.Sprintf("%s(%d)", a.Binding, resp.StatusCode))
+				continue
 			}
 			base := s.saveErrEvidence(reqID, resp.StatusCode, body, newBody, eb,
 				r.Header, resp.Header, routeStr)
@@ -1011,8 +1021,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(eb)
 			return
 		}
+		s.Health.Report(a.Binding.Provider, a.Binding.Model,
+			breaker.Input{Kind: breaker.KindUpstreamSuccess})
 		s.Health.ObserveSuccess(a.Binding.Provider, a.Binding.Model, len(newBody), attemptTTFT)
-		s.Health.RecordSuccess(a.Binding.Provider, a.Binding.Model)
 		if i > 0 {
 			metrics.Default.Inc("chain.failover")
 		}
@@ -1099,8 +1110,21 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					metrics.Default.Inc("client.cancel")
 					s.logf("[proxy] #%d 客户端取消，已掐断上游（省下后续 token）", reqID)
 				default:
-					s.logf("[proxy] #%d 上游断流（已转发 %d 块 / %d 字节）: %v",
-						reqID, chunks, bytesOut, rderr)
+					// 首字节已经拿到、字节也已经开始往客户端写，中途上游断了。
+					// 换不了站（写出去的东西收不回），但这是实打实的可用性
+					// 问题——以前这里只打一行日志，一个每次流到一半就断的上游
+					// 在熔断表上完全隐形。
+					res := s.Health.Report(a.Binding.Provider, a.Binding.Model, breaker.Input{
+						Kind:    breaker.KindStreamTruncated,
+						Written: true,
+						IsLast:  isLast,
+					})
+					if res.Opened {
+						metrics.Default.Inc("breaker.opened")
+					}
+					s.logf("[proxy] #%d 上游断流（已转发 %d 块 / %d 字节）: %v%s",
+						reqID, chunks, bytesOut, rderr,
+						breakerNote(res.Opened, a.Binding.Provider))
 				}
 				return
 			}

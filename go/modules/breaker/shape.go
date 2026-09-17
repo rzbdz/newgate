@@ -2,17 +2,24 @@ package breaker
 
 import "bytes"
 
-// IsRequestShapeError 决定这个 4xx/5xx 是否**不该**记进熔断器。
+// shapeOf 问一句「这次失败是不是请求形状问题」。
 //
-// 「请求形状」错误 = 同一个坏请求换一个 provider 也不会变好；记失败只会让熔断
-// 器去摘一个本可用的 provider，等客户端重试几次直接拖垮整条链。
+// 形状错误的定义与检测都属于**上游自己**：同一份请求 body 换一个 provider
+// 也不会变好，所以它既不该记在这家头上，也确实值得换个校验更松的 provider
+// 再试一次。core 只提供这个端口和「永不摘牌，只计数」的策略。
+//
+// 现在这里还硬编码着 DeepSeek 那条规则；紧接着的一刀会把它搬到
+// modules/deepseek，改成由上游模块注册的 ShapeDetector，core 里不留任何
+// 上游专有字符串。
+func (b *table) shapeOf(status int, body []byte) bool {
+	return IsRequestShapeError(body, status)
+}
+
+// IsRequestShapeError 决定这个 4xx/5xx 是否**不该**记进可用性账本。
 //
 // 当前只覆盖 reasoning-400（DeepSeek 的「reasoning_content 必须逐字回传」灰度
-// 门）。数据面在定案 4xx 分支调用它决定「这次失败要不要记账」，是这条策略的
-// **唯一**入口——forward 不该再自己判断。
-//
-// 下一步（同一次重构的第三刀）：这里的上游专有字符串要搬到 modules/deepseek，
-// 改成由上游模块注册的 ShapeDetector。core 只留端口和策略，不留上游的名字。
+// 门）。数据面用它决定要不要打 [reasoning-400] 那条专属日志并单独存档证据；
+// 「折不折账」由 Classify 的 Bucket 决定，两者不再混在一起。
 func IsRequestShapeError(errBody []byte, statusCode int) bool {
 	if statusCode != 400 {
 		return false

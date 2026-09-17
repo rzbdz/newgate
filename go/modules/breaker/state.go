@@ -12,40 +12,76 @@ type probeResult struct {
 	CheckedAt time.Time
 }
 
-// table 是健康表本体。**一个 binding 一行**（provider + model），不是一 provider
-// 一行——同一家上游的不同模型经常一个通一个不通。
+// record 是一个 binding 的全部健康状态。
 //
-// 熔断后不会按时间自动复活：只有一次成功 probe 能把 binding 放回链。这是刻意的
-// ——坏上游被定时放回来会每分钟撞一次用户请求。代价是「摘了就再也回不来」，等
-// 到用户手动 `newgate probe` 为止（2026-09-17 实测 ark 就这样卡了 16 分钟）。
-// 半开恢复是紧接着要补的一步，见 docs/05-gateway.md §3。
+// 状态的四个形态：
+//
+//	closed      openedAt 为零。正常参与建链。
+//	open        openedAt 非零、now < openUntil。摘牌中，不进候选链。
+//	half-open   open 且 now >= openUntil。Available 会放行**一次**真实请求
+//	            做试探（halfOpenAt 是这次试探的失效时刻）；其它并发请求仍然
+//	            被挡在外面。
+//	closed(回)  试探成功 → openedAt 清零、退避归位。
+//
+// 为什么要有 half-open：「摘了只能靠手动 probe 放回来」是 2026-09-17 之前的
+// 硬伤——ark 被真实连接超时摘掉后卡了 16 分钟，直到用户手敲 `newgate probe`。
+// 半开让真实流量自己证明恢复。安全性由三点保住：只在冷却期满放行、半开期严格
+// 一次、试探失败立刻回闸并把冷却翻倍（60s → 120s → 240s …，10 分钟封顶），
+// 所以坏上游不会每分钟回来撞一次。
+type record struct {
+	fails      int       // 当前这本账的连续失败数
+	bucket     Bucket    // fails 记的是哪本账（换账本要清零重数）
+	openedAt   time.Time // 非零 = 已摘牌
+	openUntil  time.Time // 冷却何时到期
+	halfOpenAt time.Time // 非零 = 半开试探在飞，值 = 试探失效时刻
+	cooldown   time.Duration
+	reason     string
+	shapeSkips int // 请求形状错误的次数（永不摘牌，只计数）
+}
+
+func (r *record) state(now time.Time) string {
+	switch {
+	case r.openedAt.IsZero():
+		return "closed"
+	case now.Before(r.openUntil):
+		return "open"
+	default:
+		return "half-open"
+	}
+}
+
+// table 是健康表本体。**一个 binding 一行**（provider + model），不是一
+// provider 一行——同一家上游的不同模型经常一个通一个不通。
 type table struct {
-	mu           sync.Mutex
-	fails        map[string]int
-	openedAt     map[string]time.Time
-	reasons      map[string]string
-	probes       map[string]probeResult
-	ranker       *ranker
+	mu      sync.Mutex
+	records map[string]*record
+	probes  map[string]probeResult
+	ranker  *ranker
+	policy  Policy
+	now     func() time.Time // 测试注入时钟；生产恒为 time.Now
+
 	file         string
 	persistedAt  time.Time
 	persistTimer *time.Timer
 	onError      func(error)
 	loadErr      error // 装载期失败，等 SetErrorHandler 装上后补报
-
-	Threshold int           // 真实流量连续失败多少次开闸
-	Cooldown  time.Duration // 最短隔离时间；到期仍需成功 probe 才能回链
 }
 
 func newTable() *table {
 	return &table{
-		fails:     map[string]int{},
-		openedAt:  map[string]time.Time{},
-		reasons:   map[string]string{},
-		probes:    map[string]probeResult{},
-		ranker:    newRanker(),
-		Threshold: 2,
-		Cooldown:  60 * time.Second,
+		records: map[string]*record{},
+		probes:  map[string]probeResult{},
+		ranker:  newRanker(),
+		policy:  DefaultPolicy(),
+		now:     time.Now,
 	}
+}
+
+// SetPolicy 整份替换策略；零值项按 DefaultPolicy 补齐。
+func (b *table) SetPolicy(p Policy) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.policy = p.normalized()
 }
 
 // SetErrorHandler 注入持久化错误出口；健康状态不能因后台写盘失败而静默丢失。
@@ -65,55 +101,159 @@ func (b *table) SetErrorHandler(fn func(error)) {
 
 func bindingKey(provider, model string) string { return provider + "\x00" + model }
 
-// Available 只回答 binding 当前是否可进入候选链，不在读路径隐式解除熔断。
+func (b *table) recordLocked(provider, model string) *record {
+	key := bindingKey(provider, model)
+	r := b.records[key]
+	if r == nil {
+		r = &record{}
+		b.records[key] = r
+	}
+	return r
+}
+
+// Available 回答这个 binding 现在能不能进候选链。
+//
+// 它是**唯一**会推进状态机的读路径：冷却期满时顺手把 binding 推进半开，并发放
+// 这一轮的试探名额。建链期每个候选只问一次，所以「放行一次」在这里天然成立。
 func (b *table) Available(provider, model string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	_, open := b.openedAt[bindingKey(provider, model)]
-	return !open
-}
-
-// RecordSuccess 清零连续失败，但故意不解除熔断；恢复必须由独立 probe 证明。
-func (b *table) RecordSuccess(provider, model string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	// 成功的普通请求只刷新分数，不负责解封。熔断状态必须经过 probe。
-	b.fails[bindingKey(provider, model)] = 0
-}
-
-// RecordFailure 返回 true 表示这次失败把闸打开了。
-func (b *table) RecordFailure(provider, model string) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	key := bindingKey(provider, model)
-	b.fails[key]++
-	if b.fails[key] >= b.Threshold {
-		b.openedAt[key] = time.Now()
-		b.reasons[key] = "真实流量连续失败"
-		b.persistLocked()
+	r := b.records[bindingKey(provider, model)]
+	if r == nil || r.openedAt.IsZero() {
 		return true
 	}
-	return false
+	now := b.now()
+	if now.Before(r.openUntil) {
+		return false
+	}
+	if !r.halfOpenAt.IsZero() && now.Before(r.halfOpenAt) {
+		return false // 已经有一个试探在飞，不并发放第二个
+	}
+	r.halfOpenAt = now.Add(b.policy.TrialTTL)
+	return true
 }
 
-// Open 立即熔断一个 binding。probe 已经是主动、独立的健康请求；再要求它
-// 累计两次只会让已知不可用的模型继续占住真实请求链。
-func (b *table) Open(provider, model, reason string) {
+// Report 回报一次上游交互的结局，并返回判决。
+//
+// 这是数据面唯一需要的记账入口：分类（Classify）与状态迁移都在这里，调用方
+// 只负责把「实际发生了什么」如实描述出来。2026-09-17 之前数据面自己在两处
+// 分支里各判断一次 4xx 的语义，两处判据不一致，形状错误在链中间会摘牌、在
+// 链尾不会。
+func (b *table) Report(provider, model string, in Input) Result {
+	in.Shape = b.shapeOf(in.Status, in.Body)
+	v := Classify(in)
+	if in.Kind != KindUpstreamSuccess && v.Bucket == BucketNone {
+		// 客户端取消、"换谁都一样"的 4xx：什么都不改，也**不要**在账本里
+		// 造一行空记录——不然每次取消都会往 `newgate breaker` 里塞一行
+		// 全零的 binding。
+		return Result{Verdict: v}
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	key := bindingKey(provider, model)
-	b.fails[key] = b.Threshold
-	b.openedAt[key] = time.Now()
-	b.reasons[key] = reason
+	now := b.now()
+
+	switch {
+	case in.Kind == KindUpstreamSuccess:
+		// 只碰已经存在的记录：成功的 binding 不需要为它凭空造一行，它的
+		// 延迟样本另有落处（ranker），而状态迁移只可能发生在已有记录上。
+		if r := b.records[bindingKey(provider, model)]; r != nil {
+			b.succeedLocked(r, now)
+		}
+		return Result{Verdict: v}
+	case v.Bucket == BucketShape:
+		r := b.recordLocked(provider, model)
+		r.shapeSkips++
+		b.persistLocked()
+		return Result{Verdict: v}
+	}
+	r := b.recordLocked(provider, model)
+	return Result{Verdict: v, Opened: b.failLocked(r, v.Bucket, now)}
+}
+
+// succeedLocked 记一次真实成功。
+//
+// 「成功」并不总是能解封：冷却期内的成功可能来自更早建链的请求（链是每个请求
+// 开始时建的），它不能当作恢复的证据——否则一个坏上游只要偶尔漏一个成功就能
+// 一直赖在链上。冷却期满之后的成功才是半开试探的结论，那才解封。
+func (b *table) succeedLocked(r *record, now time.Time) {
+	r.fails = 0
+	if r.openedAt.IsZero() || now.Before(r.openUntil) {
+		return
+	}
+	r.openedAt = time.Time{}
+	r.openUntil = time.Time{}
+	r.halfOpenAt = time.Time{}
+	r.cooldown = 0 // 退避归位：下次再从基准冷却开始
+	r.reason = ""
+	r.bucket = BucketNone
 	b.persistLocked()
 }
 
-// RecordProbe 记录主动探活的四档结论，并返回评级和是否熔断。
+// failLocked 记一次失败；返回 true 表示这次把闸打开了。
+func (b *table) failLocked(r *record, bucket Bucket, now time.Time) bool {
+	rule := b.policy.rule(bucket)
+	if rule.Threshold <= 0 {
+		return false // 这本账永不摘牌
+	}
+	if !r.openedAt.IsZero() {
+		if now.Before(r.openUntil) {
+			// 隔离期内的失败来自更早建链的请求，不构成新证据：既不再数
+			// 阈值，也不延长隔离。
+			return false
+		}
+		// 冷却已过（半开）：这一次失败就是试探的结论，立刻回闸并退避。
+		// 不重新数阈值——试探本身就是那一票。
+		r.halfOpenAt = time.Time{}
+		b.openLocked(r, rule, now, "半开试探失败（"+bucket.ruleName()+"）")
+		return true
+	}
+	if r.bucket != bucket {
+		// 换账本了：连续失败的定义是「同一类问题连着来」，不是「各种问题
+		// 凑够两次」。一条 binding 连吃 429 和连接超时，两边各一次，还不
+		// 足以说明它坏了。
+		r.bucket, r.fails = bucket, 0
+	}
+	r.fails++
+	if r.fails < rule.Threshold {
+		b.persistLocked() // 未开闸也要落盘：不然重启等于白送一次免死金牌
+		return false
+	}
+	b.openLocked(r, rule, now, "真实流量连续失败（"+bucket.ruleName()+"）")
+	return true
+}
+
+func (b *table) openLocked(r *record, rule Rule, now time.Time, reason string) {
+	switch {
+	case r.cooldown <= 0:
+		r.cooldown = rule.Cooldown
+	case rule.Backoff > 1:
+		r.cooldown = time.Duration(float64(r.cooldown) * rule.Backoff)
+	}
+	if rule.MaxCooldown > 0 && r.cooldown > rule.MaxCooldown {
+		r.cooldown = rule.MaxCooldown
+	}
+	if r.cooldown <= 0 {
+		r.cooldown = rule.Cooldown
+	}
+	r.openedAt = now
+	r.openUntil = now.Add(r.cooldown)
+	r.halfOpenAt = time.Time{}
+	r.reason = reason
+	b.persistLocked()
+}
+
+// RecordProbe 记录主动探活的四档结论，并返回评级和是否仍然熔断。
+//
+// probe 是主动、独立的健康请求，所以它**不受阈值约束**：结论差就当场摘，
+// 结论好且冷却期满就当场放。这与真实流量那条路不同——那条路上单次成功不足以
+// 证明什么，单次失败也不足以定案。
 func (b *table) RecordProbe(provider, model string, status, contextBytes int,
 	latency, slowAfter time.Duration, probeErr string) (ProbeGrade, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	key := bindingKey(provider, model)
+	now := b.now()
 	grade := ProbeFluent
 	reason := ""
 	switch {
@@ -128,26 +268,27 @@ func (b *table) RecordProbe(provider, model string, status, contextBytes int,
 		grade = ProbeUsable
 	}
 	b.probes[key] = probeResult{
-		Grade: grade, LatencyMs: latency.Milliseconds(), CheckedAt: time.Now(),
+		Grade: grade, LatencyMs: latency.Milliseconds(), CheckedAt: now,
 	}
 	if latency > 0 {
 		b.ranker.observe(key, contextBytes, latency)
 	}
+	r := b.recordLocked(provider, model)
+
 	if reason != "" {
-		b.fails[key] = b.Threshold
-		b.openedAt[key] = time.Now()
-		b.reasons[key] = reason
+		rule := b.policy.rule(BucketAvailability)
+		r.cooldown = 0 // probe 的结论是权威的：退避重新从基准开始
+		b.openLocked(r, rule, now, reason)
+		r.fails = rule.Threshold
+		return grade, true
+	}
+	if !r.openedAt.IsZero() && now.Before(r.openUntil) {
+		// 隔离期内的成功 probe 不能提前解封——最短隔离时间是硬下限，
+		// 否则上游抖一下就被 probe 立刻放回来了。
 		b.persistLocked()
 		return grade, true
 	}
-	if opened, ok := b.openedAt[key]; ok && time.Since(opened) < b.Cooldown {
-		b.persistLocked()
-		return grade, true
-	}
-	b.fails[key] = 0
-	delete(b.openedAt, key)
-	delete(b.reasons, key)
-	b.persistLocked()
+	b.succeedLocked(r, now)
 	return grade, false
 }
 
@@ -206,24 +347,35 @@ func (b *table) Rank(provider, model string, contextBytes int) int {
 func (b *table) Snapshot() []Status {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]Status, 0, len(b.openedAt))
+	now := b.now()
+	out := make([]Status, 0, len(b.records))
 	for key := range b.entryKeysLocked() {
 		provider, model := splitBindingKey(key)
-		s := Status{
-			Provider: provider,
-			Model:    model,
-			Fails:    b.fails[key],
-			Reason:   b.reasons[key],
+		r := b.records[key]
+		s := Status{Provider: provider, Model: model}
+		if r != nil {
+			s.Fails = r.fails
+			s.Rule = r.bucket.ruleName()
+			s.ShapeSkips = r.shapeSkips
+			s.CooldownMs = r.cooldown.Milliseconds()
+			s.Reason = r.reason
+			if !r.openedAt.IsZero() {
+				s.Open = true
+				s.OpenFor = now.Sub(r.openedAt)
+				s.OpenedAt = r.openedAt
+				s.OpenUntil = r.openUntil
+			}
+			s.State = r.state(now)
+			s.Trial = !r.halfOpenAt.IsZero() && now.Before(r.halfOpenAt)
 		}
-		if opened, ok := b.openedAt[key]; ok {
-			s.Open = true
-			s.OpenFor = time.Since(opened)
-			s.OpenedAt = opened
+		if s.State == "" {
+			s.State = "closed"
 		}
 		if p, ok := b.probes[key]; ok {
 			s.Grade, s.Latency, s.Checked = p.Grade, p.LatencyMs, p.CheckedAt
 		}
 		b.ranker.fill(&s, key)
+		s.Rank = b.ranker.rank(key, 0)
 		out = append(out, s)
 	}
 	sortStatuses(out)
@@ -234,19 +386,14 @@ func (b *table) Snapshot() []Status {
 //
 // 曾经是 openedAt ∪ scores ∪ probes——漏掉了「失败过但还没被摘」的 binding，
 // 于是 `newgate breaker` 看不见「失败 1 次、闸还没开」，重启也把这个计数丢了。
-// 现在并上 fails>0：只要发生过任何一件事，这一行就存在。
+// 现在整张 records 都在：只要发生过任何一件事，这一行就存在。
 func (b *table) entryKeysLocked() map[string]bool {
 	keys := map[string]bool{}
+	for key := range b.records {
+		keys[key] = true
+	}
 	for key := range b.probes {
 		keys[key] = true
-	}
-	for key := range b.openedAt {
-		keys[key] = true
-	}
-	for key := range b.fails {
-		if b.fails[key] > 0 {
-			keys[key] = true
-		}
 	}
 	for _, key := range b.ranker.keys() {
 		keys[key] = true
@@ -267,33 +414,4 @@ func splitBindingKey(key string) (string, string) {
 		}
 	}
 	return key, ""
-}
-
-// ShouldAdvance 决定这个上游状态码该不该沿链往下走。见 docs/04-configuration.md。
-//
-//	连接失败/超时/429/5xx  → 走：明确的可用性问题
-//	404 模型不存在         → 走：这家没这个模型
-//	401/403                → 走，但调用方要大声告警：凭证坏了不该让请求死，
-//	                          但必须让用户知道是 key 问题不是模型问题
-//	400                    → 默认不走（fallbackOn400 可开）。schema 类问题
-//	                          应在 schemarepair 根治，而不是靠换 provider 掩盖；
-//	                          若是客户端自己的 bug，往下走就是拿坏请求撞遍所有上游
-//	其它 4xx               → 不走：请求本身有问题，换谁都一样
-func ShouldAdvance(statusCode int, fallbackOn400 bool) bool {
-	switch statusCode {
-	case 400:
-		return fallbackOn400
-	case 401, 403, 404, 408, 409, 429:
-		return true
-	}
-	return statusCode >= 500
-}
-
-// CredentialProblem 这个状态码是不是凭证问题（调用方要给不同的提示）。
-func CredentialProblem(statusCode int) bool { return statusCode == 401 || statusCode == 403 }
-
-// Retryable 判断这个失败该不该转移到备用。
-// 只转移「确定没产生副作用」的失败——已经开始吐流的绝不转移。
-func Retryable(statusCode int, connErr bool) bool {
-	return ShouldAdvance(statusCode, false) || connErr
 }

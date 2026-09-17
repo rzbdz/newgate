@@ -433,6 +433,12 @@ func healthDisplayRank(h breakerapi.Status) int {
 	}
 }
 
+// modelHealthState 把一行健康快照翻成给人看的档位名。
+//
+// 注意它读的是**分档明细**（Scores/Buckets），不是 daemon 算好的排序键 Rank
+// ——这里要显示「哪个上下文档位多少毫秒」，而 Rank 只编码 ≤4K 那一档。排序
+// 策略（谁先上链）仍然只有 [rankFromProxy] 读的那一个来源；这里的 3000/12000
+// 只是同一套数在**显示**上的复用。要改口径就两边一起改，别只改一处。
 func modelHealthState(h breakerapi.Status) string {
 	if h.Open {
 		score, _ := modelDisplayScore(h)
@@ -1124,15 +1130,25 @@ func cmdStatus(agents agentapi.AgentCatalog) int {
 	fmt.Print(t.String())
 
 	if snap, err := store.Load(); err == nil {
+		// MaxSteps: 0——`status` 展示的是**完整候选链**，maxAttempts 是单次
+		// 请求的执行上限，不是 membership。传 Attempts() 会把第 4 站之后
+		// 静默裁掉，于是「normal 档里怎么没有 ark」这种观感问题（2026-09-17
+		// 实查：ark 是第 4 站，被这里截掉了）。截断的事实用下面那行提示说，
+		// 而不是让它看起来像不在链里。
 		steps, skips := resolve.BuildChain("normal", snap.Profiles, snap.Providers, resolve.Opts{
 			Active: st.DefaultProfile, Available: availableFromProxy(ps),
 			Rank:     rankFromProxy(ps),
-			MaxSteps: st.Chain.Attempts()})
+			MaxSteps: 0})
 		fmt.Print(style.Section("fallback 链") + style.Dim("   normal 档，按序尝试") + "\n")
 		if len(steps) == 0 {
 			fmt.Println(style.Item(style.Warn, "无可用候选   newgate tier normal"))
 		} else {
 			fmt.Print(bindingChain(steps, "  "))
+			if limit := st.Chain.Attempts(); limit < len(steps) {
+				fmt.Println(style.Hint(fmt.Sprintf(
+					"单次请求最多尝试前 %d 站；后续 %d 站仍在链中（newgate tier normal 看明细）",
+					limit, len(steps)-limit)))
+			}
 			if tail := chainTail(steps, skips); tail != "" {
 				fmt.Println(style.Hint(tail))
 			}

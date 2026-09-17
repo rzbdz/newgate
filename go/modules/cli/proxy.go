@@ -50,20 +50,23 @@ func availableFromProxy(ps *proxyInfo) func(provider, model string) bool {
 	}
 }
 
+// rankFromProxy 把 daemon 算好的排序键原样递给诊断。
+//
+// **这里不重算阈值**：3000ms / 12000ms 那套分桶只存在于 modules/breaker，
+// CLI 抄一份的话 daemon 改阈值 CLI 不会跟着变（2026-09-17 之前就是这样，
+// 两边各有一份 3000/12000）。排序策略只有一个来源。
+//
+// 老 daemon 不发 `rank`（优雅交接期间 CLI 与 daemon 可以来自不同版本），读不到
+// 就退化成中性值——排序退化为「按配置顺序」，不会因为版本不齐而互相打架。
+// 被摘牌的 binding 不在这里沉底：建链期先问 Available，被摘的根本进不了候选。
 func rankFromProxy(ps *proxyInfo) func(provider, model string) int {
+	const neutral = 1_000_000
 	scores := map[string]int{}
 	if ps != nil {
 		for _, b := range ps.Breakers {
-			score := 1_000_000
-			switch {
-			case b.Open:
-				score = 3_000_000 + b.ScoreMs
-			case b.ScoreMs > 0 && b.ScoreMs < 3000:
-				score = b.ScoreMs
-			case b.ScoreMs >= 3000 && b.ScoreMs <= 12000:
-				score = 2_000_000 + b.ScoreMs
-			case b.ScoreMs > 12000:
-				score = 3_000_000 + b.ScoreMs
+			score := neutral
+			if b.Rank != 0 {
+				score = b.Rank
 			}
 			scores[b.Provider+"/"+b.Model] = score
 		}
@@ -72,7 +75,7 @@ func rankFromProxy(ps *proxyInfo) func(provider, model string) int {
 		if score, ok := scores[provider+"/"+model]; ok {
 			return score
 		}
-		return 1_000_000
+		return neutral
 	}
 }
 
