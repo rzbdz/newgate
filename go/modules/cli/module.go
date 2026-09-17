@@ -15,6 +15,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/go/component"
 
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
@@ -23,6 +24,7 @@ import (
 type service struct {
 	agents  confighookapi.AgentCatalog
 	runtime runtimeapi.Runtime
+	health  breakerapi.Breaker
 
 	commands    modules.Registry[Command]
 	diagnostics modules.Registry[DiagnosticProvider]
@@ -43,6 +45,9 @@ func New() modules.Component {
 			modules.Need(configapi.Capability),
 			modules.Need(runtimeapi.Capability),
 			modules.Need(confighookapi.AgentCatalogCapability),
+			// daemon 角色要用它构造数据面（forward.New 的第四个参数），
+			// CLI 角色要用它把 /__newgate/status 的 breakers 解出来。
+			modules.Need(breakerapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, CLI(service)),
@@ -50,11 +55,13 @@ func New() modules.Component {
 		Start: func(_ context.Context, ctx modules.Context) error {
 			service.agents = modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
 			service.runtime = modules.MustGet(ctx, runtimeapi.Capability)
+			service.health = modules.MustGet(ctx, breakerapi.Capability)
 			return nil
 		},
 		Stop: func(context.Context) error {
 			service.agents = nil
 			service.runtime = nil
+			service.health = nil
 			return nil
 		},
 	}

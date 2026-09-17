@@ -1,4 +1,4 @@
-package health
+package breaker
 
 import (
 	"path/filepath"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestBreakerIsScopedToBinding(t *testing.T) {
-	b := newBreaker()
+	b := newTable()
 	b.Open("relay", "slow", "probe 太慢")
 
 	if b.Available("relay", "slow") {
@@ -24,7 +24,7 @@ func TestBreakerIsScopedToBinding(t *testing.T) {
 }
 
 func TestBreakerCooldownStillRequiresSuccessfulProbe(t *testing.T) {
-	b := newBreaker()
+	b := newTable()
 	b.Cooldown = 5 * time.Millisecond
 	b.Open("relay", "model", "probe 失败")
 	if grade, open := b.RecordProbe("relay", "model", 200, 1,
@@ -47,7 +47,7 @@ func TestBreakerCooldownStillRequiresSuccessfulProbe(t *testing.T) {
 }
 
 func TestTrafficStillNeedsConsecutiveFailures(t *testing.T) {
-	b := newBreaker()
+	b := newTable()
 	if b.RecordFailure("relay", "model") {
 		t.Fatal("第一次真实流量失败不应开闸")
 	}
@@ -63,7 +63,7 @@ func TestTrafficStillNeedsConsecutiveFailures(t *testing.T) {
 }
 
 func TestProbeGradesAndContextBuckets(t *testing.T) {
-	b := newBreaker()
+	b := newTable()
 	if grade, open := b.RecordProbe("relay", "fast", 200, 1,
 		2*time.Second, 12*time.Second, ""); grade != ProbeFluent || open {
 		t.Fatalf("2s = %s open=%v", grade, open)
@@ -90,14 +90,14 @@ func TestProbeGradesAndContextBuckets(t *testing.T) {
 
 func TestOpenStateSurvivesRestartAndNeedsProbe(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "health.json")
-	first := newBreaker()
+	first := newTable()
 	first.Cooldown = time.Millisecond
 	if err := first.UseFile(path); err != nil {
 		t.Fatal(err)
 	}
 	first.Open("relay", "model", "probe 失败")
 
-	second := newBreaker()
+	second := newTable()
 	second.Cooldown = time.Millisecond
 	if err := second.UseFile(path); err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestOpenStateSurvivesRestartAndNeedsProbe(t *testing.T) {
 		t.Fatal("隔离期后成功 probe 没有解封")
 	}
 
-	third := newBreaker()
+	third := newTable()
 	if err := third.UseFile(path); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestOpenStateSurvivesRestartAndNeedsProbe(t *testing.T) {
 }
 
 func TestSnapshotReportsEveryContextBucket(t *testing.T) {
-	b := newBreaker()
+	b := newTable()
 	b.ObserveSuccess("relay", "model", 1024, 2*time.Second)
 	b.ObserveSuccess("relay", "model", 16*1024, 4*time.Second)
 	b.ObserveSuccess("relay", "model", 64*1024, 8*time.Second)
@@ -140,7 +140,7 @@ func TestSnapshotReportsEveryContextBucket(t *testing.T) {
 
 func TestTrafficScoresSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "health.json")
-	first := newBreaker()
+	first := newTable()
 	if err := first.UseFile(path); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestTrafficScoresSurviveRestart(t *testing.T) {
 	first.ObserveSuccess("relay", "model", 16*1024, 2*time.Second)
 	first.Flush()
 
-	second := newBreaker()
+	second := newTable()
 	if err := second.UseFile(path); err != nil {
 		t.Fatal(err)
 	}

@@ -73,7 +73,7 @@ func TestClassifierFirstByteTimeoutFailsOver(t *testing.T) {
 		}
 	}
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -127,7 +127,7 @@ func TestCompactNotTightTimeout(t *testing.T) {
 		}
 	}
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 

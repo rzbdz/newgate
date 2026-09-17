@@ -105,7 +105,7 @@ func TestReasoningRoundTripThroughDroppingClient(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -261,7 +261,7 @@ func TestThinkingBlockRoundTripAnthropicDialect(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -370,7 +370,7 @@ func TestDeepseekRebasesForeignToolLoop(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 

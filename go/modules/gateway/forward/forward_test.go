@@ -18,7 +18,6 @@ import (
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
-	"github.com/rzbdz/newgate/go/modules/gateway/health"
 )
 
 // 一段有代表性的 SSE：含 tool_call 分片、Unicode、空 data、大整数。
@@ -105,7 +104,7 @@ func TestStreamNotBuffered(t *testing.T) {
 func streamThroughProxy(t *testing.T, upstreamURL string, _ time.Duration) (string, []time.Duration) {
 	t.Helper()
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	handler := http.HandlerFunc(srv.handleProxy)
 
 	// 用一个只认 real-model-1 的解析器替代真实配置：
@@ -198,7 +197,7 @@ func TestClientCancelAbortsUpstream(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -251,7 +250,7 @@ func TestNonStreamResponseByteFaithful(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -297,7 +296,7 @@ func TestErrorResponseByteFaithful(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -326,7 +325,7 @@ func TestErrorResponseByteFaithful(t *testing.T) {
 // 形状问题**（同一份 body 换哪个 provider 都一样错），却被当成可用性失败记进
 // 熔断器——连续两发就把一条本来能用的 binding 摘掉（health.json 上能看到
 // `fails=2 open=true grade=fluent`，probe 却一直绿，因为 probe 发的最小请求
-// 根本触发不到这条校验）。修复：health.IsRequestShapeError 把这类 400 从
+// 根本触发不到这条校验）。修复：breaker.IsRequestShapeError 把这类 400 从
 // RecordFailure 里摘出去。这里两个候选都返回同一个 reasoning-400，断言
 // 熔断器纹丝不动、请求仍然透传给客户端（不静默）。
 func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
@@ -348,9 +347,7 @@ func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	health.Default.RecordSuccess("ds-shape", "deepseek-flash") // 从干净状态开始
-
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -373,7 +370,7 @@ func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
 	if hits != 3 {
 		t.Fatalf("上游被打了 %d 次, want 3", hits)
 	}
-	if !health.Default.Available("ds-shape", "deepseek-flash") {
+	if !srv.Health.Available("ds-shape", "deepseek-flash") {
 		t.Error("reasoning-400 把熔断器打开了——请求形状错误不该记进可用性")
 	}
 }
@@ -397,9 +394,7 @@ func TestOtherClientErrorStillOpensBreaker(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	health.Default.RecordSuccess("schema-bad", "real-model-1")
-
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -412,7 +407,7 @@ func TestOtherClientErrorStillOpensBreaker(t *testing.T) {
 		ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
 	}
-	if health.Default.Available("schema-bad", "real-model-1") {
+	if srv.Health.Available("schema-bad", "real-model-1") {
 		t.Error("非 shape 错误的 400 连发两次却没打开熔断器——回归了旧行为的另一半")
 	}
 }
@@ -450,11 +445,7 @@ func TestClientCancelDuringConnectDoesNotBurnTheChain(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	for _, p := range provs {
-		health.Default.RecordSuccess(p, "real-model-1") // 从干净状态开始
-	}
-
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -489,7 +480,7 @@ func TestClientCancelDuringConnectDoesNotBurnTheChain(t *testing.T) {
 	default:
 	}
 	for _, p := range provs {
-		if !health.Default.Available(p, "real-model-1") {
+		if !srv.Health.Available(p, "real-model-1") {
 			t.Errorf("provider %s 被一次客户端取消打开了熔断器", p)
 		}
 	}

@@ -35,7 +35,7 @@ import (
 //   - 每个 agent 读自己的绑定（per-agent profile）
 //   - 换页是原子指针替换，不存在「读到一半配置变了」的中间态
 //   - 新配置加载失败时**保留旧快照**，正在跑的一切继续工作
-func Serve(port int) int {
+func Serve(service *service, port int) int {
 	rot, rerr := logx.New(paths.LogFile(), 16<<20, 3) // 16MB × 4 份
 	var lg *log.Logger
 	if rerr != nil {
@@ -96,7 +96,7 @@ func Serve(port int) int {
 	if err := thinkcache.AttachDisk(paths.ThinkCacheFile(), 100<<20); err != nil {
 		lg.Printf("thinkcache 落盘关闭（继续纯内存）: %v", err)
 	}
-	srv := forward.New(port, lg, watcher)
+	srv := forward.New(port, lg, watcher, service.health)
 
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)

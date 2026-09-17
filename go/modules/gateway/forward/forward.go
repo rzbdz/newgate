@@ -23,12 +23,12 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/lib/logx"
+	"github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/dialect"
-	"github.com/rzbdz/newgate/go/modules/gateway/health"
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
 	"github.com/rzbdz/newgate/go/modules/gateway/probe"
 	"github.com/rzbdz/newgate/go/modules/gateway/protocol"
@@ -50,6 +50,11 @@ type Server struct {
 	// 正在跑的会话不受影响（各 agent 读各自的绑定）。
 	Watch *store.Watcher
 
+	// Health 是注入进来的 binding 健康表（熔断 + 延迟排序）。数据面只读它
+	// 决定「这条 binding 能不能进链、排第几」，只写它回报结果；策略一概
+	// 不在这个包里，见 modules/breaker。
+	Health breaker.Breaker
+
 	srv      *http.Server
 	ln       net.Listener // 优雅交接要把它作为 fd 移交新进程
 	requests uint64
@@ -69,9 +74,9 @@ type Server struct {
 	drainFlag int32
 }
 
-// New 构造尚未监听的 Server，使配置和日志依赖在启动副作用前就完整可见。
-func New(port int, lg *log.Logger, w *store.Watcher) *Server {
-	return &Server{Port: port, Logger: lg, Watch: w,
+// New 构造尚未监听的 Server，使配置、日志和健康表依赖在启动副作用前就完整可见。
+func New(port int, lg *log.Logger, w *store.Watcher, br breaker.Breaker) *Server {
+	return &Server{Port: port, Logger: lg, Watch: w, Health: br,
 		stopCh: make(chan struct{}), drainCh: make(chan struct{})}
 }
 
@@ -115,12 +120,11 @@ func (s *Server) logf(format string, a ...interface{}) {
 }
 
 func (s *Server) Start() error {
-	health.Default.SetErrorHandler(func(err error) {
-		s.logf("[health] 全局健康表写入失败（继续使用内存状态）: %v", err)
+	// 健康表的装载归 breaker 模块自己（它在 Start 里读 health.json）；这里只
+	// 提供日志出口。持久化失败必须说出来——健康状态不能静默丢失。
+	s.Health.SetErrorHandler(func(err error) {
+		s.logf("[breaker] 健康表读写失败（继续使用内存状态）: %v", err)
 	})
-	if err := health.Default.UseFile(paths.HealthFile()); err != nil {
-		s.logf("[health] 全局健康表加载失败（继续纯内存）: %v", err)
-	}
 	probe.LoadCachedCapabilities()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__newgate/status", s.handleStatus)
@@ -193,7 +197,7 @@ func (s *Server) signalReady() {
 }
 
 func (s *Server) Shutdown() {
-	health.Default.Flush()
+	s.Health.Flush()
 	if s.srv != nil {
 		_ = s.srv.Close()
 	}
@@ -214,7 +218,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"port":            s.Port,
 		"requests":        atomic.LoadUint64(&s.requests),
 		"failures":        atomic.LoadUint64(&s.failures),
-		"breakers":        health.Default.Snapshot(),
+		"breakers":        s.Health.Snapshot(),
 		"uptime_s":        int(time.Since(s.started).Seconds()),
 		"tiers":           domain.Roles,
 		// 给 `newgate restart` 探测用：支持优雅交接（socket 移交）。
@@ -272,7 +276,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		if o.Provider == "" || o.Model == "" {
 			continue
 		}
-		grade, didOpen := health.Default.RecordProbe(o.Provider, o.Model, o.Status, o.Context,
+		grade, didOpen := s.Health.RecordProbe(o.Provider, o.Model, o.Status, o.Context,
 			time.Duration(o.LatencyMs)*time.Millisecond, threshold, o.Error)
 		if didOpen {
 			opened++
@@ -281,7 +285,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"ok": true, "opened": opened, "breakers": health.Default.Snapshot(),
+		"ok": true, "opened": opened, "breakers": s.Health.Snapshot(),
 	})
 }
 
@@ -670,8 +674,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if routeTier != "" {
 		opts := resolve.Opts{
 			Active:    active,
-			Available: health.Default.Available,
-			Rank:      func(provider, model string) int { return health.Default.Rank(provider, model, len(body)) },
+			Available: s.Health.Available,
+			Rank:      func(provider, model string) int { return s.Health.Rank(provider, model, len(body)) },
 			MaxSteps:  st.Chain.Attempts(),
 		}
 		var rs []resolve.Step
@@ -717,8 +721,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// （docs/04-configuration.md）——这支持「工具界面显示真实模型名」。
 			steps, skips, tier = resolve.ResolveRequest(norm, active, snap.Profiles, snap.Providers, resolve.Opts{
 				Active:    active,
-				Available: health.Default.Available,
-				Rank:      func(provider, model string) int { return health.Default.Rank(provider, model, len(body)) },
+				Available: s.Health.Available,
+				Rank:      func(provider, model string) int { return s.Health.Rank(provider, model, len(body)) },
 				MaxSteps:  st.Chain.Attempts(),
 			})
 		}
@@ -911,7 +915,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					metrics.Default.Inc("timeout.first_byte.non_stream")
 				}
 			}
-			opened := health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
+			opened := s.Health.RecordFailure(a.Binding.Provider, a.Binding.Model)
 			if opened {
 				metrics.Default.Inc("breaker.opened")
 			}
@@ -938,10 +942,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 可转移的失败：还没往客户端写任何字节，安全
-		if resp.StatusCode >= 400 && health.ShouldAdvance(resp.StatusCode, st.Chain.FallbackOn400) && !isLast {
+		if resp.StatusCode >= 400 && breaker.ShouldAdvance(resp.StatusCode, st.Chain.FallbackOn400) && !isLast {
 			body, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 4096))
 			_ = resp.Body.Close()
-			opened := health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
+			opened := s.Health.RecordFailure(a.Binding.Provider, a.Binding.Model)
 			if opened {
 				metrics.Default.Inc("breaker.opened")
 			}
@@ -964,8 +968,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// 进熔断器（连续两发会把能用的 deepseek 摘掉，2026-09-17 实测）。
 			eb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 256*1024))
 			resp.Body.Close()
-			if !health.IsRequestShapeError(eb, resp.StatusCode) {
-				health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
+			if !breaker.IsRequestShapeError(eb, resp.StatusCode) {
+				s.Health.RecordFailure(a.Binding.Provider, a.Binding.Model)
 				atomic.AddUint64(&s.failures, 1)
 			} else {
 				metrics.Default.Inc("breaker.skipped.shape_error")
@@ -1007,8 +1011,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(eb)
 			return
 		}
-		health.Default.ObserveSuccess(a.Binding.Provider, a.Binding.Model, len(newBody), attemptTTFT)
-		health.Default.RecordSuccess(a.Binding.Provider, a.Binding.Model)
+		s.Health.ObserveSuccess(a.Binding.Provider, a.Binding.Model, len(newBody), attemptTTFT)
+		s.Health.RecordSuccess(a.Binding.Provider, a.Binding.Model)
 		if i > 0 {
 			metrics.Default.Inc("chain.failover")
 		}
@@ -1298,7 +1302,7 @@ func truncate(s string, n int) string {
 // isReasoningPassthroughError 是历史接口，外部仍可能在 grep；转发给 health 包
 // 的单一来源，让"是否算请求形状错误"这条策略只有一处可改。
 func isReasoningPassthroughError(upstreamBody []byte) bool {
-	return health.IsRequestShapeError(upstreamBody, 400)
+	return breaker.IsRequestShapeError(upstreamBody, 400)
 }
 
 func trim(s string) string {

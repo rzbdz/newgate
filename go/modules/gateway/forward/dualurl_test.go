@@ -43,7 +43,7 @@ func TestDualURLRoutesByDialect(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 

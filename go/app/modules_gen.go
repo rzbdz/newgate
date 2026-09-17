@@ -7,6 +7,7 @@ package app
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
+	mod_breaker "github.com/rzbdz/newgate/go/modules/breaker"
 	mod_claudecode "github.com/rzbdz/newgate/go/modules/claudecode"
 	mod_claudecode_deepseek "github.com/rzbdz/newgate/go/modules/claudecode_deepseek"
 	mod_claudecode_glm "github.com/rzbdz/newgate/go/modules/claudecode_glm"
@@ -27,6 +28,7 @@ import (
 // 顺序不是依赖声明——真实启动顺序由 capability 依赖图在构图期计算。
 func generatedComponents() []modules.Component {
 	return []modules.Component{
+		mod_breaker.New(),
 		mod_claudecode.New(),
 		mod_claudecode_deepseek.New(),
 		mod_claudecode_glm.New(),

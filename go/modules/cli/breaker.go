@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/cli/style"
-	"github.com/rzbdz/newgate/go/modules/gateway/health"
 )
 
 // cmdBreaker 只回答一件事：**现在哪些 binding 被摘牌了、为什么**。
@@ -29,7 +29,7 @@ func cmdBreaker() int {
 		return die(69, fmt.Sprintf("连不上代理 127.0.0.1:%d（newgate doctor）", info.Port))
 	}
 
-	var open []health.Status
+	var open []breakerapi.Status
 	for _, b := range ps.Breakers {
 		if b.Open {
 			open = append(open, b)

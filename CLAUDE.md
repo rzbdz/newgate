@@ -42,6 +42,7 @@ go vet ./... && gofmt -l component modules cmd
 | `component` | typed capability、依赖 DAG、生命周期 | 组件框架本身 |
 | `modules/config/{domain,resolve,roleprov,store}` | Config 组件、配置语义、动态角色、fallback 纯函数、持久化 | 档位与配置 |
 | `modules/gateway/{forward,special,rewrite,thinkcache}` | 网关组件及其内部实现 | 转发、扩展与思维链 |
+| `modules/breaker` | binding 健康表：可用性 + 延迟排序，**无 Requires**（叶子，被注入数据面与 CLI） | 熔断策略与恢复 |
 | `modules/confighook` | agent/config/state-field 注册端口 | 配置文件接管 |
 | `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
 | `modules/cli` | CLI 组件与命令壳 | `newgate <动词>` |

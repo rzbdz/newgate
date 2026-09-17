@@ -210,7 +210,7 @@ func run(service *service, args []string) int {
 		fmt.Print(usageText())
 		return 0
 	case "__serve":
-		return Serve(intFlag(args, "--port", 0))
+		return Serve(service, intFlag(args, "--port", 0))
 	default:
 		return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))
 	}
