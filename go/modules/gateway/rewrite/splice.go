@@ -331,6 +331,68 @@ func AppendLastArrayItemArray(body []byte, arrayKey, field string, rawVal []byte
 	return out, true, nil
 }
 
+// AppendArrayItemArrayAt 往顶层数组**第 itemIndex 个**对象元素的子数组末尾
+// 追加 rawVal（下标越界或那项不是对象 = 什么都不做）。
+//
+// 与 AppendLastArrayItemArray 的差别只在「挑谁」：那个只认数组的最后一项。需要
+// 按下标挑，是因为「最后一条 user 消息」**不一定**是数组的最后一项——Claude Code
+// 会在 tool_result 之后追加一条 role:"system" 的插话，数组最后一项是那条 system，
+// 而被上游拒掉的却是它前面那条只有 tool_result 的 user 轮（现场：
+// dump/err-400-req000464）。按下标挑而不是「从后往前找第一个合形状的」，是因为
+// 长历史里中段的 tool_result-only 轮到处都是，从后往前找会去改一条**不该动**的
+// 老消息。
+func AppendArrayItemArrayAt(body []byte, arrayKey, field string, itemIndex int,
+	rawVal []byte) ([]byte, bool, error) {
+	s, e, err := findTopLevelValue(body, arrayKey)
+	if err != nil {
+		return body, false, err
+	}
+	arr := body[s:e]
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
+		return body, false, errNotArray
+	}
+	if itemIndex < 0 || itemIndex >= len(spans) {
+		return body, false, nil
+	}
+	sp := spans[itemIndex]
+	item := arr[sp[0]:sp[1]]
+	if len(item) == 0 || item[0] != '{' {
+		return body, false, nil
+	}
+	cs, ce, err := findTopLevelValue(item, field)
+	if err != nil {
+		return body, false, err
+	}
+	child := item[cs:ce]
+	if len(child) == 0 || child[0] != '[' {
+		return body, false, errNotArray
+	}
+	close := len(child) - 1
+	for close > 0 {
+		switch child[close] {
+		case ' ', '\t', '\r', '\n':
+			close--
+			continue
+		}
+		break
+	}
+	if child[close] != ']' {
+		return body, false, errNotArray
+	}
+	j := skipWS(child, 1)
+	ins := rawVal
+	if j < len(child) && child[j] != ']' {
+		ins = append([]byte(","), rawVal...)
+	}
+	off := s + sp[0] + cs + close
+	out := make([]byte, 0, len(body)+len(ins))
+	out = append(out, body[:off]...)
+	out = append(out, ins...)
+	out = append(out, body[off:]...)
+	return out, true, nil
+}
+
 // ArrayItems 把一个 JSON 数组的原始字节切成各元素的原始字节（只读判断用，
 // 比如「这条 content[] 里有没有 thinking 块」）。切片指向原字节，不拷贝。
 func ArrayItems(arr []byte) ([][]byte, bool) {

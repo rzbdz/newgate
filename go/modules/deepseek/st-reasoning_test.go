@@ -389,40 +389,74 @@ func TestDeepSeekToolLoopMigrationIsScopedAndRebased(t *testing.T) {
 
 // TestTailShapeRepairOnToolResultOnlyTail 锁住 reasoning 400 的**根因**修复。
 //
-// 现场（dump/err-400-req000412、req000464，2026-09-17）：229 条消息、每条
-// assistant 都带着 thinking 块和 reasoning_content、tools 开着、thinking
-// adaptive，上游照样回「reasoning_content must be passed back」。排除法得出
-// 真正起作用的是尾部形状：最后一条 user 消息只有 tool_result、没有任何文字。
+// 现场（dump/err-400-req000412、req000464、req000061、req000063、req000096、
+// req000199，2026-09-17）：每条 assistant 都带着 thinking 块和 reasoning_content、
+// tools 开着、thinking adaptive，上游照样回「reasoning_content must be passed
+// back」。排除法得出真正起作用的是**最后一条 user 消息**的形状：它的 content[]
+// 里全是 tool_result 块、一个字都没有。
+//
+// 两种尾部都要修：
+//   - 数组就以那条 user 轮收尾（req000412/req000096）；
+//   - 那条 user 轮后面还跟着 role:"system" 的插话（req000464：Claude Code 在
+//     tool_result 之后追加「The user sent a new message while you were
+//     working: …」）。上游不认 system 里的指令，照样 400——旧实现要求数组最后
+//     一项就是 user，这一族全部漏修。
 func TestTailShapeRepairOnToolResultOnlyTail(t *testing.T) {
-	body := []byte(`{"model":"deepseek-flash","thinking":{"type":"adaptive"},"messages":[` +
-		`{"role":"user","content":[{"type":"text","text":"开始吧"}]},` +
-		`{"role":"assistant","content":[{"type":"thinking","thinking":"想一下"},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},` +
-		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`)
-
-	out, notes, err := reasoning{}.Apply(body, claudeReq("deepseek-flash"))
-	if err != nil {
-		t.Fatalf("Apply 报错: %v", err)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"user 轮收尾", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"text","text":"开始吧"}]},` +
+			`{"role":"assistant","content":[{"type":"thinking","thinking":"想一下"},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`},
+		{"user 轮之后还有 system 插话", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"text","text":"开始吧"}]},` +
+			`{"role":"assistant","content":[{"type":"thinking","thinking":"想一下"},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},` +
+			`{"role":"system","content":[{"type":"text","text":"The user sent a new message while you were working: keep going."}]}]}`},
+		{"并行工具轮：两个 tool_result", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"text","text":"开始吧"}]},` +
+			`{"role":"assistant","content":[{"type":"tool_use","id":"t1"},{"type":"tool_use","id":"t2"}]},` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a"},{"type":"tool_result","tool_use_id":"t2","content":"b"}]}]}`},
 	}
-	if !strings.Contains(string(out), "Continue from the tool results above") {
-		t.Fatalf("尾部没有补上继续指令:\n%s", out)
-	}
-	// 原内容一个字节都不能丢：tool_result 还在，历史消息没被动。
-	if !strings.Contains(string(out), `"tool_use_id":"t1"`) ||
-		!strings.Contains(string(out), `"text":"开始吧"`) {
-		t.Fatalf("补尾部指令时改动了已有内容:\n%s", out)
-	}
-	// 继续指令必须在**最后一条** user 消息里（尾部），不是别的地方。
-	tail := string(out[strings.LastIndex(string(out), `"role":"user"`):])
-	if !strings.Contains(tail, "Continue from the tool results above") {
-		t.Fatalf("继续指令没落在尾部消息里:\n%s", tail)
-	}
-	if !containsNote(notes, "尾") {
-		t.Fatalf("没有回报 notes（不静默是硬要求）: %v", notes)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, notes, err := reasoning{}.Apply([]byte(tt.body), claudeReq("deepseek-flash"))
+			if err != nil {
+				t.Fatalf("Apply 报错: %v", err)
+			}
+			s := string(out)
+			if !strings.Contains(s, "Continue from the tool results above") {
+				t.Fatalf("尾部没有补上继续指令:\n%s", s)
+			}
+			// 原内容一个字节都不能丢：tool_result 还在，历史消息没被动。
+			if !strings.Contains(s, `"tool_use_id":"t1"`) ||
+				!strings.Contains(s, `"text":"开始吧"`) {
+				t.Fatalf("补尾部指令时改动了已有内容:\n%s", s)
+			}
+			// 继续指令必须落在**最后一条 user 消息**里，而不是数组末尾：
+			// 尾随的 system 插话必须还排在它后面。
+			if i, j := strings.Index(s, "Continue from the tool results above"),
+				strings.LastIndex(s, `"role":"user"`); i < j {
+				t.Fatalf("继续指令没落在最后一条 user 消息里:\n%s", s)
+			}
+			if k := strings.Index(s, "while you were working"); k >= 0 &&
+				strings.Index(s, "Continue from the tool results above") > k {
+				t.Fatalf("继续指令跑到了尾随 system 插话后面（上游不认 system 里的指令）:\n%s", s)
+			}
+			if !containsNote(notes, "尾") {
+				t.Fatalf("没有回报 notes（不静默是硬要求）: %v", notes)
+			}
+		})
 	}
 }
 
-// TestTailShapeLeavesNormalTailsAlone：尾部本来就有文字 / 尾部不是 user /
-// 思考关着 —— 三种情况都不许动，别往用户对话里加噪音。
+// TestTailShapeLeavesNormalTailsAlone：这些尾部本来就能过，一个字节都不许动。
+//
+// 判据是「content[] 里**全是** tool_result 块」，不是「没有 text 块」——后者太宽，
+// 会把下面 [image] / [tool_result, image] 这两种实测 3/3 放行的尾部也改掉
+// （2026-09-17 打真实 smt-deepseek/deepseek-flash，读 X-Newgate-Chain）。
 func TestTailShapeLeavesNormalTailsAlone(t *testing.T) {
 	tests := []struct {
 		name string
@@ -430,9 +464,21 @@ func TestTailShapeLeavesNormalTailsAlone(t *testing.T) {
 	}{
 		{"尾部有文字", `{"thinking":{"type":"adaptive"},"messages":[` +
 			`{"role":"user","content":[{"type":"text","text":"hi"}]}]}`},
-		{"尾部是 assistant", `{"thinking":{"type":"adaptive"},"messages":[` +
+		{"尾部是 assistant（另一条规则在管，追加指令证明没用）", `{"thinking":{"type":"adaptive"},"messages":[` +
 			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},` +
 			`{"role":"assistant","content":[{"type":"text","text":"说完了"}]}]}`},
+		{"只有 image 块", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}`},
+		{"tool_result + image", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"},` +
+			`{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}`},
+		{"tool_result + text（已经能过）", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"},` +
+			`{"type":"text","text":"继续"}]}]}`},
+		{"tool_result-only 的轮不是最后一条 user 轮", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},` +
+			`{"role":"assistant","content":[{"type":"text","text":"干完了"}]},` +
+			`{"role":"user","content":[{"type":"text","text":"再来一个"}]}]}`},
 		{"content 是字符串", `{"thinking":{"type":"adaptive"},"messages":[` +
 			`{"role":"user","content":"纯文本"}]}`},
 		{"没有 messages", `{"thinking":{"type":"adaptive"}}`},
@@ -452,17 +498,27 @@ func TestTailShapeLeavesNormalTailsAlone(t *testing.T) {
 	}
 }
 
-// TestTailShapeSkippedWhenThinkingOff：思考关着时 DeepSeek 不走那条严格校验，
-// 补了反而是噪音。
-func TestTailShapeSkippedWhenThinkingOff(t *testing.T) {
+// TestTailShapeRepairedWhenThinkingOff：思考关着也照样修。
+//
+// 这条校验**与思考开关无关**。2026-09-17 实测 3/3：同一份 tool_result-only 尾部，
+// 顶层写 thinking:{"type":"disabled"} 且不带 tools，上游还是回
+// 「reasoning_content must be passed back」。
+//
+// 旧实现的契约正好相反（挂在 thinkingOn 闸门里），所以这个测试是从
+// TestTailShapeSkippedWhenThinkingOff 反过来的——那个名字锁的是一个被实测证伪的
+// 假设，留着比删掉更危险。
+func TestTailShapeRepairedWhenThinkingOff(t *testing.T) {
 	body := []byte(`{"thinking":{"type":"disabled"},"messages":[` +
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`)
-	out, _, err := reasoning{}.Apply(body, claudeReq("deepseek-flash"))
+	out, notes, err := reasoning{}.Apply(body, claudeReq("deepseek-flash"))
 	if err != nil {
 		t.Fatalf("Apply 报错: %v", err)
 	}
-	if strings.Contains(string(out), "Continue from the tool results above") {
-		t.Fatalf("思考关着却补了尾部指令:\n%s", out)
+	if !strings.Contains(string(out), "Continue from the tool results above") {
+		t.Fatalf("思考关着时没补尾部指令（实测这条校验不受 thinking 影响）:\n%s", out)
+	}
+	if !containsNote(notes, "尾") {
+		t.Fatalf("没有回报 notes: %v", notes)
 	}
 }
 
