@@ -100,6 +100,50 @@ Agent 组件通常：
 模型组件负责识别目标 provider/model，并注册只属于该模型族的 Gateway 行为。
 匹配应基于明确的 provider、model 或 base URL 证据。
 
+如果这个模型族的上游会用自己的方言报一类「**请求形状**错误」——同一份 body 换
+哪个 provider 都会以同样方式被拒，因此不该记在任何一家的可用性账本上——就把它
+写成一条**形状判据**注册进健康表（`modules/breaker`），别写进转发热路径：
+
+```go
+type ShapeDetector interface {
+    Name() string                     // 进日志/指标/证据目录名，是一条对外契约
+    Match(status int, body []byte) bool
+}
+```
+
+```go
+// modules/<模型族>/module.go
+Requires: []component.Requirement{
+    component.Need(breakerapi.Capability),
+},
+Start: func(_ context.Context, ctx component.Context) error {
+    health := component.MustGet(ctx, breakerapi.Capability)
+    release, err := health.RegisterShapeDetector(reasoningShape{})
+    if err != nil {
+        return err
+    }
+    releases = append(releases, release)
+    return nil
+},
+Stop: func(context.Context) error { return component.ReleaseAll(releases) },
+```
+
+契约要点（DeepSeek 的 `modules/deepseek/shape.go` 是参考实现，它的表测试就是
+这条判据的行权点）：
+
+- **core 里不许出现上游专有字符串**。转发路径只读 `Result.Shape` 那个名字
+  （判据自己起的），据此打 `[shape-400]` 日志、存
+  `dump/shape-400-<名字>/`；它不知道也不用知道那两句文案长什么样。
+- **判据要宽进严出**：只认真正属于这一类的那几发。一条见 400 就认领的判据会
+  把「上游真的在拒我们的请求」一起放过——那正是它存在要区分的东西。
+- **命中之后永不摘牌，只计数**（`shape_skips` + metrics
+  `breaker.skipped.shape_error`），这条策略在 `modules/breaker` 里，判据自己
+  改不了。
+- **`Name()` 别乱改**：它进日志、指标和证据目录名，改名字等于让老证据换地方。
+  非字母数字的字符在落盘时会被换成 `_`，空名退化成 `unknown`。
+- 判据**不允许 panic 穿出去**（健康表会 recover 并当作不认领），但也别依赖这层
+  兜底：判据在每一个上游 4xx 上都会跑，写成纯函数、只做字符串匹配。
+
 ## 6. 新上游补丁
 
 放在 owner 模块的 `st-*.go`，实现 Gateway Plugin：

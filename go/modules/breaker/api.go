@@ -126,6 +126,16 @@ type Breaker interface {
 	// 返回 true = 这条 binding 仍然可用（不摘）；false = 确认不可用（照摘）。
 	// nil（默认）＝不做这一步，行为与以前完全一致。
 	SetVerifier(func(provider, model string) bool)
+
+	// RegisterShapeDetector 贡献一条「这个 4xx 是请求形状问题」的判据。
+	//
+	// 形状错误的定义**属于上游自己**（见 shape.go 的 ShapeDetector）：core 只
+	// 提供端口和「永不摘牌、只计数」的策略，判据由知道那家校验规则的模块注册
+	// 进来。没有注册任何检测器时，400 一律不记在任何人头上——少认一次只是少
+	// 一个计数，误认一次会让真正的可用性故障被放过。
+	//
+	// 返回只属于本次注册的撤销句柄；consumer 在 Stop 里逆序释放。
+	RegisterShapeDetector(ShapeDetector) (modules.Release, error)
 }
 
 // Capability 是健康表在组件图里的身份。

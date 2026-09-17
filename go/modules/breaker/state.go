@@ -61,6 +61,7 @@ type table struct {
 	records map[string]*record
 	probes  map[string]probeResult
 	ranker  *ranker
+	shapes  shapeRegistry
 	policy  Policy
 	now     func() time.Time // 测试注入时钟；生产恒为 time.Now
 
@@ -152,7 +153,8 @@ func (b *table) Available(provider, model string) bool {
 // 分支里各判断一次 4xx 的语义，两处判据不一致，形状错误在链中间会摘牌、在
 // 链尾不会。
 func (b *table) Report(provider, model string, in Input) Result {
-	in.Shape = b.shapeOf(in.Status, in.Body)
+	detector, shape := b.shapeOf(in.Status, in.Body)
+	in.Shape = shape
 	v := Classify(in)
 	if in.Kind != KindUpstreamSuccess && v.Bucket == BucketNone {
 		// 客户端取消、"换谁都一样"的 4xx：什么都不改，也**不要**在账本里
@@ -178,7 +180,9 @@ func (b *table) Report(provider, model string, in Input) Result {
 		r.shapeSkips++
 		b.persistLocked()
 		b.mu.Unlock()
-		return Result{Verdict: v}
+		// Shape 带上认领的判据名：数据面据此打专属日志并存证据，而它不需要
+		// 认识任何上游专有字符串——名字是检测器自己起的。
+		return Result{Verdict: v, Shape: detector}
 	}
 
 	r := b.recordLocked(provider, model)

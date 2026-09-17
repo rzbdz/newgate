@@ -1018,9 +1018,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// 「沿不沿链走 / 记不记账 / 记进哪一本账」交给 breaker 的决策表。
 			//
 			// 2026-09-17 之前这里是两个分支各判一次：可转移的那条无条件记账，
-			// 定案的那条先豁免形状错误。判据不一致的后果是同一个 reasoning-400
-			// 在链中间会摘牌、在链尾不会——链中间那发会把还能用的 deepseek
-			// 摘掉。现在只有一处判据，且它是纯函数，能被穷举测完。
+			// 定案的那条先豁免形状错误。判据不一致的后果是同一发 reasoning
+			// 回传 400 在链中间会摘牌、在链尾不会——链中间那发会把还能用的
+			// deepseek 摘掉。现在只有一处判据，且它是纯函数，能被穷举测完。
 			eb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 256*1024))
 			_ = resp.Body.Close()
 			res := s.report(a.Binding.Provider, a.Binding.Model, breaker.Input{
@@ -1052,17 +1052,18 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				r.Header, resp.Header, routeStr)
 			s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
 			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
-			if isReasoningPassthroughError(eb) {
-				// 专属标记：这类 400 不是客户端 schema 错，是我们补的思考内容
-				// 被上游严格节点拒了（DeepSeek 灰度），要能一眼 grep 出来。
-				s.logf("[reasoning-400] #%d %s 上游拒收思考内容回传（证据 %s.*）",
-					reqID, a.Binding.String(), filepath.Base(base))
+			if res.Shape != "" {
+				// 请求形状错误：不是客户端 schema 错，是这份 body 本身只有某家
+				// 上游挑食（典型是 DeepSeek 思考模式那两句 400），要能一眼 grep
+				// 出来。判据名由检测器自己起，转发路径不认识任何上游专有字符串。
+				s.logf("[shape-400] #%d %s 请求形状错误（判据 %s；证据 %s.*）",
+					reqID, a.Binding.String(), res.Shape, filepath.Base(base))
 				// 现场单独存档：这类 400 偶发又致命，dump 目录的 req-*/err-*
 				// 滚动清理会把它挤掉，所以另存一份到不参与滚动清理的专用目录，
 				// 并附逐条 reasoning 审计（哪几条补了占位符）。
-				if rdir := s.saveReasoningEvidence(reqID, body, newBody, eb,
+				if rdir := s.saveShapeEvidence(reqID, res.Shape, body, newBody, eb,
 					r.Header, resp.Header, routeStr); rdir != "" {
-					s.logf("[reasoning-400] #%d 现场已存档 %s/", reqID, rdir)
+					s.logf("[shape-400] #%d 现场已存档 %s/", reqID, rdir)
 				}
 			}
 			s.logf("[proxy] #%d 上游原文: %s", reqID, truncate(string(redact(eb)), 2000))
@@ -1271,18 +1272,23 @@ func (s *Server) saveErrEvidence(reqID uint64, status int, inBody, outBody, resp
 	return base
 }
 
-// saveReasoningEvidence 思考回传被拒（reasoning 400）时把现场存进**专用目录**，
-// 不参与 dump 目录的 req-*/err-* 滚动清理——这类 400 偶发又致命，丢了就再也
-// 复现不了（本会话的 transcript 单条就能上 MB，dump 目录几十组就满了，而
-// 400 往往隔很久才来一次，等不到下一次就被挤没了）。
+// saveShapeEvidence 请求形状被拒时把现场存进**专用目录**，不参与 dump 目录的
+// req-*/err-* 滚动清理——这类 400 偶发又致命，丢了就再也复现不了（本会话的
+// transcript 单条就能上 MB，dump 目录几十组就满了，而这类 400 往往隔很久才来
+// 一次，等不到下一次就被挤没了）。当前认领它的只有 DeepSeek 那条判据
+// （modules/deepseek/shape.go），但目录名取自检测器自己起的名字，所以加一条
+// 新判据就会自动多一个证据目录，转发路径不用改。
 //
-// 目录结构：dump/reasoning-400/req-<id>-<unixnano>/，里面放客户端发来的、我们
-// 发出的、上游说的，外加一份逐条 reasoning 审计（哪几条 assistant 补了占位符）。
-// 只按总字节数封顶（512MB，约几百个现场），超了才清最旧的——正常排查用
-// 根本到不了这个量，等于「不删」。
-func (s *Server) saveReasoningEvidence(reqID uint64, inBody, outBody, respBody []byte,
+// 目录结构：dump/shape-400-<判据>/req-<id>-<unixnano>/，里面放客户端发来的、
+// 我们发出的、上游说的，外加一份逐条审计（哪几条 assistant 消息被补过字段）。
+// 只按总字节数封顶（512MB，约几百个现场），超了才清最旧的——正常排查用根本
+// 到不了这个量，等于「不删」。
+//
+// 判据名进路径前做了白名单过滤（见 shapeDirName）：检测器是别的模块注册进来
+// 的代码，名字里带 `/` 或 `..` 就能让这个函数往配置目录外写文件。
+func (s *Server) saveShapeEvidence(reqID uint64, detector string, inBody, outBody, respBody []byte,
 	reqHdr http.Header, respHdr http.Header, routeStr string) string {
-	dir := filepath.Join(paths.Config(), "dump", "reasoning-400",
+	dir := filepath.Join(paths.Config(), "dump", shapeDirName(detector),
 		fmt.Sprintf("req-%06d-%d", reqID, time.Now().UnixNano()))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return ""
@@ -1292,17 +1298,38 @@ func (s *Server) saveReasoningEvidence(reqID uint64, inBody, outBody, respBody [
 	_ = ioutil.WriteFile(filepath.Join(dir, "upstream-said.json"), redact(respBody), 0o600)
 	_ = ioutil.WriteFile(filepath.Join(dir, "audit.txt"),
 		[]byte(special.AuditResponse(outBody)), 0o600)
-	meta := fmt.Sprintf("route: %s\nstatus: 400\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
-		routeStr, headerDump(reqHdr), headerDump(respHdr))
+	meta := fmt.Sprintf("route: %s\nstatus: 400\ndetector: %s\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
+		routeStr, detector, headerDump(reqHdr), headerDump(respHdr))
 	_ = ioutil.WriteFile(filepath.Join(dir, "meta.txt"), []byte(meta), 0o600)
-	pruneReasoningEvidence(filepath.Dir(dir), 512<<20)
+	pruneShapeEvidence(filepath.Dir(dir), 512<<20)
 	return dir
 }
 
-// pruneReasoningEvidence 按总字节数封顶清理 reasoning-400 目录：超了就删最旧的
-// 子目录，直到回到上限以下。比按个数更可预测，磁盘安全——但上限给得很宽，
-// 正常排查根本触不到（见 saveReasoningEvidence）。
-func pruneReasoningEvidence(dir string, maxBytes int64) {
+// shapeDirName 把检测器名压成一个安全的目录名：只留字母数字和 `-_.`，其余
+// 一律换成 `_`，空名退化成 `unknown`。名字会进文件路径，而检测器是**别的
+// 模块**注册进来的——不设防就等于让一个注册项决定往哪写文件。
+func shapeDirName(detector string) string {
+	var b strings.Builder
+	b.WriteString("shape-400-")
+	for _, r := range detector {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == len("shape-400-") {
+		b.WriteString("unknown")
+	}
+	return b.String()
+}
+
+// pruneShapeEvidence 按总字节数封顶清理证据目录：超了就删最旧的子目录，直到
+// 回到上限以下。比按个数更可预测，磁盘安全——但上限给得很宽，正常排查根本
+// 触不到（见 saveShapeEvidence）。
+func pruneShapeEvidence(dir string, maxBytes int64) {
 	ents, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return
@@ -1380,19 +1407,6 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + fmt.Sprintf("…(截断，共 %d 字符)", len(r))
-}
-
-// isReasoningPassthroughError 认出 DeepSeek 思考模式那两句 400：
-//
-//	The `reasoning_content` in the thinking mode must be passed back to the API.
-//	The `content[].thinking` in the thinking mode must be passed back to the API.
-//
-// 这不是客户端的 schema 错误，而是我们（special/deepseek）补回去的思考内容
-// 被上游严格节点拒了——单独打点，别跟普通 400 混在一起。
-// isReasoningPassthroughError 是历史接口，外部仍可能在 grep；转发给 health 包
-// 的单一来源，让"是否算请求形状错误"这条策略只有一处可改。
-func isReasoningPassthroughError(upstreamBody []byte) bool {
-	return breaker.IsRequestShapeError(upstreamBody, 400)
 }
 
 func trim(s string) string {

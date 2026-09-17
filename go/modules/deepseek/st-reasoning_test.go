@@ -387,7 +387,7 @@ func TestDeepSeekToolLoopMigrationIsScopedAndRebased(t *testing.T) {
 	}
 }
 
-// TestTailShapeRepairOnToolResultOnlyTail 锁住 reasoning-400 的**根因**修复。
+// TestTailShapeRepairOnToolResultOnlyTail 锁住 reasoning 400 的**根因**修复。
 //
 // 现场（dump/err-400-req000412、req000464，2026-09-17）：229 条消息、每条
 // assistant 都带着 thinking 块和 reasoning_content、tools 开着、thinking

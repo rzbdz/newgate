@@ -5,15 +5,14 @@ import (
 	"time"
 )
 
-// 上游错误文案的真实快照（见 forward 的 [reasoning-400] 日志与
-// docs/11-troubleshooting.md §3）。判据必须能在真现场成立，所以测试里用的是
-// 原文，不是自造的字符串。
-const (
-	reasoning400 = `{"type":"error","message":"The ` + "`reasoning_content`" +
-		` in the thinking mode must be passed back to the API. (request id: 202609170712356080642648268d9d67Gf5hQWS)"}`
-	thinking400 = `{"type":"error","message":"The ` + "`content[].thinking`" +
-		` in the thinking mode must be passed back to the API."}`
-)
+// shapeBody 是一条会被 testShape（见 state_test.go）认领的 400 原文。
+//
+// 真实的判据文案不再住在这个包里——2026-09-17 起它由上游模块注册
+// （modules/deepseek/shape.go），那边的测试用的是真上游响应快照。这里只需要
+// 一条**形状对得上 testShape** 的 body，用来验证状态机对「形状账本」的处理
+// （永不摘牌、只计数）。
+const shapeBody = `{"type":"error","message":"The ` + "`reasoning_content`" +
+	` in the thinking mode must be passed back to the API."}`
 
 // TestClassify 是决策表的真值表：每一行对应 docs/05-gateway.md 里那张表的一行。
 //
@@ -288,7 +287,7 @@ func TestSplitBindingKey(t *testing.T) {
 }
 
 func BenchmarkClassify(b *testing.B) {
-	in := Input{Kind: KindUpstreamStatus, Status: 500, Body: []byte(reasoning400)}
+	in := Input{Kind: KindUpstreamStatus, Status: 500, Body: []byte(shapeBody)}
 	for i := 0; i < b.N; i++ {
 		if v := Classify(in); !v.Advance {
 			b.Fatalf("Classify = %+v", v)
