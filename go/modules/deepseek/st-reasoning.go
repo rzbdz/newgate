@@ -49,6 +49,19 @@ func Treatments() []special.Plugin { return []special.Plugin{reasoning{}} }
 // 第 3 手只在思考模式开着时做：思考关掉时再塞 thinking 块，反而会被上游
 // 以「关了还给我思考块」拒掉。
 //
+// 第 4 手（2026-09-17 新增）修的是**根因**，前几手都只是把字段补齐：
+//
+//	对话尾部如果是「只有 tool_result、没有任何文字」的 user 轮，
+//	DeepSeek 的严格校验一律回「reasoning_content must be passed back」
+//	——哪怕每一条历史消息的推理都逐字回了。
+//
+// 这是实测排除法得出的结论，不是猜的：同一份真实 body（带完整历史）连发
+// 多次都 400；把 reasoning_content 全换成真实文本、或全部删掉，结果都不变；
+// 上游原文里点名的字段却明明是齐的。真正起作用的是尾部形状——追加一条普通
+// 用户指令就 5/5 200（同一份 Ark → DeepSeek 的 A/B，见 RebaseToolLoop）。
+// 报错文案与真实原因不一致，是这个上游最坑的地方：它把「你这轮没有新指令」
+// 也报成「推理没回传」。
+//
 // 第 1 手只给 Claude Code（`/a/claude/` 认出来，见 claudeCode）：它剥掉思考块，
 // 思考开着也回不来，白花思考的时间和 token。**别的客户端不能关**——2026-09-15
 // 现场：opencode 走 OpenAI 方言（`/chat/completions`），压根不会写 thinking 这个
@@ -193,6 +206,21 @@ func (reasoning) Apply(body []byte, r *special.Request) ([]byte, []string, error
 		notes = append(notes, reasoningNote("reasoning_content", n, restored, placeholders))
 	}
 
+	// 4) 尾部形态：最后一条消息是「只有 tool_result、没有文字」的 user 轮时，
+	//    给**它**追加一条普通用户指令。详见文件头第 4 手。
+	//
+	//    顺序放在补字段之后：这一步改的是 messages 的尾部形状，前面两步改的是
+	//    已有消息里的字段，互不影响；放在后面读起来也顺——先补全字段，再修形状。
+	if thinkingOn {
+		if nb, changed, err := repairTailShape(out); err != nil {
+			notes = append(notes, "尾部形状未改动（"+err.Error()+"）")
+		} else if changed {
+			out = nb
+			notes = append(notes, "对话尾部只有 tool_result 没有用户指令——"+
+				"追加一条继续指令（DeepSeek 对空指令尾部误报 reasoning_content 缺失）")
+		}
+	}
+
 	// 3) 思考模式开着 → assistant 的 content[] 开头必须有 thinking 块
 	//    （Anthropic 方言那句报错）。同样：真实原文 → 占位符。
 	//    只对 Anthropic 方言做：OpenAI 方言里回传推理的载体是 reasoning_content。
@@ -221,6 +249,64 @@ func (reasoning) Apply(body []byte, r *special.Request) ([]byte, []string, error
 	}
 
 	return out, notes, nil
+}
+
+// tailContinuation 是补在「只有 tool_result 的尾部」后面的那句用户指令。
+//
+// 措辞要像用户会说的话（模型会当成真实指令读）：明确「接着上面继续」，同时
+// 把「要不要再调工具」的选择权留给模型——写死「给出最终答案」会让它在该继续
+// 干活的时候停下来。
+const tailContinuation = "Continue from the tool results above. " +
+	"Call the next tool you need, or give your final answer."
+
+// repairTailShape 修「尾部只有 tool_result」这个形状。
+//
+// 只认**最后一条**消息，且必须是 user、content 是数组、数组里一个 text 块都
+// 没有（典型就是只有 tool_result）。已经带了文字的尾部一律不碰——它本来就能过，
+// 多塞一句话只是往用户的对话里加噪音。
+//
+// 用 AppendLastArrayItemArray 而不是自己拼字节：它保证只在最后一个匹配项上
+// 追加，且沿用 rewrite 包一贯的「只动该动的那一段」。
+func repairTailShape(body []byte) ([]byte, bool, error) {
+	raw, ok := rewrite.TopLevelRaw(body, "messages")
+	if !ok {
+		return body, false, nil
+	}
+	items, ok := rewrite.ArrayItems(raw)
+	if !ok || len(items) == 0 {
+		return body, false, nil
+	}
+	if role, _ := rewrite.TopLevelString(items[len(items)-1], "role"); role != "user" {
+		return body, false, nil
+	}
+	content, ok := rewrite.TopLevelRaw(items[len(items)-1], "content")
+	if !ok {
+		return body, false, nil
+	}
+	blocks, ok := rewrite.ArrayItems(content)
+	if !ok || len(blocks) == 0 {
+		// content 是普通字符串（本来就有文字），或形状不认识：不动。
+		return body, false, nil
+	}
+	for _, b := range blocks {
+		if t, _ := rewrite.TopLevelString(b, "type"); t == "text" {
+			return body, false, nil
+		}
+	}
+	q, err := json.Marshal(tailContinuation)
+	if err != nil {
+		return body, false, err
+	}
+	block := []byte(`{"type":"text","text":` + string(q) + `}`)
+	out, changed, err := rewrite.AppendLastArrayItemArray(body, "messages", "content",
+		block, func(item []byte) bool {
+			role, _ := rewrite.TopLevelString(item, "role")
+			return role == "user"
+		})
+	if err != nil {
+		return body, false, err
+	}
+	return out, changed, nil
 }
 
 // pickReasoning 为一条 assistant 消息选出回传的推理原文（JSON 编码后的字符串值）。

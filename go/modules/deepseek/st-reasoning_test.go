@@ -386,3 +386,91 @@ func TestDeepSeekToolLoopMigrationIsScopedAndRebased(t *testing.T) {
 		t.Fatalf("rebase 没有明确回报: %q", note)
 	}
 }
+
+// TestTailShapeRepairOnToolResultOnlyTail 锁住 reasoning-400 的**根因**修复。
+//
+// 现场（dump/err-400-req000412、req000464，2026-09-17）：229 条消息、每条
+// assistant 都带着 thinking 块和 reasoning_content、tools 开着、thinking
+// adaptive，上游照样回「reasoning_content must be passed back」。排除法得出
+// 真正起作用的是尾部形状：最后一条 user 消息只有 tool_result、没有任何文字。
+func TestTailShapeRepairOnToolResultOnlyTail(t *testing.T) {
+	body := []byte(`{"model":"deepseek-flash","thinking":{"type":"adaptive"},"messages":[` +
+		`{"role":"user","content":[{"type":"text","text":"开始吧"}]},` +
+		`{"role":"assistant","content":[{"type":"thinking","thinking":"想一下"},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`)
+
+	out, notes, err := reasoning{}.Apply(body, claudeReq("deepseek-flash"))
+	if err != nil {
+		t.Fatalf("Apply 报错: %v", err)
+	}
+	if !strings.Contains(string(out), "Continue from the tool results above") {
+		t.Fatalf("尾部没有补上继续指令:\n%s", out)
+	}
+	// 原内容一个字节都不能丢：tool_result 还在，历史消息没被动。
+	if !strings.Contains(string(out), `"tool_use_id":"t1"`) ||
+		!strings.Contains(string(out), `"text":"开始吧"`) {
+		t.Fatalf("补尾部指令时改动了已有内容:\n%s", out)
+	}
+	// 继续指令必须在**最后一条** user 消息里（尾部），不是别的地方。
+	tail := string(out[strings.LastIndex(string(out), `"role":"user"`):])
+	if !strings.Contains(tail, "Continue from the tool results above") {
+		t.Fatalf("继续指令没落在尾部消息里:\n%s", tail)
+	}
+	if !containsNote(notes, "尾") {
+		t.Fatalf("没有回报 notes（不静默是硬要求）: %v", notes)
+	}
+}
+
+// TestTailShapeLeavesNormalTailsAlone：尾部本来就有文字 / 尾部不是 user /
+// 思考关着 —— 三种情况都不许动，别往用户对话里加噪音。
+func TestTailShapeLeavesNormalTailsAlone(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"尾部有文字", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"text","text":"hi"}]}]}`},
+		{"尾部是 assistant", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},` +
+			`{"role":"assistant","content":[{"type":"text","text":"说完了"}]}]}`},
+		{"content 是字符串", `{"thinking":{"type":"adaptive"},"messages":[` +
+			`{"role":"user","content":"纯文本"}]}`},
+		{"没有 messages", `{"thinking":{"type":"adaptive"}}`},
+		{"messages 为空", `{"thinking":{"type":"adaptive"},"messages":[]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, _, err := reasoning{}.Apply([]byte(tt.body),
+				claudeReq("deepseek-flash"))
+			if err != nil {
+				t.Fatalf("Apply 报错: %v", err)
+			}
+			if strings.Contains(string(out), "Continue from the tool results above") {
+				t.Fatalf("不该动的尾部被动了:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestTailShapeSkippedWhenThinkingOff：思考关着时 DeepSeek 不走那条严格校验，
+// 补了反而是噪音。
+func TestTailShapeSkippedWhenThinkingOff(t *testing.T) {
+	body := []byte(`{"thinking":{"type":"disabled"},"messages":[` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}`)
+	out, _, err := reasoning{}.Apply(body, claudeReq("deepseek-flash"))
+	if err != nil {
+		t.Fatalf("Apply 报错: %v", err)
+	}
+	if strings.Contains(string(out), "Continue from the tool results above") {
+		t.Fatalf("思考关着却补了尾部指令:\n%s", out)
+	}
+}
+
+func containsNote(notes []string, sub string) bool {
+	for _, n := range notes {
+		if strings.Contains(n, sub) {
+			return true
+		}
+	}
+	return false
+}

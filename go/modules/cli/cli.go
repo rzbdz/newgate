@@ -86,6 +86,7 @@ func usageText() string {
 	cmd("st [on|off] [插件]", "special_treatment 开关与说明")
 
 	sec("维护")
+	cmd("naked on|forever|off|<时长>", "短路 Bash 分类器：on=60s / forever=永久 / off=关")
 	cmd("init [--force]", "铺开默认配置")
 	cmd("schema-repair on|off", "")
 	cmd("shim …", "底层逃生口，平时用 on/off 就够了")
@@ -197,6 +198,8 @@ func run(service *service, args []string) int {
 		return cmdAllLogs(service.agents)
 	case "debug":
 		return cmdDebug(args)
+	case "naked":
+		return cmdNaked(args)
 	case "schema-repair", "schema_repair":
 		return cmdSchemaRepair(len(args) > 1 && truthy(args[1]))
 	case "st", "special", "special-treatment", "special_treatment":

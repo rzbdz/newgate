@@ -37,6 +37,10 @@ type record struct {
 	cooldown   time.Duration
 	reason     string
 	shapeSkips int // 请求形状错误的次数（永不摘牌，只计数）
+	spared     int // 上闸前诊断探活把它救回来的次数
+	// verifying 这一刻有一个「上闸前诊断」在飞。它挡的是并发重复诊断：
+	// 同一个 binding 同时来两条失败，只该探活一次。
+	verifying bool
 }
 
 func (r *record) state(now time.Time) string {
@@ -65,6 +69,7 @@ type table struct {
 	persistTimer *time.Timer
 	onError      func(error)
 	loadErr      error // 装载期失败，等 SetErrorHandler 装上后补报
+	verify       func(provider, model string) bool
 }
 
 func newTable() *table {
@@ -97,6 +102,13 @@ func (b *table) SetErrorHandler(fn func(error)) {
 	if pending != nil && fn != nil {
 		fn(pending)
 	}
+}
+
+// SetVerifier 注入「上闸前的最后一次诊断」（见 api.go 的同名方法）。
+func (b *table) SetVerifier(fn func(provider, model string) bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.verify = fn
 }
 
 func bindingKey(provider, model string) string { return provider + "\x00" + model }
@@ -150,7 +162,6 @@ func (b *table) Report(provider, model string, in Input) Result {
 	}
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	now := b.now()
 
 	switch {
@@ -160,15 +171,58 @@ func (b *table) Report(provider, model string, in Input) Result {
 		if r := b.records[bindingKey(provider, model)]; r != nil {
 			b.succeedLocked(r, now)
 		}
+		b.mu.Unlock()
 		return Result{Verdict: v}
 	case v.Bucket == BucketShape:
 		r := b.recordLocked(provider, model)
 		r.shapeSkips++
 		b.persistLocked()
+		b.mu.Unlock()
 		return Result{Verdict: v}
 	}
+
 	r := b.recordLocked(provider, model)
-	return Result{Verdict: v, Opened: b.failLocked(r, v.Bucket, now)}
+	opened, needsVerify := b.failLocked(r, v.Bucket, now)
+	verify := b.verify
+	if !needsVerify {
+		b.mu.Unlock()
+		return Result{Verdict: v, Opened: opened}
+	}
+	if verify == nil {
+		// 没装诊断：照旧直接开闸。行为与 2026-09-17 之前完全一致，
+		// 装配里没接探活能力时不会因此少摘一条坏 binding。
+		b.openLocked(r, b.policy.rule(v.Bucket), now,
+			"真实流量连续失败（"+v.Bucket.ruleName()+"）")
+		b.mu.Unlock()
+		return Result{Verdict: v, Opened: true}
+	}
+	// 到阈值了，但**先别摘**：到锁外去做一次主动诊断（探活要发网络请求，
+	// 不能拿着状态机的锁做）。只让一个 goroutine 诊断，其余失败照常计数。
+	r.verifying = true
+	b.mu.Unlock()
+
+	healthy := verify(provider, model)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	r = b.records[bindingKey(provider, model)]
+	if r == nil {
+		return Result{Verdict: v}
+	}
+	r.verifying = false
+	if healthy {
+		// 诊断说它还通：这次连续失败是单点/上下文相关的（首字节超时、排队、
+		// 大 prefill），不是这家不行。计数清零，不摘牌。
+		r.fails = 0
+		r.bucket = BucketNone
+		r.spared++
+		r.reason = "上闸前诊断探活证明可用（" + v.Bucket.ruleName() + " 计数清零）"
+		b.persistLocked()
+		return Result{Verdict: v, Spared: true}
+	}
+	b.openLocked(r, b.policy.rule(v.Bucket), b.now(),
+		"真实流量连续失败且诊断探活也不通（"+v.Bucket.ruleName()+"）")
+	return Result{Verdict: v, Opened: true}
 }
 
 // succeedLocked 记一次真实成功。
@@ -190,23 +244,27 @@ func (b *table) succeedLocked(r *record, now time.Time) {
 	b.persistLocked()
 }
 
-// failLocked 记一次失败；返回 true 表示这次把闸打开了。
-func (b *table) failLocked(r *record, bucket Bucket, now time.Time) bool {
+// failLocked 记一次失败，返回 (这次把闸打开了吗, 要不要先做上闸前诊断)。
+//
+// 半开试探的失败是**当场定案**的，不走诊断：那一次试探本身就是主动证据，
+// 再要一次只是拖长坏上游的隔离。诊断只服务于「被动流量把一条可能还活着的
+// binding 数到阈值」这一种情形。
+func (b *table) failLocked(r *record, bucket Bucket, now time.Time) (bool, bool) {
 	rule := b.policy.rule(bucket)
 	if rule.Threshold <= 0 {
-		return false // 这本账永不摘牌
+		return false, false // 这本账永不摘牌
 	}
 	if !r.openedAt.IsZero() {
 		if now.Before(r.openUntil) {
 			// 隔离期内的失败来自更早建链的请求，不构成新证据：既不再数
 			// 阈值，也不延长隔离。
-			return false
+			return false, false
 		}
 		// 冷却已过（半开）：这一次失败就是试探的结论，立刻回闸并退避。
 		// 不重新数阈值——试探本身就是那一票。
 		r.halfOpenAt = time.Time{}
 		b.openLocked(r, rule, now, "半开试探失败（"+bucket.ruleName()+"）")
-		return true
+		return true, false
 	}
 	if r.bucket != bucket {
 		// 换账本了：连续失败的定义是「同一类问题连着来」，不是「各种问题
@@ -217,10 +275,15 @@ func (b *table) failLocked(r *record, bucket Bucket, now time.Time) bool {
 	r.fails++
 	if r.fails < rule.Threshold {
 		b.persistLocked() // 未开闸也要落盘：不然重启等于白送一次免死金牌
-		return false
+		return false, false
 	}
-	b.openLocked(r, rule, now, "真实流量连续失败（"+bucket.ruleName()+"）")
-	return true
+	if r.verifying {
+		// 已经有一个诊断在飞：这一条只计数，等它的结论。两个并发失败同时
+		// 去探活是白花两倍的钱买同一个答案。
+		b.persistLocked()
+		return false, false
+	}
+	return false, true
 }
 
 func (b *table) openLocked(r *record, rule Rule, now time.Time, reason string) {
@@ -357,6 +420,7 @@ func (b *table) Snapshot() []Status {
 			s.Fails = r.fails
 			s.Rule = r.bucket.ruleName()
 			s.ShapeSkips = r.shapeSkips
+			s.Spared = r.spared
 			s.CooldownMs = r.cooldown.Milliseconds()
 			s.Reason = r.reason
 			if !r.openedAt.IsZero() {

@@ -37,7 +37,7 @@ func cmdBreaker() int {
 		switch {
 		case b.Open:
 			open = append(open, b)
-		case b.Fails > 0 || b.ShapeSkips > 0:
+		case b.Fails > 0 || b.ShapeSkips > 0 || b.Spared > 0:
 			counted = append(counted, b)
 		}
 	}
