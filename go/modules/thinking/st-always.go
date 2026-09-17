@@ -12,13 +12,13 @@ func Treatments() []special.Plugin { return []special.Plugin{alwaysThinks{}} }
 
 // BestEffortDisableThink 「这次调用不想思考」的完整语义，一个操作做完：
 //
-//	1. 落地意图：**只在没写 thinking 时**注入 thinking:{"type":"disabled"}。
-//	   写了（adaptive / enabled / disabled）就是客户端这次调用的明确意图，
-//	   尊重它、不碰它（2026-09-09 实抓 + 探针复现：compact 总结请求显式带
-//	   thinking:adaptive，强改成 disabled 会被「始终思考」模型拒掉——glm-5.3
-//	   code 1210；探针：adaptive+tools→200、disabled→1210）；
-//	2. 按当前链步的模型翻译：不支持关闭思考的模型（quirk NoThinkingDisable）
-//	   听不懂 disabled，就地翻成 enabled + reasoning_effort:low。
+//  1. 落地意图：**只在没写 thinking 时**注入 thinking:{"type":"disabled"}。
+//     写了（adaptive / enabled / disabled）就是客户端这次调用的明确意图，
+//     尊重它、不碰它（2026-09-09 实抓 + 探针复现：compact 总结请求显式带
+//     thinking:adaptive，强改成 disabled 会被「始终思考」模型拒掉——glm-5.3
+//     code 1210；探针：adaptive+tools→200、disabled→1210）；
+//  2. 按当前链步的模型翻译：不支持关闭思考的模型（quirk NoThinkingDisable）
+//     听不懂 disabled，就地翻成 enabled + reasoning_effort:low。
 //
 // best effort 的含义：关不掉就让它思考（用户把不支持关思考的模型配进
 // light 档，也只能由他去了——慢，但请求活着）；翻译不动就原样发。绝不
