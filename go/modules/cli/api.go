@@ -45,15 +45,23 @@ type BuildInfo struct {
 	CommitTime string
 }
 
-// CLI 是进程组合根最终调用的命令行入口。
+// CLI 是进程组合根最终调用的命令行入口，也是命令与诊断的**扩展点所有者**。
+//
+// 为什么扩展点长在 CLI 自己的 service 上，而不是另开一个「命令」端口让模块
+// 往里面 Provide：后者没有生命周期。模块认领一个命令名之后没人能撤销它，也
+// 没人查重——两个模块认领同一个名字是静默先到先得（2026-09-17 实测）。走
+// Register 则每次贡献都拿到一个 Release，owner 负责在 Stop 时逆序释放。
+// 全仓库的跨模块贡献从此只有这一种写法，见 docs/09-extension-guide.md §3。
 type CLI interface {
 	Run(args []string, build BuildInfo) int
+
+	// RegisterCommand 贡献一条命令。命令名（Names）是查重的逻辑键，撞名当场
+	// 报错而不是先到先得。
+	RegisterCommand(Command) (modules.Release, error)
+	// RegisterDiagnostics 贡献一组 doctor 输出。诊断是可叠加的，没有键命名
+	// 空间，因此不查重，只记 token。
+	RegisterDiagnostics(DiagnosticProvider) (modules.Release, error)
 }
 
-// 这组三个 capability 把固定 CLI 入口与开放扩展点分开：
-// CLI 只能有一个实现，命令和诊断则允许模块独立贡献。
-var (
-	Capability            = modules.NewCapability[CLI]("cli")
-	CommandsCapability    = modules.NewCapability[Command]("cli-commands")
-	DiagnosticsCapability = modules.NewCapability[DiagnosticProvider]("diagnostics")
-)
+// Capability 是 CLI 的端口身份。
+var Capability = modules.NewCapability[CLI]("cli")
