@@ -499,6 +499,137 @@ echo "$MOUT" | command grep -q "classifier-naked" \
 "$BIN" naked off >/dev/null 2>&1
 check "裸奔终于关掉（不留沙箱脏状态）" "$("$BIN" naked 2>&1 | command grep -c '已关闭')" "1"
 
+echo; echo "== 17. 形状 400：上游 400 原样透传 + 熔断器只计数、永不摘牌 =="
+# 这份 body 三个条件都要满足，缺一条这个用例就不是它要测的东西：
+#
+#   1. **stream=true + 显式 thinking:enabled**。非流式的后台请求会被 claude-bg
+#      补上 thinking:disabled，而假上游的 strict_reasoning_violation 看到
+#      disabled 直接 return False（ch.6 备注过），永远不发那个 400。
+#   2. **assistant 上显式写着 `"reasoning_content":""`，且 content[] 里有一个
+#      空的 thinking 块**。这样 deepseek 插件的两只手都**修不了**它——hand 2
+#      的 EnsureArrayItemFieldFunc「已经有了这个字段就一个字节不碰」，hand 3 的
+#      lacksThinking 只要看到一个 thinking 块（哪怕文本是空的）就返回 false。
+#      于是链上**每一个**候选都会 400，链走到头，客户端才拿得到上游原文。
+#      （换成「缺字段」的 body 就测不到这条：ds 候选会把它补好、返回 200，
+#      客户端拿到的是 fallback 的成功响应——那是另一件事。）
+#   3. **走 glm profile**，让 glm 那一发先吃 400：deepseek 插件的 MatchTarget
+#      看 model/provider/baseURL，glm/glm-4-plus 三处都没有「deepseek」字样。
+#
+# 形状判据（modules/deepseek/shape.go）认领它 → classify 判 BucketShape →
+# 账本只涨 ShapeSkips、永不进 Open。所以「客户端拿到 400」和「glm 没被摘牌」
+# 必须**同时**成立：这正是这轮重构要的那个行为。
+RESETUP
+SHAPE_BODY='{"model":"glm-4-plus","max_tokens":16,"stream":true,'\
+'"thinking":{"type":"enabled","budget_tokens":1024},'\
+'"tools":[{"name":"Bash","description":"d","input_schema":{"type":"object","properties":{}}}],'\
+'"messages":['\
+'{"role":"user","content":[{"type":"text","text":"跑一下"}]},'\
+'{"role":"assistant","reasoning_content":"","content":[{"type":"thinking","thinking":""},{"type":"text","text":"好"}]},'\
+'{"role":"user","content":[{"type":"text","text":"继续"}]}]}'
+
+# (1) 直打假上游：证明这条规则真的部署到位（不是被代理偷偷改过）。
+CODE=$(curl -s -o "$SANDBOX/shape_direct.out" -w '%{http_code}' -X POST \
+  "http://127.0.0.1:$UP_PORT/v1/messages" \
+  -H 'Content-Type: application/json' -d "$SHAPE_BODY")
+check "直打上游：400 must be passed back" \
+  "$( [ "$CODE" = "400" ] && command grep -q 'must be passed back' "$SANDBOX/shape_direct.out" && echo y || echo n)" "y"
+
+# (2) 同 body 经代理：链上每一站都 400 → 客户端必须收到上游原文（不静默）。
+RESETUP
+RES_CODE=$(curl -s -o "$SANDBOX/shape_proxy.out" -w '%{http_code}' -X POST \
+  "http://127.0.0.1:$PROXY_PORT/a/claude/p/glm/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -H 'anthropic-version: 2023-06-01' -H 'x-api-key: e2e' -d "$SHAPE_BODY")
+check "经代理：客户端仍 400" "$RES_CODE" "400"
+command grep -q 'must be passed back' "$SANDBOX/shape_proxy.out" \
+  && ok "经代理：上游原文原样透传（不静默）" \
+  || bad "经代理：被吞了；body=$(head -c 200 "$SANDBOX/shape_proxy.out")"
+
+# 日志里那行 [shape-400] 是判据认领的**唯一**证据（转发路径不认识任何上游
+# 专有字符串，它只读 Result.Shape 那个名字）。
+LOG="$NEWGATE_HOME/newgate.log"
+for _ in $(seq 20); do
+  command grep -q '\[shape-400\]' "$LOG" 2>/dev/null && break; sleep 0.1
+done
+command grep -aq '\[shape-400\].*判据 deepseek' "$LOG" \
+  && ok "日志有 [shape-400] 判据 deepseek（认领留痕）" \
+  || bad "日志里没有 [shape-400] 判据 deepseek"
+
+# (3) 熔断器只计数、绝不摘牌。`newgate breaker` 把问题 binding 分两段，这条
+#     shape-400 只能出现在「只计数、没摘牌」那一段。
+BRK_OUT="$("$BIN" breaker 2>/dev/null)"
+echo "$BRK_OUT" | sed 's/^/    /'
+echo "$BRK_OUT" | command grep -q '只计数、没摘牌' \
+  && ok "breaker 表里有「只计数、没摘牌」段（shape-400 的归属）" \
+  || bad "breaker 表里找不到「只计数、没摘牌」段"
+echo "$BRK_OUT" | command grep -q 'glm/glm-4-plus' \
+  && ok "breaker 表里能找到 glm/glm-4-plus（被记账了）" \
+  || bad "breaker 表里找不到 glm/glm-4-plus"
+echo "$BRK_OUT" | command grep -qE '· 0 个被摘牌' \
+  && ok "没有任何 binding 被摘牌（形状 400 只计数）" \
+  || bad "有 binding 被摘牌了（形状 400 不该摘牌）：$(echo "$BRK_OUT" | command grep '被摘牌' | head)"
+
+# (4) metrics 端的形状计数要涨。
+"$BIN" metrics 2>/dev/null | command grep -q 'breaker.skipped.shape_error' \
+  && ok "metrics 有 breaker.skipped.shape_error" \
+  || bad "metrics 缺 breaker.skipped.shape_error"
+
+echo; echo "== 18. 尾部形状 400：修复在**发出之前**，上游根本看不到那个形状 =="
+# 这一章锁 docs/06-reasoning.md §2b 那条根因修复（deepseek 插件 hand 4）在
+# 进程级的真实效果。假上游的 tool_result_only_tail_violation 是 2026-09-17
+# 实测口径的替身：**最后一条 role:user 消息**的 content[] 全是 tool_result 块
+# 时回 400 must be passed back。它挂在 `mock_tail_strict` 开关上（默认 off），
+# 免得把所有工具轮请求一起打废。
+#
+# 三件事一起验：
+#   (a) 直打上游 → 400（规则真的部署到位，不是被代理偷偷改过）；
+#   (b) 经代理 → 200（hand 4 在那条 user 轮上补了继续指令，上游看到的形状变了）；
+#   (c) 上游**实际收到的** body 里，那条 user 轮的 content 末尾就是继续指令
+#       ——(b) 的 200 可能是因为别的原因，只有 (c) 能证明是这道修复起的作用。
+#
+# thinking 显式写成 disabled：既让 strict_reasoning_violation 让路（只留尾部这
+# 条规则在场），又顺手证明修复**不在 thinkingOn 闸门里**——旧实现挂在闸门里，
+# 这一发会 400。
+TAIL_BODY='{"model":"deepseek-chat","max_tokens":16,"stream":false,"mock_tail_strict":true,'\
+'"thinking":{"type":"disabled"},'\
+'"tools":[{"name":"Bash","description":"d","input_schema":{"type":"object","properties":{}}}],'\
+'"messages":['\
+'{"role":"user","content":[{"type":"text","text":"跑一下"}]},'\
+'{"role":"assistant","reasoning_content":"上一轮的推理","content":[{"type":"text","text":"好"},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},'\
+'{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}]}'
+
+CODE=$(curl -s -o "$SANDBOX/tail_direct.out" -w '%{http_code}' -X POST \
+  "http://127.0.0.1:$UP_PORT/v1/messages" \
+  -H 'Content-Type: application/json' -d "$TAIL_BODY")
+check "直打上游：尾部只有 tool_result → 400" "$CODE" "400"
+
+RESETUP
+CODE=$(curl -s -o "$SANDBOX/tail_proxy.out" -w '%{http_code}' -X POST \
+  "http://127.0.0.1:$PROXY_PORT/a/claude/p/ds/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -H 'anthropic-version: 2023-06-01' -H "x-api-key: e2e" -d "$TAIL_BODY")
+check "经代理：同样的尾部 → 200（修复生效）" "$CODE" "200"
+
+GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+if not r: print("NO_REQUEST"); raise SystemExit
+msgs=r[-1]["body"]["messages"]
+tail=[m for m in msgs if m.get("role")=="user"][-1]
+blocks=tail.get("content")
+if not isinstance(blocks,list): print("NOT_ARRAY"); raise SystemExit
+texts=[b.get("text","") for b in blocks if isinstance(b,dict) and b.get("type")=="text"]
+print(texts[-1][:50] if texts else "NO_TEXT_BLOCK")')
+case "$GOT" in
+  "Continue from the tool results above"*)
+    ok "上游收到的尾部被补了继续指令" ;;
+  *) bad "上游收到的尾部没有继续指令，实际：$GOT" ;;
+esac
+# 显式启用了 disabled 还能修，说明修复不在 thinkingOn 闸门里。
+command grep -aq '末尾的 user 轮只有 tool_result' "$NEWGATE_HOME/newgate.log" \
+  && ok "日志回报了这次尾部改写（不静默）" \
+  || bad "日志里没有尾部改写的 notes"
+
 echo
 echo "结果: $PASS 通过, $FAIL 失败"
 [ "$FAIL" -eq 0 ]

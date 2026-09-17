@@ -332,7 +332,7 @@ func (s *Server) servePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strictReasoningViolation(body) {
+	if strictReasoningViolation(body) || tailOnlyViolation(body) {
 		writeJSON(w, http.StatusBadRequest, strictReasoningError())
 		return
 	}

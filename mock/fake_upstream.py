@@ -61,6 +61,40 @@ def strict_reasoning_violation(body):
     return False
 
 
+# tool_result_only_tail_violation 复刻 2026-09-17 实测出的 smt-deepseek 第二条
+# 严格口径：**最后一条 role:user 消息**的 content[] 是非空、且**每个块都是
+# tool_result** 时直接 400 "reasoning_content must be passed back"——哪怕
+# 每条历史 assistant 都补好了推理。报错文案与 strict_reasoning_violation 完全
+# 一致，是同一个形状判据认领的现场（dump/err-400-req000412/req000464/req000096/…）。
+#
+# 为什么不直接打开：这条规则会让所有「只发一条 user[tool_result] 的轮」（也就是
+# 所有工具轮）直接 400，把第 7/8/9 章的 think2/think3 一起打废。所以用一个
+# 显式的 `mock_tail_strict: true` 开关：默认 off，测试新装接时打开，**不会**
+# 在既有的 53 条 e2e 断言上惹出新失败。
+#
+# 上游的 400 是**上游原文原样透传**给客户端的事（forward.go 第 1043-1069 行），
+# 形状判据认领后判进 BucketShape（永不摘牌，只计数）。newgate 端的修复（hand 4）
+# 在请求**发出去之前**就给那条 user 轮补一句继续指令——所以走代理的版本应得 200，
+# 直接打上游的版本应得 400，这两条要一起验才说明问题。
+def tool_result_only_tail_violation(body):
+    if not isinstance(body, dict) or not body.get("mock_tail_strict"):
+        return False
+    msgs = body.get("messages") or []
+    idx = -1
+    for i, m in enumerate(msgs):
+        if isinstance(m, dict) and m.get("role") == "user":
+            idx = i
+    if idx < 0:
+        return False
+    content = msgs[idx].get("content")
+    if not isinstance(content, list) or not content:
+        return False
+    for b in content:
+        if not isinstance(b, dict) or b.get("type") != "tool_result":
+            return False
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -134,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.endswith("/count_tokens"):
             return self._json(200, {"input_tokens": 42})
 
-        if strict_reasoning_violation(body):
+        if strict_reasoning_violation(body) or tool_result_only_tail_violation(body):
             print(f"[upstream] STRICT 400: {u.path}", flush=True)
             return self._json(400, STRICT_REASONING_ERR)
 

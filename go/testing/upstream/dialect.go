@@ -22,6 +22,38 @@ func strictReasoningError() map[string]any {
 	}
 }
 
+// tailOnlyViolation 复刻 python 的 tool_result_only_tail_violation（mock/
+// fake_upstream.py，那边是唯一真相）：2026-09-17 实测出的第二条严格口径——
+// **最后一条 role:user 消息**的 content[] 是非空、且每个块都是 tool_result 时
+// 直接 400 "must be passed back"。挂在显式 `mock_tail_strict` 开关上（默认关），
+// 免得把系统测试里所有工具轮请求一起打废。
+func tailOnlyViolation(body map[string]any) bool {
+	if body == nil || !truthy(body["mock_tail_strict"]) {
+		return false
+	}
+	messages, _ := body["messages"].([]any)
+	idx := -1
+	for i, entry := range messages {
+		if m, ok := entry.(map[string]any); ok && m["role"] == "user" {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	last, _ := messages[idx].(map[string]any)
+	content, _ := last["content"].([]any)
+	if len(content) == 0 {
+		return false
+	}
+	for _, entry := range content {
+		if b, ok := entry.(map[string]any); ok && b["type"] != "tool_result" {
+			return false
+		}
+	}
+	return true
+}
+
 // strictReasoningViolation 复刻 python 的 strict_reasoning_violation：
 // 只对「带了 tools 且思考没关」的请求生效（官方文档口径），此时历史里**每条**
 // assistant 消息都必须带上非空的推理内容，否则这一发就是 400。
