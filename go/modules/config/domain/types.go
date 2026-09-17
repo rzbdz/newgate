@@ -20,7 +20,6 @@ import (
 //	vision           多模态，与上面的阶梯正交
 //
 // 顺序即能力从高到低，别随手调——`newgate status`、doctor、TUI 都按它排。
-//
 var Roles = []string{"heavy", "normal", "mid", "light", "vision"}
 
 // IsRole 判断一个模型名是不是语义档位名（而不是具体模型名）。
