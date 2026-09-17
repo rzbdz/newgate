@@ -181,6 +181,43 @@ func TestNakedStatusAndNoteAreVisible(t *testing.T) {
 	}
 }
 
+// TestExpiredWindowLooksOffEverywhere 锁住「过期窗口在任何读点都算没开」这条
+// 不变式。2026-09-17 实跑：`Respond` 判了过期、`Status` 没判，于是窗口过去
+// 之后 `newgate status` 打出一行「还有 -6m3s 自动关」——一个已经失效的开关
+// 在状态页上显示得像是开着，比不显示更坏。
+func TestExpiredWindowLooksOffEverywhere(t *testing.T) {
+	expired := nakedState(t, NakedConfig{Mode: "on", ExpiresAt: time.Now().Add(-6 * time.Minute)})
+
+	if _, ok := ParseNakedConfig(expired.ModuleConfig[NakedConfigKey]); ok {
+		t.Fatal("过期窗口被解析成生效")
+	}
+	if items := (classifierNaked{}).Status(expired); len(items) != 0 {
+		t.Fatalf("过期窗口还在 status 里报开着: %+v", items)
+	}
+	// 日志说明仍要带 [naked] 标记（这一发确实短路了），但不能出现负的剩余时间。
+	note := (classifierNaked{}).RespondNote(expired)
+	if !strings.Contains(note, "[naked]") {
+		t.Fatalf("日志说明里没有 [naked] 标记: %q", note)
+	}
+	if strings.Contains(note, "窗口还剩") {
+		t.Fatalf("过期窗口不该报剩余时间: %q", note)
+	}
+}
+
+// TestNakedConfigNoExpiryIsTreatedAsOff：`on` 但没写 expires_at（或写成零值）
+// 等于「没有窗口」。零值会让 time.Now().Before 恒为 false 从而静默生效，
+// 所以必须显式判定成没开。
+func TestNakedConfigNoExpiryIsTreatedAsOff(t *testing.T) {
+	state := nakedState(t, NakedConfig{Mode: "on"})
+	if _, ok := ParseNakedConfig(state.ModuleConfig[NakedConfigKey]); ok {
+		t.Fatal("没有 expires_at 的 on 被当成生效了")
+	}
+	if _, ok := (classifierNaked{}).Respond([]byte(nakedClassifierBody),
+		&special.Request{Agent: ID}, state); ok {
+		t.Fatal("没有 expires_at 的 on 短路了请求")
+	}
+}
+
 // TestNakedOrdersItselfAfterBackground：短路排在 claude-bg 之后——它的
 // After/Before 声明让插件图知道这件事（顺序错了会让 claude-bg 该做的
 // 改道被一个无操作的 Apply 抢掉）。
