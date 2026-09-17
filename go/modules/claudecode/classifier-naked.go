@@ -43,15 +43,29 @@ func (c NakedConfig) Marshal() ([]byte, error) {
 	return json.Marshal(c)
 }
 
-// ParseNakedConfig 解析 state.json 里的裸奔配置。坏数据一律按「没开」处理
-// ——关起来是安全侧，宁可不生效也不能误短路。
+// ParseNakedConfig 解析 state.json 里的裸奔配置，并把**过期判定放在这里**。
+//
+// 为什么过期检查必须在解析处、而不是各个调用点：`on` 窗口是懒过期的
+// （daemon 不持 timer），所以「现在还算不算开着」只能由读的那一刻决定。三个
+// 读点（Respond / Status / RespondNote）各判一次，必然漂移——2026-09-17 实跑
+// 就是这样：Respond 判了过期、Status 没判，于是窗口过去之后 `newgate status`
+// 打出一行 `还有 -6m3s 自动关`。一个已经失效的窗口在**任何**读点都该表现为
+// 「没开」，这条不变式只有一个执行点才不会破。
+//
+// 坏数据（空、坏 JSON、模式不在白名单）一律按「没开」处理——关起来是安全侧，
+// 宁可不生效也不能误短路。
 func ParseNakedConfig(raw []byte) (NakedConfig, bool) {
 	var c NakedConfig
 	if len(raw) == 0 || json.Unmarshal(raw, &c) != nil {
 		return c, false
 	}
 	switch c.Mode {
-	case "on", "forever":
+	case "on":
+		if !time.Now().Before(c.ExpiresAt) {
+			return c, false // 窗口已过（或 expires_at 缺失/为零值）：当作没开
+		}
+		return c, true
+	case "forever":
 		return c, true
 	}
 	return c, false
@@ -122,7 +136,7 @@ func (classifierNaked) Respond(body []byte, r *special.Request, state *domain.St
 	if r == nil || r.Agent != ID || r.Stream || !isClassifier(body) {
 		return nil, false
 	}
-	if cfg, active := ParseNakedConfig(state.ModuleConfig[NakedConfigKey]); !active || (cfg.Mode == "on" && !time.Now().Before(cfg.ExpiresAt)) {
+	if _, active := ParseNakedConfig(state.ModuleConfig[NakedConfigKey]); !active {
 		return nil, false
 	}
 
@@ -152,16 +166,24 @@ func (classifierNaked) Respond(body []byte, r *special.Request, state *domain.St
 // 短路意味着「这一发上游调用**没发生**」——对一个排查「为什么没有分类器
 // 请求」的人来说，日志里只有 HTTP 200 是不够的，必须写清是谁替它回答的、
 // 以及这个决定还有多久自动失效。
+//
+// 这里**不**依赖 ParseNakedConfig 的 active：本方法只在短路已经发生后被调用，
+// 而窗口可能恰好在这两个调用之间到期（毫秒级，最长的一次日志就撞不上）。那种
+// 情况下说「配置刚被关掉」是误导，直接报告「窗口刚好到期」才是事实。
 func (classifierNaked) RespondNote(state *domain.State) string {
 	cfg, active := ParseNakedConfig(state.ModuleConfig[NakedConfigKey])
-	if !active {
-		return "裸奔生效（配置刚被关掉）"
-	}
-	if cfg.Mode == "forever" {
+	switch {
+	case cfg.Mode == "forever":
 		return "[naked] forever 模式：分类器请求被直接批准，未调用上游"
+	case active:
+		return fmt.Sprintf("[naked] 分类器请求被直接批准，未调用上游（窗口还剩 %s）",
+			time.Until(cfg.ExpiresAt).Round(time.Second))
+	case !cfg.ExpiresAt.IsZero():
+		return "[naked] 分类器请求被直接批准，未调用上游（窗口在拦截后立即到期）"
+	default:
+		// 配置读不出来（坏数据 / 刚被删）：这一发确实短路了，照实说。
+		return "[naked] 分类器请求被直接批准，未调用上游（配置已失效）"
 	}
-	return fmt.Sprintf("[naked] 分类器请求被直接批准，未调用上游（窗口还剩 %s）",
-		time.Until(cfg.ExpiresAt).Round(time.Second))
 }
 
 func (classifierNaked) Status(state *domain.State) []special.StatusItem {
