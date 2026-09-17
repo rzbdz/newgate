@@ -30,7 +30,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 	"github.com/rzbdz/newgate/go/modules/runtime/injection"
 )

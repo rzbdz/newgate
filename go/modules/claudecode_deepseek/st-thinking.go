@@ -5,8 +5,8 @@ package claudecode_deepseek
 import (
 	"fmt"
 
-	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
-	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek/api"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode"
+	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )

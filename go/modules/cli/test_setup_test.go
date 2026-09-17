@@ -5,15 +5,16 @@ import (
 	"sort"
 	"testing"
 
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
+
 	"github.com/rzbdz/newgate/go/modules/claudecode"
-	"github.com/rzbdz/newgate/go/modules/confighook/api"
 	"github.com/rzbdz/newgate/go/modules/opencode"
 	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 )
 
-type testCatalog map[string]*api.Agent
+type testCatalog map[string]*agentapi.Agent
 
-func (catalog testCatalog) Get(id string) (*api.Agent, bool) {
+func (catalog testCatalog) Get(id string) (*agentapi.Agent, bool) {
 	agent, ok := catalog[id]
 	return agent, ok
 }

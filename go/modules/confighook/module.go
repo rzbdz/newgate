@@ -15,41 +15,40 @@ import (
 	"sync"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 )
 
 type registry struct {
 	mu     sync.RWMutex
-	agents map[string]*agentapi.Agent
+	agents map[string]*Agent
 	fields map[string]string
 	tokens map[string]uint64
 	next   uint64
 }
 
 var (
-	_ agentapi.ConfigHooks  = (*registry)(nil)
-	_ agentapi.AgentCatalog = (*registry)(nil)
+	_ ConfigHooks  = (*registry)(nil)
+	_ AgentCatalog = (*registry)(nil)
 )
 
 // New 创建同时实现写入端口和只读目录端口的注册表。
 // 两个 capability 共享同一事实源，但通过不同接口限制消费者权限。
 func New() modules.Component {
 	registry := &registry{
-		agents: make(map[string]*agentapi.Agent),
+		agents: make(map[string]*Agent),
 		fields: make(map[string]string),
 		tokens: make(map[string]uint64),
 	}
 	return modules.Component{
 		Name: "config-hook",
 		Provides: []modules.Provision{
-			modules.Provide(agentapi.ConfigHooksCapability, agentapi.ConfigHooks(registry)),
-			modules.Provide(agentapi.AgentCatalogCapability, agentapi.AgentCatalog(registry)),
+			modules.Provide(ConfigHooksCapability, ConfigHooks(registry)),
+			modules.Provide(AgentCatalogCapability, AgentCatalog(registry)),
 		},
 	}
 }
 
 // RegisterAgent 原子加入客户端描述符，并用 token 防止过期 Release 删除后来的注册。
-func (r *registry) RegisterAgent(agent *agentapi.Agent) (modules.Release, error) {
+func (r *registry) RegisterAgent(agent *Agent) (modules.Release, error) {
 	if agent == nil || agent.ID == "" {
 		return nil, fmt.Errorf("agent ID is required")
 	}
@@ -66,7 +65,7 @@ func (r *registry) RegisterAgent(agent *agentapi.Agent) (modules.Release, error)
 }
 
 // BindTakeover 把配置接管绑定到已存在客户端，避免产生无法启动的孤立配置插件。
-func (r *registry) BindTakeover(agentID string, takeover agentapi.ConfigTakeover) (modules.Release, error) {
+func (r *registry) BindTakeover(agentID string, takeover ConfigTakeover) (modules.Release, error) {
 	if takeover == nil {
 		return nil, fmt.Errorf("nil config takeover for agent %s", agentID)
 	}
@@ -123,7 +122,7 @@ func (r *registry) release(key string, token uint64, remove func()) modules.Rele
 }
 
 // Get 返回描述符副本，防止只读消费者修改注册表持有的切片。
-func (r *registry) Get(id string) (*agentapi.Agent, bool) {
+func (r *registry) Get(id string) (*Agent, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	agent, ok := r.agents[id]
@@ -132,7 +131,7 @@ func (r *registry) Get(id string) (*agentapi.Agent, bool) {
 	}
 	clone := *agent
 	clone.Bin = append([]string(nil), agent.Bin...)
-	clone.Slots = append([]agentapi.Slot(nil), agent.Slots...)
+	clone.Slots = append([]Slot(nil), agent.Slots...)
 	clone.UnsetEnv = append([]string(nil), agent.UnsetEnv...)
 	return &clone, true
 }

@@ -1,9 +1,7 @@
 // Package glm owns GLM model-family identification and model-only behavior.
 package glm
 
-import (
-	"strings"
-)
+import "strings"
 
 func MatchTarget(model, provider, baseURL string) bool {
 	if strings.Contains(strings.ToLower(baseURL), "api.anthropic.com") {

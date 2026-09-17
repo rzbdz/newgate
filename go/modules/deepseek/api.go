@@ -1,4 +1,4 @@
-package api
+package deepseek
 
 import modules "github.com/rzbdz/newgate/go/component"
 
@@ -9,4 +9,4 @@ type Model struct {
 }
 
 // Capability 标识唯一的 DeepSeek 模型家族判定器。
-var Capability = modules.One[Model]("model-family.deepseek")
+var Capability = modules.NewCapability[Model]("model-family.deepseek")

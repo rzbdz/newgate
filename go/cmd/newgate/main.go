@@ -9,32 +9,38 @@ import (
 	"path/filepath"
 	"strings"
 
-	agents "github.com/rzbdz/newgate/go/modules/builtin"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/api"
+	app "github.com/rzbdz/newgate/go/app"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli"
 )
 
-// main 做 argv0 分发：被当成某个 agent 调用时进 wrapper，被当成
-// newgate-<preset> 调用时按 preset 覆盖进控制 CLI，否则进控制 CLI。
+// main 只做组合：起组件图，然后把这次调用交给两条通路之一。
+//
+//	argv0 是某个 client 名（PATH shim 转过来的）→ wrapper 模块注入 env 并 exec
+//	其余                                        → 控制 CLI
+//
+// 分发的**判据**不在这里：哪些名字算 client、什么条件才认领一次调用，是 shim
+// 接管策略，属于 modules/wrapper（见那个包的 doc）。这里只剩「先问它，再问 CLI」。
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
-	app, err := agents.New(context.Background())
+	built, err := app.New(context.Background())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "newgate:", err)
 		return 70
 	}
-	defer app.Stop(context.Background())
+	defer built.Stop(context.Background())
+
+	if code, ok := built.Wrapper().Dispatch(context.Background(), os.Args); ok {
+		return code
+	}
 
 	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-	if a, ok := app.Get(name); ok {
-		return runWrapper(a, os.Args)
-	}
-	cli := app.CLI()
 	build := cliapi.BuildInfo{
 		Version: version, BuildTime: buildTime, CommitTime: commitTime,
 	}
+	cli := built.CLI()
 
 	// argv0 分发：newgate-<preset> ≡ newgate --preset <preset> …（docs/08-operations.md）。
 	// preset 名从 basename 第一个 `-` 之后取，不再切分（preset 名可含 `-`）。

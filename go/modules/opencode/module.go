@@ -9,8 +9,8 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
-	opencodeapi "github.com/rzbdz/newgate/go/modules/opencode/api"
+
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
 // New 声明 OpenCode 客户端组件：提供家族身份，并在生命周期内注册客户端描述符。
@@ -20,8 +20,8 @@ func New() modules.Component {
 		Name:     "opencode",
 		Requires: []modules.Requirement{modules.Need(confighookapi.ConfigHooksCapability)},
 		Provides: []modules.Provision{
-			modules.Provide(opencodeapi.Capability,
-				opencodeapi.Client{AgentID: ID}),
+			modules.Provide(Capability,
+				Client{AgentID: ID}),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			var err error

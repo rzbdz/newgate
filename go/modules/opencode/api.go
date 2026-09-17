@@ -1,4 +1,4 @@
-package api
+package opencode
 
 import modules "github.com/rzbdz/newgate/go/component"
 
@@ -9,4 +9,4 @@ type Client struct {
 }
 
 // Capability 标识唯一的 OpenCode 客户端家族。
-var Capability = modules.One[Client]("client-family.opencode")
+var Capability = modules.NewCapability[Client]("client-family.opencode")

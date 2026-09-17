@@ -7,7 +7,6 @@ package glm
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
-	glmapi "github.com/rzbdz/newgate/go/modules/glm/api"
 )
 
 // New 声明纯模型身份组件。它没有生命周期副作用，
@@ -16,7 +15,7 @@ func New() modules.Component {
 	return modules.Component{
 		Name: "glm",
 		Provides: []modules.Provision{
-			modules.Provide(glmapi.Capability, glmapi.Model{
+			modules.Provide(Capability, Model{
 				MatchTarget: MatchTarget,
 			}),
 		},

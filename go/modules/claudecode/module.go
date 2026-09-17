@@ -12,10 +12,10 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
-	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
-	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
-	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking/api"
+
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
+	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking"
 )
 
 // New 声明 Claude Code 客户端组件。它注册客户端描述符和状态字段，
@@ -30,8 +30,8 @@ func New() modules.Component {
 			modules.Need(thinkingapi.Capability),
 		},
 		Provides: []modules.Provision{
-			modules.Provide(claudeapi.Capability,
-				claudeapi.Client{AgentID: ID}),
+			modules.Provide(Capability,
+				Client{AgentID: ID}),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			config := modules.MustGet(ctx, confighookapi.ConfigHooksCapability)

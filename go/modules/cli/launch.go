@@ -5,8 +5,9 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
-	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime/api"
+
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
+	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 )
 
 // detectLaunch 判断这串 argv 是否像「包装启动」，而不是控制面子命令。

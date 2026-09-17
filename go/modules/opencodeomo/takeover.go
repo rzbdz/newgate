@@ -13,7 +13,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
 const ProviderID = "newgate"

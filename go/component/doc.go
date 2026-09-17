@@ -15,8 +15,9 @@ Claude Code；它只认识下面六个结构概念。
 
 内核用六个概念构造一张有向图：
 
-  - Capability[T] 是服务或扩展点的有类型名字。One[T] 只接受一个提供者，
-    Many[T] 接受零个或多个贡献。
+  - Capability[T] 是服务或扩展点的有类型名字。NewCapability[T] 声明它；
+    一个端口可以有零个、一个或多个提供者——基数不是框架的约束，谁需要
+    "只能有一个"就在自己的 Get 调用点或业务逻辑里断言。
   - Requirement 表示组件消费一个 capability。Need 要求提供者必须存在，
     Optional 允许图中没有这个端口。
   - Provision 把 capability 与它提供的具体值绑定。
@@ -30,7 +31,7 @@ Claude Code；它只认识下面六个结构概念。
 的是 Capability[T] 中的 T。下面的 consumer 会在 provider 之后启动，却不需要
 知道究竟哪个组件提供了 Store：
 
-	var StoreCapability = component.One[Store]("config.store")
+	var StoreCapability = component.NewCapability[Store]("config.store")
 
 	provider := component.Component{
 		Name: "config",
@@ -55,7 +56,7 @@ Claude Code；它只认识下面六个结构概念。
 Manager 的构建分为五步：
 
  1. 从 Loader 收集全部 Component。
- 2. 验证名称、capability 类型、基数和必需提供者。
+ 2. 验证名称、capability 类型和必需提供者。
  3. 拓扑排序，使提供者位于消费者之前。
  4. 按图顺序调用 Start。
  5. 启动失败或收到 Stop 时，按相反顺序调用 Stop。

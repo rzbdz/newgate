@@ -12,7 +12,7 @@ type fakeLoader struct{ components []Component }
 func (loader fakeLoader) Load() ([]Component, error) { return loader.components, nil }
 
 func TestManagerInjectsCapabilitiesAndReversesLifecycle(t *testing.T) {
-	service := One[string]("service")
+	service := NewCapability[string]("service")
 	var events []string
 	manager, err := New(fakeLoader{components: []Component{
 		{
@@ -56,7 +56,7 @@ func TestManagerInjectsCapabilitiesAndReversesLifecycle(t *testing.T) {
 }
 
 func TestManagerRejectsInvalidCapabilityGraphs(t *testing.T) {
-	service := One[string]("service")
+	service := NewCapability[string]("service")
 	tests := []struct {
 		name       string
 		components []Component
@@ -70,18 +70,10 @@ func TestManagerRejectsInvalidCapabilityGraphs(t *testing.T) {
 			want: "requires missing capability service",
 		},
 		{
-			name: "duplicate single provider",
-			components: []Component{
-				{Name: "a", Provides: []Provision{Provide(service, "a")}},
-				{Name: "b", Provides: []Provision{Provide(service, "b")}},
-			},
-			want: "multiple providers",
-		},
-		{
 			name: "cycle",
 			components: func() []Component {
-				a := One[string]("a")
-				b := One[string]("b")
+				a := NewCapability[string]("a")
+				b := NewCapability[string]("b")
 				return []Component{
 					{Name: "a", Requires: []Requirement{Need(b)}, Provides: []Provision{Provide(a, "a")}},
 					{Name: "b", Requires: []Requirement{Need(a)}, Provides: []Provision{Provide(b, "b")}},
@@ -101,7 +93,7 @@ func TestManagerRejectsInvalidCapabilityGraphs(t *testing.T) {
 }
 
 func TestManyCapabilityInjectsAllProviders(t *testing.T) {
-	hooks := Many[string]("hooks")
+	hooks := NewCapability[string]("hooks")
 	manager, err := New(fakeLoader{components: []Component{
 		{Name: "one", Provides: []Provision{Provide(hooks, "one")}},
 		{Name: "two", Provides: []Provision{Provide(hooks, "two")}},
@@ -157,7 +149,7 @@ func TestFailedComponentParticipatesInRollback(t *testing.T) {
 }
 
 func TestManagerRejectsTypedNilCapability(t *testing.T) {
-	service := One[*string]("service")
+	service := NewCapability[*string]("service")
 	var value *string
 	_, err := New(fakeLoader{components: []Component{{
 		Name: "provider", Provides: []Provision{Provide(service, value)},
@@ -165,17 +157,6 @@ func TestManagerRejectsTypedNilCapability(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "provides nil service") {
 		t.Fatalf("err = %v", err)
 	}
-}
-
-func TestCapabilityAccessEnforcesCardinality(t *testing.T) {
-	one := One[string]("one")
-	many := Many[string]("many")
-	ctx := Context{values: map[string][]any{
-		"one":  {"value"},
-		"many": {"a", "b"},
-	}}
-	assertPanics(t, func() { Get(ctx, many) })
-	assertPanics(t, func() { GetAll(ctx, one) })
 }
 
 func TestStartReceivesManagerContext(t *testing.T) {
@@ -211,14 +192,4 @@ func TestStartReportsRollbackFailure(t *testing.T) {
 		!strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
 		t.Fatalf("err = %v", err)
 	}
-}
-
-func assertPanics(t *testing.T, fn func()) {
-	t.Helper()
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected panic")
-		}
-	}()
-	fn()
 }

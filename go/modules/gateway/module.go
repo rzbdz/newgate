@@ -12,14 +12,14 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	configapi "github.com/rzbdz/newgate/go/modules/config/api"
-	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
+	configapi "github.com/rzbdz/newgate/go/modules/config"
+
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
 type port struct{ registry *special.Registry }
 
-var _ gatewayapi.Gateway = (*port)(nil)
+var _ Gateway = (*port)(nil)
 
 // New 声明网关控制面组件。对 Config 的 Need 既表达真实依赖，
 // 也确保所有配置语义先就绪，再允许插件进入请求路径。
@@ -30,7 +30,7 @@ func New() modules.Component {
 		Name:     "gateway",
 		Requires: []modules.Requirement{modules.Need(configapi.Capability)},
 		Provides: []modules.Provision{
-			modules.Provide(gatewayapi.Capability, gatewayapi.Gateway(port)),
+			modules.Provide(Capability, Gateway(port)),
 		},
 		Start: func(context.Context, modules.Context) error {
 			restore = special.InstallDefault(port.registry)
@@ -46,6 +46,6 @@ func New() modules.Component {
 }
 
 // RegisterRequestHook 把插件注册限制在 gateway owner 内部，并把撤销权交还调用组件。
-func (p *port) RegisterRequestHook(hook gatewayapi.Plugin) (modules.Release, error) {
+func (p *port) RegisterRequestHook(hook Plugin) (modules.Release, error) {
 	return p.registry.Register(hook)
 }

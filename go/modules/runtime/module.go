@@ -12,16 +12,16 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	configapi "github.com/rzbdz/newgate/go/modules/config/api"
-	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+	configapi "github.com/rzbdz/newgate/go/modules/config"
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
-	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime/api"
+
 	"github.com/rzbdz/newgate/go/modules/runtime/launch"
 )
 
 type service struct{}
 
-var _ runtimeapi.Runtime = (*service)(nil)
+var _ Runtime = (*service)(nil)
 
 // New 声明客户端运行时组件。启动时把只读 AgentCatalog 接入兼容层，
 // 停止时撤销该桥接；Launch 端口本身保持无状态。
@@ -35,7 +35,7 @@ func New() modules.Component {
 			modules.Need(confighookapi.AgentCatalogCapability),
 		},
 		Provides: []modules.Provision{
-			modules.Provide(runtimeapi.Capability, runtimeapi.Runtime(service)),
+			modules.Provide(Capability, Runtime(service)),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			restore = agentstate.Set(modules.MustGet(ctx, confighookapi.AgentCatalogCapability))

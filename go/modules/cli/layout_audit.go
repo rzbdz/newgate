@@ -10,7 +10,8 @@ import (
 
 	"github.com/rzbdz/newgate/go/modules/cli/style"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
 type widthViolation struct {

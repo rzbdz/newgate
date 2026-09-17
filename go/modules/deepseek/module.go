@@ -11,8 +11,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek/api"
-	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
 )
 
 // New 声明 DeepSeek 模型组件，同时提供模型判定端口并注册模型侧协议修补。
@@ -23,7 +22,7 @@ func New() modules.Component {
 		Name:     "deepseek",
 		Requires: []modules.Requirement{modules.Need(gatewayapi.Capability)},
 		Provides: []modules.Provision{
-			modules.Provide(deepseekapi.Capability, deepseekapi.Model{
+			modules.Provide(Capability, Model{
 				MatchTarget: MatchTarget,
 			}),
 		},

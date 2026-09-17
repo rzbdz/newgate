@@ -12,14 +12,13 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
-	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking/api"
 )
 
 type service struct{}
 
-var _ thinkingapi.Service = (*service)(nil)
+var _ Service = (*service)(nil)
 
 // New 声明通用 thinking 组件：它既提供跨模型降级端口，
 // 也把与模型无关的处理器注册进网关，并在 Stop 时逆序撤销。
@@ -29,7 +28,7 @@ func New() modules.Component {
 		Name:     "thinking",
 		Requires: []modules.Requirement{modules.Need(gatewayapi.Capability)},
 		Provides: []modules.Provision{
-			modules.Provide(thinkingapi.Capability, thinkingapi.Service(service{})),
+			modules.Provide(Capability, Service(service{})),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			gateway := modules.MustGet(ctx, gatewayapi.Capability)

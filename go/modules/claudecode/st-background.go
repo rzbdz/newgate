@@ -8,7 +8,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
-	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking/api"
+	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking"
 )
 
 var (

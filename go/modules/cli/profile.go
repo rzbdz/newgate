@@ -12,7 +12,8 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/gateway/health"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )

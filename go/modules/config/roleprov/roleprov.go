@@ -8,7 +8,7 @@
 //
 // 分工：
 //
-//	模块实现 Provider，经 Config 组件的 capability 注册；
+//	模块实现 RoleProvider，经 Config 组件的 capability 注册；
 //	框架（store 每次装快照、CLI 启动）调 Refresh，把结果灌进 domain。
 //
 // core 只认「键 → 缺省绑定」这张表，解析时与内置别名一视同仁。
@@ -20,20 +20,27 @@ import (
 	"sync"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	configapi "github.com/rzbdz/newgate/go/modules/config/api"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 )
 
-// Provider 是配置 API 中动态档位提供者的本地别名，避免 roleprov 另造一套契约。
-type Provider = configapi.RoleProvider
+// RoleProvider 允许模块向配置层贡献动态档位，同时保留来源供冲突诊断。
+//
+// 契约定义在这里而不是 config 根：角色注册表的实现就是本包，定义放这里
+// config 根才能 import 本包而不成环（见 docs/03-architecture.md 的分层）。
+type RoleProvider interface {
+	Source() string
+	Roles() ([]domain.ExtraRole, error)
+}
 
-// WatchProvider 是提供者可选实现的热更新文件声明。
-type WatchProvider = configapi.RoleWatchProvider
+// RoleWatchProvider 是 RoleProvider 的可选能力：声明哪些文件变化后需要重载。
+type RoleWatchProvider interface {
+	WatchFiles() []string
+}
 
 // Registry 聚合动态档位提供者，并用 token 维护每次注册的精确所有权。
 type Registry struct {
 	mu        sync.RWMutex
-	providers []Provider
+	providers []RoleProvider
 	tokens    map[string]uint64
 	next      uint64
 }
@@ -82,14 +89,14 @@ func currentRegistry() *Registry {
 }
 
 // Register 是旧数据面的兼容入口；生产装配通过 Config capability 注册。
-func Register(p Provider) {
+func Register(p RoleProvider) {
 	if _, err := currentRegistry().Register(p); err != nil {
 		panic(err)
 	}
 }
 
 // Register 加入一个来源唯一的动态档位提供者，并返回所有权 Release。
-func (r *Registry) Register(p Provider) (modules.Release, error) {
+func (r *Registry) Register(p RoleProvider) (modules.Release, error) {
 	if p == nil || p.Source() == "" {
 		return nil, fmt.Errorf("roleprov: provider source is required")
 	}
@@ -134,7 +141,7 @@ func (r *Registry) Register(p Provider) (modules.Release, error) {
 func Refresh() []error {
 	registry := currentRegistry()
 	registry.mu.RLock()
-	ps := append([]Provider(nil), registry.providers...)
+	ps := append([]RoleProvider(nil), registry.providers...)
 	registry.mu.RUnlock()
 
 	var (
@@ -194,7 +201,7 @@ func WatchFiles() []string {
 	defer registry.mu.RUnlock()
 	var files []string
 	for _, provider := range registry.providers {
-		if watcher, ok := provider.(WatchProvider); ok {
+		if watcher, ok := provider.(RoleWatchProvider); ok {
 			files = append(files, watcher.WatchFiles()...)
 		}
 	}

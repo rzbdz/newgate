@@ -15,24 +15,33 @@ STATIC_LD    := $(LDFLAGS) -extldflags '-static'
 
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: all build static release test fmt vet clean install verify-static e2e help
+.PHONY: all build static release test test-race fmt check-fmt vet clean install \
+         verify-static e2e e2e-claude check help generate check-generate
 
 all: build
 
-build:
+## generate: 扫描 modules/ 重建组合根装配清单（app/modules_gen.go）
+generate:
+	@go run ./tools/genmodules
+
+## check-generate: 只校验清单是否过期，不改文件（CI/测试用）
+check-generate:
+	@go run ./tools/genmodules -check
+
+build: generate
 	@mkdir -p $(OUT)
 	go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(OUT)/$(BIN) ./cmd/newgate
 	@echo "built $(OUT)/$(BIN)"
 
 ## static: 当前平台的全静态二进制
-static:
+static: generate
 	@mkdir -p $(OUT)
 	$(STATIC_ENV) go build $(GOFLAGS) $(STATIC_TAGS) -ldflags '$(STATIC_LD)' \
 		-o $(OUT)/$(BIN) ./cmd/newgate
 	@$(MAKE) --no-print-directory verify-static
 
 ## release: 交叉编译所有平台的静态二进制到 dist/
-release:
+release: generate
 	@mkdir -p $(DIST)
 	@fails=""; for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
@@ -62,11 +71,22 @@ verify-static:
 	fi
 	@$(OUT)/$(BIN) version | sed 's/^/  /'
 
-test:
+test: check-generate
 	go test ./...
 
+## test-race: 带竞态检测跑单测（并发相关改动必跑，见 docs/10-testing-security.md §6）
+test-race: check-generate
+	go test -race ./...
+
+## fmt: 就地格式化
 fmt:
 	gofmt -l -w .
+
+## check-fmt: 只校验格式，不改文件（CI 与 check 用）
+check-fmt:
+	@out=$$(gofmt -l .); if [ -n "$$out" ]; then \
+		echo "以下文件格式不对，跑 make fmt："; echo "$$out"; exit 1; \
+	fi
 
 vet:
 	go vet ./...
@@ -85,10 +105,20 @@ install-static: static
 clean:
 	rm -rf $(OUT) $(DIST)
 
-# 零 token 端到端：假上游 + 假 opencode
+# 零 token 端到端：假上游 + 假 opencode 客户端
 e2e: build
 	@bash ../mock/e2e.sh
 
+## e2e-claude: 零 token 端到端（Claude Code 侧，覆盖面最广的一份）
+e2e-claude: build
+	@bash ../mock/e2e_claude.sh
+
+## check: 换版本之前跑这个。全绿才有资格谈上线。
+check: check-generate check-fmt vet test e2e e2e-claude
+	@echo
+	@echo "✓ 全绿：静态检查 + 单测 + 两条零 token 端到端"
+
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
-	@echo "  build / install / test / fmt / vet / clean / e2e"
+	@echo "  build / install / test / test-race / fmt / vet / clean"
+	@echo "  e2e / e2e-claude / check / generate / check-generate"

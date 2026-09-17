@@ -3,13 +3,13 @@ package roleprov
 import (
 	"testing"
 
-	configapi "github.com/rzbdz/newgate/go/modules/config/api"
+	"github.com/rzbdz/newgate/go/modules/config/domain"
 )
 
 type registryProvider struct{ source string }
 
 func (p registryProvider) Source() string { return p.source }
-func (registryProvider) Roles() ([]configapi.ExtraRole, error) {
+func (registryProvider) Roles() ([]domain.ExtraRole, error) {
 	return nil, nil
 }
 

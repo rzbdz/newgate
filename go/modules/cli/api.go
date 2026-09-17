@@ -1,8 +1,8 @@
-package api
+package cli
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
-	configapi "github.com/rzbdz/newgate/go/modules/config/api"
+	configapi "github.com/rzbdz/newgate/go/modules/config"
 )
 
 // Diagnostic 是模块交给 CLI 展示的一组结构化状态，
@@ -53,7 +53,7 @@ type CLI interface {
 // 这组三个 capability 把固定 CLI 入口与开放扩展点分开：
 // CLI 只能有一个实现，命令和诊断则允许模块独立贡献。
 var (
-	Capability            = modules.One[CLI]("cli")
-	CommandsCapability    = modules.Many[Command]("cli-commands")
-	DiagnosticsCapability = modules.Many[DiagnosticProvider]("diagnostics")
+	Capability            = modules.NewCapability[CLI]("cli")
+	CommandsCapability    = modules.NewCapability[Command]("cli-commands")
+	DiagnosticsCapability = modules.NewCapability[DiagnosticProvider]("diagnostics")
 )
