@@ -9,6 +9,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,8 +18,10 @@ import (
 
 	"context"
 
+	"github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
+	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
 )
 
 // 一段有代表性的 SSE：含 tool_call 分片、Unicode、空 data、大整数。
@@ -319,16 +323,49 @@ func TestErrorResponseByteFaithful(t *testing.T) {
 	}
 }
 
-// TestReasoningPassthrough400DoesNotOpenBreaker 是 2026-09-17 止血的回归测试。
+// shapeTestDetector 是 forward 这一层的测试判据：认「点名了 reasoning_content
+// 又要求逐字回传」的 400。
 //
-// 线上实况：deepseek-flash 的 400「reasoning_content 必须逐字回传」是**请求
-// 形状问题**（同一份 body 换哪个 provider 都一样错），却被当成可用性失败记进
-// 熔断器——连续两发就把一条本来能用的 binding 摘掉（health.json 上能看到
-// `fails=2 open=true grade=fluent`，probe 却一直绿，因为 probe 发的最小请求
-// 根本触发不到这条校验）。修复：breaker.IsRequestShapeError 把这类 400 从
-// RecordFailure 里摘出去。这里两个候选都返回同一个 reasoning-400，断言
-// 熔断器纹丝不动、请求仍然透传给客户端（不静默）。
-func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
+// 为什么在 forward 的测试里自己写一条，而不是 import modules/deepseek 用它那条：
+// 转发路径**不认识任何上游**（这正是 2026-09-17 那次重构成立的理由——判据由
+// 上游模块注册，core 只读 Result.Shape 那个名字）。在单测里 import deepseek
+// 等于把刚拆掉的那条耦合从测试里接回去：真判据改了文案，这里会跟着红，而它
+// 红的原因跟 forward 的行为毫无关系。
+//
+// 分工是「测试跟着谁知道这件事走」：真判据的真值表在 modules/deepseek/shape_test.go，
+// 判据从模块 Start 一路接到转发路径的**接线**在 testing/system（真组件图 + 假
+// 上游）；这里只锁 forward 与健康表的契约——Shape 非空时它该做什么。
+type shapeTestDetector struct{}
+
+func (shapeTestDetector) Name() string { return "test-shape" }
+
+func (shapeTestDetector) Match(status int, body []byte) bool {
+	if status != 400 {
+		return false
+	}
+	return bytes.Contains(body, []byte("reasoning_content")) &&
+		bytes.Contains(body, []byte("must be passed back"))
+}
+
+var _ breaker.ShapeDetector = shapeTestDetector{}
+
+// TestShapeErrorIsCountedThenLoggedWithEvidence 锁住转发路径对「形状错误」的
+// 全部义务。健康表说是形状错误（Result.Shape 非空）之后，forward 要：
+//
+//  1. 原样透传上游原文（不静默，客户端看到的就是上游说的）；
+//  2. 不把它记成可用性失败——binding 必须还在链上；
+//  3. 日志里打出**是哪条判据**认的，外加一行「现场已存档」；
+//  4. 现场落进 dump/shape-400-<判据>/（专用目录，不参与 req-*/err-* 的滚动清理）。
+//
+// 现场动机（2026-09-17，health.json + 日志）：deepseek-flash 的这条 400 被当成
+// 可用性失败记进熔断器，连续两发就把一条本来能用的 binding 摘掉；而 probe 一直
+// 绿——探活发的是最小请求，触发不到「思考模式要求逐字回传」。摘要写得明确：
+// 「同一份 body 换哪个 provider 都一样错」的问题不该记在任何一家的账上。
+func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
+	sandboxState(t, `{"port": 0}`)
+	metrics.Default.Reset()
+	t.Cleanup(func() { metrics.Default.Reset(); testChain = nil })
+
 	reasoningErr := `{"type":"error","message":"The ` + "`reasoning_content`" +
 		` in the thinking mode must be passed back to the API."}`
 	hits := 0
@@ -340,6 +377,8 @@ func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
 	}))
 	defer up.Close()
 
+	// 单站链（IsLast）：形状错误会继续沿链试，只有链尾那一发才走「定案」分支，
+	// 也就是打专属日志、存实地证据的那条路径。多站链测不到它。
 	testChain = func(role string) []resolve.Step {
 		return []resolve.Step{{Profile: "ds",
 			Binding:  domain.Binding{Provider: "ds-shape", Model: "deepseek-flash"},
@@ -347,11 +386,14 @@ func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := newTestServer()
+	srv, logBuf := newLoggingTestServer()
+	if _, err := srv.Health.RegisterShapeDetector(shapeTestDetector{}); err != nil {
+		t.Fatalf("注册判据: %v", err)
+	}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
-	// 连发 3 次——旧行为下 Threshold=2 早该把它摘了。
+	// 连发 3 次——可用性账本的阈值是 2，没有判据时第二发就该摘牌了。
 	for i := 0; i < 3; i++ {
 		resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
 			strings.NewReader(`{"model":"newgate/heavy"}`))
@@ -371,7 +413,64 @@ func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
 		t.Fatalf("上游被打了 %d 次, want 3", hits)
 	}
 	if !srv.Health.Available("ds-shape", "deepseek-flash") {
-		t.Error("reasoning-400 把熔断器打开了——请求形状错误不该记进可用性")
+		t.Error("形状 400 把熔断器打开了——这类错误不该记进可用性账本")
+	}
+	for _, s := range srv.Health.Snapshot() {
+		if s.Provider != "ds-shape" {
+			continue
+		}
+		if s.ShapeSkips != 3 || s.Fails != 0 || s.Open {
+			t.Errorf("形状错误应当只计数: %+v", s)
+		}
+	}
+
+	// 判据名必须进日志：形状判据是多家上游各自的，只说「命中了形状错误」在
+	// 有两家同时报 400 时毫无用处。转发路径不认识那些字符串，名字是它唯一的线索。
+	logs := logBuf.String()
+	if !strings.Contains(logs, "[shape-400]") || !strings.Contains(logs, "判据 test-shape") {
+		t.Errorf("日志没有说清是被哪条判据认下的:\n%s", logs)
+	}
+	if !strings.Contains(logs, "现场已存档") {
+		t.Errorf("证据没落盘（这类 400 偶发又致命，丢了就复现不了）:\n%s", logs)
+	}
+
+	// 证据落进专用目录，名字取自判据 → 加一条新判据自动多一个目录，转发路径不改。
+	dir := filepath.Join(os.Getenv("NEWGATE_HOME"), "dump", "shape-400-test-shape")
+	ents, err := ioutil.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("读证据目录 %s: %v（形状 400 的现场必须单独存档）", dir, err)
+	}
+	if len(ents) == 0 {
+		t.Fatalf("证据目录 %s 是空的", dir)
+	}
+	for _, want := range []string{"client-sent.json", "we-sent.json", "upstream-said.json", "audit.txt"} {
+		if _, err := os.Stat(filepath.Join(dir, ents[0].Name(), want)); err != nil {
+			t.Errorf("证据目录里缺 %s: %v", want, err)
+		}
+	}
+}
+
+// TestShapeDirNameIsPathSafe：判据名会进文件路径，而判据是**别的模块**注册进来
+// 的代码——不设防就等于让一个注册项决定往哪写文件。
+func TestShapeDirNameIsPathSafe(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"deepseek", "shape-400-deepseek"},
+		{"a.b_c-1", "shape-400-a.b_c-1"},
+		{"../escape", "shape-400-.._escape"},
+		{"a/b", "shape-400-a_b"},
+		{"", "shape-400-unknown"},
+		{"中文", "shape-400-__"},
+	}
+	for _, tt := range tests {
+		if got := shapeDirName(tt.in); got != tt.want {
+			t.Errorf("shapeDirName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	// 结果里绝不能出现分隔符：路径拼接的反面教材是「上游说了算的字符串」。
+	for _, name := range []string{"../x", "a/b", "a\\b"} {
+		if got := shapeDirName(name); strings.ContainsAny(got, `/\`) {
+			t.Errorf("shapeDirName(%q) = %q 仍然带路径分隔符", name, got)
+		}
 	}
 }
 
@@ -383,7 +482,7 @@ func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
 //
 //   - 400 的含义就是「你这份请求不对」，而形状检测器只是几条字符串匹配，认不
 //     出来不等于问题在上游——按认不出来的 400 摘牌，等于让一个补丁的盲区决定
-//     摘谁，正好是 2026-09-17 reasoning-400 那次事故的形状；
+//     摘谁，正好是 2026-09-17 那次 reasoning 回传 400 事故的形状；
 //   - 现在摘牌会自己回来（半开 + 退避），但代价不对称：误摘一次要等 60s 起
 //     步、最多 10 分钟才回到链上，期间用户的请求被悄悄换给了别的模型；
 //   - 「这家上游根本不通」不是被动路径能下的结论，`newgate probe` 才是权威

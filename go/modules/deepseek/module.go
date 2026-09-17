@@ -11,16 +11,25 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
 )
 
 // New 声明 DeepSeek 模型组件，同时提供模型判定端口并注册模型侧协议修补。
 // 客户端与模型的组合行为不放在这里，而由独立交叉组件拥有。
+//
+// 它还向健康表注册一条**形状判据**（reasoningShape）：那两句「must be passed
+// back」的 400 是请求形状问题，不该记在任何 provider 的可用性账本上。判据放
+// 在这里而不是 core，是因为文案是 DeepSeek 的方言——core 里不该出现任何上游
+// 专有字符串（见 shape.go 的注释）。
 func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
-		Name:     "deepseek",
-		Requires: []modules.Requirement{modules.Need(gatewayapi.Capability)},
+		Name: "deepseek",
+		Requires: []modules.Requirement{
+			modules.Need(gatewayapi.Capability),
+			modules.Need(breakerapi.Capability),
+		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Model{
 				MatchTarget: MatchTarget,
@@ -35,6 +44,12 @@ func New() modules.Component {
 				}
 				releases = append(releases, release)
 			}
+			health := modules.MustGet(ctx, breakerapi.Capability)
+			release, err := health.RegisterShapeDetector(reasoningShape{})
+			if err != nil {
+				return err
+			}
+			releases = append(releases, release)
 			return nil
 		},
 		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },

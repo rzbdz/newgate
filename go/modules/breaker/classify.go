@@ -94,6 +94,14 @@ type Result struct {
 	// Spared 连续失败已经数到阈值，但**上闸前的诊断探活**证明这条 binding
 	// 仍然可用，于是没有摘牌、计数清零。见 Breaker.SetVerifier。
 	Spared bool
+	// Shape 认领这次 400 的检测器名（BucketShape 时非空）。
+	//
+	// 数据面用它打专属日志、存证据，**同时保持对上游专有字符串的无知**：名字
+	// 是检测器自己起的（"deepseek"），core 里没有任何一处写着
+	// "must be passed back"。2026-09-17 之前 forward 自己认那两句文案
+	// （当时那个函数叫 IsRequestShapeError，住在 core 里），等于把上游方言
+	// 抄进了转发路径。
+	Shape string
 }
 
 // Classify 是**唯一**的失败分类表。纯函数：同样的 Input 永远同样的 Verdict。

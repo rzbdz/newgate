@@ -1,6 +1,7 @@
 package breaker
 
 import (
+	"bytes"
 	"os"
 	"strings"
 	"sync"
@@ -11,11 +12,36 @@ import (
 // clocked 造一份带注入时钟的健康表。状态机全靠时间推进，所以测试里不 sleep：
 // 老实现靠 `b.Cooldown = 5*time.Millisecond` + `time.Sleep` 摸黑走，既慢又飘。
 // 返回的第二个函数把时钟往前拨。
+//
+// 顺带注册一条测试用的形状判据（见 testShape）。2026-09-17 起真实判据由上游
+// 模块注册（modules/deepseek/shape.go），core 里不再有那条字符串——但状态机
+// 的「形状账本永不摘牌」这条策略仍然要能被测到，所以这里挂一条等价的。
 func clocked() (*table, func(time.Duration)) {
 	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	b := newTable()
 	b.now = func() time.Time { return now }
+	if _, err := b.RegisterShapeDetector(testShape{}); err != nil {
+		panic(err)
+	}
 	return b, func(d time.Duration) { now = now.Add(d) }
+}
+
+// testShape 是 breaker 内部的测试判据：认「must be passed back + 点名了字段」
+// 这个形状（真判据在 modules/deepseek）。放在这里是为了让状态机的测试不依赖
+// 别的模块，同时保持判据的**形态**与真实情况一致。
+type testShape struct{}
+
+func (testShape) Name() string { return "test-shape" }
+
+func (testShape) Match(status int, body []byte) bool {
+	if status != 400 {
+		return false
+	}
+	if !bytes.Contains(body, []byte("must be passed")) {
+		return false
+	}
+	return bytes.Contains(body, []byte("reasoning_content")) ||
+		bytes.Contains(body, []byte("content[].thinking"))
 }
 
 func writeFile(path, content string) error {
@@ -127,7 +153,7 @@ func TestPerBucketPolicy(t *testing.T) {
 // TestShapeErrorsOnlyCount：形状错误永不摘牌，但要能被看见。
 func TestShapeErrorsOnlyCount(t *testing.T) {
 	b, _ := clocked()
-	in := Input{Kind: KindUpstreamStatus, Status: 400, Body: []byte(reasoning400)}
+	in := Input{Kind: KindUpstreamStatus, Status: 400, Body: []byte(shapeBody)}
 	for i := 0; i < 50; i++ {
 		if r := b.Report("p", "m", in); r.Opened {
 			t.Fatalf("第 %d 次形状错误把闸打开了", i+1)
