@@ -37,6 +37,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/app"
 	"github.com/rzbdz/newgate/go/lib/httpx"
+	"github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/forward"
 	"github.com/rzbdz/newgate/go/testing/testkit"
@@ -142,7 +143,7 @@ func Start(t *testing.T) *Harness {
 	t.Cleanup(watcher.Close)
 	watcher.Start()
 
-	server := forward.New(port, log.New(sink, "", 0), watcher)
+	server := forward.New(port, log.New(sink, "", 0), watcher, breaker.NewTable())
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Start() }()
 	t.Cleanup(func() {

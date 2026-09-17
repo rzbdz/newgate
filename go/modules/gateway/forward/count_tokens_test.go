@@ -65,7 +65,7 @@ func TestCountTokensLazyProbeThenLocal(t *testing.T) {
 	defer up.Close()
 	mainLoopChainOnly(t, up)
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -112,7 +112,7 @@ func TestCountTokensForwardedWhenSupported(t *testing.T) {
 	defer up.Close()
 	mainLoopChainOnly(t, up)
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -158,7 +158,7 @@ func TestCountTokensTransientErrorNotLearned(t *testing.T) {
 	defer up.Close()
 	mainLoopChainOnly(t, up)
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -202,7 +202,7 @@ func TestCountTokensAlreadyLearnedSkipsUpstream(t *testing.T) {
 	}
 	dialect.MarkUnsupported("test-prov", "real-model-1", dialect.CapCountTokens)
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -232,7 +232,7 @@ func TestCountTokensRespectsClientModel(t *testing.T) {
 	defer up.Close()
 	mainLoopChainOnly(t, up)
 
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -255,7 +255,7 @@ func TestCountTokensRespectsClientModel(t *testing.T) {
 // TestAPIHelloAnsweredLocally Claude Code 的连通性探针（HEAD/GET，无 body）
 // 本地应 200——掉进 model 解析会刷 400 日志（2026-09-09 实抓）。
 func TestAPIHelloAnsweredLocally(t *testing.T) {
-	srv := &Server{Port: 0}
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 

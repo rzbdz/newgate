@@ -13,8 +13,8 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
-	"github.com/rzbdz/newgate/go/modules/gateway/health"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
 
@@ -308,7 +308,7 @@ func tierReport(which string) int {
 	return 0
 }
 
-func bindingHealthLabel(h health.Status) string {
+func bindingHealthLabel(h breakerapi.Status) string {
 	if h.Open {
 		return style.Red("熔断")
 	}
@@ -319,7 +319,7 @@ func bindingHealthLabel(h health.Status) string {
 		return style.Yellow(fmt.Sprintf("可用 %dms", h.ScoreMs))
 	case h.ScoreMs > 12000:
 		return style.Red(fmt.Sprintf("卡顿 %dms", h.ScoreMs))
-	case h.Grade == health.ProbeUnavailable:
+	case h.Grade == breakerapi.ProbeUnavailable:
 		return style.Red("不可用")
 	default:
 		return style.Dim("未探")

@@ -8,22 +8,22 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/lib/httpx"
-	"github.com/rzbdz/newgate/go/modules/gateway/health"
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
 
 // 代理自报的运行时状态。整页状态（status / metrics / st）都只发**一次**
 // 这个请求就拿全——以前每个命令各打各的探活，数字还可能对不上。
 type proxyInfo struct {
-	OK       bool              `json:"ok"`
-	Port     int               `json:"port"`
-	UptimeS  int               `json:"uptime_s"`
-	Requests uint64            `json:"requests"`
-	Failures uint64            `json:"failures"`
-	Breakers []health.Status   `json:"breakers"`
-	Handoff  bool              `json:"handoff"`
-	Default  string            `json:"default_profile"`
-	Active   map[string]string `json:"active"`
+	OK       bool                `json:"ok"`
+	Port     int                 `json:"port"`
+	UptimeS  int                 `json:"uptime_s"`
+	Requests uint64              `json:"requests"`
+	Failures uint64              `json:"failures"`
+	Breakers []breakerapi.Status `json:"breakers"`
+	Handoff  bool                `json:"handoff"`
+	Default  string              `json:"default_profile"`
+	Active   map[string]string   `json:"active"`
 	Think    struct {
 		Entries   int   `json:"entries"`
 		Bytes     int64 `json:"bytes"`
@@ -76,8 +76,8 @@ func rankFromProxy(ps *proxyInfo) func(provider, model string) int {
 	}
 }
 
-func healthFromProxy(ps *proxyInfo) map[string]health.Status {
-	out := map[string]health.Status{}
+func healthFromProxy(ps *proxyInfo) map[string]breakerapi.Status {
+	out := map[string]breakerapi.Status{}
 	if ps != nil {
 		for _, status := range ps.Breakers {
 			out[status.Provider+"/"+status.Model] = status

@@ -19,9 +19,9 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/gateway/dialect"
-	"github.com/rzbdz/newgate/go/modules/gateway/health"
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
 	"github.com/rzbdz/newgate/go/modules/gateway/probe"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
@@ -420,7 +420,7 @@ func printModelHealth(ps *proxyInfo) {
 	}
 }
 
-func healthDisplayRank(h health.Status) int {
+func healthDisplayRank(h breakerapi.Status) int {
 	switch modelHealthState(h) {
 	case "流畅":
 		return 0
@@ -433,10 +433,10 @@ func healthDisplayRank(h health.Status) int {
 	}
 }
 
-func modelHealthState(h health.Status) string {
+func modelHealthState(h breakerapi.Status) string {
 	if h.Open {
 		score, _ := modelDisplayScore(h)
-		if h.Grade == health.ProbeLaggy || score > 12000 {
+		if h.Grade == breakerapi.ProbeLaggy || score > 12000 {
 			return "卡顿"
 		}
 		return "不可用"
@@ -454,7 +454,7 @@ func modelHealthState(h health.Status) string {
 	}
 }
 
-func modelScoreLine(h health.Status) string {
+func modelScoreLine(h breakerapi.Status) string {
 	const labels = "≤4K,≤32K,≤128K,>128K"
 	names := strings.Split(labels, ",")
 	var scores []string
@@ -480,7 +480,7 @@ func modelScoreLine(h health.Status) string {
 	return modelHealthState(h) + " · " + strings.Join(scores, " · ")
 }
 
-func modelDisplayScore(h health.Status) (int, bool) {
+func modelDisplayScore(h breakerapi.Status) (int, bool) {
 	for i, n := range h.Buckets {
 		if n > 0 {
 			return h.Scores[i], true

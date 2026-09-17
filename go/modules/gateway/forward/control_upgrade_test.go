@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rzbdz/newgate/go/modules/breaker"
 )
 
 // TestControlUpgradeAuth 优雅交接端点的鉴权底线：错令牌绝不能触发交接。
@@ -22,7 +24,7 @@ func TestControlUpgradeAuth(t *testing.T) {
 	_ = ioutil.WriteFile(filepath.Join(dir, "state.json"),
 		[]byte(`{"default_profile":"ds","port":1,"control_token":"`+tok+`"}`), 0o600)
 
-	srv := New(0, nil, nil) // s.ln == nil：鉴权通过后会 503，正好不真交接
+	srv := New(0, nil, nil, breaker.NewTable()) // s.ln == nil：鉴权通过后会 503，正好不真交接
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		srv.handleControlUpgrade(w, r)
 	}))
@@ -79,7 +81,7 @@ func TestControlUpgradeNoToken(t *testing.T) {
 	_ = ioutil.WriteFile(filepath.Join(dir, "state.json"),
 		[]byte(`{"default_profile":"ds","port":1}`), 0o600)
 
-	srv := New(0, nil, nil)
+	srv := New(0, nil, nil, breaker.NewTable())
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		srv.handleControlUpgrade(w, r)
 	}))

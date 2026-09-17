@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rzbdz/newgate/go/modules/gateway/health"
+	"github.com/rzbdz/newgate/go/modules/breaker"
 )
 
 func TestProbeHealthOpensOnlySlowBinding(t *testing.T) {
@@ -24,14 +24,7 @@ func TestProbeHealthOpensOnlySlowBinding(t *testing.T) {
 			`","timeouts":{"classifier_first_byte_ms":10}}`), 0o600)
 
 	const provider = "relay-health-test"
-	health.Default.RecordSuccess(provider, "slow")
-	health.Default.RecordSuccess(provider, "fast")
-	t.Cleanup(func() {
-		health.Default.RecordSuccess(provider, "slow")
-		health.Default.RecordSuccess(provider, "fast")
-	})
-
-	srv := New(0, nil, nil)
+	srv := New(0, nil, nil, breaker.NewTable())
 	front := httptest.NewServer(http.HandlerFunc(srv.handleHealth))
 	defer front.Close()
 	body := []byte(`{"observations":[` +
@@ -48,10 +41,10 @@ func TestProbeHealthOpensOnlySlowBinding(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health POST = %d", resp.StatusCode)
 	}
-	if health.Default.Available(provider, "slow") {
+	if srv.Health.Available(provider, "slow") {
 		t.Fatal("超过 classifier 阈值的极小请求没有熔断")
 	}
-	if !health.Default.Available(provider, "fast") {
+	if !srv.Health.Available(provider, "fast") {
 		t.Fatal("同 provider 的快速模型被误伤")
 	}
 }

@@ -31,6 +31,7 @@ Gateway
 | `modules/config` | domain、profile resolver、store、动态 role |
 | `modules/confighook` | Agent、takeover、state field registry |
 | `modules/gateway` | HTTP 数据面和扩展执行 |
+| `modules/breaker` | binding 健康表（可用性 + 延迟排序），无依赖的叶子模块 |
 | `modules/runtime` | daemon、进程启动、shim、takeover |
 | `modules/cli` | 命令解析、TUI、诊断输出 |
 | `modules/<client>` | 客户端描述和客户端独有行为 |
