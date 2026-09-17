@@ -24,6 +24,33 @@ Gateway 在流式响应经过时提取真实 reasoning，并用稳定的消息/t
 Anthropic 方言回填 `content[]` 的 thinking block，且必须排在 tool use 前。
 OpenAI 方言回填 `reasoning_content`。
 
+## 2b. 尾部形状：同一个 400 文案的第二个来源
+
+那句 `must be passed back` **不完全等于**「历史推理没带回来」。2026-09-17 从
+两份 958KB 真实 dump（`err-400-req000412/req000464`）里定位到第二个来源：
+
+对话最后一条 user 消息的 `content` 是数组、里面**只有 `tool_result`、一个
+text 块都没有**。模型刚拿到一串工具输出，却没被告知「接着干什么」，DeepSeek
+的严格校验把这种「没有指令的尾部」误判成推理状态缺失，报的还是同一句话。
+
+判据（`repairTailShape`，modules/deepseek）：
+
+- 只看**最后一条**消息；
+- 必须是 `user`，`content` 是数组，且数组里没有 `type == "text"` 的块；
+- 命中就追一句用户口气的继续指令：
+
+  ```text
+  Continue from the tool results above. Call the next tool you need, or give your final answer.
+  ```
+
+只碰这一种形状。已经带文字的尾部、content 是普通字符串的尾部一律不动——
+多塞一句只会往用户的对话里加噪音。只在思考模式开着时做（`thinkingOn`）：
+关思考的后台小调用（分类器、起标题）根本不带这段历史，改了也没意义。
+
+两个来源的区别决定了排查姿势：**回填问题**看 thinkcache 命中与 `we-sent` 里
+的字段，**尾部形状问题**看 dump 里最后一条消息长什么样。两者报错文案相同，
+只有一个到不了上游校验那一层时才会暴露是谁。
+
 ## 3. 冷层
 
 内存 cache 支持快速查找，`thinkcache.bin` 保存重启后的冷层。冷层损坏时必须报告，

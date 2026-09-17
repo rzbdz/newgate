@@ -1476,9 +1476,9 @@ func (s *Server) writeShortCircuit(w http.ResponseWriter, _ *http.Request,
 	reqID uint64, plugin string, body []byte, note string) {
 	metrics.Default.Inc("special." + plugin + ".shortcircuit")
 	if note == "" {
-		note = "请求被 special 插件 " + plugin + " 短路"
+		note = "请求被 special 插件 " + plugin + " 短路（未调用上游）"
 	}
-	s.logf("[proxy] #%d %s（未调用上游，%d 字节）", reqID, note, len(body))
+	s.logf("[proxy] #%d %s（%d 字节）", reqID, note, len(body))
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Newgate-Route", "naked:"+plugin)
 	w.Header().Set("X-Newgate-Chain", plugin)
