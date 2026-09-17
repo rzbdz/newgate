@@ -1,0 +1,108 @@
+name: CI
+
+# 为什么要有这个文件
+#
+# 在这之前，`go test ./...`、`go vet`、`make static`、两条零 token 端到端
+# 全靠人记得跑。这个仓库的改动密度很高（一天里网关、组件框架、模块布局都
+# 可能同时动），靠记性守不住——尤其是端到端，它锁的正是「真实现场复现出来
+# 的那几条」，单测覆盖不到。
+#
+# 三档对应 docs/10-testing-security.md 的三层粒度：
+#
+#   static  格式 / vet / 生成清单 / 单测      —— 秒级，每次 push 都跑
+#   race    带竞态检测的单测                  —— 只跑并发相关包
+#   e2e     真二进制 + 假上游 + 假客户端      —— 零 token，覆盖真行为
+#
+# 需要真 token 的 `mock/e2e_reasoning_affinity.sh` **不在**这里：它会花真钱，
+# 只能人工按需跑。
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: 静态检查与单测
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # 跟 go.mod 走，不写死版本——否则升级 toolchain 时这里会静默落后。
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      - name: gofmt
+        run: make check-fmt
+
+      - name: vet
+        run: make vet
+
+      - name: 装配清单是否过期
+        run: make check-generate
+
+      - name: 单测
+        run: go test ./...
+
+  race:
+    name: 竞态检测
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - run: go test -race ./...
+
+  e2e:
+    name: 零 token 端到端
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      # 两条脚本的依赖：python3（假上游）、curl（打代理）、md5sum（逐字节还原校验）。
+      - name: 装依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3 curl coreutils
+
+      - name: 构建
+        run: make build
+
+      - name: opencode 侧端到端
+        run: bash ../mock/e2e.sh
+
+      - name: Claude Code 侧端到端
+        run: bash ../mock/e2e_claude.sh
+
+      # 失败时把沙箱日志带出来——脚本自己会清沙箱，所以只能靠它打到 stdout
+      # 的内容。这两步是兜底：把代理日志也捞一份，方便判断是网关行为变了
+      # 还是脚本环境不对。
+      - name: 失败时导出日志
+        if: failure()
+        run: |
+          for d in /tmp/newgate-e2e.* /tmp/newgate-claude-e2e.*; do
+            [ -d "$d" ] || continue
+            echo "=== $d ==="
+            find "$d" -name '*.log' -exec sh -c 'echo "--- {}"; tail -80 "{}"' \;
+          done

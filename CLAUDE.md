@@ -46,13 +46,28 @@ go vet ./... && gofmt -l component modules cmd
 | `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
 | `modules/cli` | CLI 组件与命令壳 | `newgate <动词>` |
 | `modules/<客户端或模型>` | Claude Code、DeepSeek、组合行为 | 新增可组合组件 |
+| `app`（在 `modules/` 之外） | 组合根：装配清单与 `App` 所有权对象 | 换默认装配 |
+| `tools/genmodules` | 构建期扫描 `modules/` 生成装配清单 | 改模块发现规则 |
+| `testing/{testkit,upstream,system}` | 测试设施：模块层起图、进程内假上游、系统层整图 | 加测试设施（不是产品代码） |
 
-除 `modules/builtin` 外，每个 `modules/<name>` 都必须在根目录
-提供唯一的 `module.go`，由它用 `New()` 直接返回 `component.Component`，并声明
-`Requires`、`Provides`、`Start` 和 `Stop`。注册型 capability 必须返回
-`component.Release`，consumer 在 `Stop` 中逆序释放。
-复杂实现可以拆文件或子包，但入口文件名和所在层级不能变化。
-公开 capability 和接口归组件自己的 `api/` 子包；禁止建立中心化 contracts 包。
+每个 `modules/<name>`（无例外）都必须在根目录提供唯一的 `module.go`，由它用
+`New()` 直接返回 `component.Component`，并声明 `Requires`、`Provides`、`Start`
+和 `Stop`。注册型 capability 必须返回 `component.Release`，consumer 在 `Stop`
+中逆序释放。复杂实现可以拆文件或子包，但入口文件名和所在层级不能变化。
+
+**公开 capability 和接口写在模块根目录的 `api.go`**（2026-09-17 起，不再用
+`<module>/api/` 子包）；禁止建立中心化 contracts 包。契约类型若实现方需要反向
+引用，定义下沉到实现包、根 `api.go` 做类型别名转发（见 `docs/03-architecture.md` §3）。
+
+**`Provides` 只放自己的 service。** 跨模块贡献一律走 owner service 上的
+`RegisterX() (Release, error)`；别做「既 provide 自己的 service、又 provide 别人的
+service」。端口不声明基数（没有 `One`/`Many`），需要唯一性由 owner 自己在注册
+逻辑里保证。
+
+**装配清单是构建期生成的**（`app/modules_gen.go`，由 `tools/genmodules` 扫描
+`modules/` 得到）：装一个模块 = 把目录复制进 `modules/`、重新编译。`make build`
+会自动重生成，`make check-generate` 只校验；`app` 里有一条测试跑它，拦住
+「加了模块忘了生成」的静默漏装配。
 
 档位阶梯（2026-09-16 四档化）：
 `heavy`(fable) > `normal`(opus，**主力**) > `mid`(sonnet) > `light`(haiku)，
@@ -63,10 +78,26 @@ go vet ./... && gofmt -l component modules cmd
 
 ## 2. 测试与验证
 
+- **四层粒度，谁都替不了谁**（`docs/10-testing-security.md` §1.1）。原则是
+  **测试跟着「谁知道这件事」走**：基础通用、不常改的功能（档位解析、字节手术、
+  转移、流式）做**大测试**；各模块自己的特殊行为放**模块内部**，只有它自己清楚
+  边界在哪：
+  - 单元：纯函数，不需要额外设施；
+  - 模块：`go/testing/testkit` —— `testkit.Start(t, 我, 桩...)` 装出「我 + 我的
+    依赖链」的真组件图，断言接口通过性和注册/撤销对称性；`testkit.Sandbox(t)`
+    圈住 `NEWGATE_HOME`/`NEWGATE_TARGET_DIR`/`HOME`；
+  - 系统：`go/testing/system` —— `system.Start(t)` 起**整张**真组件图 + 真转发
+    服务（**临时端口，不是 8899**，所以能和跑着的线上 daemon 并存）+ 进程内假
+    上游（`go/testing/upstream`，两方言 + 流式 + 严格 reasoning + 故障注入）。
+    不是 e2e：没有子进程、没有 PATH shim、没有真接管；
+  - 端到端：`mock/*.sh` —— 真二进制、真进程、真接管。**刻意与 Go 侧解耦**
+    （不 import 任何 core 包），所以 Go 怎么重构都不该影响它。它一红就是行为
+    真的变了。
+- **一把梭**：`cd go && make check`（格式 + vet + 生成清单 + 单测 + 两条零 token
+  端到端）。拆开：`make test` / `make test-race` / `make e2e` / `make e2e-claude`。
 - **单测不出网**（`docs/10-testing-security.md` §1）：一律用 `httptest`，出网即失败。
-- **端到端零 token**：`bash mock/e2e_claude.sh`（假上游 + 沙箱
-  `NEWGATE_HOME`，不碰真实配置）。改网关/插件行为后跑一遍，它锁的正是
-  真实现场复现出来的那几条。
+- **端到端零 token**：`make e2e-claude`（假上游 + 沙箱 `NEWGATE_HOME`，不碰真实
+  配置）。改网关/插件行为后跑一遍，它锁的正是真实现场复现出来的那几条。
 - **打真实上游验证**（几个 token）：利用 `/p/<profile>` 的**单次 profile
   覆盖**，不用切全局状态：
   ```bash
@@ -169,7 +200,7 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
 - **文档同步**：动了行为就改 `docs/`（`00-index.md` 有全表）。新机制写进
   `docs/09-extension-guide.md`，配置字段写进 `docs/04-configuration.md` / `docs/05-gateway.md`。
 - **模块的键不 hard-code 进 core**：客户端插件自带的东西（omo 的
-  sisyphus/librarian 槽位）由模块实现 `config/api.RoleProvider` 注册成动态角色
+  sisyphus/librarian 槽位）由模块实现 `config.RoleProvider` 注册成动态角色
   键（`domain.ExtraRole`），命名与缺省归属留在 `modules/opencodeomo`。
   core 只认「键 → 缺省绑定」这张表，解析路径与档位完全一样（引用展开，见
   `resolve.BuildChain`）。接一个新插件 = 新注册一个 Provider，core 不动。

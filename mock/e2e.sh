@@ -5,9 +5,11 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/go/bin/newgate"
-SANDBOX="$(mktemp -d /tmp/newgate-e2e.XXXXXX)"
-UP_PORT=18080
-PROXY_PORT=18899
+SANDBOX="${NEWGATE_E2E_SANDBOX:-$(mktemp -d /tmp/newgate-e2e.XXXXXX)}"
+# 端口可用环境变量覆盖：默认值互不冲突，好让人肉并行跑；CI 里同一台机器上
+# 并行跑两份时才需要显式岔开（不然两边抢同一个假上游端口）。
+UP_PORT="${NEWGATE_E2E_UP_PORT:-18080}"
+PROXY_PORT="${NEWGATE_E2E_PROXY_PORT:-18899}"
 
 PASS=0; FAIL=0
 ok()   { echo "  ✓ $1"; PASS=$((PASS+1)); }
