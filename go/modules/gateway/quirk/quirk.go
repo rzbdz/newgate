@@ -122,6 +122,17 @@ var signatures = []signature{{
 		"cannot be disabled", // deepseek: thinking options type cannot be disabled…
 		"does not support disabling thinking",
 		"thinking cannot be turned off",
+		// 2026-09-17 补：kimi。现场 dump/err-400-req000213、req000230
+		// （route: mid -> kimi/kimi-k2.7-code，Claude Code 的后台调用，
+		// thinking 字段本来没有，claudecode 的后台插件替它补了
+		// thinking:{"type":"disabled"}，上游回这句）。
+		//
+		// 加之前这句措辞**一条签名都不匹配**，所以 quirk 永远学不到它：
+		// 每一次后台调用都重新撞一遍 400。而这条路本来是和 GLM 1210 同一
+		// 个坑、同一个补丁（disabled → enabled + reasoning_effort:low），
+		// GLM 那边 2026-09-10 就学会了（日志 `#82 学到：smt-glm/glm-5.3-flash
+		// 该模型始终思考`），kimi 这边因为文案不同一直漏着。
+		"only type=enabled is allowed",
 	},
 	label: "该模型始终思考",
 }}
