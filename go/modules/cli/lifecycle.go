@@ -92,7 +92,7 @@ func Serve(service *service, port int) int {
 		port = watcher.Current().State.Port
 	}
 	// thinkcache 落盘冷层：daemon 重启后找回上一进程的推理内容。失败就降级
-	// 纯内存（补不回来的轮次用占位符兜底），落盘永远不反过来搞挂代理。
+	// 纯内存（重启前那几轮的原文找不回来了），落盘永远不反过来搞挂代理。
 	if err := thinkcache.AttachDisk(paths.ThinkCacheFile(), 100<<20); err != nil {
 		lg.Printf("thinkcache 落盘关闭（继续纯内存）: %v", err)
 	}

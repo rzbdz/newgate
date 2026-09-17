@@ -3,8 +3,12 @@ OUT      := $(CURDIR)/bin
 DIST     := $(CURDIR)/dist
 PREFIX   ?= $(HOME)/.local
 GITREV   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-BUILDTS  := $(shell date -u '+%Y-%m-%d_%H:%M:%SZ')
-COMMITTS := $(shell git log -1 --date=format:'%Y-%m-%d_%H:%M' --format=%cd 2>/dev/null || echo unknown)
+# 时间戳一律用**本地时区**（这台机器就是 UTC+8），并且带时区后缀。
+# 2026-09-18 之前 buildTime 走 `date -u`（UTC，结尾 Z）、commitTime 走 git 的本地
+# 时间，同一行里两个时区，看的人得自己换算。用户原话：「版本号时间统一改成
+# UTC+8，别搞两个时间了」。
+BUILDTS  := $(shell date '+%Y-%m-%d_%H:%M:%S%z')
+COMMITTS := $(shell git log -1 --date=format:'%Y-%m-%d_%H:%M:%S%z' --format=%cd 2>/dev/null || echo unknown)
 VERSION  := $(GITREV)
 GOFLAGS  := -trimpath
 LDFLAGS  := -s -w -X main.version=$(GITREV) -X main.buildTime=$(BUILDTS) -X main.commitTime=$(COMMITTS)

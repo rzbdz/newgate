@@ -27,6 +27,7 @@ import (
 // 修后：显式带 adaptive 的请求一个字节不碰；disabled 只补在「真没写
 // thinking」的请求上（分类器/起标题那类）。本测试锁住前者不回归。
 func TestCompactKeepsExplicitThinking(t *testing.T) {
+	isolate(t) // 不隔离就会读到线上 state.json：裸奔一开这里必红
 	var sent []byte
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent, _ = ioutil.ReadAll(r.Body)
@@ -87,6 +88,7 @@ func TestCompactKeepsExplicitThinking(t *testing.T) {
 // （分类器/起标题形态）仍补 disabled——修的是「强改显式意图」，不是「放弃
 // 禁思考」这条 intent。
 func TestBackgroundCallStillDisablesThinking(t *testing.T) {
+	isolate(t) // 不隔离就会读到线上 state.json：裸奔一开这里必红
 	var sent []byte
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent, _ = ioutil.ReadAll(r.Body)

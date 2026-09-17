@@ -80,7 +80,7 @@ func New(maxBytes int64, ttl time.Duration) *Cache {
 // 唯一入口。路径在 ~/.config/newgate/thinkcache.bin（见 paths.ThinkCacheFile）。
 //
 // 失败（没权限 / 磁盘不可写）就返回 err，调用方决定降级：继续纯内存，
-// 补不回来的轮次用占位符兜底——落盘永远不该反过来把代理搞挂。
+// 重启后那些轮次的推理原文就找不回来了——落盘永远不该反过来把代理搞挂。
 func AttachDisk(path string, maxBytes int64) error {
 	d, err := openDisk(path, maxBytes, Default.ttl)
 	if err != nil {

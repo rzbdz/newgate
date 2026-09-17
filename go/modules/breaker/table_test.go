@@ -115,6 +115,17 @@ func TestOpenStateSurvivesRestart(t *testing.T) {
 // health.json 没有 rule / state / open_until 这些新字段，新代码必须照样能读
 // ——文件名和键都不许改，就是为了这条。
 func TestLegacyHealthFileIsReadable(t *testing.T) {
+	// 时钟必须钉住，不能读真实时间。
+	//
+	// 现场（2026-09-18 发现）：这个 fixture 原先写死 opened_at=2026-09-17T15:40:00Z
+	// 又用 newTable()（真实时钟），于是**过了那天 15:41 之后这条测试必然变红**——
+	// 冷却（可用性 60s）早就到期，Available 按设计就该放行，断言「仍不可用」
+	// 自然不成立。测试在 2026-09-17T15:41:00Z 那一刻起就坏了，只是没人跑。
+	// 用 clocked()，并把 opened_at 放在**时钟当前时刻之前几十秒**：表达的是
+	// 「旧二进制几分钟前刚摘的牌，重启后得原样恢复」，这才是这条测试的本意。
+	b, _ := clocked()
+	openedAt := time.Date(2026, 9, 17, 11, 59, 30, 0, time.UTC).Format(time.RFC3339)
+
 	path := filepath.Join(t.TempDir(), "health.json")
 	legacy := `[
   {
@@ -126,8 +137,8 @@ func TestLegacyHealthFileIsReadable(t *testing.T) {
     "reason": "probe 失败：dial tcp: i/o timeout",
     "grade": "unavailable",
     "latency_ms": 0,
-    "checked_at": "2026-09-17T15:40:00Z",
-    "opened_at": "2026-09-17T15:40:00Z",
+    "checked_at": "` + openedAt + `",
+    "opened_at": "` + openedAt + `",
     "score_ms": 1200
   },
   {
@@ -140,7 +151,6 @@ func TestLegacyHealthFileIsReadable(t *testing.T) {
 	if err := writeFile(path, legacy); err != nil {
 		t.Fatal(err)
 	}
-	b := newTable()
 	if err := b.UseFile(path); err != nil {
 		t.Fatal(err)
 	}

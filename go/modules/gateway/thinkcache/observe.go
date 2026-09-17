@@ -3,6 +3,7 @@ package thinkcache
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -10,7 +11,8 @@ import (
 //
 // 严格只读：喂进来的字节原样是转发给客户端的那一份，Observer 不碰它、
 // 也不产生任何回写。转发的字节保真是硬约束（docs/01-product.md），这里只是搭个便车看
-// 一眼。看错了最坏的结果是这轮没缓存上，退回占位符。
+// 一眼。看错了最坏的结果是这轮没缓存上，下一轮那条消息补不上原文（插件
+// 不编内容，见 modules/deepseek/st-reasoning.go 文件头）。
 //
 // 用法：
 //
@@ -23,6 +25,19 @@ type Observer struct {
 	text    bytes.Buffer // 累积的正文（纯文本轮的 key 靠它）
 	toolIDs []string
 	seenID  map[string]bool
+
+	// ---- 计数（2026-09-18 加，只为日志取证）----
+	//
+	// 存在的理由：线上出现「上游没给推理内容」时，只看结果（推理字节数 0）
+	// 分不清是我们**没解析出来**还是上游**真没给**。用户的原话是「你他妈给我
+	// trace 出来」。这几个计数就是那份 trace：哪一方言、收了多少块、其中
+	// 多少个推理增量 / 正文增量、几个块连 JSON 都解析不了。
+	chunks       int
+	badChunks    int
+	reasonDeltas int
+	textDeltas   int
+	sawOpenAI    bool
+	sawAnthropic bool
 }
 
 func NewObserver() *Observer {
@@ -105,17 +120,23 @@ type sseChunk struct {
 func (o *Observer) feedChunk(payload []byte) {
 	var c sseChunk
 	if json.Unmarshal(payload, &c) != nil {
+		o.badChunks++
 		return // 不认识的形状：跳过，不是错
 	}
+	o.chunks++
 
 	for _, ch := range c.Choices { // OpenAI 方言
 		d := ch.Delta
+		o.sawOpenAI = true
 		if d.ReasoningContent != "" {
+			o.reasonDeltas++
 			o.reason.WriteString(d.ReasoningContent)
 		} else if d.Reasoning != "" {
+			o.reasonDeltas++
 			o.reason.WriteString(d.Reasoning)
 		}
 		if d.Content != "" {
+			o.textDeltas++
 			o.text.WriteString(d.Content)
 		}
 		for _, tc := range d.ToolCalls {
@@ -125,16 +146,26 @@ func (o *Observer) feedChunk(payload []byte) {
 
 	switch c.Type { // Anthropic 方言
 	case "content_block_start":
+		o.sawAnthropic = true
 		if c.ContentBlock.Type == "tool_use" {
 			o.addTool(c.ContentBlock.ID)
 		}
-		o.reason.WriteString(c.ContentBlock.Thinking)
-		o.text.WriteString(c.ContentBlock.Text)
+		if c.ContentBlock.Thinking != "" {
+			o.reasonDeltas++
+			o.reason.WriteString(c.ContentBlock.Thinking)
+		}
+		if c.ContentBlock.Text != "" {
+			o.textDeltas++
+			o.text.WriteString(c.ContentBlock.Text)
+		}
 	case "content_block_delta":
+		o.sawAnthropic = true
 		switch c.Delta.Type {
 		case "thinking_delta":
+			o.reasonDeltas++
 			o.reason.WriteString(c.Delta.Thinking)
 		case "text_delta":
+			o.textDeltas++
 			o.text.WriteString(c.Delta.Text)
 		}
 	}
@@ -197,6 +228,36 @@ func (o *Observer) ObserveBody(body []byte) {
 	}
 }
 
+// Wire 汇报这条响应**线路层**看到了什么，供日志取证。
+//
+// 一行说清「上游到底发了什么」：哪一方言、多少块、其中多少个推理增量。
+// 与 ReasoningBytes 配对看就能立刻分辨两件事：
+//
+//	Wire: 200 块 / 推理增量 0 / 正文增量 40   ⇒ 上游真的没发推理（请求侧的事）
+//	Wire: 0 块（全是坏块）/ …                  ⇒ 我们没解析出来（网关侧的事）
+//
+// 不打任何内容，只有计数和布尔。
+func (o *Observer) Wire() string {
+	if o == nil {
+		return "（没有观测者）"
+	}
+	dialect := "未知方言"
+	switch {
+	case o.sawAnthropic && o.sawOpenAI:
+		dialect = "两种混着"
+	case o.sawAnthropic:
+		dialect = "anthropic"
+	case o.sawOpenAI:
+		dialect = "openai"
+	}
+	s := fmt.Sprintf("%s %d 块 / 推理增量 %d / 正文增量 %d",
+		dialect, o.chunks, o.reasonDeltas, o.textDeltas)
+	if o.badChunks > 0 {
+		s += fmt.Sprintf(" / **%d 块解析不了**", o.badChunks)
+	}
+	return s
+}
+
 // Keys 这一轮的推理内容该挂在哪些 key 上。
 func (o *Observer) Keys() []string {
 	var keys []string
@@ -235,6 +296,30 @@ func (o *Observer) CommitWithOrigin(c *Cache, origin Origin) (nbytes, nkeys int)
 
 // Reasoning 观测到的推理内容（测试与非流式路径用）。
 func (o *Observer) Reasoning() string { return o.reason.String() }
+
+// ReasoningBytes 观测到的推理内容长度，不产生拷贝。
+//
+// 为什么要有它而不是 len(Reasoning())：调用点在转发循环里、每一条响应都跑，
+// 而推理内容动辄上百 KB——为了写一行日志把整段复制成 string 是白花的。
+func (o *Observer) ReasoningBytes() int {
+	if o == nil {
+		return 0
+	}
+	return o.reason.Len()
+}
+
+// ToolCalls 这一轮观测到的 tool call 个数（去重后）。
+//
+// 给日志用：上游一轮「有 tool call 却一个字节推理都没给」时，下一轮的补丁
+// 对这条消息**一条都补不上**（插件不编占位符），而**那是上游本来就没给，
+// 不是我们弄丢的**——这两件事的处置完全相反，日志必须能分开（见
+// modules/deepseek/st-reasoning.go 的 skipCause）。
+func (o *Observer) ToolCalls() int {
+	if o == nil {
+		return 0
+	}
+	return len(o.toolIDs)
+}
 
 // LooksLikeSSE 粗判一个 Content-Type 是不是事件流。
 func LooksLikeSSE(contentType string) bool {

@@ -331,16 +331,14 @@ func AppendLastArrayItemArray(body []byte, arrayKey, field string, rawVal []byte
 	return out, true, nil
 }
 
-// AppendArrayItemArrayAt 往顶层数组**第 itemIndex 个**对象元素的子数组末尾
-// 追加 rawVal（下标越界或那项不是对象 = 什么都不做）。
+// AppendArrayItemArrayAt 与 AppendLastArrayItemArray 同形，但按下标挑元素，
+// 而不是"从后往前找第一个 match 为真的"。
 //
-// 与 AppendLastArrayItemArray 的差别只在「挑谁」：那个只认数组的最后一项。需要
-// 按下标挑，是因为「最后一条 user 消息」**不一定**是数组的最后一项——Claude Code
-// 会在 tool_result 之后追加一条 role:"system" 的插话，数组最后一项是那条 system，
-// 而被上游拒掉的却是它前面那条只有 tool_result 的 user 轮（现场：
-// dump/err-400-req000464）。按下标挑而不是「从后往前找第一个合形状的」，是因为
-// 长历史里中段的 tool_result-only 轮到处都是，从后往前找会去改一条**不该动**的
-// 老消息。
+// 存在的理由（2026-09-17 现场，2026-09-18 复核）：deepseek 的尾部形状修复要锚
+// 在**最后一条 role:user 的消息**上，而下标可能不是数组最后一项——Claude Code
+// 会在 tool_result 之后追加一条 role:"system" 的插话，数组最后一项是那条
+// system。写成"从后往前找"在长历史里会去改一条中段的 tool_result-only 老消息
+// （那种轮次到处都是），把一句用户没说过的话塞进对话中段。
 func AppendArrayItemArrayAt(body []byte, arrayKey, field string, itemIndex int,
 	rawVal []byte) ([]byte, bool, error) {
 	s, e, err := findTopLevelValue(body, arrayKey)

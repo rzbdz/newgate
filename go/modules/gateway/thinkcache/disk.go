@@ -9,7 +9,7 @@ import (
 )
 
 // diskMagic 文件头：认出这是 thinkcache 的落盘文件。换记录格式时改这个
-// 字符串，旧文件会被当作空文件（冷启动，退回纯内存 + 占位符，不报错）。
+// 字符串，旧文件会被当作空文件（冷启动，退回纯内存，不报错）。
 var diskMagic = []byte("NGTC01\n")
 
 // DiskStore 三级缓存的落盘冷层：append-only 记录文件 + 内存索引（只存
@@ -18,7 +18,7 @@ var diskMagic = []byte("NGTC01\n")
 // best-effort，不是强一致存储：
 //   - 写走 os.File.Write + O_APPEND（进 OS page cache，不 fsync）。进程退出/
 //     重启不丢数据（page cache 仍归内核），只有整机掉电才丢最近几条——
-//     对「补不回来就用占位符兜底」的缓存够用；
+//     对「重启后尽力找回上一进程的推理原文」这个用途够用；
 //   - 超过 maxBytes*2 就整体重写一遍（丢过期项），磁盘占用封顶在 ~2×max
 //     附近，不会无限增长、不会占满盘（活数据本身超过 max 时无法再缩，只能
 //     由 TTL 兜住——8h 内真产不出 100MB 推理）。
