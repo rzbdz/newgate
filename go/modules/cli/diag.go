@@ -553,6 +553,8 @@ func metricHint(k string) string {
 		return "客户端主动取消"
 	case k == "breaker.opened":
 		return "熔断器打开，provider 暂时摘除"
+	case k == "breaker.skipped.shape_error":
+		return "请求形状错误（如 deepseek reasoning-400），跳过熔断记账"
 	case strings.HasPrefix(k, "special."):
 		if hint, ok := special.MetricHint(k); ok {
 			return hint

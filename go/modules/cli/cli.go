@@ -77,6 +77,7 @@ func usageText() string {
 
 	sec("探测与观测")
 	cmd("probe [profile]", "给候选打真实请求，出健康报告")
+	cmd("breaker", "哪些 binding 被摘牌了、为什么、多久了")
 	cmd("metrics", "代理计数器：拦截 / 超时 / 转移 / 改道")
 	cmd("doctor", "体检")
 	cmd("logs [N] [-f]", "代理日志：终端上分页，-f 持续跟随")
@@ -178,6 +179,8 @@ func run(service *service, args []string) int {
 		return cmdTier(args[1:])
 	case "probe":
 		return cmdProbe(arg(args, 1), has(args, "--json"))
+	case "breaker", "breakers":
+		return cmdBreaker()
 	case "metrics", "stat":
 		return cmdMetrics()
 	case "shim":

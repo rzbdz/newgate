@@ -29,6 +29,20 @@ URL 选择规则，避免“probe 绿但真实请求 404”。
 链上每个候选有独立健康观测。连接失败、允许转移的状态码或首字节超时会记录失败，
 再尝试下一候选。已开始向客户端写响应后不能换站。
 
+**记失败 ≠ 沿链走**：这是两条独立的策略。`health.ShouldAdvance` 决定要不要
+换下一个候选；`health.IsRequestShapeError` 决定这次失败要不要记进熔断器
+（`RecordFailure`）。二者不是同一个判据——2026-09-17 之前两者混在一起，
+DeepSeek 的「reasoning_content 必须逐字回传」400（同一份请求换哪个 provider
+都一样错，是**请求形状**问题，不是**可用性**问题）被当成可用性失败连续记两
+次就把整条 binding 摘掉，而 `newgate probe` 发的最小请求根本不带历史、不带
+`reasoning_content`，永远探不到这条校验，于是「probe 绿、真实流量被摘」。
+现在 `IsRequestShapeError` 把这类 400 排除在 `RecordFailure` 之外；其它
+4xx/5xx（401/403/404/408/409/429/5xx）行为不变，仍然记账。跳过的次数计在
+`breaker.skipped.shape_error`，被摘掉的 binding 详情用 `newgate breaker` 看。
+
+熔断解封只能靠探活证明恢复：`RecordSuccess`（真实流量成功）故意**不**解封，
+必须等 `RecordProbe` 且冷却期（60s）已过。
+
 Route headers 和日志记录实际 profile、链和最终 provider/model。Fallback 不得
 静默发生。
 

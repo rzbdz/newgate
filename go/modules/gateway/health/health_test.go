@@ -157,3 +157,62 @@ func TestTrafficScoresSurviveRestart(t *testing.T) {
 		t.Fatalf("traffic score did not survive restart: %+v", got)
 	}
 }
+
+// TestIsRequestShapeError 是请求形状错误 vs 可用性错误的策略闸门的回归测试。
+//
+// 这条函数被 forward.go:962 调用来决定"是否要 RecordFailure"。改这个函数
+// 等于改了"哪类上游反馈会熔断"，是行权点，**不能**靠推断改——下面的每条
+// 都是真上游响应文案的快照或同族。
+func TestIsRequestShapeError(t *testing.T) {
+	const realReasoning400 = `{"type":"error","message":"The ` + "`reasoning_content`" +
+		` in the thinking mode must be passed back to the API. (request id: 202609170712356080642648268d9d67Gf5hQWS)"}`
+	const thinkingBlock400 = `{"type":"error","message":"The ` + "`content[].thinking`" +
+		` in the thinking mode must be passed back to the API."}`
+
+	tests := []struct {
+		name string
+		body string
+		code int
+		want bool
+	}{
+		// 必须跳过（shape 错误）——
+		{"openai dialect reasoning_content 400", realReasoning400, 400, true},
+		{"anthropic dialect content[].thinking 400", thinkingBlock400, 400, true},
+
+		// 必须**不**跳过（真可用性问题）——
+		// 401 凭证：绕过去会以为是上游坏，其实是 key 错
+		{"401 unauthorized", `{"error":"missing api key"}`, 401, false},
+		// 403 权限：同上
+		{"403 forbidden", `{"error":"no quota"}`, 403, false},
+		// 404 该 provider 没这个模型：换一个能成
+		{"404 model not found", `{"error":"model unknown"}`, 404, false},
+		// 408/409/429 排队 / 限流 / 冲突：等一下或换一家
+		{"408 request timeout", `{"error":"timed out"}`, 408, false},
+		{"409 conflict", `{"error":"concurrent edit"}`, 409, false},
+		{"429 rate limit", `{"error":"slow down"}`, 429, false},
+		// 500/502/503/504 上游挂了：必须熔断
+		{"500 server error", `{"error":"internal"}`, 500, false},
+		{"502 bad gateway", `{"error":"upstream"}`, 502, false},
+		// 400 但不是 reasoning：换 provider 也修不好，但**仍**要记账——
+		// 否则 schema 错的上游（schema 不熟）永远摘不掉。这是反例：
+		// 400 + "must be passed" + 没 reasoning_content 字符串 → false。
+		{"400 unrelated (no reasoning_content)", `{"error":"bad parameter foo"}`, 400, false},
+		{"400 'must be passed' without reasoning_content",
+			`{"error":"the value must be passed as header"}`, 400, false},
+
+		// 边界：空 body、非 400
+		{"empty body", ``, 400, false},
+		{"400 with empty body", ``, 400, false},
+		{"401 with reasoning_content in body (key phrase elsewhere)",
+			`{"error":"unauthorized; see reasoning_content handling"}`, 401, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsRequestShapeError([]byte(tt.body), tt.code)
+			if got != tt.want {
+				t.Errorf("IsRequestShapeError(%q, %d) = %v, want %v",
+					tt.body, tt.code, got, tt.want)
+			}
+		})
+	}
+}

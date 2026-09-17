@@ -959,11 +959,17 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// 定案：把这个响应交给客户端
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
-			atomic.AddUint64(&s.failures, 1)
-
-			// 错误响应体一般不大，整个读出来当证据，再原样转给客户端
+			// 错误响应体一般不大，整个读出来当证据，再原样转给客户端。
+			// 必须**先**于 RecordFailure：reasoning-400 是请求形状问题，不该记
+			// 进熔断器（连续两发会把能用的 deepseek 摘掉，2026-09-17 实测）。
 			eb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 256*1024))
+			resp.Body.Close()
+			if !health.IsRequestShapeError(eb, resp.StatusCode) {
+				health.Default.RecordFailure(a.Binding.Provider, a.Binding.Model)
+				atomic.AddUint64(&s.failures, 1)
+			} else {
+				metrics.Default.Inc("breaker.skipped.shape_error")
+			}
 			base := s.saveErrEvidence(reqID, resp.StatusCode, body, newBody, eb,
 				r.Header, resp.Header, routeStr)
 			s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
@@ -1289,10 +1295,10 @@ func truncate(s string, n int) string {
 //
 // 这不是客户端的 schema 错误，而是我们（special/deepseek）补回去的思考内容
 // 被上游严格节点拒了——单独打点，别跟普通 400 混在一起。
+// isReasoningPassthroughError 是历史接口，外部仍可能在 grep；转发给 health 包
+// 的单一来源，让"是否算请求形状错误"这条策略只有一处可改。
 func isReasoningPassthroughError(upstreamBody []byte) bool {
-	s := string(upstreamBody)
-	return strings.Contains(s, "must be passed back") &&
-		(strings.Contains(s, "reasoning_content") || strings.Contains(s, "content[].thinking"))
+	return health.IsRequestShapeError(upstreamBody, 400)
 }
 
 func trim(s string) string {
