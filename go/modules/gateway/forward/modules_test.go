@@ -5,16 +5,16 @@ import (
 	"os"
 	"testing"
 
-	"github.com/rzbdz/newgate/go/modules/builtin"
+	"github.com/rzbdz/newgate/go/app"
 )
 
 func TestMain(m *testing.M) {
-	app, err := builtin.New(context.Background())
+	built, err := app.New(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	code := m.Run()
-	if err := app.Stop(context.Background()); err != nil && code == 0 {
+	if err := built.Stop(context.Background()); err != nil && code == 0 {
 		code = 1
 	}
 	os.Exit(code)

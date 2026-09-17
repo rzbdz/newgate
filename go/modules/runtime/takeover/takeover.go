@@ -30,7 +30,7 @@ import (
 	"sort"
 
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 	"github.com/rzbdz/newgate/go/modules/runtime/injection"
 )

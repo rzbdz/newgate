@@ -2,7 +2,7 @@
 // behavior. It must not import model-family modules.
 package claudecode
 
-import agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+import agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 
 const ID = "claude"
 

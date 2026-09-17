@@ -1,11 +1,13 @@
-package builtin
+package app
 
 import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/api"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+
+	cliapi "github.com/rzbdz/newgate/go/modules/cli"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
+	wrapperapi "github.com/rzbdz/newgate/go/modules/wrapper"
 )
 
 // App 是进程级组合根的所有权对象。
@@ -49,4 +51,10 @@ func (a *App) Names() []string { return a.catalog().Names() }
 // CLI 返回组件图中唯一的命令行入口。
 func (a *App) CLI() cliapi.CLI {
 	return modules.MustGet(a.manager.Context(), cliapi.Capability)
+}
+
+// Wrapper 返回 shim 接管入口。main 用它做 argv0 分发：被当成某个 client 调用
+// 时走它，否则走 CLI。
+func (a *App) Wrapper() wrapperapi.Wrapper {
+	return modules.MustGet(a.manager.Context(), wrapperapi.Capability)
 }

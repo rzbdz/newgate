@@ -8,43 +8,42 @@ import (
 	"sync"
 )
 
-// cardinality 把“一个实现”和“可组合的一组实现”放进同一套依赖图语义。
-// 它不是容器细节：single 会拒绝歧义提供者，many 则保留所有扩展贡献。
-type cardinality uint8
-
-const (
-	single cardinality = iota
-	many
-)
-
 // capabilitySpec 是 Capability 的运行时身份。泛型保证调用点类型安全，
 // 这份反射信息则让构图阶段能在启动任何组件前发现同名异型等配置错误。
 type capabilitySpec struct {
-	name        string
-	valueType   reflect.Type
-	cardinality cardinality
+	name      string
+	valueType reflect.Type
 }
 
 // Capability 是提供者与消费者共同引用的有类型端口身份。
 // 模块依赖这个端口而不是依赖具体实现，因此实现可以被替换、组合和独立测试。
+//
+// **端口不声明基数**。曾经有过 One/Many 之分（"只能有一个提供者" / "允许多个"），
+// 2026-09-17 取消：框架没法预知一个端口将来会有几个实现（cli 今天一个，
+// 明天就可能有第二个），"只能有一个"是使用者的约束，不是框架的约束，
+// 更不该在构图期把合法的装配判死。多提供者时 Get 取声明顺序里的第一个，
+// GetAll 取全部。
+//
+// 多样性更常见的表达方式不是"一个端口多个提供者"，而是 owner 在自己的
+// service 上开注册方法（见 Registry）：注册是运行期动作，有撤销、有查重、
+// 有生命周期；Provide 只是"这个端口由谁绑定"的静态声明。
 type Capability[T any] struct{ spec capabilitySpec }
 
-// One 声明只能有一个提供者的端口；重复提供会在构图阶段失败，避免隐式选边。
-func One[T any](name string) Capability[T] { return newCapability[T](name, single) }
-
-// Many 声明可由多个组件共同贡献的扩展点，读取顺序服从稳定的组件顺序。
-func Many[T any](name string) Capability[T] { return newCapability[T](name, many) }
-
-func newCapability[T any](name string, count cardinality) Capability[T] {
+// NewCapability 声明一个端口身份。名字是全局逻辑键：同名端口必须同型，
+// 否则构图阶段直接报错（见 validateSpec）。
+func NewCapability[T any](name string) Capability[T] {
 	return Capability[T]{spec: capabilitySpec{
-		name:        name,
-		valueType:   reflect.TypeOf((*T)(nil)).Elem(),
-		cardinality: count,
+		name:      name,
+		valueType: reflect.TypeOf((*T)(nil)).Elem(),
 	}}
 }
 
+// Name 返回端口的逻辑名。诊断输出和测试断言用；业务代码不该拿它做分支——
+// 那等于把类型安全换成字符串比较，正是 Capability 想避免的事。
+func Name[T any](capability Capability[T]) string { return capability.spec.name }
+
 // Requirement 描述组件启动前必须解析的端口，而不是保存服务实例。
-// optional 只放宽“没有提供者”的情况，不放宽端口类型或基数冲突。
+// optional 只放宽"没有提供者"这一种情况，端口类型仍然严格校验。
 type Requirement struct {
 	spec     capabilitySpec
 	optional bool
@@ -111,21 +110,19 @@ type Loader interface {
 // 它刻意不提供动态写入，防止运行期退化为 service locator。
 type Context struct{ values map[string][]any }
 
-// Get 读取 single 端口；布尔值让 Optional 的消费者显式处理缺失情况。
+// Get 读取一个端口；布尔值让调用方显式处理"没有提供者"的情况。
+// 多个提供者时返回声明顺序里的第一个——要全部请用 GetAll。
 func Get[T any](ctx Context, capability Capability[T]) (T, bool) {
-	if capability.spec.cardinality != single {
-		panic("component: Get called with many capability " + capability.spec.name)
-	}
 	var zero T
-	values := ctx.values[capability.spec.name]
-	if len(values) == 0 {
-		return zero, false
+	for _, value := range ctx.values[capability.spec.name] {
+		if typed, ok := value.(T); ok {
+			return typed, true
+		}
 	}
-	value, ok := values[0].(T)
-	return value, ok
+	return zero, false
 }
 
-// MustGet 读取已经由 Need 保证存在的 single 端口。
+// MustGet 读取已经由 Need 保证存在的端口。
 // 若声明与使用不一致则立即 panic，暴露组件自身的编程错误。
 func MustGet[T any](ctx Context, capability Capability[T]) T {
 	value, ok := Get(ctx, capability)
@@ -135,11 +132,9 @@ func MustGet[T any](ctx Context, capability Capability[T]) T {
 	return value
 }
 
-// GetAll 读取 many 端口的全部贡献，用于插件、命令等开放扩展点。
+// GetAll 读取端口的全部贡献，顺序与组件声明顺序一致，用于插件、命令这类
+// 开放扩展点。没有提供者时返回空切片而非 nil，调用方无需判空。
 func GetAll[T any](ctx Context, capability Capability[T]) []T {
-	if capability.spec.cardinality != many {
-		panic("component: GetAll called with single capability " + capability.spec.name)
-	}
 	values := ctx.values[capability.spec.name]
 	out := make([]T, 0, len(values))
 	for _, value := range values {
@@ -242,7 +237,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 }
 
 // resolve 在任何副作用发生前验证端口并生成稳定拓扑顺序。
-// 同序候选按原始声明位置排序，使 many 扩展点和诊断输出可复现。
+// 同序候选按原始声明位置排序，使扩展点和诊断输出可复现。
 func resolve(components []Component) ([]Component, map[string][]any, error) {
 	byName := make(map[string]int, len(components))
 	specs := make(map[string]capabilitySpec)
@@ -270,12 +265,6 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 			}
 			providers[provision.spec.name] = append(providers[provision.spec.name], i)
 			values[provision.spec.name] = append(values[provision.spec.name], provision.value)
-		}
-	}
-	for name, indexes := range providers {
-		if specs[name].cardinality == single && len(indexes) > 1 {
-			return nil, nil, fmt.Errorf("capability %s has multiple providers: %s",
-				name, componentList(components, indexes))
 		}
 	}
 
@@ -350,24 +339,20 @@ func isNil(value any) bool {
 	}
 }
 
+// validateSpec 保证同名端口处处同型。名字是全局逻辑键，若两个模块用同一个
+// 名字指代不同的东西，这里必须在启动任何组件之前失败，而不是等到某次 Get
+// 拿到一个类型断言失败的零值。
 func validateSpec(known map[string]capabilitySpec, spec capabilitySpec) error {
 	if spec.name == "" {
 		return fmt.Errorf("capability name is required")
 	}
 	if prior, ok := known[spec.name]; ok {
-		if prior.valueType != spec.valueType || prior.cardinality != spec.cardinality {
-			return fmt.Errorf("capability %s declared inconsistently", spec.name)
+		if prior.valueType != spec.valueType {
+			return fmt.Errorf("capability %s declared as %s and %s",
+				spec.name, prior.valueType, spec.valueType)
 		}
 		return nil
 	}
 	known[spec.name] = spec
 	return nil
-}
-
-func componentList(components []Component, indexes []int) string {
-	names := make([]string, 0, len(indexes))
-	for _, index := range indexes {
-		names = append(names, components[index].Name)
-	}
-	return fmt.Sprintf("%v", names)
 }

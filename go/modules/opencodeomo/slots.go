@@ -341,8 +341,8 @@ func variantShift(v string) int {
 type omoRolesProvider struct{}
 
 var (
-	_ roleprov.Provider      = (*omoRolesProvider)(nil)
-	_ roleprov.WatchProvider = (*omoRolesProvider)(nil)
+	_ roleprov.RoleProvider      = (*omoRolesProvider)(nil)
+	_ roleprov.RoleWatchProvider = (*omoRolesProvider)(nil)
 )
 
 func (omoRolesProvider) Source() string { return "omo" }

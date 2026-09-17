@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/go/modules/cli/style"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/runtime/injection"
 	"github.com/rzbdz/newgate/go/modules/runtime/takeover"
 )

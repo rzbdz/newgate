@@ -2,17 +2,15 @@ package confighook
 
 import (
 	"testing"
-
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook/api"
 )
 
 func TestRegistryReleaseRemovesOwnedExtensions(t *testing.T) {
 	registry := &registry{
-		agents: make(map[string]*agentapi.Agent),
+		agents: make(map[string]*Agent),
 		fields: make(map[string]string),
 		tokens: make(map[string]uint64),
 	}
-	releaseAgent, err := registry.RegisterAgent(&agentapi.Agent{ID: "test"})
+	releaseAgent, err := registry.RegisterAgent(&Agent{ID: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,11 +37,11 @@ func TestRegistryReleaseRemovesOwnedExtensions(t *testing.T) {
 
 func TestRegistryReturnsAgentCopy(t *testing.T) {
 	registry := &registry{
-		agents: make(map[string]*agentapi.Agent),
+		agents: make(map[string]*Agent),
 		fields: make(map[string]string),
 		tokens: make(map[string]uint64),
 	}
-	_, err := registry.RegisterAgent(&agentapi.Agent{
+	_, err := registry.RegisterAgent(&Agent{
 		ID:       "test",
 		Bin:      []string{"one"},
 		UnsetEnv: []string{"A"},

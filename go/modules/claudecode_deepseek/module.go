@@ -12,9 +12,9 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
-	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek/api"
-	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode"
+	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
 )
 
 // New 声明 Claude Code × DeepSeek 交叉组件。

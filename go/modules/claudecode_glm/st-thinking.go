@@ -3,10 +3,10 @@ package claudecode_glm
 import (
 	"fmt"
 
-	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
-	glmapi "github.com/rzbdz/newgate/go/modules/glm/api"
+	glmapi "github.com/rzbdz/newgate/go/modules/glm"
 )
 
 type thinking struct {

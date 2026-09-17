@@ -8,28 +8,58 @@
 func New() component.Component
 ```
 
-按需声明 `Requires`、`Provides`、`Start` 和 `Stop`。然后只在
-`modules/builtin/loader.go` 把组件加入默认图。
+按需声明 `Requires`、`Provides`、`Start` 和 `Stop`。**不需要改任何清单**：
+装配清单由 `go/tools/genmodules` 构建期扫描 `modules/` 生成，目录进来就自动
+在图上（判据：根 `module.go` 导出 `func New() modules.Component`）。
+`make build` 会自动重生成，`make check-generate` 只校验。
 
 ## 2. 新 capability
 
-Contract 放在 owner 的 `api/`：
+Contract 放在 owner 根目录的 `api.go`：
 
 ```go
 type Service interface {
     Do(context.Context) error
 }
 
-var Capability = component.One[Service]("owner.service")
+var Capability = component.NewCapability[Service]("owner.service")
 ```
 
 接口只包含 consumer 真正需要调用的行为。空 marker 不是 service；不要为了排序
 声明一个从不读取的 Requirement。
 
-## 3. Registry capability
+端口不声明基数：需要"只能有一个"就在 owner 的注册逻辑里保证，框架不拦多
+provider。
 
-注册 API 返回 `(component.Release, error)`。实现需要用 token 区分同名注册代际；
-consumer 在 Stop 中逆序释放。
+## 3. 跨模块贡献：一律走 register
+
+**`Provides` 只放自己的 service。** 要往别人的扩展点插东西，消费它的 service
+并调它的 `RegisterX()`：
+
+```go
+// owner 侧：service 上开注册方法
+type Service interface {
+    RegisterPlugin(Plugin) (component.Release, error)
+}
+
+// consumer 侧：Consume 别人的 service 来注入
+Requires: []component.Requirement{
+    component.Need(cliapi.Capability),
+},
+Start: func(_ context.Context, ctx component.Context) error {
+    cli := component.MustGet(ctx, cliapi.Capability)
+    release, err := cli.RegisterCommand(myCommand{})
+    if err != nil {
+        return err
+    }
+    releases = append(releases, release)
+    return nil
+},
+Stop: func(context.Context) error { return component.ReleaseAll(releases) },
+```
+
+注册 API 返回 `(component.Release, error)`，在写锁内做查重、冲突返回错误（不要
+静默先到先得）；consumer 在 `Stop` 中逆序释放。
 
 ## 4. 新 Agent
 

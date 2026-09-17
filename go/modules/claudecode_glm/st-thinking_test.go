@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 	"github.com/rzbdz/newgate/go/modules/glm"
-	glmapi "github.com/rzbdz/newgate/go/modules/glm/api"
+	glmapi "github.com/rzbdz/newgate/go/modules/glm"
 	thinkingmodule "github.com/rzbdz/newgate/go/modules/thinking"
 )
 

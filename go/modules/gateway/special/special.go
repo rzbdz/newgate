@@ -36,7 +36,6 @@ import (
 
 	modules "github.com/rzbdz/newgate/go/component"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
-	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 )
 
@@ -51,10 +50,29 @@ import (
 // 手动维护它：忘了维护就是「上游切了模型、下游拿旧模型做决定」的失真
 // （2026-09-09 实抓过一次）。其余字段（Provider/Tier/Stream/Agent…）来自
 // 路由和请求形态，不来自 body，链上不变。
-type Request = gatewayapi.Request
+//
+// 定义放在这里而不是 gateway 根，是因为这个契约属于**插件层**：
+// special 的实现要用它，插件作者也只用它。根 api.go 反过来别名它，
+// 这样 gateway 根能 import special，而 special 不必回头 import 根（会成环）。
+type Request struct {
+	InModel  string
+	Tier     string
+	Model    string
+	Provider string
+	BaseURL  string
+	Protocol string
+	Path     string
+	Stream   bool
+	Agent    string
+}
 
 // Plugin 是模块可以挂到请求处理链的 typed capability。
-type Plugin = gatewayapi.Plugin
+type Plugin interface {
+	Name() string
+	Why() string
+	Match(*Request) bool
+	Apply(body []byte, request *Request) (out []byte, notes []string, err error)
+}
 
 // ToolLoopMigrator 是可选的路由约束：某些上游不能原样接手别家尚未闭合的
 // reasoning/tool 状态，但可以在安全候选都失败后做一次显式的有损重建。

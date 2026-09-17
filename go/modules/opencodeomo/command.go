@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/api"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli"
 	"github.com/rzbdz/newgate/go/modules/cli/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"

@@ -8,9 +8,9 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode/api"
-	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway/api"
-	glmapi "github.com/rzbdz/newgate/go/modules/glm/api"
+	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode"
+	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
+	glmapi "github.com/rzbdz/newgate/go/modules/glm"
 )
 
 // New 声明 Claude Code × GLM 交叉组件，

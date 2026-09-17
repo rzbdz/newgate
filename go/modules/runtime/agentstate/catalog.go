@@ -3,7 +3,7 @@ package agentstate
 import (
 	"sync"
 
-	confighookapi "github.com/rzbdz/newgate/go/modules/confighook/api"
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
 var (
