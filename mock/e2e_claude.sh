@@ -36,9 +36,9 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/go/bin/newgate"
-SANDBOX="$(mktemp -d /tmp/newgate-claude-e2e.XXXXXX)"
-UP_PORT=18081
-PROXY_PORT=18898
+SANDBOX="${NEWGATE_E2E_SANDBOX:-$(mktemp -d /tmp/newgate-claude-e2e.XXXXXX)}"
+UP_PORT="${NEWGATE_E2E_UP_PORT:-18081}"
+PROXY_PORT="${NEWGATE_E2E_PROXY_PORT:-18898}"
 FAKEBIN="$SANDBOX/fakebin"
 
 PASS=0; FAIL=0
