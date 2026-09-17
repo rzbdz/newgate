@@ -13,6 +13,7 @@ import (
 var (
 	_ special.Plugin         = (*classifierNaked)(nil)
 	_ special.Responder      = (*classifierNaked)(nil)
+	_ special.NoteProvider   = (*classifierNaked)(nil)
 	_ special.StatusProvider = (*classifierNaked)(nil)
 	_ special.MetricProvider = (*classifierNaked)(nil)
 	_ special.Ordered        = (*classifierNaked)(nil)
@@ -24,17 +25,22 @@ var (
 const NakedConfigKey = "classifier_naked"
 
 // NakedConfig 是一次裸奔窗口的描述。CLI 构建/持久化，插件消费。
+//
+// **JSON 标签不能省**：`expires_at` 靠标签才对得上 `ExpiresAt`（Go 的默认
+// 字段名匹配忽略大小写但**不忽略下划线**）。少了标签，反序列化出来的
+// ExpiresAt 是零值，`time.Now().Before(zero)` 恒为 false → `on` 模式当场
+// 判定过期 → 裸奔**永远不生效**，而 status 那行会打出 `-2562047h…`
+// （time.Until 对零值溢出）。2026-09-17 上线后第一次实跑就撞上了。
 type NakedConfig struct {
-	Mode      string    // "on"（60s 自动过期）| "forever"
-	ExpiresAt time.Time // Mode=="on" 时这个窗口到哪一刻失效
+	Mode      string    `json:"mode"`       // "on"（自限窗口）| "forever"
+	ExpiresAt time.Time `json:"expires_at"` // Mode=="on" 时这个窗口到哪一刻失效
 }
 
-// Marshal 编成要写进 state.json 的字节。
+// Marshal 编成要写进 state.json 的字节。字段键名由结构体标签决定，
+// 与 ParseNakedConfig 共用同一份定义——两边各写一遍键名就是这类
+// 「写进去读不出来」bug 的温床。
 func (c NakedConfig) Marshal() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
-		"mode":       c.Mode,
-		"expires_at": c.ExpiresAt,
-	})
+	return json.Marshal(c)
 }
 
 // ParseNakedConfig 解析 state.json 里的裸奔配置。坏数据一律按「没开」处理
@@ -139,6 +145,23 @@ func (classifierNaked) Respond(body []byte, r *special.Request, state *domain.St
 		return nil, false
 	}
 	return out, true
+}
+
+// RespondNote 是写给日志那一行的说明：这一发为什么没走上游。
+//
+// 短路意味着「这一发上游调用**没发生**」——对一个排查「为什么没有分类器
+// 请求」的人来说，日志里只有 HTTP 200 是不够的，必须写清是谁替它回答的、
+// 以及这个决定还有多久自动失效。
+func (classifierNaked) RespondNote(state *domain.State) string {
+	cfg, active := ParseNakedConfig(state.ModuleConfig[NakedConfigKey])
+	if !active {
+		return "裸奔生效（配置刚被关掉）"
+	}
+	if cfg.Mode == "forever" {
+		return "[naked] forever 模式：分类器请求被直接批准，未调用上游"
+	}
+	return fmt.Sprintf("[naked] 分类器请求被直接批准，未调用上游（窗口还剩 %s）",
+		time.Until(cfg.ExpiresAt).Round(time.Second))
 }
 
 func (classifierNaked) Status(state *domain.State) []special.StatusItem {

@@ -67,15 +67,22 @@ func cmdBreaker() int {
 		fmt.Println()
 		fmt.Println(style.Section("只计数、没摘牌") +
 			style.Dim("   这些 binding 仍然在链上"))
-		t := style.NewTable("binding", "账本", "连续失败", "请求形状", "上次 probe")
+		t := style.NewTable("binding", "账本", "连续失败", "请求形状", "救回", "上次 probe")
 		for _, b := range counted {
 			t.Row(b.Provider+"/"+b.Model, ruleLabel(b),
-				fmt.Sprintf("%d", b.Fails), shapeLabel(b), probeLabel(b))
+				fmt.Sprintf("%d", b.Fails), shapeLabel(b), sparedLabel(b), probeLabel(b))
 		}
 		fmt.Print(t.String())
 	}
 
 	fmt.Println()
+	if spared := totalSpared(ps.Breakers); spared > 0 {
+		// 「救回」是这轮新增的可见面：上闸前那次诊断探活把 binding 从摘牌边缘
+		// 拉了回来。数字不回零（跨重启累计），所以它回答的是「这条链一共被
+		// 误判过几次」，而不是「现在还有几次没清」。
+		fmt.Println(style.Hint(fmt.Sprintf(
+			"诊断探活累计救回 %d 次：真实流量数到阈值、但主动探活证明它还通，计数清零未摘牌", spared)))
+	}
 	// 半开之后解封不再只有 probe 一条路：真实流量在冷却期满后会自动被放行
 	// 一次做试探，成了就合闸。probe 仍然是**立刻**改结论的手段。
 	fmt.Println(style.Hint("冷却到期后会放行一次真实请求作试探：成功即合闸，失败则回闸并把冷却翻倍（上限 10 分钟）"))
@@ -148,6 +155,23 @@ func shapeLabel(b breakerapi.Status) string {
 		return style.Dim("-")
 	}
 	return fmt.Sprintf("%d 次", b.ShapeSkips)
+}
+
+// sparedLabel 显示「差点被摘、被诊断探活救回来」的累计次数。
+func sparedLabel(b breakerapi.Status) string {
+	if b.Spared == 0 {
+		return style.Dim("-")
+	}
+	return style.Green(fmt.Sprintf("%d 次", b.Spared))
+}
+
+// totalSpared 汇总整张表的救回次数，供页脚那句话用。
+func totalSpared(rows []breakerapi.Status) int {
+	n := 0
+	for _, b := range rows {
+		n += b.Spared
+	}
+	return n
 }
 
 func agoLabel(at time.Time) string {

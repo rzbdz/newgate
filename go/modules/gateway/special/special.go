@@ -97,6 +97,16 @@ type Responder interface {
 	Respond(body []byte, request *Request, state *domain.State) (result []byte, ok bool)
 }
 
+// NoteProvider 是短路插件的可选搭档：给自己替上游回答的每一发写一句人类可读
+// 的说明。热路径把它原样写进日志行，因此**谁短路的、为什么**在日志里始终
+// 看得见（「不静默」在短路路径上的落点）。
+//
+// 为什么不由调用方拼这句话：只有插件自己知道这次判决意味着什么。热路径去
+// 猜（比如按插件名 if）会把插件私有知识搬回 core，正是这个仓库明令禁止的。
+type NoteProvider interface {
+	RespondNote(state *domain.State) string
+}
+
 // RoutePlugin 是 special 层在构链前的扩展点。插件只返回路由意图；如何校验
 // binding、构造 fallback 链仍由 resolve 负责。
 type RoutePlugin interface {
@@ -380,6 +390,21 @@ func Respond(body []byte, request *Request, state *domain.State) ([]byte, string
 		}
 	}
 	return nil, "", false
+}
+
+// RespondNote 问刚生效的短路插件「这一发意味着什么」，供调用方写进日志。
+// 插件没实现 NoteProvider（或已注销）就回空串，调用方照常打自己的日志。
+func RespondNote(name string, state *domain.State) string {
+	for _, p := range Plugins() {
+		if p.Name() != name {
+			continue
+		}
+		if provider, ok := p.(NoteProvider); ok {
+			return provider.RespondNote(state)
+		}
+		return ""
+	}
+	return ""
 }
 
 // Route 按注册顺序询问路由插件；第一个明确认领请求的决定生效。

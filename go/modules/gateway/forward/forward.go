@@ -732,7 +732,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// 分类器短路成批准。先于构链问：短路成功就没有「链」这回事了。热路径不
 	// 认识具体插件，只负责执行判决、留痕。
 	if resp, pluginName, short := special.Respond(body, req, st); short {
-		s.writeShortCircuit(w, r, reqID, pluginName, resp)
+		s.writeShortCircuit(w, r, reqID, pluginName, resp, special.RespondNote(pluginName, st))
 		return
 	}
 
@@ -1473,10 +1473,12 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 // 上游调用」同样在每一条观测带上留痕——这是「不静默」在短路路径上的落地：
 // 响应看得到，日志看得到，计数器看得到，用户永远知道这一发没走上游。
 func (s *Server) writeShortCircuit(w http.ResponseWriter, _ *http.Request,
-	reqID uint64, plugin string, body []byte) {
+	reqID uint64, plugin string, body []byte, note string) {
 	metrics.Default.Inc("special." + plugin + ".shortcircuit")
-	s.logf("[proxy] #%d 请求被 special 插件 %s 短路，未调用上游（%d 字节）",
-		reqID, plugin, len(body))
+	if note == "" {
+		note = "请求被 special 插件 " + plugin + " 短路"
+	}
+	s.logf("[proxy] #%d %s（未调用上游，%d 字节）", reqID, note, len(body))
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Newgate-Route", "naked:"+plugin)
 	w.Header().Set("X-Newgate-Chain", plugin)
