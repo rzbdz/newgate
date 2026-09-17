@@ -91,6 +91,9 @@ type Result struct {
 	Verdict
 	// Opened 这次失败把闸打开了。
 	Opened bool
+	// Spared 连续失败已经数到阈值，但**上闸前的诊断探活**证明这条 binding
+	// 仍然可用，于是没有摘牌、计数清零。见 Breaker.SetVerifier。
+	Spared bool
 }
 
 // Classify 是**唯一**的失败分类表。纯函数：同样的 Input 永远同样的 Verdict。

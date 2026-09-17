@@ -119,12 +119,74 @@ func (s *Server) logf(format string, a ...interface{}) {
 	}
 }
 
+// report 是数据面回报上游结局的唯一入口：一次 Report + 副作用记账 + 日志
+// 素材。四个调用点（连接失败、状态码、流中断、成功）都走它，免得某个点漏
+// 掉指标或日志。
+func (s *Server) report(provider, model string, in breaker.Input) breaker.Result {
+	res := s.Health.Report(provider, model, in)
+	switch {
+	case res.Opened:
+		metrics.Default.Inc("breaker.opened")
+	case res.Spared:
+		metrics.Default.Inc("breaker.spared")
+	}
+	return res
+}
+
+// verifyProbeAttempts / verifyProbeTimeout 是「上闸前诊断」的形状：连续打
+// 最多两次最小探活，**任一次 200 就算这条 binding 还活着**。
+//
+// 为什么是「任一成功」而不是「两次都成功」：要回答的问题是「它到底还能不能
+// 通」，一次成功就是确凿的能通；而一次失败可能只是排队/抖动。用户的原话是
+// 「就算间歇性能通也算」——这条路径要防的正是「明明能通却被摘牌」。
+//
+// 为什么超时刻意短：这是**替用户等**的时间。真实请求已经失败，用户正等
+// fallback；诊断再慢一点，就是拿一个已经不爽的请求去换一个更准的结论。
+// 8s 够打一个 max_tokens=4 的最小请求（正常上游是百毫秒级）。
+const (
+	verifyProbeAttempts = 2
+	verifyProbeTimeout  = 8 * time.Second
+)
+
+// verify 是注入给 breaker 的诊断函数（breaker.Breaker.SetVerifier）。
+//
+// 现场（2026-09-17 实测，日志与 health.json 都在）：smt-deepseek 被摘了好几次，
+// 每次 reason 都是「真实流量连续失败」，而每一次手动 `newgate probe` 都是
+// fluent——因为被动路径失败的是**首字节超时**（分类器那条链把 126KB 的 system
+// 塞进 12s 的紧预算），而 probe 发最小请求，压根碰不到那个边界。两种证据冲突
+// 时，主动、可控、可重复的那一个更硬；而摘牌的代价不对称（用户被悄悄换给别的
+// 模型、要等 60s 起的冷却），所以上闸前必须再要一次主动证据。
+//
+// fail-closed：拿不到 provider 配置、key 为空、探活报错，一律返回 false
+// ——诊断**不能**成为坏 binding 的免死金牌，它只该拦住误判。
+func (s *Server) verify(provider, model string) bool {
+	snap := s.snap()
+	if snap == nil || snap.Providers == nil {
+		return false
+	}
+	p, ok := snap.Providers.Providers[provider]
+	if !ok || p.Key() == "" {
+		return false
+	}
+	for i := 0; i < verifyProbeAttempts; i++ {
+		status, latency, err := probe.One(p, model, verifyProbeTimeout)
+		s.logf("[breaker] 上闸前诊断 %s/%s 第 %d/%d 次：HTTP %d %v（%s）",
+			provider, model, i+1, verifyProbeAttempts, status, err,
+			latency.Round(time.Millisecond))
+		if err == nil && status == 200 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) Start() error {
 	// 健康表的装载归 breaker 模块自己（它在 Start 里读 health.json）；这里只
 	// 提供日志出口。持久化失败必须说出来——健康状态不能静默丢失。
 	s.Health.SetErrorHandler(func(err error) {
 		s.logf("[breaker] 健康表读写失败（继续使用内存状态）: %v", err)
 	})
+	s.Health.SetVerifier(s.verify)
 	probe.LoadCachedCapabilities()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__newgate/status", s.handleStatus)
@@ -664,9 +726,17 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	toolOrigin, hasToolOrigin := thinkcache.Default.ContinuationOrigin(body)
 	// special 路由插件在常规解析前贡献结构化决策。热路径不知道具体插件名，
 	// 也不解释它为什么改道；档位、覆盖链头、超时和可观测性都由插件声明。
-	route, routed := special.Route(body, &special.Request{
-		InModel: inModel, Tier: norm, Stream: stream0, Agent: tgt.TaskCreate,
-	}, st)
+	req := &special.Request{InModel: inModel, Tier: norm, Stream: stream0, Agent: tgt.TaskCreate}
+	// special 短路器（special.Responder）：有的插件能**直接替上游回答**，一个
+	// 字节都不发——比如裸奔（modules/claudecode/classifier-naked.go）把 Bash
+	// 分类器短路成批准。先于构链问：短路成功就没有「链」这回事了。热路径不
+	// 认识具体插件，只负责执行判决、留痕。
+	if resp, pluginName, short := special.Respond(body, req, st); short {
+		s.writeShortCircuit(w, r, reqID, pluginName, resp)
+		return
+	}
+
+	route, routed := special.Route(body, req, st)
 	routeTier := ""
 	if routed {
 		routeTier = route.Tier
@@ -915,13 +985,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					metrics.Default.Inc("timeout.first_byte.non_stream")
 				}
 			}
-			res := s.Health.Report(a.Binding.Provider, a.Binding.Model, breaker.Input{
+			res := s.report(a.Binding.Provider, a.Binding.Model, breaker.Input{
 				Kind:   breaker.KindConnError,
 				IsLast: isLast,
 			})
-			if res.Opened {
-				metrics.Default.Inc("breaker.opened")
-			}
 			atomic.AddUint64(&s.failures, 1)
 			hint := ""
 			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
@@ -932,7 +999,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
 			}
 			s.logf("[proxy] #%d %s 连接失败: %v%s%s", reqID, routeStr, derr,
-				breakerNote(res.Opened, a.Binding.Provider), hint)
+				breakerNote(res, a.Binding.Provider), hint)
 			lastMsg, lastCode = fmt.Sprintf("上游 %s 连接失败: %v", a.Binding.Provider, derr), 502
 			trail = append(trail, fmt.Sprintf("%s(conn)", a.Binding))
 			if res.Verdict.Advance {
@@ -956,7 +1023,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// 摘掉。现在只有一处判据，且它是纯函数，能被穷举测完。
 			eb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 256*1024))
 			_ = resp.Body.Close()
-			res := s.Health.Report(a.Binding.Provider, a.Binding.Model, breaker.Input{
+			res := s.report(a.Binding.Provider, a.Binding.Model, breaker.Input{
 				Kind:          breaker.KindUpstreamStatus,
 				Status:        resp.StatusCode,
 				Body:          eb,
@@ -971,13 +1038,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			default:
 				atomic.AddUint64(&s.failures, 1)
 			}
-			if res.Opened {
-				metrics.Default.Inc("breaker.opened")
-			}
 			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
 			if res.Verdict.Advance {
 				s.logf("[proxy] %s -> %d%s  上游说: %s", routeStr, resp.StatusCode,
-					breakerNote(res.Opened, a.Binding.Provider), trim(string(eb)))
+					breakerNote(res, a.Binding.Provider), trim(string(eb)))
 				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
 				metrics.Default.Inc("chain.step_failed")
 				lastMsg, lastCode = trim(string(eb)), resp.StatusCode
@@ -1114,17 +1178,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					// 换不了站（写出去的东西收不回），但这是实打实的可用性
 					// 问题——以前这里只打一行日志，一个每次流到一半就断的上游
 					// 在熔断表上完全隐形。
-					res := s.Health.Report(a.Binding.Provider, a.Binding.Model, breaker.Input{
+					res := s.report(a.Binding.Provider, a.Binding.Model, breaker.Input{
 						Kind:    breaker.KindStreamTruncated,
 						Written: true,
 						IsLast:  isLast,
 					})
-					if res.Opened {
-						metrics.Default.Inc("breaker.opened")
-					}
 					s.logf("[proxy] #%d 上游断流（已转发 %d 块 / %d 字节）: %v%s",
 						reqID, chunks, bytesOut, rderr,
-						breakerNote(res.Opened, a.Binding.Provider))
+						breakerNote(res, a.Binding.Provider))
 				}
 				return
 			}
@@ -1301,9 +1362,14 @@ func fmtSkips(skips []resolve.Skip) string {
 	return strings.Join(parts, "; ")
 }
 
-func breakerNote(opened bool, prov string) string {
-	if opened {
+func breakerNote(res breaker.Result, prov string) string {
+	switch {
+	case res.Opened:
 		return fmt.Sprintf("  [熔断器已打开: %s 暂时摘掉]", prov)
+	case res.Spared:
+		// 差一点摘、被诊断探活拦下来。必须打出来：这解释了「日志里有失败、
+		// newgate breaker 里却没有它」这个会让人查错方向的组合。
+		return fmt.Sprintf("  [诊断探活证明 %s 仍然可用，未摘牌]", prov)
 	}
 	return ""
 }
@@ -1398,4 +1464,23 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.WriteHeader(code)
 	b, _ := json.MarshalIndent(v, "", "  ")
 	_, _ = w.Write(append(b, '\n'))
+}
+
+// writeShortCircuit 把 special.Responder 的回答作为本次请求的最终响应写出去。
+//
+// 短路插件返回的是**协议层响应体**（对 anthropic Messages 请求就是一个合法
+// messages JSON），这里补 HTTP 头、打日志、发 metric，让一次「根本没发出去的
+// 上游调用」同样在每一条观测带上留痕——这是「不静默」在短路路径上的落地：
+// 响应看得到，日志看得到，计数器看得到，用户永远知道这一发没走上游。
+func (s *Server) writeShortCircuit(w http.ResponseWriter, _ *http.Request,
+	reqID uint64, plugin string, body []byte) {
+	metrics.Default.Inc("special." + plugin + ".shortcircuit")
+	s.logf("[proxy] #%d 请求被 special 插件 %s 短路，未调用上游（%d 字节）",
+		reqID, plugin, len(body))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Newgate-Route", "naked:"+plugin)
+	w.Header().Set("X-Newgate-Chain", plugin)
+	w.Header().Set("X-Newgate-Profile", "n/a")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }

@@ -37,6 +37,7 @@ func (b *table) UseFile(path string) error {
 			fails:      s.Fails,
 			bucket:     bucketFromName(s.Rule),
 			shapeSkips: s.ShapeSkips,
+			spared:     s.Spared,
 			cooldown:   time.Duration(s.CooldownMs) * time.Millisecond,
 		}
 		if s.Fails > 0 && r.bucket == BucketNone {
@@ -120,6 +121,7 @@ func (b *table) persistLocked() {
 			s.Fails = r.fails
 			s.Rule = r.bucket.ruleName()
 			s.ShapeSkips = r.shapeSkips
+			s.Spared = r.spared
 			s.CooldownMs = r.cooldown.Milliseconds()
 			s.Reason = r.reason
 			s.State = r.state(b.now())

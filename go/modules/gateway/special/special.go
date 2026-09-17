@@ -82,6 +82,21 @@ type ToolLoopMigrator interface {
 	RebaseToolLoop(body []byte, candidate *Request) ([]byte, string, error)
 }
 
+// Responder 是插件在构链/转发前的短路点：**直接替上游回答**，一个字节都不发
+// 出去。返回 (result, true) 表示这条请求由插件定案；返回 false 走正常转发。
+//
+// 它与 Apply 的区别：Apply 改请求，Responder 造响应 —— 前者让请求「变成」另一
+// 份请求，后者让请求「不用发」了。短路器要自己负责响应的**完整 HTTP/协议语义**
+// （对 anthropic Messages 请求就要回一个合法的 messages 响应），调用方只负责写
+// 头和打日志。
+//
+// 端点左侧不写死任何上游专有字符串：认不认得出「这是分类器」是具体插件的事
+// （见 modules/claudecode/classifier-naked.go）。fail-open：插件 panic 就当它没
+// 跑，走正常转发。
+type Responder interface {
+	Respond(body []byte, request *Request, state *domain.State) (result []byte, ok bool)
+}
+
 // RoutePlugin 是 special 层在构链前的扩展点。插件只返回路由意图；如何校验
 // binding、构造 fallback 链仍由 resolve 负责。
 type RoutePlugin interface {
@@ -336,6 +351,35 @@ func Plugins() []Plugin {
 	out := make([]Plugin, len(registry.plugins))
 	copy(out, registry.plugins)
 	return out
+}
+
+// Respond 按注册顺序询问短路插件；第一个能直接替上游回答的生效。
+// 返回 (响应体, 生效插件名, ok)。
+func Respond(body []byte, request *Request, state *domain.State) ([]byte, string, bool) {
+	if state == nil || !state.SpecialEnabled() {
+		return nil, "", false
+	}
+	for _, p := range Plugins() {
+		if state.SpecialPluginOff(p.Name()) {
+			continue
+		}
+		responder, is := p.(Responder)
+		if !is {
+			continue
+		}
+		var out []byte
+		var matched bool
+		func() {
+			// fail-open：插件 panic 就当它没跑。短路器替用户做决定，绝不能让
+			// 一个坏插件把整条链的回答也夺走。
+			defer func() { _ = recover() }()
+			out, matched = responder.Respond(body, request, state)
+		}()
+		if matched {
+			return out, p.Name(), true
+		}
+	}
+	return nil, "", false
 }
 
 // Route 按注册顺序询问路由插件；第一个明确认领请求的决定生效。

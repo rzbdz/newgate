@@ -75,6 +75,9 @@ type Status struct {
 	// Rank 是 daemon 算好的排序键（按 ≤4K 档位）。CLI 直接用它，不再自己
 	// 重算 3000/12000 那套阈值——策略只有一个来源。
 	Rank int `json:"rank,omitempty"`
+	// Spared 上闸前那一次诊断探活把这条 binding 救回来了（差一点摘、结果
+	// 探活证明它还通）。数字为累计次数，跨重启保留。
+	Spared int `json:"spared,omitempty"`
 }
 
 // Breaker 是健康表端口。数据面只读前两项、只写 Report/ObserveSuccess；
@@ -108,6 +111,21 @@ type Breaker interface {
 	UseFile(path string) error
 	// SetErrorHandler 注入持久化错误出口；健康状态不能因写盘失败而静默丢失。
 	SetErrorHandler(func(error))
+
+	// SetVerifier 注入「上闸前的最后一次诊断」。
+	//
+	// 连续失败数到达阈值时先别摘：调这个函数做几次主动探活，探活说它还通就
+	// 不摘、计数清零。理由是真实现场（2026-09-17）：smt-deepseek 被摘了
+	// 很多次，每次 `newgate probe` 都是 fluent——因为真实流量失败的是
+	// **第一字节超时**（分类器那条链把 126KB 的 system 塞进 12s 的紧预算），
+	// 而探活发的是最小请求，永远探不到这个边界。两者的结论不一致时，谁的
+	// 证据更硬？探活是**主动、可控、可重复**的，被动流量则是单点、受上下文
+	// 尺寸和排队影响的。摘牌会让用户被悄悄换给别的模型，代价不对称，所以
+	// 上闸前必须再要一次主动证据。
+	//
+	// 返回 true = 这条 binding 仍然可用（不摘）；false = 确认不可用（照摘）。
+	// nil（默认）＝不做这一步，行为与以前完全一致。
+	SetVerifier(func(provider, model string) bool)
 }
 
 // Capability 是健康表在组件图里的身份。

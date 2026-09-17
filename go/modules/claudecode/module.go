@@ -45,6 +45,11 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, release)
+			release, err = config.RegisterStateField("claudecode", "classifier_naked")
+			if err != nil {
+				return err
+			}
+			releases = append(releases, release)
 			gateway := modules.MustGet(ctx, gatewayapi.Capability)
 			thinking := modules.MustGet(ctx, thinkingapi.Capability)
 			for _, treatment := range Treatments(thinking) {
@@ -54,6 +59,11 @@ func New() modules.Component {
 				}
 				releases = append(releases, release)
 			}
+			release, err = gateway.RegisterRequestHook(classifierNaked{})
+			if err != nil {
+				return err
+			}
+			releases = append(releases, release)
 			return nil
 		},
 		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },

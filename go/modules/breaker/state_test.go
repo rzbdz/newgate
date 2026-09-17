@@ -2,6 +2,7 @@ package breaker
 
 import (
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -355,5 +356,146 @@ func TestConcurrentAvailableGrantsOneTrial(t *testing.T) {
 	wg.Wait()
 	if granted != 1 {
 		t.Fatalf("%d 个并发请求里有 %d 个拿到试探名额，应恰好 1 个", n, granted)
+	}
+}
+
+// TestPreSealDiagnosticSparesAHealthyBinding 是 2026-09-17 现场的直接回归：
+// smt-deepseek 被真实流量的**首字节超时**连续数到阈值摘掉，而每次
+// `newgate probe` 都是 fluent。上闸前必须再要一次主动证据。
+func TestPreSealDiagnosticSparesAHealthyBinding(t *testing.T) {
+	b, _ := clocked()
+	calls := 0
+	b.SetVerifier(func(provider, model string) bool {
+		calls++
+		if provider != "p" || model != "m" {
+			t.Fatalf("诊断探活问错了 binding: %s/%s", provider, model)
+		}
+		return true // 探活说它还通
+	})
+
+	connFail(b, "p", "m")
+	r := connFail(b, "p", "m") // 数到阈值
+	if r.Opened {
+		t.Fatal("诊断探活说可用，却还是摘了")
+	}
+	if !r.Spared {
+		t.Fatal("应该报 spared")
+	}
+	if calls != 1 {
+		t.Fatalf("诊断探活跑了 %d 次，应恰好 1 次", calls)
+	}
+	if !b.Available("p", "m") {
+		t.Fatal("被救回来的 binding 却不在链上")
+	}
+	got := state(t, b, "p", "m")
+	if got.Fails != 0 || got.Spared != 1 || got.Open || got.State != "closed" {
+		t.Fatalf("救回来之后账本不对: %+v", got)
+	}
+	if got.Reason == "" {
+		t.Fatal("救回来的原因要留在快照里（不静默）")
+	}
+
+	// 计数清零的**意义**：下一次失败要重新从 1 开始数，而不是一上来又到阈值
+	// 再探一次——否则一条间歇性抖动的 binding 会每个请求都探活一次。
+	connFail(b, "p", "m")
+	if calls != 1 {
+		t.Fatalf("计数没有清零，又探了一次（第 %d 次）", calls)
+	}
+
+	// 诊断改口说不可用：第二次到达阈值就必须真摘。
+	b.SetVerifier(func(string, string) bool { calls++; return false })
+	if r := connFail(b, "p", "m"); !r.Opened || r.Spared {
+		t.Fatalf("诊断说不可用却没摘: %+v", r)
+	}
+	if calls != 2 {
+		t.Fatalf("诊断应只在到达阈值时各跑一次，实际 %d 次", calls)
+	}
+}
+
+// TestPreSealDiagnosticSealsWhenProbeAlsoFails：诊断说不可用就照摘，理由里
+// 要能看出「这次是双重证据」，好和「纯被动流量摘的」区分开。
+func TestPreSealDiagnosticSealsWhenProbeAlsoFails(t *testing.T) {
+	b, _ := clocked()
+	b.SetVerifier(func(string, string) bool { return false })
+	connFail(b, "p", "m")
+	if r := connFail(b, "p", "m"); !r.Opened || r.Spared {
+		t.Fatalf("诊断说不可用却没摘: %+v", r)
+	}
+	got := state(t, b, "p", "m")
+	if got.State != "open" || !strings.Contains(got.Reason, "诊断探活也不通") {
+		t.Fatalf("开闸原因应写明诊断结论: %+v", got)
+	}
+}
+
+// TestPreSealDiagnosticRunsOnceForConcurrentFailures：并发失败只该探活一次。
+func TestPreSealDiagnosticRunsOnceForConcurrentFailures(t *testing.T) {
+	b := newTable()
+	b.SetPolicy(Policy{Rules: map[Bucket]Rule{
+		BucketAvailability: {Threshold: 1, Cooldown: time.Minute},
+	}})
+	var mu sync.Mutex
+	calls := 0
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	b.SetVerifier(func(string, string) bool {
+		mu.Lock()
+		calls++
+		first := calls == 1
+		mu.Unlock()
+		if first {
+			entered <- struct{}{}
+			<-release // 卡住第一个诊断，让后面的失败都撞进 verifying
+		}
+		return true
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); connFail(b, "p", "m") }()
+	<-entered
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); connFail(b, "p", "m") }()
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("并发失败触发了 %d 次诊断探活，应恰好 1 次", calls)
+	}
+}
+
+// TestHalfOpenTrialFailureSkipsDiagnostic：半开试探失败是**主动**证据，不该
+// 再要一次诊断——那只会拖长坏上游的隔离。
+func TestHalfOpenTrialFailureSkipsDiagnostic(t *testing.T) {
+	b, advance := clocked()
+	calls := 0
+	b.SetVerifier(func(string, string) bool { calls++; return true })
+
+	connFail(b, "p", "m")
+	connFail(b, "p", "m") // 这次会诊断（结果说健康 → 不摘）
+	if calls != 1 {
+		t.Fatalf("第一次到阈值应诊断一次，实际 %d", calls)
+	}
+
+	// 让这条 binding 真的被摘掉（诊断改口说不可用），再等冷却放行试探。
+	b.SetVerifier(func(string, string) bool { calls++; return false })
+	connFail(b, "p", "m")
+	if r := connFail(b, "p", "m"); !r.Opened {
+		t.Fatal("诊断说不可用却没摘")
+	}
+	before := calls
+	advance(time.Minute)
+	if !b.Available("p", "m") {
+		t.Fatal("冷却到期没有放行试探")
+	}
+	if r := connFail(b, "p", "m"); !r.Opened {
+		t.Fatal("半开试探失败没有立刻回闸")
+	}
+	if calls != before {
+		t.Fatalf("半开试探失败不该再要诊断（多了 %d 次）", calls-before)
 	}
 }
