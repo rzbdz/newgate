@@ -493,15 +493,31 @@ func TestCountTokens(t *testing.T) {
 	}
 }
 
-// ---- 严格口径 ----
+// ---- 尾部形状口径 ----
 
-// TestStrictReasoning 是 e2e 最重要那条判据的自检：**先证明假上游真的会拦**
-// （前几条必须 400），再证明补齐推理之后放行（后几条必须 200）。顺序有意如此
-// ——反过来的话，一个从不校验的假上游也能让所有用例「通过」。
-func TestStrictReasoning(t *testing.T) {
+// TestStrictTailShape 是这套假上游最重要那条判据的自检：**先证明它真的会拦**，
+// 再证明它**只**按形状拦。2026-09-18 按实测重写——原来的实现照抄官方文档口径
+// （「每条 assistant 都得回传非空推理」），那条口径在真实上游上不成立。
+//
+// 实测（打真实 smt-deepseek/deepseek-flash，每格 3/3）：
+//
+//	最后一条 user 消息的 content[] 全是 tool_result 块   → 400
+//	同一个 content[] 里多一个非空 text 块（一个空格就够） → 200
+//
+// 而 reasoning_content 是真实原文、省略、空串还是占位符，**对结果毫无影响**。
+// 下面「放行」组里那两条带完整推理、尾部合规的用例，和「拦截」组里那条带完整
+// 推理、尾部不合规的用例，就是这件事的两半——它们互为对照，缺一条就退化成
+// 「反正都能过」。
+func TestStrictTailShape(t *testing.T) {
 	const tools = `"tools":[{"name":"Read","input_schema":{"type":"object"}}]`
 	const thinkingOn = `"thinking":{"type":"enabled","budget_tokens":1024}`
 	const toolUse = `{"type":"tool_use","id":"toolu_x","name":"Read","input":{}}`
+	const tr = `{"type":"tool_result","tool_use_id":"toolu_x","content":"ok"}`
+	// 头部：普通一问一答之后再调一次工具，尾部由各用例自己接。
+	const head = `{"model":"deepseek-chat",`
+	const pre = `"messages":[{"role":"user","content":"跑一下"},{"role":"assistant","content":[` + toolUse + `]},`
+	// 完整推理原文：用来证明它既救不了不合规的尾部，也不影响合规的尾部。
+	const reason = `"reasoning_content":"这一轮的真实推理原文"`
 
 	for _, tc := range []struct {
 		name string
@@ -509,90 +525,121 @@ func TestStrictReasoning(t *testing.T) {
 		body string
 		want int
 	}{
+		// ---- 拦下：尾部形状不合规 ----
 		{
-			// Claude Code 把 thinking 块剥掉之后的现场：两条判据都是空的
-			name: "带 tools + 思考开 + assistant 只剩 tool_use",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"assistant","content":[` + toolUse + `]}]}`,
+			name: "尾部只有 tool_result（Claude Code 主循环的标准形状）",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr + `]}]}`,
 			want: http.StatusBadRequest,
 		},
 		{
-			// 空串等于没回传——e2e 第 6 章专抓这一条（补占位符时补成空串
-			// 的实现会在这里露馅）
-			name: "reasoning_content 是空串",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"assistant","reasoning_content":"","content":[` + toolUse + `]}]}`,
+			// 这一段是全套里最反直觉的一条：推理**已经在**，而且是真实原文，
+			// 上游照样 400。它证明报错文案在撒谎。
+			name: "尾部只有 tool_result，但推理原文完整——照样拦",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr + `]}]}` + ``,
 			want: http.StatusBadRequest,
 		},
 		{
-			name: "reasoning_content 只有空白",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"assistant","reasoning_content":"  \n\t","content":[` + toolUse + `]}]}`,
+			name: "尾部两个 tool_result（并行工具轮）",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr +
+				`,{"type":"tool_result","tool_use_id":"toolu_y","content":"ok2"}]}]}`,
 			want: http.StatusBadRequest,
 		},
 		{
-			name: "content[] 里的 thinking 块是空文本",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":""},` + toolUse + `]}]}`,
+			name: "尾部只有 tool_result，后面跟一条 role:system 插话——照样拦",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr + `]},` +
+				`{"role":"system","content":[{"type":"text","text":"用户插了一句话"}]}]}`,
 			want: http.StatusBadRequest,
 		},
 		{
-			name: "assistant 的 content 是普通字符串、没有推理",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"assistant","content":"好的"}]}`,
+			name: "thinking: disabled 也拦（与思考开关无关）",
+			body: head + `"thinking":{"type":"disabled"},` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr + `]}]}`,
 			want: http.StatusBadRequest,
 		},
 		{
-			name: "没带 thinking 字段（国模缺省就是思考）也算开着",
-			body: `{"model":"deepseek-chat",` + tools +
-				`,"messages":[{"role":"assistant","content":[` + toolUse + `]}]}`,
-			want: http.StatusBadRequest,
-		},
-		{
-			// openai 方言（聚合器 /v1/chat/completions）同一个口径
-			name: "openai 方言同样严格",
-			path: "/v1/chat/completions",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"assistant","content":"好的"}]}`,
+			name: "不带 tools 也拦（与 tools 无关）",
+			body: head + thinkingOn + `,` + pre +
+				`{"role":"user","content":[` + tr + `]}]}`,
 			want: http.StatusBadRequest,
 		},
 
+		// ---- 放行：尾部形状合规 ----
 		{
-			// 放行路一：openai 方言的 reasoning_content 字段
-			name: "补齐非空 reasoning_content",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"assistant","reasoning_content":"缓存里的原文","content":[` + toolUse + `]}]}`,
+			name: "尾部 tool_result + 文字（同一个请求体只多一个块）",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr + `,{"type":"text","text":"继续"}]}]}`,
 			want: http.StatusOK,
 		},
 		{
-			// 放行路二：anthropic 方言 content[] 里的 thinking 块
-			name: "补齐非空 thinking 块",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"缓存里的原文"},` + toolUse + `]}]}`,
+			name: "尾部 tool_result + 一个空格的文字——空格就够",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr + `,{"type":"text","text":" "}]}]}`,
 			want: http.StatusOK,
 		},
 		{
-			name: "thinking: disabled 就不校验了",
-			body: `{"model":"deepseek-chat","thinking":{"type":"disabled"},` + tools +
-				`,"messages":[{"role":"assistant","content":[` + toolUse + `]}]}`,
+			name: "尾部 tool_result + image（非 text 的块也算有指令）",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr +
+				`,{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}`,
 			want: http.StatusOK,
 		},
 		{
-			name: "没带 tools 时不校验",
-			body: `{"model":"deepseek-chat",` + thinkingOn +
-				`,"messages":[{"role":"assistant","content":[` + toolUse + `]}]}`,
+			name: "尾部只有 image",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}`,
 			want: http.StatusOK,
 		},
 		{
-			name: "tools 是空数组（python 里空列表 falsy）",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,"tools":[],` +
+			// 已知**修不好**的一族：尾部 user 是 tool_result-only，但数组以
+			// assistant 收尾。它照样 400，而且往那个 user 轮追加指令**也没用**
+			// （实测 3/3 还是 400），所以 deepseek 插件故意不碰它——塞一句没有
+			// 效果的噪音比 400 更糟。真实客户端到不了这个形状（Claude Code 要么
+			// 以 tool_result 收尾等模型接着干，要么以文字收尾）。
+			name: "尾部 user 是 tool_result、数组以 assistant 收尾（修不好的一族）",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[` + tr + `]},` +
+				`{"role":"assistant","content":[{"type":"text","text":"说完了"}]}]}`,
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "尾部是普通 user 文字",
+			body: head + thinkingOn + `,` + tools + `,` + pre +
+				`{"role":"user","content":[{"type":"text","text":"再来一个"}]}]}`,
+			want: http.StatusOK,
+		},
+		{
+			name: "user 消息的 content 是普通字符串",
+			body: head + thinkingOn + `,` + tools + `,` +
+				`"messages":[{"role":"user","content":"纯文本"}]}`,
+			want: http.StatusOK,
+		},
+		{
+			name: "没有 user 消息",
+			body: head + thinkingOn + `,` + tools + `,` +
 				`"messages":[{"role":"assistant","content":[` + toolUse + `]}]}`,
 			want: http.StatusOK,
 		},
 		{
-			name: "只管 assistant：user 消息没有推理不算",
-			body: `{"model":"deepseek-chat",` + thinkingOn + `,` + tools +
-				`,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_x","content":"ok"}]}]}`,
+			// openai 方言的续轮是 role:tool 收尾，最后一条 user 是老早那条
+			// 字符串消息——这条口径天然不管它。实测同为 200。
+			name: "openai 方言：role:tool 收尾",
+			path: "/v1/chat/completions",
+			body: head + thinkingOn + `,` + tools +
+				`,"messages":[{"role":"user","content":"跑一下"},` +
+				`{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"Read","arguments":"{}"}}]},` +
+				`{"role":"tool","tool_call_id":"c1","content":"ok"}]}`,
+			want: http.StatusOK,
+		},
+		{
+			name: "合规尾部 + 推理原文完整（对照上面那条「照样拦」）",
+			body: head + thinkingOn + `,` + tools + `,` +
+				`"messages":[{"role":"user","content":"跑一下"},` +
+				`{"role":"assistant",` + reason + `,"content":[` + toolUse + `]},` +
+				`{"role":"user","content":[` + tr + `,{"type":"text","text":"继续"}]}]}`,
 			want: http.StatusOK,
 		},
 	} {

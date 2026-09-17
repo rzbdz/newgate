@@ -8,30 +8,31 @@ import (
 	"github.com/rzbdz/newgate/go/testing/system"
 )
 
-// strictReasoningBody 造一发**会被假上游按严格口径拒掉**的请求，也就是线上那条
+// strictReasoningBody 造一发**会被假上游按实测口径拒掉**的请求，也就是线上那条
 // 「reasoning_content must be passed back」400 的真形态。
 //
-// 三个条件缺一不可（判据在 testing/upstream/dialect.go 的 strictReasoningViolation，
-// 它是 mock/fake_upstream.py 的逐字替身）：
+// 判据是**尾部形状**（2026-09-18 按实测重写；判据本体在 testing/upstream/dialect.go
+// 的 strictReasoningViolation，它是 mock/fake_upstream.py 的逐字替身）：
 //
-//   - 带 tools；
-//   - 没有显式 thinking:{"type":"disabled"}，也就是思考是开着的；
-//   - 历史里有一条 assistant 消息两条路（reasoning_content / content[].thinking）
-//     都是空的——这正是 Claude Code 剥掉第三方 thinking 块之后的样子。
+//	最后一条 role:user 消息的 content[] 非空、且里面**全是** tool_result 块 → 400
 //
-// 必须 stream=true，两个理由：主循环的真实形态就是流式（非流式的只剩后台小
-// 调用）；而且非流式的 /a/claude/ 请求会被 claudecode 的 claude-bg 插件补上
-// thinking:disabled，那条严格校验根本不会触发——用它测就测不到任何东西。
+// 这里就是 Claude Code 主循环的标准形状：模型调了工具，客户端把结果送回去等它接着
+// 干，那个 content[] 里一个文字块都没有。**跟推理字段无关**——实测把 reasoning_content
+// 换成真实原文 / 省略 / 空串 / 占位符，这一格全是 400；同一个请求体只在那个 content[]
+// 里加一个空格，就变 200。
 //
-// 请求体**恰好**是会被拒的形状，不靠 mock 施法：假上游的回应就是真上游的回应。
+// 必须 stream=true：非流式的 /a/claude/ 请求会被 claudecode 的 claude-bg 插件补上
+// thinking:disabled，那是另一条路（虽然实测形状校验也不吃 thinking，但主循环的真实
+// 形态本来就是流式）。deepseek 插件不认这个 provider（链上是 upstream-a），所以
+// 尾部修复不会介入——发出去的就是这里写的字节。
 func strictReasoningBody() string {
 	return `{"model":"normal","max_tokens":16,"stream":true,` +
 		`"tools":[{"name":"Bash","description":"run a command",` +
 		`"input_schema":{"type":"object","properties":{}}}],` +
 		`"messages":[` +
 		`{"role":"user","content":[{"type":"text","text":"跑一下"}]},` +
-		`{"role":"assistant","content":[{"type":"text","text":"好"}]},` +
-		`{"role":"user","content":[{"type":"text","text":"继续"}]}]}`
+		`{"role":"assistant","content":[{"type":"tool_use","id":"toolu_strict_1","name":"Bash","input":{}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_strict_1","content":"ok"}]}]}`
 }
 
 // TestDeepSeekShapeDetectorIsWiredThroughTheRealGraph 是 2026-09-17 那次事故的

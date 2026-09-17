@@ -7,7 +7,6 @@ package upstream
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -22,92 +21,48 @@ func strictReasoningError() map[string]any {
 	}
 }
 
-// tailOnlyViolation 复刻 python 的 tool_result_only_tail_violation（mock/
-// fake_upstream.py，那边是唯一真相）：2026-09-17 实测出的第二条严格口径——
-// **最后一条 role:user 消息**的 content[] 是非空、且每个块都是 tool_result 时
-// 直接 400 "must be passed back"。挂在显式 `mock_tail_strict` 开关上（默认关），
-// 免得把系统测试里所有工具轮请求一起打废。
-func tailOnlyViolation(body map[string]any) bool {
-	if body == nil || !truthy(body["mock_tail_strict"]) {
-		return false
-	}
-	messages, _ := body["messages"].([]any)
-	idx := -1
-	for i, entry := range messages {
-		if m, ok := entry.(map[string]any); ok && m["role"] == "user" {
-			idx = i
-		}
-	}
-	if idx < 0 {
-		return false
-	}
-	last, _ := messages[idx].(map[string]any)
-	content, _ := last["content"].([]any)
-	if len(content) == 0 {
-		return false
-	}
-	for _, entry := range content {
-		if b, ok := entry.(map[string]any); ok && b["type"] != "tool_result" {
-			return false
-		}
-	}
-	return true
-}
-
-// strictReasoningViolation 复刻 python 的 strict_reasoning_violation：
-// 只对「带了 tools 且思考没关」的请求生效（官方文档口径），此时历史里**每条**
-// assistant 消息都必须带上非空的推理内容，否则这一发就是 400。
+// strictReasoningViolation 复刻 python 的 strict_reasoning_violation，判据是
+// **尾部形状**（2026-09-18 按实测重写，原来的实现照抄的是官方文档口径——
+// 「每条 assistant 都得回传非空推理」——那条口径在真实上游上不成立）：
 //
-// 三个容易写错、都是从 python 原样抄过来的细节：
-//   - 「非空」按 trim 之后算：空串、纯空白都算没回传（mock/e2e_claude.sh 第 6
-//     章专门有一发空串用例，就是这个坑）。
-//   - 判据有两条路，任一条非空即放行：openai 方言看 reasoning_content 字段，
-//     anthropic 方言看 content[] 里 thinking 块文本拼起来。
-//   - 一旦有哪条 assistant 消息两条路都空，立刻判定违规，不再看后面的消息
-//     （python 是在循环里 return True）。
+//	最后一条 role:user 消息的 content[] 非空、且里面**全是** tool_result 块 → 违规
 //
-// 这个口径就是本仓库 gateway/special/st-deepseek.go 那套占位符修法冲着的
-// 现场：Claude Code 会把 thinking 块从历史里剥掉，剥完之后 back 给官方的
-// 请求两条路都是空的。
+// 实测依据（打真实 smt-deepseek/deepseek-flash，每格 3/3）：reasoning_content
+// 是真实原文、省略、空串还是占位符，对结果**毫无影响**；同一个请求体只在那个
+// content[] 里多一个非空 text 块（哪怕只有一个空格）就从 400 变 200。
+//
+// 报错文案仍是上游那句（它把「你这轮没有新指令」报成了「推理没回传」）——
+// 文案与真实原因不一致，正是不能按文案判、只能按形状判的原因。
+//
+// 复刻时别加回这三个已经被证伪的闸门：带 tools、思考没关、每条 assistant 都查。
+// 实测里 thinking:disabled 连 tools 都不带，一样 400。
 func strictReasoningViolation(body map[string]any) bool {
 	if body == nil {
 		return false
 	}
-	if !truthy(body["tools"]) {
-		return false
-	}
-	// thinking: {"type": "disabled"} = 显式关掉思考，口径不管。
-	// 没带 thinking 字段是**开**（国模缺省就是默认思考），照样管。
-	if thinking, ok := body["thinking"].(map[string]any); ok && thinking["type"] == "disabled" {
-		return false
-	}
 	messages, _ := body["messages"].([]any)
+	var lastUser map[string]any
 	for _, entry := range messages {
 		message, ok := entry.(map[string]any)
-		if !ok || message["role"] != "assistant" {
+		if !ok || message["role"] != "user" {
 			continue
 		}
-		if text, ok := message["reasoning_content"].(string); ok && strings.TrimSpace(text) != "" {
-			continue
-		}
-		if blocks, ok := message["content"].([]any); ok {
-			var joined strings.Builder
-			for _, entry := range blocks {
-				block, ok := entry.(map[string]any)
-				if !ok || block["type"] != "thinking" {
-					continue
-				}
-				if text, ok := block["thinking"].(string); ok {
-					joined.WriteString(text)
-				}
-			}
-			if strings.TrimSpace(joined.String()) != "" {
-				continue
-			}
-		}
-		return true
+		lastUser = message
 	}
-	return false
+	if lastUser == nil {
+		return false
+	}
+	blocks, ok := lastUser["content"].([]any)
+	if !ok || len(blocks) == 0 {
+		return false // content 是字符串 = 本来就有文字，放行
+	}
+	for _, entry := range blocks {
+		block, ok := entry.(map[string]any)
+		if !ok || block["type"] != "tool_result" {
+			return false // 除 tool_result 之外的任何块都算「有指令」
+		}
+	}
+	return true
 }
 
 // anthropicMessage 是非流式 anthropic 响应（python 的 do_POST 里那一段）。

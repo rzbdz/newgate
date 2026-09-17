@@ -11,6 +11,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
+	"github.com/rzbdz/newgate/go/modules/gateway/thinkcache"
 )
 
 // TestSpecialTreatmentDeepseekOnTheWire 端到端断言：转给 DeepSeek 的请求里，
@@ -87,9 +88,12 @@ func TestSpecialTreatmentDeepseekOnTheWire(t *testing.T) {
 			continue
 		}
 		assistants++
-		// 必须非空：空串在最严的 DeepSeek 官方检查下照样 400
-		if rc, has := m["reasoning_content"]; !has || string(rc) == `""` || string(rc) == `null` {
-			t.Errorf("第 %d 条 assistant 缺/空 reasoning_content: %s", i, sent)
+		// 只有缓存/客户端**真给过原文**时才补。这条请求的 tool id 从来没进过
+		// thinkcache，所以正确行为是**字段保持缺席**——补任何东西都是编造
+		// （2026-09-18 的实测结论，见 modules/deepseek/st-reasoning.go 文件头）。
+		if rc, has := m["reasoning_content"]; has {
+			t.Errorf("第 %d 条 assistant 没有原文来源，却被补了 reasoning_content=%s: %s",
+				i, rc, sent)
 		}
 	}
 	if assistants != 2 {
@@ -150,6 +154,12 @@ func TestSpecialTreatmentSkipsNonDeepseek(t *testing.T) {
 //
 // 该补的照旧：思考开着，上游要的推理内容一个不能少。
 func TestSpecialTreatmentOpencodeKeepsThinking(t *testing.T) {
+	isolate(t)
+	// 上一轮上游真的给过这段推理，只是客户端序列化时丢了。
+	// 有了原文，插件才该把它逐字补回去——2026-09-18 起「没有原文就一个字节都不补」，
+	// 所以这个测试必须自己造出「有原文」这个前提，否则它断言的正是我们已经否掉的行为。
+	thinkcache.Default.Put([]string{thinkcache.ToolKey("call_oa_1")}, []byte("上一轮真实想过的内容"))
+
 	var sent []byte
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent, _ = ioutil.ReadAll(r.Body)
@@ -205,7 +215,8 @@ func TestSpecialTreatmentOpencodeKeepsThinking(t *testing.T) {
 	if got.Thinking.Type != "" {
 		t.Errorf("opencode 的请求被动了 thinking（现场 bug）: %s", sent)
 	}
-	if got.Messages[1].ReasoningContent == "" {
-		t.Errorf("思考没被关，那就必须回传推理内容，缺了上游要 400: %s", sent)
+	if got.Messages[1].ReasoningContent != "上一轮真实想过的内容" {
+		t.Errorf("上一轮上游给过的推理原文没被逐字补回（got=%q）: %s",
+			got.Messages[1].ReasoningContent, sent)
 	}
 }

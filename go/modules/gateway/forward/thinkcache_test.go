@@ -307,8 +307,48 @@ func TestThinkingBlockRoundTripAnthropicDialect(t *testing.T) {
 	t.Logf("Anthropic 方言：%d 字节 thinking 块已逐字补回 content[] 开头", len(sawThinking))
 }
 
-// TestDeepseekRebasesForeignToolLoop 复刻真实迁移故障：
+// hasTrailingUserText 判断这条请求的**最后一条 user 消息**里有没有一个非空的
+// text 块——也就是「有损重建追加了一条普通用户继续指令」这个契约。
 //
+// 为什么不直接断言那句注入文本的字面量：那句话会被改（2026-09-18 就从一句英文
+// 长句改成了「继续」，理由是它会长住进用户对话历史）。断言字面量的话，每次改
+// 文案都要同步改这里，而真正要锁的从来不是**措辞**，是「尾部多了一条普通用户
+// 指令」这个结构——上游要的也是这个，不是那句话的内容。
+//
+// 不依赖任何生产常量：本测试在 forward 包里，认不到 modules/deepseek 的 const
+// （会成环），所以按结构判。
+func hasTrailingUserText(body string) bool {
+	var req struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal([]byte(body), &req) != nil {
+		return false
+	}
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role != "user" {
+			continue
+		}
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(req.Messages[i].Content, &blocks) != nil {
+			return false
+		}
+		for _, b := range blocks {
+			if b.Type == "text" && strings.TrimSpace(b.Text) != "" {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// TestDeepseekRebasesForeignToolLoop 复刻真实迁移故障：
 //  1. 链头 DeepSeek 失败，fallback Ark 产出 thinking + tool_use；
 //  2. 客户端带 tool_result 回来时，普通建链重新从 DeepSeek 开始；
 //  3. fallback 顺序保持不变，deepseek special 追加普通用户继续指令，
@@ -329,7 +369,7 @@ func TestDeepseekRebasesForeignToolLoop(t *testing.T) {
 			_, _ = io.WriteString(w, `{"error":{"message":"initial failure"}}`)
 			return
 		}
-		if !strings.Contains(string(body), "Re-evaluate them as a new step") {
+		if !hasTrailingUserText(string(body)) {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = io.WriteString(w, `{"error":{"message":"reasoning_content must be passed back"}}`)
 			return

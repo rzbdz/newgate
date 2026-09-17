@@ -2,53 +2,72 @@
 
 ## 1. reasoning_content 400
 
-先看日志是否出现真实回填、占位符或 tool-loop rebase notes。再检查
-`dump/err-400-*` 的 client-sent、we-sent、upstream-said：
+**先别读这句话的字面意思。** 上游那句 `The \`reasoning_content\` in the
+thinking mode must be passed back to the API.` 是**误报**——它把「这一轮没有
+新指令」报成了「推理没回传」。真实判据有三条（缺一不可），完整推导在
+`docs/06-reasoning.md` §1，那里是唯一出处：
 
-- 客户端没带，但 we-sent 有真实值：cache 命中；
-- we-sent 是占位符：cache 未命中；
-- we-sent 缺字段：插件未匹配或被关闭；
-- 上游仍拒绝：检查方言和 model 是否属于严格 thinking mode。
+1. **尾形**：最后一条 `role:"user"` 消息的 `content[]` 非空、且**全是**
+   `tool_result`；
+2. **锚点**：是「最后一条 `role:user`」不是数组最后一项——Claude Code 会在
+   `tool_result` 后面插一条 `role:"system"` 的 mid-turn 消息；
+3. **出身**：那条 `tool_result` 引用的 tool call 里，**至少有一个不是本聚合器
+   产的**（`call_00_…` 是它产的；`call_<hex>`、`toolu_…` 是别家来的）。
 
-**这类 400 不会（也不该）把 binding 摘牌**（2026-09-17 起）：它是请求形状
-问题，同一份 body 换哪个 provider 都一样错，跟这个 provider「能不能用」无
-关。`newgate breaker` 只会显示真正的可用性熔断；如果这条 binding 出现在
-`newgate breaker` 里且 `reason` 不是"真实流量连续失败"以外的可信原因，
-先看 `newgate metrics` 里的 `breaker.skipped.shape_error` 是不是在涨——涨
-说明这类 400 正在发生但已经不计入熔断了，属于预期。
+### 排查顺序
 
-实测过一次确定性复现：同一份真实 body（带完整历史）连发多次都 400，但
-把 reasoning_content 全换成真实文本 / 全部删掉都不影响结果——根因不在
-"补的内容对不对"，而在**最后一条 user 消息的形状**（它的 content[] 里全是
-`tool_result` 块、一个字都没有时，DeepSeek 的严格校验会报同一个误导性文案）。
+1. 日志里有没有 `[shape-400] … 判据 deepseek`——有就是这类，往下走；
+2. 看 `dump/shape-400-deepseek/req-*/client-sent.json`：把 `messages` 里
+   `tool_use` 的 id 列出来，看**有没有非 `call_00_` 开头的**（一条就够）；
+   再看最后一条 user 的 `content[]` 是不是只有 `tool_result`；
+3. 两个都中 → 这条 400 是**必然**的，且它说明这一发之前的某一轮被 fallback
+   交给了别家上游。想看那一轮是谁：日志里往前找 `(已转移)` /
+   `X-Newgate-Chain`。
 
-**这条根因已修**（2026-09-17，判据当日按实测重写过一版）：
-`repairTailShape`（modules/deepseek）锚在**最后一条 `role:"user"` 消息**上，
-当它的 content[] 非空且**每个块都是 `tool_result`** 时，追一句用户口气的
-继续指令（`Continue from the tool results above…`），让 DeepSeek 的校验落在
-一条真正的指令上。
+**为什么会「偶尔」出现**：绝大多数轮次不满足，因为 Claude Code 通常不留裸尾
+（它会补一条 `role:"system"` 插话，或在同一轮里带文字），而只有 fallback 才会
+产生别家的 id。两者叠加才是「用着用着突然来一发」。**没开 fallback 的会话
+永远不会遇到**——id 始终自洽，第三条永远不成立。
 
-判据的完整实测矩阵、以及三个**被推翻的旧假设**（不是「数组最后一项」、
-不是「没有 text 块」、不挂在 `thinkingOn` 上）写在 `docs/06-reasoning.md`
-§2b，那里是唯一的出处，别在这儿抄第二份。
+### 这两类 400 都不该摘牌（2026-09-17 起）
 
-归档留样：`dump/` 里 15 份 `err-400-*`。其中 6 份是这句文案，形状全部是
-「最后一条 user 消息只有 tool_result」——包括 2 份尾部还跟着 `role:"system"`
-插话的（`req000464`、`req000061`），那 2 份**旧实现漏修**（旧判据要求数组
-最后一项就是 user），是这次重写的直接动因。其余 9 份是另外三类，文案都不
-同，别混进来：
+它是请求形状问题，同一份 body 换个 provider 一样错，跟 provider「能不能用」
+无关。`newgate breaker` 只显示真正的可用性熔断；要看这类在不在发生，看
+`newgate metrics` 的 `breaker.skipped.shape_error`（涨就是预期）。
+
+### 插件做了什么、没做什么
+
+- **做**：命中「一族」（裸 `tool_result` 且那条 user 轮就是数组末尾）时，往它
+  的 `content[]` 追加**一条最简指令**（`"继续"`）。实测 400 → 200，每格 3/3。
+- **不做**：cache 未命中时**不编占位符**（上游自己没给过的推理，编了也只是烧
+  token——实测对这条 400 毫无影响）；「二族」（裸尾之后还有 assistant）
+  **故意不碰**——实测往那个 user 轮追加指令 **3/3 还是 400**，塞一句模型看不见
+  效果的噪音比 400 更糟。
+
+### 曾经删掉过一次（别再删）
+
+2026-09-18 这一手被整手删过，理由是判据「不看上游是否真的报错」。删掉之后错得
+很隐蔽：**上游 400 之后自动沿链转移，客户端拿到 200，日志里那行 400 也看不出来**
+——「看起来没坏」实际是「每一发都悄悄降级到别的模型」，形状判据的证据也一起没了。
+**判据是对的，措辞是错的；只改措辞，别删判据。** 复现命令与全过程见
+`docs/06-reasoning.md` §2b 末段。
+
+### 归档留样：`dump/` 里的 15 份 `err-400-*`
 
 | 上游原文 | 份数 | 归属 |
 | --- | --- | --- |
-| `The \`reasoning_content\` in the thinking mode must be passed back` | 6 | 本节，尾部形状 |
+| `The \`reasoning_content\` in the thinking mode must be passed back` | 6 | 本节 |
 | `[1210][该模型始终思考，不支持关闭思考；请使用 low、high 或 max。]` | 2 | glm；走 quirk 学习（见 §3） |
 | `invalid thinking: only type=enabled is allowed for this model` | 2 | kimi；**措辞不在 `quirk.signatures` 里，学不到，会反复撞** |
 | `invalid params, Mismatch type ***.ClaudeContent with value string` | 4 | 客户端发来的 content 块类型不符，与推理无关 |
 | `An assistant message with 'tool_calls' must be followed by tool messages` | — | 链上出现未闭合的 tool_use，非本类 |
 
-新出现的 400 仍按 §3 分类器处理（形状错误永不摘牌、只计数）。**形状判据只
-认这一种尾部**：数组以 `assistant` 收尾、或尾部本来就有文字/图片的，一律
-不碰（前者实测追加指令也修不好，后者本来就能过）。
+那 6 份的形状全部是「最后一条 user 消息只有 tool_result」，其中 2 份尾部还跟着
+`role:"system"` 插话（`req000464`、`req000412`）——**旧判据要求数组最后一项就是
+user，那 2 份被漏修**，是重写判据的直接动因。另有两份（`req000412`、
+`req000464`）的历史里混着别家产的 tool id，正是 §1 的第三个维度。
+
+新出现的 400 仍按 §3 分类器处理（形状错误永不摘牌、只计数）。
 
 **被形状判据认领的 400 会额外存一份专属证据**（2026-09-17 起）：
 `dump/shape-400-<判据名>/req-<id>-<纳秒>/`，里面是 client-sent / we-sent /

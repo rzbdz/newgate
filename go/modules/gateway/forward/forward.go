@@ -1060,7 +1060,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					reqID, a.Binding.String(), res.Shape, filepath.Base(base))
 				// 现场单独存档：这类 400 偶发又致命，dump 目录的 req-*/err-*
 				// 滚动清理会把它挤掉，所以另存一份到不参与滚动清理的专用目录，
-				// 并附逐条 reasoning 审计（哪几条补了占位符）。
+				// 并附逐条 reasoning 审计（哪几条 assistant 没有推理原文）。
 				if rdir := s.saveShapeEvidence(reqID, res.Shape, body, newBody, eb,
 					r.Header, resp.Header, routeStr); rdir != "" {
 					s.logf("[shape-400] #%d 现场已存档 %s/", reqID, rdir)
@@ -1160,9 +1160,28 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 						Profile: a.Profile, Provider: a.Binding.Provider, Model: a.Binding.Model,
 					}
 					if nb, nk := ob.CommitWithOrigin(thinkcache.Default, origin); nb > 0 {
-						// 只打字节数和 key 数，绝不打内容
-						s.logf("[proxy] #%d 记下本轮推理内容 %d 字节 / %d 个 key，"+
-							"下一轮替客户端补回去", reqID, nb, nk)
+						// 只打字节数和 key 数，绝不打内容。key 是 tool:<id> 形式的
+						// **身份**，不是内容——它是把「这一轮存了」和下一轮「这轮
+						// 补上了原文 / 这轮没有原文可补」对起来的唯一线索
+						// （见 st-reasoning.go 的 skipCause）。2026-09-18 加。
+						s.logf("[proxy] #%d 记下本轮推理内容 %d 字节 / %d 个 key %v，"+
+							"下一轮替客户端补回去", reqID, nb, nk, keysForLog(ob.Keys()))
+					} else if ntc := ob.ToolCalls(); ntc > 0 {
+						// 有 tool call 却一个字节推理都没有：下一轮这些历史消息
+						// **一条都补不上**（插件不编占位符，见 st-reasoning.go 文件头），
+						// 而这是**上游本来就没给**，不是我们弄丢的。两种情况的处置完全
+						// 相反（前者只能接受，后者要查缓存），所以这一行必须存在——
+						// 否则事后只看补丁那侧的日志，会把「上游没给」误判成缓存失效，
+						// 然后去修一个没坏的东西。
+						//
+						// 连**请求里的 thinking 配置**一起打：DeepSeek 不认 Anthropic
+						// 的 adaptive（Claude Code 的默认值），收到 adaptive 时一个思考
+						// 块都不吐——请求侧完全合法、日志全绿，只有把这个值打出来才看
+						// 得出「不是缓存坏了，是上游根本没思考」。
+						s.logf("[proxy] #%d 本轮上游没给推理内容（%d 个 tool call，"+
+							"请求 thinking=%s，tool id %v）；线路层：%s。"+
+							"下一轮这些历史消息一条都补不上（不编占位符）",
+							reqID, ntc, thinkingTagOf(newBody), keysForLog(ob.Keys()), ob.Wire())
 					}
 					if stream {
 						s.logf("[proxy] #%d 流正常结束：%d 块 / %d 字节 / 总 %dms",
@@ -1407,6 +1426,52 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + fmt.Sprintf("…(截断，共 %d 字符)", len(r))
+}
+
+// keysForLog 把 thinkcache 的 key 列表收窄成日志里该出现的那部分。
+//
+// 只留 `tool:` 开头的：那是**工具调用 id**，是纯身份字符串，能把「这一轮存了
+// 什么」和下一轮「这轮补上了原文 / 这轮没有原文可补」精确对上。`text:` 开头的是正文的哈希——
+// 它同时充当 key 和摘要，而本仓库有一条硬规矩：**任何路径都不打内容**，
+// 连哈希也不该外泄到日志里去和别处的正文比对。所以只打前缀和个数。
+//
+// 上限 8：一次响应通常 1~3 个 tool call，够用；真遇到几十个并行调用的，也不
+// 至于把一行日志撑爆。
+func keysForLog(keys []string) []string {
+	var out []string
+	texts := 0
+	for _, k := range keys {
+		if strings.HasPrefix(k, "tool:") {
+			if len(out) < 8 {
+				out = append(out, k)
+			}
+			continue
+		}
+		texts++
+	}
+	if texts > 0 {
+		out = append(out, fmt.Sprintf("+%d 个正文 key", texts))
+	}
+	return out
+}
+
+// thinkingTagOf 抽出这次**实际发给上游**的 body 里 thinking.type 的原文。
+//
+// 为什么要打这个：2026-09-18 排查「为什么没有推理内容」时，最关键的一栏就是
+// 它。DeepSeek 不认 Anthropic 的 adaptive（它是 Claude Code 的默认值），
+// 收到 adaptive 时一个思考块都不吐——请求侧完全合法、日志里也全绿，只有把
+// 这个值打出来才看得出「不是缓存坏了，是上游根本没思考」。返回值带引号，
+// 空串表示**字段缺席**（那又是另一种情况：请求压根没进思考模式）。
+func thinkingTagOf(body []byte) string {
+	raw, has := rewrite.TopLevelRaw(body, "thinking")
+	if !has {
+		return "(字段缺席)"
+	}
+	t, ok := rewrite.TopLevelString(raw, "type")
+	if !ok || t == "" {
+		return "(认不出)"
+	}
+	return t
 }
 
 func trim(s string) string {
