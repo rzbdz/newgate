@@ -33,20 +33,39 @@ func (b *table) UseFile(path string) error {
 	}
 	for _, s := range entries {
 		key := bindingKey(s.Provider, s.Model)
-		if s.Open {
-			b.openedAt[key] = s.OpenedAt
-			if b.openedAt[key].IsZero() {
-				b.openedAt[key] = time.Now().Add(-b.Cooldown)
+		r := &record{
+			fails:      s.Fails,
+			bucket:     bucketFromName(s.Rule),
+			shapeSkips: s.ShapeSkips,
+			cooldown:   time.Duration(s.CooldownMs) * time.Millisecond,
+		}
+		if s.Fails > 0 && r.bucket == BucketNone {
+			// 旧文件没有 Rule 字段：那时候只有一条账本，就是可用性。
+			r.bucket = BucketAvailability
+		}
+		switch {
+		case s.Open:
+			r.openedAt = s.OpenedAt
+			if r.openedAt.IsZero() {
+				r.openedAt = time.Now().Add(-b.policy.rule(bucketOr(r.bucket)).Cooldown)
 			}
-			b.reasons[key] = s.Reason
-			b.fails[key] = s.Fails
-			if b.fails[key] < 1 {
-				b.fails[key] = 1
+			r.openUntil = s.OpenUntil
+			if r.openUntil.IsZero() {
+				// 旧文件没存到期时刻：按当时的冷却推一次。推不出来就当
+				// 冷却已过——半开会在下一次 Available 时放行试探。
+				r.openUntil = r.openedAt.Add(b.policy.rule(bucketOr(r.bucket)).Cooldown)
 			}
-		} else if s.Fails > 0 {
+			r.reason = s.Reason
+			if r.fails < 1 {
+				r.fails = 1
+			}
+		case s.Fails > 0:
 			// 之前只有「已摘牌」的计数会被恢复；连锁未开的失败计数丢了，
 			// 于是重启等于偷偷给每条 binding 一次免死金牌。
-			b.fails[key] = s.Fails
+			r.reason = s.Reason
+		}
+		if r.fails > 0 || r.shapeSkips > 0 || !r.openedAt.IsZero() {
+			b.records[key] = r
 		}
 		if s.Grade != "" {
 			b.probes[key] = probeResult{
@@ -70,6 +89,23 @@ func (b *table) UseFile(path string) error {
 	return nil
 }
 
+// bucketOr 把 BucketNone 折成可用性，用于取「旧文件的冷却基准」。
+func bucketOr(b Bucket) Bucket {
+	if b == BucketNone {
+		return BucketAvailability
+	}
+	return b
+}
+
+func bucketFromName(name string) Bucket {
+	for _, b := range []Bucket{BucketAvailability, BucketRateLimit, BucketConfig, BucketShape} {
+		if b.ruleName() == name {
+			return b
+		}
+	}
+	return BucketNone
+}
+
 func (b *table) persistLocked() {
 	if b.file == "" {
 		return
@@ -78,14 +114,23 @@ func (b *table) persistLocked() {
 	entries := make([]Status, 0, len(keys))
 	for key := range keys {
 		provider, model := splitBindingKey(key)
-		p := b.probes[key]
-		s := Status{
-			Provider: provider, Model: model, Fails: b.fails[key],
-			Reason: b.reasons[key], Grade: p.Grade, Latency: p.LatencyMs,
-			Checked: p.CheckedAt,
+		r := b.records[key]
+		s := Status{Provider: provider, Model: model}
+		if r != nil {
+			s.Fails = r.fails
+			s.Rule = r.bucket.ruleName()
+			s.ShapeSkips = r.shapeSkips
+			s.CooldownMs = r.cooldown.Milliseconds()
+			s.Reason = r.reason
+			s.State = r.state(b.now())
+			if !r.openedAt.IsZero() {
+				s.Open = true
+				s.OpenedAt = r.openedAt
+				s.OpenUntil = r.openUntil
+			}
 		}
-		if opened, ok := b.openedAt[key]; ok {
-			s.Open, s.OpenedAt, s.OpenFor = true, opened, time.Since(opened)
+		if p, ok := b.probes[key]; ok {
+			s.Grade, s.Latency, s.Checked = p.Grade, p.LatencyMs, p.CheckedAt
 		}
 		b.ranker.fill(&s, key)
 		entries = append(entries, s)

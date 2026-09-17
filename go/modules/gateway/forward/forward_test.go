@@ -375,10 +375,24 @@ func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
 	}
 }
 
-// TestOtherClientErrorStillOpensBreaker 是上一条的对照组：不是 shape 错误的
-// 400（比如 schema 真的不对）必须继续记账，否则真正坏掉的 provider 永远摘
-// 不掉。两条测试合起来锁住 IsRequestShapeError 这条策略闸门的两侧。
-func TestOtherClientErrorStillOpensBreaker(t *testing.T) {
+// TestOtherClientErrorDoesNotBlameTheProvider 是上一条的对照组，锁住这条政策
+// 的另一侧：**任何** 400 都不记在这家上游头上，不管我们的形状检测器认不认得它。
+//
+// 这条测试 2026-09-17 的方向是反的（当时断言「非形状 400 连发两次必须开闸」，
+// 理由是「schema 真坏的 provider 否则永远摘不掉」）。翻转它的理由：
+//
+//   - 400 的含义就是「你这份请求不对」，而形状检测器只是几条字符串匹配，认不
+//     出来不等于问题在上游——按认不出来的 400 摘牌，等于让一个补丁的盲区决定
+//     摘谁，正好是 2026-09-17 reasoning-400 那次事故的形状；
+//   - 现在摘牌会自己回来（半开 + 退避），但代价不对称：误摘一次要等 60s 起
+//     步、最多 10 分钟才回到链上，期间用户的请求被悄悄换给了别的模型；
+//   - 「这家上游根本不通」不是被动路径能下的结论，`newgate probe` 才是权威
+//     手段：探活发的是最小合法请求，base 错/版本错的 provider 会当场被 probe
+//     摘掉，而它永远不会因为用户某一轮的对话形状被误判。
+//
+// 结论：被动路径只认「明确是上游的错」的收场，4xx 的歧义交给 fallback_on_400
+// 去表达（要不要换个上游试试），而不是交给记账。
+func TestOtherClientErrorDoesNotBlameTheProvider(t *testing.T) {
 	schemaErr := `{"error":{"message":"Invalid schema: missing required field 'name'"}}`
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -398,17 +412,25 @@ func TestOtherClientErrorStillOpensBreaker(t *testing.T) {
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
 			strings.NewReader(`{"model":"newgate/heavy"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
-		ioutil.ReadAll(resp.Body)
+		got, _ := ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
+		if resp.StatusCode != 400 || string(got) != schemaErr {
+			t.Fatalf("第 %d 发应原样透传 400 与上游原文，得到 %d %q", i+1, resp.StatusCode, got)
+		}
 	}
-	if srv.Health.Available("schema-bad", "real-model-1") {
-		t.Error("非 shape 错误的 400 连发两次却没打开熔断器——回归了旧行为的另一半")
+	if !srv.Health.Available("schema-bad", "real-model-1") {
+		t.Error("非形状 400 把这条 binding 摘掉了——400 不该记在上游头上")
+	}
+	for _, s := range srv.Health.Snapshot() {
+		if s.Provider == "schema-bad" && (s.Fails > 0 || s.ShapeSkips > 0 || s.Open) {
+			t.Errorf("非形状 400 进账本了: %+v", s)
+		}
 	}
 }
 

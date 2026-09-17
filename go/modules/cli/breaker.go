@@ -8,18 +8,21 @@ import (
 	"github.com/rzbdz/newgate/go/modules/cli/style"
 )
 
-// cmdBreaker 只回答一件事：**现在哪些 binding 被摘牌了、为什么**。
+// cmdBreaker 只回答一件事：**现在哪些 binding 出问题了、为什么**。
 //
 // 为什么单独立一条命令，不并进 `metrics`：`metrics` 的「模型健康」段落
 // （printModelHealth）故意把卡顿/不可用的详情藏起来只说个数量，理由写在
 // 那段注释里——避免体检退化成日志墙。但排查「deepseek 怎么又被摘了」这
-// 类问题时，恰恰要看那几条被藏起来的详情：什么时候打开的、打开了多久、
-// 连续失败几次、上一次 probe 给的评级与延迟。这条命令就是把这些字段摊开。
+// 类问题时，恰恰要看那几条被藏起来的详情：什么时候摘的、还要等多久、
+// 连续失败几次、记在哪本账上、上一次 probe 给的评级与延迟。
 //
-// 2026-09-17 加：reasoning-400 这类请求形状错误曾经被误记进熔断器连续两次
-// 就摘牌，probe 却一直绿——用户看到「deepseek 明明能用却被摘了」查不到
-// 原因。修复后这类 400 不再计入 `fails`，但排查历史现场仍然要能看见
-// 「现在到底谁被摘了、原因是不是可信」，所以留着这条命令。
+// 2026-09-17 半开重构后这条命令分两段：
+//
+//   - 被摘牌的：状态、账本、冷却到期时刻、原因、试探在不在飞；
+//   - 只计数没摘牌的：请求形状错误（永不摘牌）和还没到阈值的失败。
+//     第二段是这轮新加的可见面——以前「失败 1 次、闸还没开」在快照里
+//     根本不存在，而形状错误只躺在 metrics 计数器里，用户看到「明明
+//     能用却被摘了」查不到原因。
 func cmdBreaker() int {
 	info, ps := proxyState()
 	if info == nil {
@@ -29,41 +32,143 @@ func cmdBreaker() int {
 		return die(69, fmt.Sprintf("连不上代理 127.0.0.1:%d（newgate doctor）", info.Port))
 	}
 
-	var open []breakerapi.Status
+	var open, counted []breakerapi.Status
 	for _, b := range ps.Breakers {
-		if b.Open {
+		switch {
+		case b.Open:
 			open = append(open, b)
+		case b.Fails > 0 || b.ShapeSkips > 0:
+			counted = append(counted, b)
 		}
 	}
 
-	if len(open) == 0 {
+	if len(open) == 0 && len(counted) == 0 {
 		fmt.Println(style.Title("newgate breaker", fmt.Sprintf("pid %d", info.PID)))
-		fmt.Println(style.Hint("没有被摘牌的 binding"))
+		fmt.Println(style.Hint("没有出问题的 binding"))
 		return 0
 	}
 
 	fmt.Println(style.Title("newgate breaker",
-		fmt.Sprintf("pid %d · %d 个被摘牌", info.PID, len(open))))
+		fmt.Sprintf("pid %d · %d 个被摘牌 · %d 个只计数", info.PID, len(open), len(counted))))
 
-	t := style.NewTable("binding", "打开了多久", "连续失败", "原因", "上次 probe")
-	for _, b := range open {
-		age := "-"
-		if b.OpenFor > 0 {
-			age = prettyDur(int(time.Duration(b.OpenFor).Seconds()))
+	if len(open) > 0 {
+		t := style.NewTable("binding", "状态", "账本", "多久前摘的", "还要等", "连续失败", "原因")
+		for _, b := range open {
+			t.Row(b.Provider+"/"+b.Model, stateLabel(b), ruleLabel(b),
+				agoLabel(b.OpenedAt), untilLabel(b.OpenUntil, b.Trial),
+				fmt.Sprintf("%d", b.Fails), b.Reason)
 		}
-		probeInfo := "未探活"
-		if !b.Checked.IsZero() {
-			probeInfo = fmt.Sprintf("%s @ %dms（%s 前）",
-				b.Grade, b.Latency, time.Since(b.Checked).Round(time.Second))
-		}
-		t.Row(b.Provider+"/"+b.Model, age, fmt.Sprintf("%d", b.Fails), b.Reason, probeInfo)
+		fmt.Print(t.String())
+		fmt.Println()
+		fmt.Print(probeTable(open))
 	}
-	fmt.Print(t.String())
+
+	if len(counted) > 0 {
+		fmt.Println()
+		fmt.Println(style.Section("只计数、没摘牌") +
+			style.Dim("   这些 binding 仍然在链上"))
+		t := style.NewTable("binding", "账本", "连续失败", "请求形状", "上次 probe")
+		for _, b := range counted {
+			t.Row(b.Provider+"/"+b.Model, ruleLabel(b),
+				fmt.Sprintf("%d", b.Fails), shapeLabel(b), probeLabel(b))
+		}
+		fmt.Print(t.String())
+	}
 
 	fmt.Println()
-	fmt.Println(style.Hint(
-		"解封只能靠 probe 证明恢复（RecordSuccess 不解封，见 docs/05-gateway.md §3）："))
-	fmt.Println(style.Hint("  newgate probe        # 重新探活，健康的会在冷却期后自动解封"))
+	// 半开之后解封不再只有 probe 一条路：真实流量在冷却期满后会自动被放行
+	// 一次做试探，成了就合闸。probe 仍然是**立刻**改结论的手段。
+	fmt.Println(style.Hint("冷却到期后会放行一次真实请求作试探：成功即合闸，失败则回闸并把冷却翻倍（上限 10 分钟）"))
+	fmt.Println(style.Hint("  newgate probe        # 不等冷却，立刻用一次主动探活改结论"))
 	fmt.Println(style.Hint("  newgate tier <档位>   # 看这个 binding 在链里排第几、是不是被跳过"))
 	return 0
+}
+
+// probeTable 单独排一段：probe 结论是**另一个来源**（主动探活 vs 真实流量），
+// 混在摘牌原因里会让人以为是同一件事。
+func probeTable(rows []breakerapi.Status) string {
+	t := style.NewTable("binding", "上次 probe", "延迟", "探活时间")
+	for _, b := range rows {
+		t.Row(b.Provider+"/"+b.Model, probeLabel(b), latencyLabel(b), checkedLabel(b))
+	}
+	return t.String()
+}
+
+func probeLabel(b breakerapi.Status) string {
+	if b.Checked.IsZero() || b.Grade == "" {
+		return style.Dim("未探活")
+	}
+	return string(b.Grade)
+}
+
+func latencyLabel(b breakerapi.Status) string {
+	if b.Checked.IsZero() {
+		return style.Dim("-")
+	}
+	return fmt.Sprintf("%dms", b.Latency)
+}
+
+func checkedLabel(b breakerapi.Status) string {
+	if b.Checked.IsZero() {
+		return style.Dim("-")
+	}
+	return fmt.Sprintf("%s 前", time.Since(b.Checked).Round(time.Second))
+}
+
+// stateLabel 把状态机的三态翻成中文。daemon 可能是旧的（优雅交接期间 CLI 与
+// daemon 版本可以不同），老快照没有 state 字段，就从 Open 推——旧语义里
+// 只有「摘了」和「没摘」两种。
+func stateLabel(b breakerapi.Status) string {
+	switch b.State {
+	case "half-open":
+		if b.Trial {
+			return style.Yellow("半开·试探中")
+		}
+		return style.Yellow("半开·待试探")
+	case "open":
+		return style.Red("摘牌中")
+	case "closed":
+		return style.Green("正常")
+	}
+	if b.Open {
+		return style.Red("摘牌中")
+	}
+	return style.Green("正常")
+}
+
+func ruleLabel(b breakerapi.Status) string {
+	if b.Rule == "" {
+		return style.Dim("-")
+	}
+	return b.Rule
+}
+
+func shapeLabel(b breakerapi.Status) string {
+	if b.ShapeSkips == 0 {
+		return style.Dim("-")
+	}
+	return fmt.Sprintf("%d 次", b.ShapeSkips)
+}
+
+func agoLabel(at time.Time) string {
+	if at.IsZero() {
+		return style.Dim("-")
+	}
+	return fmt.Sprintf("%s 前", time.Since(at).Round(time.Second))
+}
+
+// untilLabel 说清「还要等多久」，以及在冷却是干什么用的：退避之后冷却会
+// 越来越长（60s → 120s → … → 10 分钟），用户看到的数字对不上基准是正常的，
+// 所以把试探状态也放进来。
+func untilLabel(until time.Time, trial bool) string {
+	if trial {
+		return style.Yellow("试探在飞")
+	}
+	if until.IsZero() {
+		return style.Dim("-")
+	}
+	if d := time.Until(until); d > 0 {
+		return prettyDur(int(d.Seconds()))
+	}
+	return style.Green("已到期")
 }

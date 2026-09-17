@@ -35,6 +35,9 @@ const (
 // 新 CLI 读旧 daemon 的快照、旧 CLI 读新 daemon 的快照都必须能活。同理
 // `health.json` 的文件名与这些 JSON 键也不能改——降级回滚用的 known-good
 // 二进制读的就是它们。
+//
+// 因此 `Open` 保留原义（「现在被摘着」），半开等新状态放在新增的 `State` 里；
+// 旧 CLI 看到 `Open=true` 就当它不可用，只是不知道它马上要试探回来了。
 type Status struct {
 	Provider string        `json:"provider"`
 	Model    string        `json:"model"`
@@ -50,19 +53,44 @@ type Status struct {
 	Scores   [4]int        `json:"scores_ms,omitempty"`
 	Buckets  [4]int        `json:"samples_by_bucket,omitempty"`
 	OpenedAt time.Time     `json:"opened_at,omitempty"`
+
+	// —— 2026-09-17 半开重构新增（只加不改）——
+	//
+	// State 是 closed / open / half-open。Open 表达不了半开：半开时 binding
+	// 已经能进链了，状态机在等这一发的结果。
+	State string `json:"state,omitempty"`
+	// Rule 是当前这本账的名字（可用性 / 限流 / 配置 / 请求形状），
+	// 让人一眼看出它是被哪一类问题摘的。
+	Rule string `json:"rule,omitempty"`
+	// OpenUntil 冷却到期的绝对时刻。CLI 用 OpenedAt 自算 age，不再依赖
+	// 快照时刻算出来的 OpenFor（那个值一过网就陈旧了）。
+	OpenUntil time.Time `json:"open_until,omitempty"`
+	// Trial 这一刻有没有一个半开试探在飞。
+	Trial bool `json:"trial,omitempty"`
+	// ShapeSkips 请求形状错误的累计次数。这类错误永不摘牌，但这个数字要
+	// 能被看见——不然「为什么老是 400」只能去翻 metrics。
+	ShapeSkips int `json:"shape_skips,omitempty"`
+	// CooldownMs 下次开闸会用多长（退避后的值）。
+	CooldownMs int64 `json:"cooldown_ms,omitempty"`
+	// Rank 是 daemon 算好的排序键（按 ≤4K 档位）。CLI 直接用它，不再自己
+	// 重算 3000/12000 那套阈值——策略只有一个来源。
+	Rank int `json:"rank,omitempty"`
 }
 
-// Breaker 是健康表端口。数据面只读前两项、只写后四项；渲染层只读 Snapshot。
+// Breaker 是健康表端口。数据面只读前两项、只写 Report/ObserveSuccess；
+// 渲染层只读 Snapshot。
 type Breaker interface {
-	// Available 回答这个 binding 现在能不能进候选链。建链期调用，只读。
+	// Available 回答这个 binding 现在能不能进候选链。建链期调用。
+	//
+	// 它有副作用：冷却期满时会把 binding 推进半开，并发放这一轮的试探名额。
+	// 建链期每个候选只问一次，所以「放行一次真实请求」在这里天然成立。
 	Available(provider, model string) bool
 	// Rank 是建链期的排序键：预测首字节延迟，越小越靠前。
 	Rank(provider, model string, contextBytes int) int
 
-	// RecordSuccess 记一次真实流量成功。
-	RecordSuccess(provider, model string)
-	// RecordFailure 记一次真实流量失败；返回 true 表示这次把闸打开了。
-	RecordFailure(provider, model string) bool
+	// Report 回报一次上游交互的结局，返回判决（要不要沿链走）。
+	// 分类与状态迁移都在实现里，数据面只如实描述发生了什么。
+	Report(provider, model string, in Input) Result
 	// ObserveSuccess 只记延迟样本，不动可用性（首字节已经拿到之后调用）。
 	ObserveSuccess(provider, model string, contextBytes int, ttft time.Duration)
 	// RecordProbe 记录一次主动探活的结论，返回评级与是否仍然熔断。
@@ -72,6 +100,8 @@ type Breaker interface {
 	// Snapshot 冻结一份可序列化的现状。
 	Snapshot() []Status
 
+	// SetPolicy 整份替换熔断策略（零值项按默认补齐）。
+	SetPolicy(Policy)
 	// Flush 把节流窗口内尚未落盘的延迟样本同步写出（优雅退出用）。
 	Flush()
 	// UseFile 让健康表跨优雅重启存活。
