@@ -334,7 +334,13 @@ if [ -f "$PIDFILE" ]; then
   CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     "http://127.0.0.1:$PORT/__newgate/stop" -H "Authorization: Bearer $TOK")
   check "对令牌 → 200" "$CODE" "200"
-  for _ in $(seq 40); do [ ! -f "$PIDFILE" ] && break; sleep 0.1; done
+  # 等的是「pid 和 lock 都清了」——断言的就是这两件事，等待条件必须一致。
+  # 只等 pidfile 会在 RemovePid() 与 RemoveLock() 之间被抢占：pid 没了、lock
+  # 还剩几微秒，轮询恰好落进这个窗口就误报「没退干净」（2026-09-17 偶发）。
+  for _ in $(seq 40); do
+    [ ! -f "$PIDFILE" ] && [ ! -f "$NEWGATE_HOME/.newgate.lock" ] && break
+    sleep 0.1
+  done
   if [ ! -f "$PIDFILE" ] && [ ! -f "$NEWGATE_HOME/.newgate.lock" ]; then
     ok "daemon 收到指令后退出，pid/lock 都清了"
   else

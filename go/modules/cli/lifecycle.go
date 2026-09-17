@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -99,6 +100,17 @@ func Serve(port int) int {
 
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+
+	// requested 记录「这次退出是有人要求的」，只影响退出码。
+	//
+	// 停机路径**只有一个出口**：下面的 goroutine 只负责 `srv.Shutdown()`
+	// 让 Serve() 返回，pid/lock 的清理和退出码一律由 srv.Start() 之后那段
+	// 统一做。曾经三个出口各自 `RemoveLock + RemovePid + os.Exit(0)`，和主
+	// 路径的 `return 70` 抢跑：实测（2026-09-17，mock/e2e_claude.sh 第 11 章）
+	// 主路径先跑完，`RemoveLock` 有 defer 兜住、`RemovePid` 没有，于是
+	// .newgate.pid 留在磁盘上——下次 start/restart 就会读到一个死 pid。
+	var requested int32
+
 	go func() {
 		for s := range sig {
 			if s == syscall.SIGHUP {
@@ -113,16 +125,14 @@ func Serve(port int) int {
 				os.Exit(0)
 			}
 			lg.Printf("收到 %v，退出", s)
+			atomic.StoreInt32(&requested, 1)
 			srv.Shutdown()
-			daemon.RemoveLock()
-			daemon.RemovePid()
-			os.Exit(0)
+			return
 		}
 	}()
 
-	// 控制端点停机（别的用户 `newgate stop`）：效果和信号一样——
-	// 关 listener、清 pid/lock、退干净。cmdStop 后半段还要 LoadState，
-	// 所以必须 os.Exit 而不是只 return，别让 deferred 副作用拖泥带水。
+	// 控制端点停机（别的用户 `newgate stop`）：发不出信号的用户靠它停机。
+	// 同样只关 listener，清理交给下面统一做。
 	go func() {
 		<-srv.StopRequested()
 		if srv.Draining() {
@@ -131,10 +141,8 @@ func Serve(port int) int {
 			os.Exit(0)
 		}
 		lg.Printf("控制停机（令牌校验通过），退出")
+		atomic.StoreInt32(&requested, 1)
 		srv.Shutdown()
-		daemon.RemoveLock()
-		daemon.RemovePid()
-		os.Exit(0)
 	}()
 
 	lg.Printf("newgate %s (构建于 %s) 启动，默认 profile=%s，配置热更新已开启",
@@ -150,6 +158,13 @@ func Serve(port int) int {
 			os.Exit(0)
 		}
 		lg.Printf("代理退出: %v", err)
+		// 唯一出口：进程要走了，pid/lock 是它自己的，必须一起带走。
+		// defer 的 RemoveLock 只管 lock，pid 得在这里补上。
+		daemon.RemoveLock()
+		daemon.RemovePid()
+		if atomic.LoadInt32(&requested) == 1 {
+			return 0
+		}
 		return 70
 	}
 	return 0
