@@ -61,6 +61,30 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 注册 API 返回 `(component.Release, error)`，在写锁内做查重、冲突返回错误（不要
 静默先到先得）；consumer 在 `Stop` 中逆序释放。
 
+**owner 侧要写这张账本就用 `component.Registry[T]`**，别自己再手写一份：它是
+单调 token + 按 token 精确撤销 + 可选的写锁内准入检查。陈旧 `Release` 是静默
+no-op（`Stop` 幂等），零值可用（`service` 里直接内嵌一个字段即可）。
+
+```go
+type service struct {
+    commands component.Registry[Command]   // 零值可用，New() 里不用构造
+}
+
+func (s *service) RegisterCommand(c Command) (component.Release, error) {
+    return s.commands.Register(c, func(existing []Command) error {
+        for _, other := range existing {
+            // 名字撞车就返回错误——这条是给插件作者看的业务冲突，
+            // 报错文案用中文（跟模块里其他用户可见文案一致）。
+        }
+        return nil
+    })
+}
+```
+
+gateway/special、config/roleprov、confighook 里那三份手写账本**暂时不迁**：
+它们各有真实差异（插件拓扑排序、`Refresh` 读侧、三张异质表共享一张 token），
+强行归并会造出更差的抽象。`Registry` 先在 `cli` 上验证，再逐个迁。
+
 ## 4. 新 Agent
 
 Agent 组件通常：

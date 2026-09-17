@@ -42,8 +42,29 @@ Consumer 只 import owner 模块的根包（端口定义在它的 `api.go`），
 
 **`Provides` 只放自己的 port**。要往别人的扩展点插东西，消费它的 service 并调
 它的 `RegisterX()`——那条路带 `Release`、有查重、有生命周期，而 `Provide` 只是
-"这个端口由谁绑定"的静态声明。这条规则自动成立：别人的端口已经由它的 owner
-提供，再去 `Provide` 就是第二个 provider。
+"这个端口由谁绑定"的静态声明。
+
+这条规则**不再由框架拦**：基数取消（2026-09-17）之前，多 provider 会在构图期
+报 `multiple providers`，所以「别 provide 别人的端口」是自动成立的；现在多
+provider 是合法的（`Get` 取第一个、`GetAll` 取全部），规则只剩约定。代价是
+一次静默先到先得，所以新增扩展点一律按上一条走 `RegisterX`，别去 `Provide`
+别人的端口。
+
+owner 要实现「注册 + 撤销」这张账本时用 `component.Registry[T]`（单调 token +
+按 token 精确撤销 + 写锁内跑准入检查），别自己再手写一份：
+
+```go
+type service struct {
+    commands component.Registry[Command]
+}
+
+func (s *service) RegisterCommand(c Command) (component.Release, error) {
+    return s.commands.Register(c, func(existing []Command) error {
+        // 查重；返回非 nil 则本次注册不生效
+        return nil
+    })
+}
+```
 
 ### Component
 

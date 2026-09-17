@@ -54,7 +54,7 @@ consumer 都依赖 owner 的根包。
 运行期动作，有撤销、有查重、有生命周期；`Provide` 只是"这个端口归谁"的静态
 声明。（2026-09-17 之前还有一条声明式的 `Provides: []Provision{Provide(别人的
 capability, 值)}` 路径，已删除——它没有 Release、没有查重，两个模块认领同一个
-命令名会静默先到先得。）
+命令名会静默先到先得。）owner 侧的账本用 `component.Registry[T]`，别手写。
 
 契约类型若实现方需要反向引用，定义下沉到实现包、根 `api.go` 做类型别名转发：
 
