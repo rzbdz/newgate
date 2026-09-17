@@ -464,6 +464,41 @@ check "ds（没声明）: MAX_CONTEXT_TOKENS 为空" \
 check "ds（没声明）: AUTO_COMPACT_WINDOW 为空" \
   "$(echo "$OUT" | grep '^WIN_COMPACT=' | cut -d= -f2-)" ""
 
+echo; echo "== 16. naked：Bash 分类器被短路，上游一个请求都收不到 =="
+# 裸奔是「自家安全门」：开着时 Bash 分类器请求被直接批准，不经过上游。判据
+# 跟上章节同一个（bg_plain = "You are a security monitor…" 的后台小调用）。
+#   关着：请求真的打到上游（glm 的 light 档）；
+#   开着：请求被短路，上游 /__mock/requests 数 0，短路口计数器涨。
+UPCOUNT() { curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))'; }
+RESETUP() { curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null; }
+
+RESETUP
+OUT="$(E2E_SCENARIO=bg_plain "$BIN" claude --profile=glm 2>"$SANDBOX/nk_off.err")"
+echo "$OUT" | sed 's/^/    /'
+check "裸奔关：bg_plain 200" "$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2)" "200"
+check "裸奔关：上游收到 1 个分类器请求" "$(UPCOUNT)" "1"
+GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+print(r[0]["body"].get("model","NONE") if r else "NONE")')
+check "裸奔关：分类器照常切到 light（glm-4.5-air）" "$GOT" "glm-4.5-air"
+
+"$BIN" naked on >/dev/null 2>&1
+RESETUP
+OUT="$(E2E_SCENARIO=bg_plain "$BIN" claude --profile=glm 2>"$SANDBOX/nk_on.err")"
+echo "$OUT" | sed 's/^/    /'
+check "裸奔开：bg_plain 仍 200（被短路批准）" "$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2)" "200"
+check "裸奔开：上游收到 0 个请求（真的被短路了）" "$(UPCOUNT)" "0"
+MOUT="$("$BIN" metrics 2>/dev/null)"
+# metrics 表格把长计数器名**截断**显示（special.classifier-naked.shortcircuit
+# 截成 special.classifier-naked.shor），所以按短名 + 那行的人话 hint 一起判。
+echo "$MOUT" | command grep -q "classifier-naked" \
+  && echo "$MOUT" | command grep -q "分类器请求被直接批准" \
+  && ok "metrics 有 special.classifier-naked.shortcircuit（短路已计数）" \
+  || bad "metrics 缺 naked 短路计数（输出：$(echo "$MOUT" | command grep -a classifier-naked)）"
+"$BIN" naked off >/dev/null 2>&1
+check "裸奔终于关掉（不留沙箱脏状态）" "$("$BIN" naked 2>&1 | command grep -c '已关闭')" "1"
+
 echo
 echo "结果: $PASS 通过, $FAIL 失败"
 [ "$FAIL" -eq 0 ]
