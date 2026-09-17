@@ -320,6 +320,103 @@ func TestErrorResponseByteFaithful(t *testing.T) {
 	}
 }
 
+// TestReasoningPassthrough400DoesNotOpenBreaker 是 2026-09-17 止血的回归测试。
+//
+// 线上实况：deepseek-flash 的 400「reasoning_content 必须逐字回传」是**请求
+// 形状问题**（同一份 body 换哪个 provider 都一样错），却被当成可用性失败记进
+// 熔断器——连续两发就把一条本来能用的 binding 摘掉（health.json 上能看到
+// `fails=2 open=true grade=fluent`，probe 却一直绿，因为 probe 发的最小请求
+// 根本触发不到这条校验）。修复：health.IsRequestShapeError 把这类 400 从
+// RecordFailure 里摘出去。这里两个候选都返回同一个 reasoning-400，断言
+// 熔断器纹丝不动、请求仍然透传给客户端（不静默）。
+func TestReasoningPassthrough400DoesNotOpenBreaker(t *testing.T) {
+	reasoningErr := `{"type":"error","message":"The ` + "`reasoning_content`" +
+		` in the thinking mode must be passed back to the API."}`
+	hits := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = io.WriteString(w, reasoningErr)
+	}))
+	defer up.Close()
+
+	testChain = func(role string) []resolve.Step {
+		return []resolve.Step{{Profile: "ds",
+			Binding:  domain.Binding{Provider: "ds-shape", Model: "deepseek-flash"},
+			Provider: testProvider(up.URL)}}
+	}
+	defer func() { testChain = nil }()
+
+	health.Default.RecordSuccess("ds-shape", "deepseek-flash") // 从干净状态开始
+
+	srv := &Server{Port: 0}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	// 连发 3 次——旧行为下 Threshold=2 早该把它摘了。
+	for i := 0; i < 3; i++ {
+		resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
+			strings.NewReader(`{"model":"newgate/heavy"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 400 {
+			t.Fatalf("第 %d 发状态码 = %d, want 400（应原样透传，不是别的错误）", i+1, resp.StatusCode)
+		}
+		if string(got) != reasoningErr {
+			t.Fatalf("第 %d 发上游原文被改动了\n want: %q\n got:  %q", i+1, reasoningErr, got)
+		}
+	}
+	if hits != 3 {
+		t.Fatalf("上游被打了 %d 次, want 3", hits)
+	}
+	if !health.Default.Available("ds-shape", "deepseek-flash") {
+		t.Error("reasoning-400 把熔断器打开了——请求形状错误不该记进可用性")
+	}
+}
+
+// TestOtherClientErrorStillOpensBreaker 是上一条的对照组：不是 shape 错误的
+// 400（比如 schema 真的不对）必须继续记账，否则真正坏掉的 provider 永远摘
+// 不掉。两条测试合起来锁住 IsRequestShapeError 这条策略闸门的两侧。
+func TestOtherClientErrorStillOpensBreaker(t *testing.T) {
+	schemaErr := `{"error":{"message":"Invalid schema: missing required field 'name'"}}`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = io.WriteString(w, schemaErr)
+	}))
+	defer up.Close()
+
+	testChain = func(role string) []resolve.Step {
+		return []resolve.Step{{Profile: "test",
+			Binding:  domain.Binding{Provider: "schema-bad", Model: "real-model-1"},
+			Provider: testProvider(up.URL)}}
+	}
+	defer func() { testChain = nil }()
+
+	health.Default.RecordSuccess("schema-bad", "real-model-1")
+
+	srv := &Server{Port: 0}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	for i := 0; i < 2; i++ {
+		resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
+			strings.NewReader(`{"model":"newgate/heavy"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+	if health.Default.Available("schema-bad", "real-model-1") {
+		t.Error("非 shape 错误的 400 连发两次却没打开熔断器——回归了旧行为的另一半")
+	}
+}
+
 // TestClientCancelDuringConnectDoesNotBurnTheChain 断言：客户端在**连接阶段**
 // 就取消时，不沿链重试、不记失败、不开熔断。
 //

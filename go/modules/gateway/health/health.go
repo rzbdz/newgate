@@ -1,6 +1,7 @@
 package health
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -505,4 +506,35 @@ func ShouldAdvance(statusCode int, fallbackOn400 bool) bool {
 // CredentialProblem 这个状态码是不是凭证问题（调用方要给不同的提示）。
 func CredentialProblem(statusCode int) bool {
 	return statusCode == 401 || statusCode == 403
+}
+
+// IsRequestShapeError 决定这个 4xx/5xx 是否**不该**记进熔断器。
+//
+// 「请求形状」错误 = 同一个坏请求换一个 provider 也不会变好；记失败只会让
+// 熔断器去摘一个本可用的 provider，等客户端重试几次直接拖垮整条链。
+//
+// 当前只覆盖 reasoning-400（DeepSeek 的「reasoning_content 必须逐字回传」灰
+// 度门）。该消息已经在 forward.go 里被识别（isReasoningPassthroughError），
+// 现在把"不熔断"的策略**集中**在这里 —— forward 不该再自己判断。后续要加
+// schema-400 / content-400 等同族规则，直接扩展 IsRequestShapeError 即可。
+func IsRequestShapeError(errBody []byte, statusCode int) bool {
+	if statusCode != 400 {
+		return false
+	}
+	return isReasoningPassthroughBody(errBody)
+}
+
+// isReasoningPassthroughBody 在不依赖 forward 包的情况下复用同一个判据：
+// DeepSeek 的 400 文案里出现「reasoning_content」（OpenAI 方言）或
+// 「content[].thinking」（Anthropic 方言）都是这类错误的字段名，两种都要认。
+func isReasoningPassthroughBody(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	if !bytes.Contains(b, []byte("must be passed back")) &&
+		!bytes.Contains(b, []byte("must be passed")) {
+		return false
+	}
+	return bytes.Contains(b, []byte("reasoning_content")) ||
+		bytes.Contains(b, []byte("content[].thinking"))
 }
