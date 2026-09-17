@@ -49,18 +49,19 @@ func Treatments() []special.Plugin { return []special.Plugin{reasoning{}} }
 // 第 3 手只在思考模式开着时做：思考关掉时再塞 thinking 块，反而会被上游
 // 以「关了还给我思考块」拒掉。
 //
-// 第 4 手（2026-09-17 新增）修的是**根因**，前几手都只是把字段补齐：
+// 第 4 手（2026-09-17 新增，同日按实测重写判据）修的是**根因**，前几手都只是把
+// 字段补齐：
 //
-//	对话尾部如果是「只有 tool_result、没有任何文字」的 user 轮，
+//	**最后一条 user 消息**的 content[] 里全是 tool_result 块、一个字都没有时，
 //	DeepSeek 的严格校验一律回「reasoning_content must be passed back」
-//	——哪怕每一条历史消息的推理都逐字回了。
+//	——哪怕每一条历史消息的推理都逐字回了，哪怕上一条是 role:"system" 的插话。
 //
 // 这是实测排除法得出的结论，不是猜的：同一份真实 body（带完整历史）连发
 // 多次都 400；把 reasoning_content 全换成真实文本、或全部删掉，结果都不变；
 // 上游原文里点名的字段却明明是齐的。真正起作用的是尾部形状——追加一条普通
-// 用户指令就 5/5 200（同一份 Ark → DeepSeek 的 A/B，见 RebaseToolLoop）。
-// 报错文案与真实原因不一致，是这个上游最坑的地方：它把「你这轮没有新指令」
-// 也报成「推理没回传」。
+// 用户指令就 200（3/3，见 repairTailShape 的判据注释与 docs/06-reasoning.md
+// §2b 的完整矩阵）。报错文案与真实原因不一致，是这个上游最坑的地方：它把
+// 「你这轮没有新指令」也报成「推理没回传」。
 //
 // 第 1 手只给 Claude Code（`/a/claude/` 认出来，见 claudeCode）：它剥掉思考块，
 // 思考开着也回不来，白花思考的时间和 token。**别的客户端不能关**——2026-09-15
@@ -206,19 +207,23 @@ func (reasoning) Apply(body []byte, r *special.Request) ([]byte, []string, error
 		notes = append(notes, reasoningNote("reasoning_content", n, restored, placeholders))
 	}
 
-	// 4) 尾部形态：最后一条消息是「只有 tool_result、没有文字」的 user 轮时，
-	//    给**它**追加一条普通用户指令。详见文件头第 4 手。
+	// 4) 尾部形态：**最后一条 user 消息**的 content[] 里只有 tool_result、一个字
+	//    都没有时，给它追加一条普通用户指令。详见文件头第 4 手。
 	//
 	//    顺序放在补字段之后：这一步改的是 messages 的尾部形状，前面两步改的是
 	//    已有消息里的字段，互不影响；放在后面读起来也顺——先补全字段，再修形状。
-	if thinkingOn {
-		if nb, changed, err := repairTailShape(out); err != nil {
-			notes = append(notes, "尾部形状未改动（"+err.Error()+"）")
-		} else if changed {
-			out = nb
-			notes = append(notes, "对话尾部只有 tool_result 没有用户指令——"+
-				"追加一条继续指令（DeepSeek 对空指令尾部误报 reasoning_content 缺失）")
-		}
+	//
+	//    **不能挂在 thinkingOn 上**。2026-09-17 实测（3/3，走 /p/ds 打真实上游，
+	//    读 X-Newgate-Chain 上 deepseek 那一发的结论）：同一份 tool_result-only
+	//    尾部，把顶层写成 thinking:{"type":"disabled"} 且**不带 tools**，
+	//    上游照样回「reasoning_content must be passed back」。上游这条校验与
+	//    思考开关无关——它只是把「你这轮没有新指令」也报成了推理缺失。
+	if nb, changed, err := repairTailShape(out); err != nil {
+		notes = append(notes, "尾部形状未改动（"+err.Error()+"）")
+	} else if changed {
+		out = nb
+		notes = append(notes, "末尾的 user 轮只有 tool_result 没有用户指令——"+
+			"追加一条继续指令（DeepSeek 对空指令尾部误报 reasoning_content 缺失）")
 	}
 
 	// 3) 思考模式开着 → assistant 的 content[] 开头必须有 thinking 块
@@ -259,14 +264,35 @@ func (reasoning) Apply(body []byte, r *special.Request) ([]byte, []string, error
 const tailContinuation = "Continue from the tool results above. " +
 	"Call the next tool you need, or give your final answer."
 
-// repairTailShape 修「尾部只有 tool_result」这个形状。
+// repairTailShape 修「最后一条 user 消息只有 tool_result」这个形状。
 //
-// 只认**最后一条**消息，且必须是 user、content 是数组、数组里一个 text 块都
-// 没有（典型就是只有 tool_result）。已经带了文字的尾部一律不碰——它本来就能过，
-// 多塞一句话只是往用户的对话里加噪音。
+// 判据三条，每一条都是实测出来的（2026-09-17，3/3，打真实
+// smt-deepseek/deepseek-flash，读 X-Newgate-Chain 上 deepseek 那一发的结论）：
 //
-// 用 AppendLastArrayItemArray 而不是自己拼字节：它保证只在最后一个匹配项上
-// 追加，且沿用 rewrite 包一贯的「只动该动的那一段」。
+//  1. **锚在「最后一条 role:user 的消息」，不是数组的最后一项**。Claude Code 会
+//     在 tool_result 之后追加一条 role:"system" 的插话（「The user sent a new
+//     message while you were working: …」），数组最后一项是那条 system，而被上游
+//     拒掉的却是它前面那条只有 tool_result 的 user 轮。上游不认 system 里的指令，
+//     所以那 400 一直存在。现场：dump/err-400-req000464（末尾 user[tool_result]
+//     → system[text] → 400 must be passed back）、req000061。
+//     旧实现要求数组最后一项就是 user，这一族全部漏修。
+//
+//  2. **那块 content[] 里必须全是 tool_result 块**，不是「没有 text 块」。
+//     原判据（一个 text 块都没有就算）太宽，会把下面这些本来就能过的尾部也改掉：
+//     [image] → 200、[tool_result, image] → 200。（tool_result + text → 200；
+//     [tool_result] → 400；[tool_result, tool_result] 并行工具轮 → 400。）所以
+//     「全是 tool_result」才是那条线：除 tool_result 之外的任何块（text、image）
+//     都算「有指令」，上游就放行。
+//
+//  3. 调用点**不在 thinkingOn 闸门里**（见 Apply 里的注释）：thinking:disabled
+//     且不带 tools 时这条校验照样触发。
+//
+// 已经带了文字/图片的尾部一律不碰——它本来就能过，多塞一句话只是往用户的对话里
+// 加噪音。
+//
+// 用 AppendArrayItemArrayAt 而不是 AppendLastArrayItemArray：按下标挑。不写成
+// 「从后往前找第一条合形状的」是因为长历史里中段的 tool_result-only 轮到处都是，
+// 从后往前找会去改一条**不该动**的老消息。
 func repairTailShape(body []byte) ([]byte, bool, error) {
 	raw, ok := rewrite.TopLevelRaw(body, "messages")
 	if !ok {
@@ -276,10 +302,37 @@ func repairTailShape(body []byte) ([]byte, bool, error) {
 	if !ok || len(items) == 0 {
 		return body, false, nil
 	}
-	if role, _ := rewrite.TopLevelString(items[len(items)-1], "role"); role != "user" {
+
+	// 1) 最后一条 role:user 消息的下标。
+	idx := -1
+	for i, it := range items {
+		if role, _ := rewrite.TopLevelString(it, "role"); role == "user" {
+			idx = i
+		}
+	}
+	if idx < 0 {
 		return body, false, nil
 	}
-	content, ok := rewrite.TopLevelRaw(items[len(items)-1], "content")
+
+	// 它之后**不能有 assistant 消息**。那种尾部（数组以 assistant 收尾）是另一条
+	// 规则在管，而且追加指令证明**没有用**：实测 A1（tool_result-only 的 user 轮
+	// + 尾随 assistant + 带 tools）3/3 400；把继续指令追加到那个 user 轮上就得到
+	// A3，3/3 还是 400——换句话说那一族的 400 与「尾部有没有指令」无关（A3 的尾部
+	// 本来就有文字）。既然改不好，就别改：往用户的对话里塞一句模型看不见效果的
+	// 噪音，比 400 更糟。
+	//
+	// 那一族（带 tools 时数组以 assistant 收尾）从真实客户端到不了：Claude Code
+	// 的请求要么以 user 的 tool_result 收尾（等模型接着干），要么以 user 的文字
+	// 收尾，要么在两者之后追加一条 role:"system" 的插话。2026-09-17 把 dump 里
+	// 全部 15 份 err-400 过了一遍，没有一份是 assistant 收尾。
+	for _, it := range items[idx+1:] {
+		if role, _ := rewrite.TopLevelString(it, "role"); role == "assistant" {
+			return body, false, nil
+		}
+	}
+
+	// 2) 它的 content[] 非空、且**全是** tool_result 块。
+	content, ok := rewrite.TopLevelRaw(items[idx], "content")
 	if !ok {
 		return body, false, nil
 	}
@@ -289,20 +342,17 @@ func repairTailShape(body []byte) ([]byte, bool, error) {
 		return body, false, nil
 	}
 	for _, b := range blocks {
-		if t, _ := rewrite.TopLevelString(b, "type"); t == "text" {
+		if t, _ := rewrite.TopLevelString(b, "type"); t != "tool_result" {
 			return body, false, nil
 		}
 	}
+
 	q, err := json.Marshal(tailContinuation)
 	if err != nil {
 		return body, false, err
 	}
 	block := []byte(`{"type":"text","text":` + string(q) + `}`)
-	out, changed, err := rewrite.AppendLastArrayItemArray(body, "messages", "content",
-		block, func(item []byte) bool {
-			role, _ := rewrite.TopLevelString(item, "role")
-			return role == "user"
-		})
+	out, changed, err := rewrite.AppendArrayItemArrayAt(body, "messages", "content", idx, block)
 	if err != nil {
 		return body, false, err
 	}

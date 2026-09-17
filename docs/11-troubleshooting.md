@@ -19,17 +19,36 @@
 
 实测过一次确定性复现：同一份真实 body（带完整历史）连发多次都 400，但
 把 reasoning_content 全换成真实文本 / 全部删掉都不影响结果——根因不在
-"补的内容对不对"，而在对话**尾部形状**（最后一轮如果只有 `tool_result`
-没有跟着一条新的用户指令，DeepSeek 的严格校验会报同一个误导性文案）。
+"补的内容对不对"，而在**最后一条 user 消息的形状**（它的 content[] 里全是
+`tool_result` 块、一个字都没有时，DeepSeek 的严格校验会报同一个误导性文案）。
 
-**这条根因已修**（2026-09-17）：`repairTailShape`（modules/deepseek）在思考
-模式下检测「最后一条 user 消息的 content 是数组、且一个 text 块都没有」的
-尾部，追一句用户口气的继续指令（`Continue from the tool results
-above…`），让 DeepSeek 的校验落在一条真正的指令上。只认最后一条、只碰这种
-形状；已带文字的尾部一律不碰，避免给正常对话加噪音。证据留样：`dump/`
-里 `err-400-req000412/req000464` 两份 958KB 真实对话，修复后不再误报
-reasoning_content 缺失。新出现的 400 仍按 §3 分类器处理（形状错误永不摘牌、
-只计数），但根因从「不修的已知问题」降级为「只剩没撞上的个案」。
+**这条根因已修**（2026-09-17，判据当日按实测重写过一版）：
+`repairTailShape`（modules/deepseek）锚在**最后一条 `role:"user"` 消息**上，
+当它的 content[] 非空且**每个块都是 `tool_result`** 时，追一句用户口气的
+继续指令（`Continue from the tool results above…`），让 DeepSeek 的校验落在
+一条真正的指令上。
+
+判据的完整实测矩阵、以及三个**被推翻的旧假设**（不是「数组最后一项」、
+不是「没有 text 块」、不挂在 `thinkingOn` 上）写在 `docs/06-reasoning.md`
+§2b，那里是唯一的出处，别在这儿抄第二份。
+
+归档留样：`dump/` 里 15 份 `err-400-*`。其中 6 份是这句文案，形状全部是
+「最后一条 user 消息只有 tool_result」——包括 2 份尾部还跟着 `role:"system"`
+插话的（`req000464`、`req000061`），那 2 份**旧实现漏修**（旧判据要求数组
+最后一项就是 user），是这次重写的直接动因。其余 9 份是另外三类，文案都不
+同，别混进来：
+
+| 上游原文 | 份数 | 归属 |
+| --- | --- | --- |
+| `The \`reasoning_content\` in the thinking mode must be passed back` | 6 | 本节，尾部形状 |
+| `[1210][该模型始终思考，不支持关闭思考；请使用 low、high 或 max。]` | 2 | glm；走 quirk 学习（见 §3） |
+| `invalid thinking: only type=enabled is allowed for this model` | 2 | kimi；**措辞不在 `quirk.signatures` 里，学不到，会反复撞** |
+| `invalid params, Mismatch type ***.ClaudeContent with value string` | 4 | 客户端发来的 content 块类型不符，与推理无关 |
+| `An assistant message with 'tool_calls' must be followed by tool messages` | — | 链上出现未闭合的 tool_use，非本类 |
+
+新出现的 400 仍按 §3 分类器处理（形状错误永不摘牌、只计数）。**形状判据只
+认这一种尾部**：数组以 `assistant` 收尾、或尾部本来就有文字/图片的，一律
+不碰（前者实测追加指令也修不好，后者本来就能过）。
 
 **被形状判据认领的 400 会额外存一份专属证据**（2026-09-17 起）：
 `dump/shape-400-<判据名>/req-<id>-<纳秒>/`，里面是 client-sent / we-sent /
@@ -40,6 +59,13 @@ upstream-said / audit.txt / meta.txt 五件。目录名里的判据名就是日�
 （512MB，超了从最旧的子目录开始删），因为它是「判据为什么这么判」的唯一
 现场；`dump/err-400-*` 记的是「上游回了什么」，两者常常同时出现、看的角度
 不同。
+
+**注意形状 400 常常不落 `err-400-*`**：判据命中时决策表给的是「沿链走、
+不记账」，走的是转移分支，而 `saveErrEvidence` 只在定案分支调用。所以查这
+类问题时**日志那一行 `上游说:` 才是主证据**（形如
+`normal -> smt-deepseek/deepseek-flash -> 400  上游说: {…}`），
+`dump/shape-400-deepseek/` 是另一份；`err-400-*` 里有的那些反而是没被判据
+认领的。
 
 ## 2. Probe 绿但请求 404 / 400
 
