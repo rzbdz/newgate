@@ -104,23 +104,31 @@ func usageText(service *service) string {
 	}
 
 	// 术语表是**界面自己的**东西：用户不知道某个词是什么意思时看的字典。它不是
-	// 命令行清单（那是模块的），所以留在这里；能推导的一律现取（agent 名、槽位键
-	// 都来自注册表），不写死。
-	// 术语表分两半：**界面自己的词汇**（profile 这类纯界面概念）写在下面，属于
-	// 模块的（agent、槽位键）由模块自己交上来（cliapi.Glossarist）。界面不再为了
-	// 那两行去认识 AgentCatalog 与 domain.ExtraRoles。
+	// 命令行清单（那是模块的），所以留在这里。但**表里的每一行都归模块自己**——
+	// 界面上一版还在写死 `profile` 与那张配置文件清单（providers.json /
+	// mappings/*.kv / state.json），那两样都是 config 的词汇，界面凭什么知道。
+	// 现在全部经 cliapi.Glossarist 交上来（见 modules/config/diagnostics.go）。
+	//
+	// 右列跟着左列一起折行：定义是模块写的，长度不受界面控制，写死一行的版式
+	// 迟早会被某一条长定义顶破 75 列上限（style.MaxColumns）。
 	b.WriteString("\n" + style.Bold("术语") + "\n")
 	term := func(left, right string) {
-		b.WriteString("  " + style.Pad(style.Cyan(left), 12) + style.Dim(right) + "\n")
+		const termWidth = 12
+		prefix := "  " + style.Pad(style.Cyan(left), termWidth)
+		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-termWidth)
+		for i, line := range lines {
+			if i == 0 {
+				b.WriteString(prefix + line + "\n")
+			} else {
+				b.WriteString(strings.Repeat(" ", 2+termWidth) + line + "\n")
+			}
+		}
 	}
-	term("profile", "一套「档位 → provider/模型」绑定")
 	if service != nil {
 		for _, line := range service.glossaryLines() {
 			term(line.Term, line.Definition)
 		}
 	}
-	b.WriteString("\n" + style.Bold("配置") + "\n")
-	b.WriteString("  " + style.Dim("~/.config/newgate/ · providers.json · mappings/*.kv · state.json") + "\n")
 	return b.String()
 }
 

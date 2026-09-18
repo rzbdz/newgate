@@ -347,5 +347,19 @@ func (glossary) Glossary() []cliapi.GlossaryLine {
 	case len(keys) > 0:
 		def = "模块贡献的动态角色（" + strings.Join(keys, " / ") + "），写法同档位"
 	}
-	return []cliapi.GlossaryLine{{Rank: 20, Term: "槽位键", Definition: def}}
+	// profile 与配置文件的说法本来写死在界面里（cli.usageText），可这两样都是
+	// **本模块的词汇**：界面凭什么知道 providers.json 叫什么、state.json 在哪。
+	// 2026-09-18 搬回来之后，界面那一节只剩「从账本里读行」这一件事。
+	//
+	// 目录与文件名**分两行**：合成一行会有 78 列，超过版面上限 75（style.MaxColumns）
+	// ——而 `style.Wrap` 是按显示宽度切字符的，不认词边界，于是它会从 `state.json`
+	// 中间断开成 `stat` / `e.json`，看着像个错字。这里宁可行数多一行。
+	// 目录现取 paths.Config()：沙箱（NEWGATE_HOME）与 --home 覆盖下真正生效的
+	// 是哪一个，只有这里说了算。
+	return []cliapi.GlossaryLine{
+		{Rank: 15, Term: "profile", Definition: "一套「档位 → provider/模型」绑定"},
+		{Rank: 20, Term: "槽位键", Definition: def},
+		{Rank: 30, Term: "配置目录", Definition: paths.Config()},
+		{Rank: 31, Term: "配置文件", Definition: "providers.json · mappings/*.kv · state.json"},
+	}
 }
