@@ -18,8 +18,6 @@ func (h *stubHost) Die(code int, message string) int { h.died, h.msg = code, mes
 
 func (h *stubHost) DaemonRunning() bool { return false }
 
-func (h *stubHost) PrintThinkCache() {}
-
 func (h *stubHost) NotifyProxy() { h.notified++ }
 
 var _ cliapi.Host = (*stubHost)(nil)

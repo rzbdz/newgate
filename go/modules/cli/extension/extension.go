@@ -133,12 +133,10 @@ type Host interface {
 	// 谁去调 modules/config 的 PrintChain / PrintSkips。借界面转发一圈只会让界面
 	// import 配置——而界面不该认识任何模块。
 
-	// PrintThinkCache 打印推理缓存的命中计数。
-	//
-	// 数字只能从**跑着的守护进程**取：缓存在守护进程的内存里，CLI 是另一个
-	// 进程，在命令这边读只会看到一个空缓存——那比不显示更误导人。所以取数
-	// 这件事归 CLI（它持有那个 HTTP 客户端），命令只管在合适的位置调一下。
-	PrintThinkCache()
+	// PrintThinkCache **不在 Host 上**（2026-09-18 移走，与 LiveRouting 同一条
+	// 理由）：它是 gateway 的 thinkcache 计数与排版，谁要谁自己去
+	// modules/gateway/thinkcache_status.go 渲染。它曾经在 Host 上，于是这个接口
+	// 里出现了一条**以某个模块命名**的方法——界面因此「认识」了那个模块。
 }
 
 // Command 是模块向 CLI 贡献的命令端口；Names 声明路由名，Run 执行命令语义。
