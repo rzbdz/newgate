@@ -19,7 +19,7 @@ name: CI
 # ---- 触发条件：只在 main 上跑（2026-09-18 改）----
 #
 # 开发流程是「从 main 切分支 → 干完合回 main」，所以**只有合进 main 的那一下**
-# 需要一次权威判定。之前 `push: branches: [main, feature/**]` 加 `pull_request:`
+# 需要一次权威判定。之前 `push: branches: [main, "feature/**"]` 加 `pull_request:`
 # 是每推一次分支、每开一个 PR 都跑一轮，run 列表里大半是还没定稿的中间态——
 # 真正要看的「main 现在绿不绿」反而被埋了。
 #
@@ -41,13 +41,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# runner 本来就是干净的，这里仍然**显式**钉住配置目录：让「测试偷偷依赖运行它的
-# 那台机器上的配置」在任何 runner 上都必然暴露，而不是碰运气。与本地 `make ci`
-# 的沙箱同一个意图（那条命令就是照这个写的）。
-# e2e 的两个脚本各自 export 自己的沙箱，不受影响。
-env:
-  NEWGATE_HOME: ${{ runner.temp }}/newgate-ci
-
 permissions:
   contents: read
 
@@ -58,6 +51,15 @@ jobs:
     defaults:
       run:
         working-directory: go
+    # runner 本来就是干净的，这里仍然**显式**钉住配置目录：让「测试偷偷依赖
+    # 运行它的那台机器上的配置」在任何 runner 上都必然暴露，而不是碰运气。
+    # 与本地 `make ci` 的沙箱同一个意图（那条命令就是照它写的）。
+    #
+    # 必须在 **job 级**：顶层 env 只允许 github/secrets/inputs/vars 四个上下文，
+    # `runner` 上下文在那里取不到——放顶层会让 GitHub 直接拒绝整个 workflow
+    # （2026-09-18 实测：run 0 秒失败，报 "workflow file issue"）。
+    env:
+      NEWGATE_HOME: ${{ runner.temp }}/newgate-ci
     steps:
       - uses: actions/checkout@v4
 
@@ -85,6 +87,9 @@ jobs:
     defaults:
       run:
         working-directory: go
+    # 与 static 同一个理由（见那里的注释）：钉住配置目录，别让 runner 状态漏进来。
+    env:
+      NEWGATE_HOME: ${{ runner.temp }}/newgate-ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -93,6 +98,7 @@ jobs:
           cache-dependency-path: go/go.sum
       - run: go test -race ./...
 
+  # 这一档不需要上面那个 env：mock/*.sh 各自 export 自己的沙箱。
   e2e:
     name: 零 token 端到端
     runs-on: ubuntu-latest
