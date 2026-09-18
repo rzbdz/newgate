@@ -22,22 +22,27 @@ import (
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
-// launchCommand 包装启动一个 agent。
+// launchCommand 包装启动一个 agent：`newgate claude …` / `newgate run claude …` /
+// `newgate --profile ds claude`。
 //
-// **每个已知 agent 一个实例**，各自带着自己的 id；外加一个不带 id 的实例负责显式
-// 的 `run <agent>`。这是账本第一次被用来声明「一个模块认识的若干个动词」而不是一
-// 个固定动词——分派器不需要为此改一行，它本来就只是查表。
+// **一条命令，动词现查**（2026-09-18 重写）。上一版是「每个已知 agent 一个实例、
+// 各自记着自己的 id」，那样注册期就必须知道全部动词；而动词是**运行期长出来的**
+// ——客户端模块在自己的 Start 里注册 agent。于是 launchCommands 只能在 Start 里
+// 枚举目录，而那一刻别人可能还没注册：实测（`Optional(cli)` 这条排序边把 cli 提到
+// 最前之后）runtime 排在 claudecode 之前，枚举出来是空表，`newgate claude` 报
+// 「未知命令」。70 条 e2e 断言就是这么红的。
 //
-// 为什么要按 agent 拆实例（2026-09-18 实测踩到）：分派器交给命令的 args **不含
-// 动词本身**（契约如此）。`newgate claude --profile=ds` 分派到 `claude` 这条命令时
-// 收到的是 `["--profile=ds"]`——agent 名在动词位上被剥掉了。命令自己知道自己是
-// 谁，把 id 补回去即可；一个实例包办所有 id 的话，那一发就会报「要启动哪个 agent」。
+// 根因不是顺序，是**在 Start 里读了别人写的东西**——依赖图表达不了「所有人都写完
+// 了」（见 docs/02-component-framework.md 的三段法则）。所以动词表在**分派那一刻**
+// 现查，注册期只交一条命令。
+//
+// 缺的那块信息由宿主补回来：分派器交给命令的 args **不含动词本身**（契约如此），
+// `newgate claude --profile=ds` 分派到这条命令时收到的是 `["--profile=ds"]`。宿主
+// 知道它是按哪个名字找到我们的（cliapi.Host.Verb），把 id 补回参数首位，后面走
+// 同一条 splitLaunch（它也负责校验 id 真的存在）。
 type launchCommand struct {
 	rt     Runtime
 	agents confighookapi.AgentCatalog
-	// agentID 非空 = 这个实例只服务这一个 agent（`newgate claude …`）；
-	// 为空 = 显式路径 `newgate run <agent> …`，agent 名在参数里。
-	agentID string
 }
 
 var (
@@ -46,52 +51,39 @@ var (
 	_ cliapi.Handoff    = (*launchCommand)(nil)
 )
 
-// Names 每个已知 agent 一个名字，外加 `run`（`newgate run claude`）。
+// Names 现查目录：每个已知 agent 一个动词，外加显式的 `run`。
 //
-// 现取而不是缓存：Attach 时目录已经装好了（config-hook 排在前面），而客户端
-// 模块可能在 Attach 之后才注册——现取才不会漏（分派器是每次命令现查账本的）。
+// **每次分派都现查**（不是缓存）：目录在装配之后还会长，而且新 agent 注册进来
+// 就该立刻可分派——不需要重启，也不需要赌自己排在客户端模块后面。
 func (c launchCommand) Names() []string {
-	if c.agentID != "" {
-		return []string{c.agentID}
-	}
-	return []string{"run"}
+	names := append([]string(nil), c.agents.Names()...)
+	return append(names, "run")
 }
 
-// Help 只在显式路径 `run` 那一行出现。
+// Help 只声明 `run <agent> [args…]` 一行。
 //
 // **故意不逐个 agent 列一行**：agent 名是各客户端模块的键，help 里列出它们等于
 // 界面又认识了一遍客户端。用户敲 `newgate claude` 从来不是从 help 里学来的。
 //
-// 实现方式是按 agentID 返回空 Usage（usageText 约定「没有 Usage 就不占一行」）：
-// 每个 agent 一个实例是**分派键**，不是 help 条目。2026-09-18 之前这里无差别
-// 返回同一行，而 launchCommands 给每个 agent 都注册了一个实例——于是
-// `newgate --help` 里 `run <agent> [args…]` 原样重复了 N 遍（实测 2 个 agent
-// 时 3 行）。注释说着「只出现一次」，代码没有做到，这正是这个仓库最怕的那种
-// 不一致：读注释的人不会去数。
+// 上一版靠「每个 agent 一个实例、实例按 agentID 返回空 Usage」来做这件事，代价是
+// 注册期就得知道全部 agent（见上面的说明）。一条命令之后，一行就是一行。
 func (c launchCommand) Help() cliapi.HelpLine {
-	if c.agentID != "" {
-		return cliapi.HelpLine{} // 空 Usage = 不占行（见 cli.usageText）
-	}
 	return cliapi.HelpLine{Section: cliapi.SectionRunOnce, Rank: 20,
 		Usage: "run <agent> [args…]", Summary: "用某个 profile 跑一次"}
 }
 
-func (c launchCommand) Run(_ cliapi.Host, args []string) int {
+func (c launchCommand) Run(host cliapi.Host, args []string) int {
 	// 动词位被分派器剥掉了：名字就是 agent 的那种调用要把 id 补回参数首位，
 	// 让 splitLaunch 走同一条路径（它也负责校验 id 是不是真的存在）。
-	if c.agentID != "" {
-		args = append([]string{c.agentID}, args...)
+	if verb := host.Verb(); verb != "" && verb != "run" {
+		args = append([]string{verb}, args...)
 	}
 	return runLaunch(c.rt, c.agents, args)
 }
 
-// launchCommands 每个已知 agent 一条，外加显式的 run。
+// launchCommands 只有一条：动词表在分派期现查（见 launchCommand 的说明）。
 func launchCommands(rt Runtime, agents confighookapi.AgentCatalog) []cliapi.Command {
-	out := []cliapi.Command{launchCommand{rt: rt, agents: agents}}
-	for _, id := range agents.Names() {
-		out = append(out, launchCommand{rt: rt, agents: agents, agentID: id})
-	}
-	return out
+	return []cliapi.Command{launchCommand{rt: rt, agents: agents}}
 }
 
 // HandsOff：这条命令接着会把控制权交给被启动的客户端，newgate 的版式审计不该

@@ -163,7 +163,7 @@ func run(service *service, args []string) int {
 			if agent := findFlag(args, "--agent", "--tool", "--target"); agent != "" {
 				rest = append(rest, "--agent", agent)
 			}
-			return command.Run(moduleCLIHost{}, rest)
+			return command.Run(moduleCLIHost{verb: name}, rest)
 		}
 	}
 
@@ -178,7 +178,7 @@ func run(service *service, args []string) int {
 	// 它叫什么、怎么解析剩下的参数，归命令自己。
 	if name := lookupName(args); name != "" {
 		if command, ok := service.moduleCommand(name); ok {
-			return command.Run(moduleCLIHost{}, dropName(args, name))
+			return command.Run(moduleCLIHost{verb: name}, dropName(args, name))
 		}
 	}
 	return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))

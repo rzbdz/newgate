@@ -20,6 +20,9 @@ func (h *stubHost) DaemonRunning() bool { return false }
 
 func (h *stubHost) NotifyProxy() { h.notified++ }
 
+// Verb 空串：测试直接调 Run，没有分派器，也就没有「按哪个名字找到我」。
+func (h *stubHost) Verb() string { return "" }
+
 var _ cliapi.Host = (*stubHost)(nil)
 
 // TestRunGetsArgsWithoutTheVerb 守命令的参数下标基准。

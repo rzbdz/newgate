@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 )
 
@@ -63,11 +64,11 @@ func TestSplitLaunch(t *testing.T) {
 
 // TestLaunchFamilyClaimsExactlyOneHelpLine 包装启动那一族在 help 里只占一行。
 //
-// 每个 agent 一个 launchCommand 是**分派键**（`newgate claude` / `newgate
-// opencode`），不是 help 条目——agent 名是各客户端模块的键，逐个列出来等于界面
-// 又认识了一遍客户端。2026-09-18 之前 Help() 无差别返回同一行，而
-// launchCommands 给每个 agent 都注册了一个实例，于是 `newgate --help` 里
-// `run <agent> [args…]` 原样重复了 N 遍（本机 2 个 agent → 3 行）。
+// 「`run <agent> [args…]` 只出现一次」这条**曾经是靠实例数凑出来的**：2026-09-18
+// 之前每个 agent 一个 launchCommand，实例按 agentID 返回空 Usage 来不占行。那样
+// 注册期就得知道全部 agent（见 launch.go 的说明：那条路让 `newgate claude` 在
+// cli 被排到最前之后直接失联）。现在只有一条命令、一行 help，这条测试改成锁
+// **动词表**：它必须现查目录，且不把 agent 名写进 help。
 //
 // 守在这里而不是界面那边：**是这一族多交了一行，不是界面漏了去重**。界面按
 // 约定「空 Usage = 不占行」处理，把去重塞进界面就等于让它又认识一遍这些命令。
@@ -77,12 +78,11 @@ func TestLaunchFamilyClaimsExactlyOneHelpLine(t *testing.T) {
 		"opencode": {ID: "opencode", Bin: []string{"opencode"}},
 	}
 	cmds := launchCommands(nil, catalog)
-	if len(cmds) != 3 {
-		t.Fatalf("期望 1 个 run + 2 个 agent 分派键，实际 %d 个", len(cmds))
+	if len(cmds) != 1 {
+		t.Fatalf("期望恰好 1 条命令，实际 %d 条", len(cmds))
 	}
 
 	var claimed []string
-	seen := map[string]int{}
 	for _, c := range cmds {
 		doc, ok := c.(interface{ Help() cliapi.HelpLine })
 		if !ok {
@@ -90,19 +90,35 @@ func TestLaunchFamilyClaimsExactlyOneHelpLine(t *testing.T) {
 		}
 		line := doc.Help()
 		if line.Usage == "" {
-			continue // 分派键：按约定不占行
+			continue // 按约定不占行
 		}
 		claimed = append(claimed, line.Usage)
-		seen[line.Usage]++
+		if line.Usage == "run <agent> [args…]" && line.Section != cliapi.SectionRunOnce {
+			t.Errorf("`run` 那行的槽位 = %q，应为 %q", line.Section, cliapi.SectionRunOnce)
+		}
 	}
 	if len(claimed) != 1 {
 		t.Fatalf("这一族只该有一行 help，实际 %d 行：%v", len(claimed), claimed)
 	}
-	if seen["run <agent> [args…]"] != 1 {
-		t.Fatalf("`run <agent> [args…]` 应恰好出现一次，实际 %d 次", seen["run <agent> [args…]"])
+	if claimed[0] != "run <agent> [args…]" {
+		t.Fatalf("那一行应是 `run <agent> [args…]`，实际 %q", claimed[0])
 	}
-	// 空 HelpLine 的零值语义要成立（界面的 usageText 靠 Usage == "" 跳过）。
-	if line := (launchCommand{agentID: "claude"}).Help(); line.Section != "" || line.Summary != "" {
-		t.Errorf("分派键的 HelpLine 应当整个是零值，实际 %+v", line)
+
+	// 动词表**现查目录**：装配之后长出来的 agent 立刻可分派，不需要重启。
+	names := cmds[0].Names()
+	if got := strings.Join(names, ","); got != "claude,opencode,run" {
+		t.Fatalf("Names() = %q，应为 `claude,opencode,run`", got)
+	}
+	catalog["glm"] = &agentapi.Agent{ID: "glm", Bin: []string{"glm"}}
+	if got := strings.Join(cmds[0].Names(), ","); got != "claude,glm,opencode,run" {
+		t.Fatalf("新 agent 注册之后 Names() = %q——动词表是快照，不是现查", got)
+	}
+
+	// help 里**不许出现 agent 名**：那是各客户端模块的键，列出来等于界面又认识
+	// 了一遍客户端。
+	for _, name := range []string{"claude", "opencode", "glm"} {
+		if strings.Contains(claimed[0], name) {
+			t.Errorf("help 行 %q 里出现了 agent 名 %q", claimed[0], name)
+		}
 	}
 }
