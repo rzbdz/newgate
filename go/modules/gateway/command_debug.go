@@ -39,7 +39,7 @@ func (debugCommand) Help() cliapi.HelpLine {
 }
 
 func (debugCommand) Run(host cliapi.Host, args []string) int {
-	arg := cliapi.Arg(args, 0)
+	arg := cliapi.Positional(args, 0)
 	// 同 schema-repair：不带参数要报用法，不能默认成 off。这条命令的代价更大
 	// ——它会在你只想看一眼的时候把全量日志关掉，而「日志怎么没了」的排查
 	// 成本远高于多敲一个 on/off。
@@ -62,7 +62,7 @@ func (debugCommand) Run(host cliapi.Host, args []string) int {
 				ttl = time.Duration(n) * time.Minute
 			}
 		}
-		if hasFlag(args, "--forever") {
+		if cliapi.Flag(args, "--forever") {
 			ttl = 0
 		}
 	}
@@ -93,13 +93,4 @@ func (debugCommand) Run(host cliapi.Host, args []string) int {
 		fmt.Println(style.Hint("即刻生效，无需重启"))
 	}
 	return 0
-}
-
-func hasFlag(args []string, name string) bool {
-	for _, a := range args {
-		if a == name {
-			return true
-		}
-	}
-	return false
 }

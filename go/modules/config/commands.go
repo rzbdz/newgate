@@ -544,7 +544,9 @@ func (initCommand) Help() cliapi.HelpLine {
 		Usage: "init [--force]", Summary: "铺开默认配置"}
 }
 
-func (initCommand) Run(_ cliapi.Host, args []string) int { return runInit(hasFlag(args, "--force")) }
+func (initCommand) Run(_ cliapi.Host, args []string) int {
+	return runInit(cliapi.Flag(args, "--force"))
+}
 
 // runInit 铺开默认配置。它归 config：写的是 providers.json / state.json / mappings，
 // 全是本模块的文件。
@@ -635,7 +637,7 @@ var (
 func (profileCommand) Names() []string { return []string{"profile"} }
 
 // Unstyled：`profile kv` 吐的是给管道/文件用的原始 KV 文本，不是控制面版式。
-func (profileCommand) Unstyled(args []string) bool { return cliapi.Arg(args, 0) == "kv" }
+func (profileCommand) Unstyled(args []string) bool { return cliapi.Positional(args, 0) == "kv" }
 
 func (profileCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
@@ -643,7 +645,7 @@ func (profileCommand) Help() cliapi.HelpLine {
 }
 
 func (profileCommand) Run(host cliapi.Host, args []string) int {
-	if cliapi.Arg(args, 0) == "kv" {
+	if cliapi.Positional(args, 0) == "kv" {
 		return cmdProfileKV(args[1:])
 	}
 	return host.Die(64, "用法：newgate profile kv <名> [--write]")
@@ -668,7 +670,7 @@ func (setProfileCommand) Help() cliapi.HelpLine {
 // 后面。界面负责认 `--set-profile=x` 与 `--set-profile x` 两种写法（argv 解析是它
 // 的活），语义归本模块。
 func (setProfileCommand) Run(_ cliapi.Host, args []string) int {
-	name := cliapi.Arg(args, 0)
+	name := cliapi.Positional(args, 0)
 	if name == "" {
 		return style.Die(64, "--set-profile 需要一个 profile 名")
 	}
@@ -692,13 +694,4 @@ func commands() []cliapi.Command {
 		tierCommand{}, profilesCommand{}, profileCommand{}, setProfileCommand{},
 		initCommand{}, reloadCommand{},
 	}
-}
-
-func hasFlag(args []string, name string) bool {
-	for _, a := range args {
-		if a == name {
-			return true
-		}
-	}
-	return false
 }

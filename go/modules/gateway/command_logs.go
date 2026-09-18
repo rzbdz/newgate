@@ -41,7 +41,7 @@ func (logsCommand) Help() cliapi.HelpLine {
 }
 
 func (logsCommand) Run(host cliapi.Host, args []string) int {
-	return runLogs(host, logCount(args), hasFlag(args, "-f") || hasFlag(args, "--follow"))
+	return runLogs(host, logCount(args), cliapi.Flag(args, "-f") || cliapi.Flag(args, "--follow"))
 }
 
 // logTailDefault 非终端输出（管道 / 重定向）时的行数。终端上给全量，

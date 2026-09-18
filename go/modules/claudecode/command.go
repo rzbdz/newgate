@@ -47,7 +47,7 @@ func (nakedCommand) Help() cliapi.HelpLine {
 // 不带时间语义；裸奔需要细粒度到期，而且输出必须足够醒目——用户打开的是自家
 // 安全门。
 func (nakedCommand) Run(host cliapi.Host, args []string) int {
-	sub := cliapi.Arg(args, 0)
+	sub := cliapi.Positional(args, 0)
 	switch sub {
 	case "", "off":
 		return nakedOff(host)
