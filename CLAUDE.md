@@ -210,6 +210,26 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
   键（`domain.ExtraRole`），命名与缺省归属留在 `modules/opencodeomo`。
   core 只认「键 → 缺省绑定」这张表，解析路径与档位完全一样（引用展开，见
   `resolve.BuildChain`）。接一个新插件 = 新注册一个 Provider，core 不动。
+- **ui 只是一类普通模块，cli 是其中一个**（2026-09-18 定）。将来 tui / web 都会
+  是独立模块，走同一套模式。由此推出一条硬规矩：
+
+  - **业务模块不依赖任何 ui**。它们在自己 `Start` 里**可选地**（`Optional` +
+    `Get` 而非 `Need` + `MustGet`）往当前存在的 ui 注入自己的控制面（命令、
+    状态行、诊断）：谁在就注入给谁，谁不在就跳过。
+  - **没装任何 ui 时，一切功能照常**。最坏情况只是「这些模块没有入口」——
+    不影响任何模块的功能与运作；反过来，要操作某个模块的控制面，**至少得装
+    一个 ui 模块**。
+  - **ui 自己不依赖任何模块**。它只提供注入点，在分派命令、渲染 status/doctor
+    时循环调用别人注入进来的回调拿数据。命令的实现住在拥有那项能力的模块里
+    （`newgate st` 归 gateway、`newgate plugin` 归 plugin-manager），不是写在
+    界面里。判断一个东西该不该留在 ui：**把它删掉，业务模块还成立吗？** 成立
+    就不该留在 ui。
+
+  这条曾经被违反得很彻底：账本长在 cli 身上、命令写在 cli 的 switch 里，于是
+  「想贡献一条命令」必须 `Need(cli)`，而 cli 自己又要 `Need(runtime/config/
+  gateway)` 才能渲染 —— 那批命令（`start` / `tier` / `probe` …）因此永远搬不回
+  自己的模块。`app/` 里有一条棘轮测试（`TestCLIDependenciesOnlyShrink`）守着
+  这个方向：界面的依赖名单**只能变短**。
 - **提交**：英文 subject（`fix(scope): …` / `feat(scope): …`），正文说明
   「现场是什么样、为什么这么改、验证了什么」。概念的设计动机写在所属
   package 或声明旁；行为变化才更新专题文档。结尾只带
