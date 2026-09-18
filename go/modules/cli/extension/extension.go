@@ -38,6 +38,8 @@
 package extension
 
 import (
+	"strings"
+
 	modules "github.com/rzbdz/newgate/go/component"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 )
@@ -268,6 +270,37 @@ func isGeneralSection(name Section) bool {
 		}
 	}
 	return false
+}
+
+// FlagValue 取 `--名字 值` 或 `--名字=值` 里的值；names 是同一选项的别名，都没有
+// 就给空串。与 Arg 同属 argv 解析的公共部分：每个模块各写一遍必然有一遍写错。
+func FlagValue(args []string, names ...string) string {
+	for i, a := range args {
+		for _, name := range names {
+			if a == name && i+1 < len(args) {
+				return args[i+1]
+			}
+			if strings.HasPrefix(a, name+"=") {
+				return strings.TrimPrefix(a, name+"=")
+			}
+		}
+	}
+	return ""
+}
+
+// Positional 取第 i 个**位置参数**（跳过 `-` 开头的），越界给空串。
+func Positional(args []string, i int) string {
+	var seen int
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if seen == i {
+			return a
+		}
+		seen++
+	}
+	return ""
 }
 
 // HelpLine 是命令在 `newgate --help` 里占的那一行。

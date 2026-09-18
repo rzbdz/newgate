@@ -56,15 +56,6 @@ func (c runOnceCommand) Run(_ Host, args []string) int {
 
 // ---------- 探测与观测 ----------
 
-type breakerCommand struct{}
-
-func (breakerCommand) Names() []string { return []string{"breaker", "breakers"} }
-func (breakerCommand) Help() HelpLine {
-	return HelpLine{Section: SectionObserve, Rank: rankObserve,
-		Usage: "breaker", Summary: "哪些 binding 被摘牌了、为什么、多久了"}
-}
-func (breakerCommand) Run(_ Host, _ []string) int { return cmdBreaker() }
-
 type doctorCommand struct{ s *service }
 
 func (doctorCommand) Names() []string { return []string{"doctor"} }
@@ -73,17 +64,6 @@ func (doctorCommand) Help() HelpLine {
 		Usage: "doctor", Summary: "体检"}
 }
 func (c doctorCommand) Run(_ Host, _ []string) int { return cmdDoctor(c.s) }
-
-type logsCommand struct{}
-
-func (logsCommand) Names() []string { return []string{"logs", "log"} }
-func (logsCommand) Help() HelpLine {
-	return HelpLine{Section: SectionObserve, Rank: rankObserve,
-		Usage: "logs [N] [-f]", Summary: "代理日志：终端上分页，-f 持续跟随"}
-}
-func (logsCommand) Run(_ Host, args []string) int {
-	return cmdLogs(logCount(args), has(args, "-f") || has(args, "--follow"))
-}
 
 type allLogsCommand struct{ s *service }
 
@@ -130,8 +110,8 @@ func (c helpCommand) Run(_ Host, _ []string) int {
 func ownCommands(s *service) []Command {
 	return []Command{
 		statusCommand{s}, runOnceCommand{s},
-		breakerCommand{}, doctorCommand{s},
-		logsCommand{}, allLogsCommand{s},
+		doctorCommand{s},
+		allLogsCommand{s},
 		versionCommand{}, helpCommand{s},
 	}
 }
