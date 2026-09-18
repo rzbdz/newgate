@@ -108,6 +108,14 @@ func Serve(filters *policy.Registry, port int) int {
 			return 69
 		}
 		defer daemon.RemoveLock()
+		// 抢到锁之后**自己**写 pidfile：只有持有监听权的进程才该出现在那里。
+		// 父进程代写会被这一步之后的「陈旧锁清理」删掉（AcquireLock 里那句
+		// RemovePid），而再没有人补回来——2026-09-18 两次现场的完整链条见
+		// daemon.WriteOwn。写不出去只警告：代理照常服务，只是 status/metrics
+		// 会看不到它（那时候 doctor 的「守护进程」一项会说出来）。
+		if err := daemon.WriteOwn(port); err != nil {
+			lg.Printf("pidfile 写不出去（status/metrics 会看不到本进程）: %v", err)
+		}
 	} else {
 		lg.Printf("优雅交接：接管父进程的监听 socket")
 	}

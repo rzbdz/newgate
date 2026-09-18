@@ -22,6 +22,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
+	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 	"github.com/rzbdz/newgate/go/modules/runtime/takeover"
 )
 
@@ -29,6 +30,7 @@ import (
 // 「谁在走 newgate」。
 const (
 	rankStatusTakeover = 20
+	rankCheckDaemon    = 35
 	rankCheckTakeover  = 40
 	rankCheckBackups   = 50
 
@@ -45,7 +47,53 @@ var (
 )
 
 func (r runtimeReporter) Diagnostics() []cliapi.Diagnostic {
-	return []cliapi.Diagnostic{r.checkTakeover(), checkBackups()}
+	return []cliapi.Diagnostic{checkDaemon(), r.checkTakeover(), checkBackups()}
+}
+
+// checkDaemon 「谁在服务」的三种说法必须对得上：pidfile、锁文件、真身。
+//
+// **为什么单独一项**（2026-09-18 现场）：pidfile 被写坏成「一个撞锁失败、当场
+// 退出的子进程」之后，代理那一项会说「未运行」，而 daemon 一直在服务——两项各自
+// 都没说谎，但没有一处把「你的 pidfile 和锁对不上」这句话讲出来，人只能靠 ps 猜。
+// 这一项就是那句话，而且顺手把 pidfile 修回去（见 daemon.Reconcile）。
+//
+// 「没在跑」是 skip 不是 bad：那是正常状态，不是故障。
+func checkDaemon() cliapi.Diagnostic {
+	d := cliapi.Diagnostic{Rank: rankCheckDaemon, Label: "守护进程"}
+	info, notes := daemon.Reconcile()
+	if len(notes) == 0 {
+		// 排在前面的检查（链路、代理）都会读 Running()，它们可能已经先把
+		// pidfile 修好了——那处不一致就此看不见。本进程修过就照样说出来。
+		if h := daemon.LastHeal(); h != "" {
+			notes = []string{h}
+		}
+	}
+	switch {
+	case len(notes) > 0:
+		d.State = "warn"
+		d.Line = notes[0]
+		d.Details = append(d.Details, notes[1:]...)
+		if info != nil {
+			d.Details = append(d.Details,
+				fmt.Sprintf("已按锁认它：pid %d · 127.0.0.1:%d", info.PID, info.Port),
+				"pidfile 已经改回真身，status/metrics 立刻恢复；不用手工改文件")
+		}
+	case info == nil:
+		d.State = "skip"
+		d.Line = "未运行"
+		d.Details = append(d.Details, "newgate start")
+	default:
+		d.State = "ok"
+		d.Line = fmt.Sprintf("pid %d · 127.0.0.1:%d · pidfile 与锁一致", info.PID, info.Port)
+		// 优雅交接的那一瞬间 pidfile 已是新进程、锁还是旧进程（AdoptRuntime
+		// 先写 pidfile 再改锁）。两个都活着却不同号时，只有这一种解释，说出来
+		// 免得看到的人以为又坏了。
+		if pid := daemon.LockHolder(); pid > 0 && pid != info.PID && daemon.Alive(pid) {
+			d.Details = append(d.Details, fmt.Sprintf(
+				"锁文件此刻写着 pid %d（优雅交接的窗口内正常，几毫秒后自己会对上）", pid))
+		}
+	}
+	return d
 }
 
 // Status 一行说清谁在走 newgate，有异常才展开。
