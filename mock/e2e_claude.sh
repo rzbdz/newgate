@@ -715,6 +715,80 @@ case "$LOGTAIL" in
   *) ok "日志里不再出现「占位符」（那条路已删）" ;;
 esac
 
+echo; echo "== 19. 运行期开关：模块自己上报、命令自己注册 =="
+# 这一层是「everything is module」的用户界面：模块在 Start 里把自己的开关点
+# 上报给 plugin-manager（RegisterSelf），命令由**各模块自己**注册进 cli
+# （gateway 的 st/schema-repair、claudecode 的 naked、plugin-manager 的 plugin）。
+#
+# 所以这里断言的顺序是刻意反的：**先**证明「谁都能被列出来」，**再**证明
+# 「关掉一个点真的改变热路径」。前者是列表的地基（枚举源必须是组件图，不是
+# 「谁上报过」——否则「这个模块没有开关」和「这个模块忘了注册」长得一模一样），
+# 后者是开关的地基（只写进 state.json 而热路径不读，等于一个好看的开关）。
+PLUGIN_OUT="$("$BIN" plugin 2>&1)"
+case "$PLUGIN_OUT" in
+  *"plugin-manager"*"deepseek"*"claudecode-deepseek"*)
+    ok "plugin：列出全部模块（含没参与开关体系的）" ;;
+  *) bad "plugin 没列全模块：$(echo "$PLUGIN_OUT" | head -6 | tr '\n' ' ')" ;;
+esac
+case "$PLUGIN_OUT" in
+  *"infra"*"gateway"*"model"*) ok "plugin：按分类分组展示" ;;
+  *) bad "plugin 没有按分类分组" ;;
+esac
+case "$PLUGIN_OUT" in
+  *"无法 runtime 开关（v1）"*)
+    ok "plugin：没上报开关点的模块显式标注（不是静默省略）" ;;
+  *) bad "plugin 没标注「无法 runtime 开关」" ;;
+esac
+
+DETAIL="$("$BIN" plugin deepseek 2>&1)"
+case "$DETAIL" in
+  *"deepseek.tail-shape"*) ok "plugin <模块>：展开出该模块的开关点" ;;
+  *) bad "plugin deepseek 没展开开关点：$(echo "$DETAIL" | head -3 | tr '\n' ' ')" ;;
+esac
+
+# 关掉第 4 手（唯一修**根因**的那一手），再跑 think3。
+# think3 的历史正好是「裸 tool_result 收尾」——正是那一手要修的形状。开关
+# 关掉后尾部**不该**再被动过，上游收到裸 tool_result 就按实测判据回 400。
+RESETUP
+"$BIN" plugin deepseek.tail-shape off >/dev/null 2>&1
+OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/sw_off.err")"
+TAIL_OFF=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+import json,sys
+try:
+    r=json.load(sys.stdin)
+    lastu=[m for m in r[0]["body"]["messages"] if m.get("role")=="user"][-1]["content"]
+    print(",".join(b.get("type") for b in lastu) if isinstance(lastu,list) else "STR")
+except Exception:
+    print("NOUP")' 2>/dev/null)
+check "关掉 tail-shape ⇒ 尾部不再被修（上游收到裸 tool_result）" "$TAIL_OFF" "tool_result"
+check "关掉 tail-shape ⇒ 客户端拿到上游原文 400（不静默）" \
+  "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "400"
+
+# status 要能看见这个非出厂态——否则用户关了东西没人知道。
+check "status 显示被关掉的开关点" \
+  "$("$BIN" status 2>&1 | command grep -c 'deepseek.tail-shape=off')" "1"
+
+# 开关点认不出来时必须是**报错**，不是静默当成 on/off。
+"$BIN" plugin 根本没有这个模块 off >/dev/null 2>&1
+check "plugin：不存在的目标以非零退出" "$([ $? -ne 0 ] && echo y || echo n)" "y"
+
+# 恢复：同一个点再打开，think3 必须回到被修好的样子（开关是对称的）。
+"$BIN" plugin deepseek.tail-shape on >/dev/null 2>&1
+RESETUP
+OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/sw_on.err")"
+TAIL_ON=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+import json,sys
+try:
+    r=json.load(sys.stdin)
+    lastu=[m for m in r[0]["body"]["messages"] if m.get("role")=="user"][-1]["content"]
+    print(",".join(b.get("type") for b in lastu) if isinstance(lastu,list) else "STR")
+except Exception:
+    print("NOUP")' 2>/dev/null)
+check "打开 tail-shape ⇒ 尾部又被修好（开关对称）" "$TAIL_ON" "tool_result,text"
+check "打开 tail-shape ⇒ 客户端 200" \
+  "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "200"
+
+
 echo
 echo "结果: $PASS 通过, $FAIL 失败"
 [ "$FAIL" -eq 0 ]
