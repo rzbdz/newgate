@@ -789,6 +789,87 @@ check "打开 tail-shape ⇒ 客户端 200" \
   "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "200"
 
 
+echo; echo "== 20. special_treatment（整层 / 单插件）与 schema-repair =="
+# 这三个开关不住在 plugin-manager 的账本里，而是 domain.State 上的 typed 字段
+# （special_treatment / special_treatment_off / schema_repair），所以单开一章。
+# 断言的是同一件事：**关掉之后热路径真的不做了**——只写进 state.json 而没人读，
+# 等于一个好看的开关。
+#
+# 尾部形状那一手（deepseek 插件第 4 手）是最好的探针：它一停，裸 tool_result
+# 就直接打到上游，上游按实测判据回 400，客户端拿到上游原文。
+sw_tail() {  # 读假上游收到的最后一发里，最后一条 user 的 content[] 块类型
+  curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+import json,sys
+try:
+    r=json.load(sys.stdin)
+    lastu=[m for m in r[0]["body"]["messages"] if m.get("role")=="user"][-1]["content"]
+    print(",".join(b.get("type") for b in lastu) if isinstance(lastu,list) else "STR")
+except Exception:
+    print("NOUP")' 2>/dev/null
+}
+
+# (1) 整层关：special_treatment off ⇒ 所有上游怪癖补丁都不跑。
+"$BIN" st on >/dev/null 2>&1          # 先确保出厂态，避免受上一章残留影响
+RESETUP
+"$BIN" st off >/dev/null 2>&1
+OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/st_off.err")"
+check "st off（整层）⇒ 尾部不再被修" "$(sw_tail)" "tool_result"
+check "st off（整层）⇒ 客户端拿到上游原文 400" \
+  "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "400"
+
+# (2) 整层开回来：同一发必须又被修好。
+"$BIN" st on >/dev/null 2>&1
+RESETUP
+OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/st_on.err")"
+check "st on（整层）⇒ 尾部又被修好" "$(sw_tail)" "tool_result,text"
+check "st on（整层）⇒ 客户端 200" \
+  "$(echo "$OUT" | command grep '^HTTP=' | cut -f2 -d=)" "200"
+
+# (3) 单插件关：粒度到「这一个插件」，别的插件不受影响。
+"$BIN" st off deepseek >/dev/null 2>&1
+RESETUP
+OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/st_ds.err")"
+check "st off deepseek（单插件）⇒ 尾部不再被修" "$(sw_tail)" "tool_result"
+check "st off deepseek（单插件）⇒ 客户端 400" \
+  "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "400"
+"$BIN" st on deepseek >/dev/null 2>&1
+check "st 清单里 deepseek 回到「生效」" \
+  "$("$BIN" st deepseek 2>&1 | command grep -c '生效')" "1"
+
+# (4) schema-repair：语义无操作的修补（补 "required": []），只有 OpenAI 方言
+#     的 function tool 会命中。所以这一格要打 openai 方言、带一个缺 required
+#     的 tool，然后看**上游收到的字节**里有没有那个键。
+SCHEMA_BODY='{"model":"normal","max_tokens":16,"messages":[{"role":"user","content":"hi"}],'\
+'"tools":[{"type":"function","function":{"name":"t","parameters":{"type":"object","properties":{}}}}]}'
+has_required() {
+  curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+import json,sys
+try:
+    r=json.load(sys.stdin)
+    prm=r[0]["body"]["tools"][0]["function"]["parameters"]
+    print("有" if "required" in prm else "无")
+except Exception:
+    print("NOUP")' 2>/dev/null
+}
+"$BIN" schema-repair on >/dev/null 2>&1
+RESETUP
+curl -s -o /dev/null -X POST "http://127.0.0.1:$PROXY_PORT/p/ds/v1/chat/completions" \
+  -H 'Content-Type: application/json' -d "$SCHEMA_BODY"
+check "schema-repair on ⇒ 上游收到补好的 required" "$(has_required)" "有"
+
+"$BIN" schema-repair off >/dev/null 2>&1
+RESETUP
+curl -s -o /dev/null -X POST "http://127.0.0.1:$PROXY_PORT/p/ds/v1/chat/completions" \
+  -H 'Content-Type: application/json' -d "$SCHEMA_BODY"
+check "schema-repair off ⇒ 字节原样，不补 required" "$(has_required)" "无"
+
+# 收尾：不留非出厂态（沙箱虽然会删，但脏状态会让调试时看到的现状骗人）。
+"$BIN" schema-repair on >/dev/null 2>&1
+"$BIN" st on >/dev/null 2>&1
+check "收尾：三个开关都回到出厂态" \
+  "$("$BIN" status 2>&1 | command grep -c 'special 关了\|schema repair off')" "0"
+
+
 echo
 echo "结果: $PASS 通过, $FAIL 失败"
 [ "$FAIL" -eq 0 ]
