@@ -74,6 +74,22 @@ type Options struct {
 	OnWaiting func(inflight map[Target]time.Duration)
 	// WaitTick OnWaiting 的间隔，0 表示不启用。
 	WaitTick time.Duration
+
+	// OnNote 报告一次「探到了，但不算失败」的事：这次探活了什么新毛病、缓存
+	// 读不出来、缓存写不回去。
+	//
+	// 为什么单独开一个口子而不是并进 OnDone 的 err：这些事都不改变本次结论
+	// （这一发是通的），但它们决定**下一次**的行为——缓存读不出来，下次还要
+	// 再花一轮 token；学到的新毛病没说出来，敲 probe 的人不知道自己刚发现了
+	// 什么（被动路径是打日志的，主动路径以前什么都不说）。
+	OnNote func(string)
+}
+
+// note 报告一句不改变结论的话。没装 OnNote 就丢弃——它只是展示，不是结论。
+func (o *Options) note(format string, args ...interface{}) {
+	if o.OnNote != nil {
+		o.OnNote(fmt.Sprintf(format, args...))
+	}
 }
 
 // Run 把指定 profile（空 = 全部）的每个档位都打一遍。
@@ -86,7 +102,11 @@ func Run(o Options) ([]Result, error) {
 	if o.Timeout <= 0 {
 		o.Timeout = 120 * time.Second
 	}
-	cache := loadCapabilityCache()
+	cache, cacheErr := loadCapabilityCache()
+	if cacheErr != nil {
+		// 读不出来 = 这一轮要重新探（花 token）。继续跑，但说出来。
+		o.note("能力缓存读不出来，本轮将重新探测全部目标: %v", cacheErr)
+	}
 
 	provs, err := store.LoadProviders()
 	if err != nil {
@@ -204,7 +224,12 @@ func Run(o Options) ([]Result, error) {
 			if err == nil && st < 400 {
 				// 方言/quirk 已学过就直接恢复缓存，不再重复花 token。
 				if !cache.apply(t) {
-					_ = CheckQuirks(t.Provider, p, t.Model, o.Timeout)
+					// 这两条探测的**返回值**以前被丢掉：CheckQuirks 学到的新毛病
+					// 只在被动路径（转发撞 400）才打日志，主动敲 probe 的人反而
+					// 不知道自己刚发现了什么。现在都经 OnNote 说出来。
+					if learned := CheckQuirks(t.Provider, p, t.Model, o.Timeout); len(learned) > 0 {
+						o.note("%s: 学到上游毛病 —— %s", t, strings.Join(learned, "；"))
+					}
 					CheckDialects(t.Provider, p, t.Model, o.Timeout)
 					cache.capture(t)
 				}
@@ -223,7 +248,12 @@ func Run(o Options) ([]Result, error) {
 	}
 	wg.Wait()
 	close(stopTick)
-	_ = cache.save()
+	// 落盘不改变本次结论，但决定下一轮要不要重新花 token。save() 里五步
+	// （Marshal/MkdirAll/WriteFile/Chmod/Rename）每一步都在报错，以前调用点
+	// `_ =` 掉了——那五步检查一次都没用上。
+	if err := cache.save(); err != nil {
+		o.note("能力缓存没能落盘，下次探活要重新花 token: %v", err)
+	}
 
 	// 回填
 	seen := map[Target]bool{}

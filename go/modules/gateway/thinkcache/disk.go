@@ -2,6 +2,7 @@ package thinkcache
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -30,6 +31,19 @@ type DiskStore struct {
 	max   int64
 	ttl   time.Duration
 	index map[string]rec
+
+	// onErr 是落盘失败的出口（照 breaker.SetErrorHandler 的形状）。没装就
+	// 丢弃：这一层是 best-effort 的，没有它不该影响正确性——但**有它**才能
+	// 回答「为什么重启后那几轮推理找不回来了」。2026-09-18 之前压实的每一步
+	// 失败都是 `return` / `continue`，一次都没说出来。
+	onErr func(error)
+}
+
+// fail 报告一次落盘失败。nil 安全：没装出口就丢弃。
+func (d *DiskStore) fail(err error) {
+	if err != nil && d.onErr != nil {
+		d.onErr(err)
+	}
 }
 
 type rec struct {
@@ -47,11 +61,26 @@ func openDisk(path string, maxBytes int64, ttl time.Duration) (*DiskStore, error
 	return d, nil
 }
 
-func (d *DiskStore) Close() error { return d.f.Close() }
+// Close 关掉冷层。d.f 可能已经是 nil（压实的重开失败会把冷层停掉，见
+// compactLocked），那时这里无事可做。
+func (d *DiskStore) Close() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.f == nil {
+		return nil
+	}
+	err := d.f.Close()
+	d.f = nil
+	return err
+}
 
 // scan 扫文件重建索引（调用方须持锁，或启动期单线程）。扫到半条记录
 // （进程被杀留下的尾巴）就截掉。空文件/外来文件一律重置成「只有文件头」。
 func (d *DiskStore) scan() {
+	if d.f == nil {
+		d.size = 0
+		return
+	}
 	fi, err := d.f.Stat()
 	if err != nil {
 		d.size = 0
@@ -113,13 +142,19 @@ func (d *DiskStore) appendKeys(keys []string, blob []byte, at time.Time) {
 	if len(keys) == 0 || len(blob) == 0 {
 		return
 	}
+	if d.f == nil {
+		return // 冷层已停用（见 compactLocked 的重开失败分支）
+	}
 	for _, k := range keys {
 		if k == "" {
 			continue
 		}
 		buf := recBytes(k, blob, at)
 		if _, err := d.f.Write(buf); err != nil {
-			continue // 写失败就跳过这条，best-effort
+			// 跳过这一条（best-effort，内存热层还在），但说出来：连续写不进去
+			// 就是「这轮推理重启后找不回来」的原因。
+			d.fail(fmt.Errorf("thinkcache 冷层写入失败（本条不落盘）: %w", err))
+			continue
 		}
 		d.index[k] = rec{off: d.size, at: at}
 		d.size += int64(len(buf))
@@ -133,6 +168,9 @@ func (d *DiskStore) appendKeys(keys []string, blob []byte, at time.Time) {
 func (d *DiskStore) get(key string) ([]byte, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.f == nil {
+		return nil, false // 冷层已停用
+	}
 	r, ok := d.index[key]
 	if !ok {
 		return nil, false
@@ -202,30 +240,65 @@ func (d *DiskStore) compactLocked() {
 	tmp := d.path + ".tmp"
 	nf, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o660)
 	if err != nil {
+		d.fail(fmt.Errorf("thinkcache 压实：开临时文件失败（继续用旧文件）: %w", err))
 		return
 	}
 	if _, err := nf.Write(diskMagic); err != nil {
 		_ = nf.Close()
+		_ = os.Remove(tmp)
+		d.fail(fmt.Errorf("thinkcache 压实：写文件头失败（继续用旧文件）: %w", err))
 		return
 	}
+	// 压实会**丢记录**，所以每一条丢掉的都要有账。两种丢法：
+	//   读不出来（旧文件那一段坏了）—— 这条本来就找不回来了；
+	//   写不进去（磁盘满 / 配额）—— 这条本来还在，压实把它弄没了。
+	// 后者是真正要紧的：它是「记录消失」的唯一解释，而旧代码两条都是裸
+	// `continue`，事后无从分辨。
+	var unreadable, unwritable int
 	for k, r := range d.index {
 		if _, blob, _, _, err := readRecAt(d.f, r.off); err != nil {
+			unreadable++
 			continue
 		} else if _, err := nf.Write(recBytes(k, blob, r.at)); err != nil {
+			unwritable++
 			continue
 		}
 	}
-	_ = nf.Sync()
-	_ = nf.Close()
+	// 落盘屏障：rename 是原子的，但它原子的是**目录项**，不保证数据已经
+	// 出了 page cache。以前这里 `_ = nf.Sync()`——rename 检查了、Sync 没有，
+	// 于是「文件已经换好了、内容是半截的」这种情况既可能发生又没人知道。
+	// 失败就不 rename：旧文件是完整的，留在原地比换上一个没落盘的强。
+	if err := nf.Sync(); err != nil {
+		_ = nf.Close()
+		_ = os.Remove(tmp)
+		d.fail(fmt.Errorf("thinkcache 压实：刷盘失败（保留旧文件）: %w", err))
+		return
+	}
+	if err := nf.Close(); err != nil {
+		_ = os.Remove(tmp)
+		d.fail(fmt.Errorf("thinkcache 压实：关闭临时文件失败（保留旧文件）: %w", err))
+		return
+	}
 	if err := os.Rename(tmp, d.path); err != nil {
 		_ = os.Remove(tmp)
+		d.fail(fmt.Errorf("thinkcache 压实：替换失败（保留旧文件）: %w", err))
 		return
+	}
+	if unreadable > 0 || unwritable > 0 {
+		d.fail(fmt.Errorf("thinkcache 压实丢了 %d 条记录（读不出 %d，写不进 %d）",
+			unreadable+unwritable, unreadable, unwritable))
 	}
 	_ = d.f.Close()
 	nf2, err := os.OpenFile(d.path, os.O_RDWR|os.O_APPEND, 0o660)
 	if err != nil {
+		// 冷层到此为止：**必须说出来**，而且必须真的停掉它——旧代码在这里
+		// 只清了索引，d.f 却已经是那个关掉的句柄，于是之后每次写都失败、
+		// 每次读都 miss，全程一声不响。用户看到的是「重启后推理全没了」，
+		// 而原因（冷层已经死了）在磁盘上、日志里都找不到。
+		d.f = nil
 		d.index = map[string]rec{}
 		d.size = 0
+		d.fail(fmt.Errorf("thinkcache 冷层停用（重开失败，重启后推理内容将无法找回）: %w", err))
 		return
 	}
 	d.f = nf2

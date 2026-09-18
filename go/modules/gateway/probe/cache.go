@@ -2,6 +2,7 @@ package probe
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -24,16 +25,27 @@ type capabilityCache struct {
 	Targets map[string]capabilityEntry `json:"targets"`
 }
 
-func loadCapabilityCache() *capabilityCache {
+// loadCapabilityCache 读回上一次探活学到的方言/quirk 结论。
+//
+// 读失败（文件坏、权限不对）返回错误但**照常给一份空缓存**：调用方据此决定
+// 是「重新探一轮（花 token）」还是「就这样跑」。以前这个错误被 `_ =` 吞掉，
+// 症状是「明明探过，每次还是要重探」——而唯一的线索（为什么读不出来）没了。
+func loadCapabilityCache() (*capabilityCache, error) {
 	c := &capabilityCache{Targets: map[string]capabilityEntry{}}
 	raw, err := os.ReadFile(paths.ProbeCacheFile())
-	if err == nil {
-		_ = json.Unmarshal(raw, c)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return c, nil // 没探过，很正常
+		}
+		return c, fmt.Errorf("读能力缓存 %s: %w", paths.ProbeCacheFile(), err)
+	}
+	if err := json.Unmarshal(raw, c); err != nil {
+		return c, fmt.Errorf("解析能力缓存 %s: %w", paths.ProbeCacheFile(), err)
 	}
 	if c.Targets == nil {
 		c.Targets = map[string]capabilityEntry{}
 	}
-	return c
+	return c, nil
 }
 
 func (c *capabilityCache) apply(t Target) bool {
@@ -72,9 +84,13 @@ func (c *capabilityCache) capture(t Target) {
 			}
 		}
 	}
+	// 逐位问，不写死某一位：`Flag` 是位掩码，恢复侧（apply）读的是整张掩码，
+	// 所以这里漏一位的症状是**那一位永远存不进去**（见 quirk.AllFlags 的说明）。
 	var flags quirk.Flag
-	if quirk.Default.Has(t.Provider, t.Model, quirk.NoThinkingDisable) {
-		flags |= quirk.NoThinkingDisable
+	for _, f := range quirk.AllFlags() {
+		if quirk.Default.Has(t.Provider, t.Model, f) {
+			flags |= f
+		}
 	}
 	c.mu.Lock()
 	c.Targets[t.String()] = capabilityEntry{
@@ -107,19 +123,25 @@ func (c *capabilityCache) save() error {
 // LoadCachedCapabilities restores learned dialect/quirk facts without spending
 // tokens. The daemon calls this on startup; probe calls it before deciding
 // whether auxiliary checks are needed.
-func LoadCachedCapabilities() {
-	c := loadCapabilityCache()
+//
+// 返回错误时**照常装回能装的部分**（坏文件 = 空缓存），只是把「为什么没装上」
+// 交出来。调用方是守护进程，它接的是日志出口——不报的话，现象是「重启之后
+// 每个上游都要重新撞一次 404 / 400 才学回来」，而原因（缓存读不出来）没人知道。
+func LoadCachedCapabilities() error {
+	c, err := loadCapabilityCache()
 	for raw := range c.Targets {
 		parts := splitTarget(raw)
 		c.apply(parts)
 	}
+	return err
 }
 
+// splitTarget 是 Target.String() 的逆。切法归 dialect 定义（两边必须一致：
+// 同一批键在缓存恢复和报告展示里必须是同一个 (provider, model)）。
 func splitTarget(raw string) Target {
-	for i := range raw {
-		if raw[i] == '/' {
-			return Target{Provider: raw[:i], Model: raw[i+1:]}
-		}
+	provider, model, ok := dialect.SplitKey(raw)
+	if !ok {
+		return Target{}
 	}
-	return Target{}
+	return Target{Provider: provider, Model: model}
 }

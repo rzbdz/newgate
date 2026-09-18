@@ -82,7 +82,10 @@ func Launch(a *agentapi.Agent, args []string, o Options) int {
 		active = st.ActiveFor(a.ID)
 	}
 
-	inject := buildInject(a, st, active, explicit)
+	inject, warns := buildInject(a, st, active, explicit)
+	for _, w := range warns {
+		fmt.Fprintf(os.Stderr, "newgate: %s\n", w)
+	}
 	inject["NEWGATE_DEPTH"] = strconv.Itoa(depth + 1)
 	return execReal(a, args, inject)
 }
@@ -103,10 +106,18 @@ func Launch(a *agentapi.Agent, args []string, o Options) int {
 // 窗口声明两条模式都注入：CLAUDE_CODE_MAX_CONTEXT_TOKENS 走客户端的
 // 「未知模型」分支（档位名和真实名对它都是未知，效果相同），
 // AUTO_COMPACT_WINDOW 无条件优先级最高——窗口修复不依赖命名模式。
-func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) map[string]string {
+// 返回的第二项是「本该注入但没注入成」的话，由调用方打到 stderr。读配置失败
+// 不影响启动（fail-open：代理仍能按档位名路由），但它会让这次调用少注入真实
+// 模型名与窗口声明——后者不给的话 Claude Code 会按 200k 假设提前 compact，是
+// 用户能直接感觉到的行为变化。所以不能一声不响（同文件上面那条控制令牌的写法）。
+func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) (map[string]string, []string) {
 	inject := a.BuildEnv(st.Port, "newgate-local") // 槽位默认 = 档位名（动态模式）
+	var warns []string
 
-	if snap, err := store.Load(); err == nil {
+	if snap, err := store.Load(); err != nil {
+		warns = append(warns, fmt.Sprintf(
+			"配置读不出来，本次不注入真实模型名与窗口声明（代理仍按档位名路由）: %v", err))
+	} else {
 		// 钉死模式：槽位换成该 profile 链头的真实模型名。解析不出就保留
 		// 档位名（fail-open，docs/05-gateway.md）：代理仍能按档位路由。
 		if explicit != "" {
@@ -140,7 +151,7 @@ func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) m
 	if explicit != "" && a.BaseURLEnv != "" {
 		inject[a.BaseURLEnv] = fmt.Sprintf("http://127.0.0.1:%d/a/%s/p/%s", st.Port, a.ID, active)
 	}
-	return inject
+	return inject, warns
 }
 
 func firstNonEmpty(vals ...string) string {

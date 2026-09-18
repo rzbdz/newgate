@@ -20,10 +20,14 @@
 //	probe 包  newgate probe 主动打一发两种方言 + count_tokens，省掉
 //	          那第一次撞墙，也让人在报告里看得见
 //
-// 只在内存里，和 quirk 同一哲学：进程重启就忘了，重新学的代价是一个
-// 请求；要更持久就该落盘，但那是用户的配置目录，不悄悄往里写东西。
-// （`newgate probe` 是独立进程，它学到的随进程消失——daemon 自己会在
-// 第一个请求上补学，最终状态一致。）
+// 注册表本身**只在内存里**，和 quirk 同一哲学：进程重启就从这个包的角度
+// 忘了，重新学的代价是一个请求（daemon 会在第一个请求上补学）。
+//
+// 但有一层持久化，它住在 probe 而不在这里：`newgate probe` 把探明的结果写进
+// ~/.config/newgate/probe-capabilities.json（`probe.LoadCachedCapabilities`
+// 在 daemon 启动时装回）。所以准确的说法是「这个包不落盘，探明的结论由探针
+// 落盘」——2026-09-18 之前这段注释写的是「进程重启就忘了」，而重启后其实装
+// 得回来，把它当成事实会得出错误的结论（比如以为每次重启都要重探一轮）。
 //
 // 正反两面都要记：只记「支持」的话，每个「不支持」的上游每次请求都得
 // 再撞一次 404。所以 Cap 既是能力位也是已探明位——Known 里为 0 的位
@@ -73,6 +77,22 @@ var (
 )
 
 func key(provider, model string) string { return provider + "/" + model }
+
+// SplitKey 是 key() 的逆：把 "provider/model" 拆回两半。
+//
+// 在**第一个** '/' 处切，不在最后一个：provider 是配置里的一个扁平键
+// （实测 ark / smt-deepseek / kimi …，见 providers.json），而 model 是上游
+// 自己的模型 id，**可以含 '/'**（openrouter 那类 `vendor/model` 的写法）。
+// 2026-09-18 之前 Snapshot 用的是 LastIndexByte，于是 `a/openrouter/x` 会被
+// 报成 provider="a/openrouter" —— 而 probe 的缓存恢复走的是另一份实现在
+// 第一个 '/' 处切，两边对同一批键给出不同的 (provider, model)。
+func SplitKey(k string) (provider, model string, ok bool) {
+	i := strings.IndexByte(k, '/')
+	if i <= 0 || i == len(k)-1 {
+		return "", "", false
+	}
+	return k[:i], k[i+1:], true
+}
 
 // Mark 记「支持」。返回 true 表示这是新学到的。
 func Mark(provider, model string, c Cap) bool {
@@ -134,11 +154,11 @@ func Snapshot() []Entry {
 	defer mu.RUnlock()
 	var out []Entry
 	for k, e := range caps {
-		i := strings.LastIndexByte(k, '/')
-		if i < 0 {
+		provider, model, ok := SplitKey(k)
+		if !ok {
 			continue
 		}
-		out = append(out, Entry{Provider: k[:i], Model: k[i+1:], Supports: e.supported, Known: e.known})
+		out = append(out, Entry{Provider: provider, Model: model, Supports: e.supported, Known: e.known})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Provider != out[j].Provider {

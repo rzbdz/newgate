@@ -308,15 +308,20 @@ func Suggest(model, variant string) (tier, why string) {
 
 // ClearOmoSlots 释放接管时清空槽位，**保留 overrides**：键没了，用户手写的
 // 「某个槽位想跟哪条链走」不该跟着丢——下次接管直接用回来。
-func ClearOmoSlots() {
+//
+// 写失败要报出来：文件没清掉的话，那些键会**留着**，而下一次接管会把它们
+// 当成「用户已经选定的槽位」照用（见 takeover 的 current 沿用逻辑）——于是
+// `newgate off opencode` 之后重新 `on`，分配结果和用户以为的不一样，且没有
+// 任何迹象说明为什么。
+func ClearOmoSlots() error {
 	prev := ReadOmoSlots()
 	if prev == nil {
-		return
+		return nil
 	}
 	if len(prev.Overrides) == 0 && len(prev.Slots) == 0 {
-		return
+		return nil
 	}
-	_ = WriteOmoSlots(&OmoSlots{Mode: prev.Mode, Overrides: prev.Overrides})
+	return WriteOmoSlots(&OmoSlots{Mode: prev.Mode, Overrides: prev.Overrides})
 }
 
 func variantShift(v string) int {

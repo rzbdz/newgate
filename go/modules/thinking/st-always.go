@@ -105,8 +105,13 @@ func noDisableTranslate(body []byte) (out []byte, translated bool, notes []strin
 		if nb2, ierr := rewrite.InsertTopLevelRaw(nb, "reasoning_effort", []byte(`"low"`)); ierr == nil {
 			nb = nb2
 			notes = append(notes, `补 reasoning_effort:"low"（报错原文要求 low/high/max）`)
+		} else {
+			// 补不上要说出来，不能只留着上面那个「thinking 翻过去了」的
+			// 好消息：工具形态下恰恰是这一手在盖过聚合器的隐式 disable，
+			// 少了它这一发还是会 400（同文件 tools 形态那条路径就是这么报的，
+			// 两条路不该两种态度）。
+			notes = append(notes, "reasoning_effort 未补上（"+ierr.Error()+"）")
 		}
-		// effort 补不上：thinking 至少翻过去了，fail-open 继续
 	}
 	return nb, true, notes, nil
 }

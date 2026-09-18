@@ -25,6 +25,14 @@ func printThinkCache() {
 	if t.Misses > 0 {
 		fmt.Println(style.Hint("未命中只能补空串（那几轮模型看不到自己的上一轮推理）；日志逐条有记"))
 	}
+	// 解析不出来的那些和「未命中」在结果上一样（都补空串），但处置完全不同：
+	// 前者是客户端发来的 JSON 形态我们不认识，后者是缓存里真没有。混在一起报
+	// 会把人引到错的地方，所以单独一行。
+	if t.Unparsable > 0 {
+		fmt.Println(style.Item(style.Warn, fmt.Sprintf(
+			"其中 %d 条是请求里的 assistant 消息解析不出来（不是缓存问题，是客户端发来的形态变了）",
+			t.Unparsable)))
+	}
 	fmt.Println(style.Hint("内存 + thinkcache.bin 冷层；重启后自动装回，只存计数不存内容"))
 }
 

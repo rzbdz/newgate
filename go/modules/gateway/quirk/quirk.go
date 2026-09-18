@@ -52,6 +52,23 @@ func (f Flag) String() string {
 	return "未知"
 }
 
+// AllFlags 全部已知的毛病位，按定义顺序。
+//
+// **加一个新的 Flag 常量时必须同时加到这里。** 它有两个消费者，两边都会因为
+// 漏掉而静默出错：
+//
+//   - probe 的能力缓存（cache.go 的 capture）逐位问「这个上游有没有这一条」
+//     再落盘。而恢复侧（apply）读的是整张位掩码，是通用的——所以漏一位的
+//     症状不是报错，而是**那一位永远存不进去**：重启/重新探活后上游的毛病
+//     又得靠撞一次 400 才学回来。
+//   - `Flag.String()` 的展示（哪几位要写成人话）。
+//
+// 2026-09-18 之前 capture 把 NoThinkingDisable 硬编码在一行 if 里，就是这个
+// 形状：加第二位的那天，落盘会静默少一位。
+func AllFlags() []Flag {
+	return []Flag{NoThinkingDisable}
+}
+
 // Table 是这张「上游毛病」表。
 //
 // **它是一个实例，不是包级变量**（2026-09-18 改）：包级 map 是典型的 service

@@ -67,19 +67,32 @@ func (r *Rotator) Write(p []byte) (int, error) {
 }
 
 // rotate 把 x.log → x.log.1 → x.log.2 …，超出 keep 的删掉。
+//
+// 失败必须报出来：轮转不发生时没有任何现象，只是日志文件一直长——而日志是
+// 这个项目排查问题的唯一手段（CLAUDE.md §5），一个悄悄涨到几 GB 的日志既
+// 拖慢 grep 也可能把盘写满。所以这里把每一步的错误收起来返回，由 Write 打
+// 到 stderr（原来每个 `_ =` 后面都是空的）。
+//
+// 「源文件不存在」不算错：还没轮到那么多代，或者上一轮已经删过——那是
+// 正常状态，报出来只会刷屏。
 func (r *Rotator) rotate() error {
 	if r.f != nil {
 		_ = r.f.Close()
 		r.f = nil
 	}
 	// 从旧到新挪，避免覆盖
-	oldest := fmt.Sprintf("%s.%d", r.path, r.keep)
-	_ = os.Remove(oldest)
+	_ = os.Remove(fmt.Sprintf("%s.%d", r.path, r.keep))
 	for i := r.keep - 1; i >= 1; i-- {
-		_ = os.Rename(fmt.Sprintf("%s.%d", r.path, i),
-			fmt.Sprintf("%s.%d", r.path, i+1))
+		from, to := fmt.Sprintf("%s.%d", r.path, i), fmt.Sprintf("%s.%d", r.path, i+1)
+		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("轮转 %s → %s: %w", from, to, err)
+		}
 	}
-	_ = os.Rename(r.path, r.path+".1")
+	// 这一条是真正要紧的：它失败 = 当前日志没被挪走 = 之后继续往同一个文件写，
+	// 于是 maxBytes 形同虚设。
+	if err := os.Rename(r.path, r.path+".1"); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("轮转 %s → %s.1: %w", r.path, r.path, err)
+	}
 	return r.open()
 }
 
