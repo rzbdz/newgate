@@ -22,6 +22,7 @@ import (
 	mod_pluginmanager "github.com/rzbdz/newgate/go/modules/pluginmanager"
 	mod_runtime "github.com/rzbdz/newgate/go/modules/runtime"
 	mod_thinking "github.com/rzbdz/newgate/go/modules/thinking"
+	mod_tui "github.com/rzbdz/newgate/go/modules/tui"
 	mod_wrapper "github.com/rzbdz/newgate/go/modules/wrapper"
 )
 
@@ -44,6 +45,7 @@ func generatedComponents() []modules.Component {
 		mod_pluginmanager.New(),
 		mod_runtime.New(),
 		mod_thinking.New(),
+		mod_tui.New(),
 		mod_wrapper.New(),
 	}
 }
