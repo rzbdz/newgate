@@ -23,12 +23,22 @@ var (
 	CommitTime = "unknown"
 )
 
+// coreSection 这几节是 CLI 自己的动词（接管、跑一次、路由与配置、探测与观测、
+// 维护）；模块声明的 Section 若命中它们就并进去，否则新开一节。
+func coreSection(name string) bool {
+	switch name {
+	case "接管", "跑一次（不改全局状态）", "路由与配置", "探测与观测", "维护", "术语", "配置":
+		return true
+	}
+	return false
+}
+
 // usageText 帮助。
 //
 // 左列固定宽度、右列是**一句话结论**，细节再往里塞就会变成没人读的墙。
 // 分组按用户此刻想干什么排（接管 / 跑一次 / 路由 / 观测 / 维护），不按
 // 代码里的文件排——用户不知道也不关心命令实现在哪个文件。
-func usageText() string {
+func usageText(service *service) string {
 	var b strings.Builder
 	b.WriteString(style.Bold("newgate") + " — AI CLI 的语义模型层代理\n")
 
@@ -53,6 +63,37 @@ func usageText() string {
 	}
 	raw := func(line string) { b.WriteString("  " + line + "\n") }
 
+	// 模块贡献的 help 行：按它们**自己声明的** Section 归位。
+	//
+	// 这一步是「命令搬回各模块」的另一半。命令搬走了而 help 不搬，等于 cli 还
+	// 认识那个模块——`Documented` 端口存在就是为了这个，不消费它等于没搬。
+	//
+	// 认不出的 Section 会新开一节，排在已知几节之后。**不报错**：节名是呈现
+	// 概念，一个模块想给自己新开一节是正当的，为它把 --help 打崩才荒唐。
+	contrib := map[string][]HelpLine{}
+	var extra []string
+	if service != nil {
+		for _, c := range service.commands.All() {
+			doc, ok := c.(Documented)
+			if !ok {
+				continue
+			}
+			line := doc.Help()
+			if line.Usage == "" {
+				continue
+			}
+			if _, known := contrib[line.Section]; !known && !coreSection(line.Section) {
+				extra = append(extra, line.Section)
+			}
+			contrib[line.Section] = append(contrib[line.Section], line)
+		}
+	}
+	emit := func(section string) {
+		for _, line := range contrib[section] {
+			cmd(line.Usage, line.Summary)
+		}
+	}
+
 	sec("接管")
 	cmd("start", "起代理 + 接管所有 agent")
 	cmd("stop", "停代理 + 所有 agent 恢复直连")
@@ -61,6 +102,7 @@ func usageText() string {
 	cmd("restart", "重启代理，接管现场原样保留")
 	cmd("status", "谁在走 newgate、用哪个 profile")
 	cmd("reload", "立刻重读配置（平时 1 秒内自动热更新）")
+	emit("接管")
 
 	sec("跑一次（不改全局状态）")
 	cmd("<agent> [--profile <名>] [args…]", "用某个 profile 跑一次")
@@ -73,7 +115,7 @@ func usageText() string {
 	cmd("--set-profile <名> [--agent <agent>]", "切 profile；省略 --agent 设全局默认")
 	cmd("profile kv <名> [--write]", "profile 转 KV 文本")
 	cmd("agents", "已知 agent 及其模型槽位")
-	cmd("omo", "omo 槽位：现状 / 建议 / 覆盖（不带参数看列表）")
+	emit("路由与配置")
 
 	sec("探测与观测")
 	cmd("probe [profile]", "给候选打真实请求，出健康报告")
@@ -84,15 +126,21 @@ func usageText() string {
 	cmd("alllogs", "完整诊断包")
 	cmd("debug on|off [分钟]", "全量请求日志（默认 30 分钟自动关）")
 	cmd("st [on|off] [插件]", "special_treatment 开关与说明")
-	cmd("plugin [模块[.路径]] [on|off] [时长]", "全部模块按分类列出；开关某个模块或某个开关点")
+	emit("探测与观测")
 
 	sec("维护")
-	cmd("naked on|forever|off|<时长>", "短路 Bash 分类器：on=60s / forever=永久 / off=关")
 	cmd("init [--force]", "铺开默认配置")
 	cmd("schema-repair on|off", "")
 	cmd("shim …", "底层逃生口，平时用 on/off 就够了")
 	cmd("tui", "menuconfig 风格界面")
 	cmd("version", "")
+	emit("维护")
+
+	// 模块自开的节。
+	for _, name := range extra {
+		sec(name)
+		emit(name)
+	}
 
 	sec("术语")
 	term := func(left, right string) {
@@ -119,7 +167,7 @@ func runCLI(service *service, args []string) int {
 
 func run(service *service, args []string) int {
 	if len(args) == 0 {
-		fmt.Print(usageText())
+		fmt.Print(usageText(service))
 		return 0
 	}
 
@@ -168,7 +216,7 @@ func run(service *service, args []string) int {
 	case "restart":
 		return cmdRestart(service.agents, has(args, "--force"))
 	case "status":
-		return cmdStatus(service.agents, service.plugins)
+		return cmdStatus(service.agents, service)
 	case "reload":
 		return cmdReload()
 	case "profiles", "ls":
@@ -197,24 +245,20 @@ func run(service *service, args []string) int {
 	case "logs", "log":
 		return cmdLogs(logCount(args), has(args, "-f") || has(args, "--follow"))
 	case "alllogs", "all-logs":
-		return cmdAllLogs(service.agents, service.plugins)
+		return cmdAllLogs(service.agents, service)
 	case "debug":
 		return cmdDebug(args)
-	case "naked":
-		return cmdNaked(args)
 	case "schema-repair", "schema_repair":
 		return cmdSchemaRepair(len(args) > 1 && truthy(args[1]))
 	case "st", "special", "special-treatment", "special_treatment":
 		return cmdSpecial(args)
-	case "plugin", "plugins":
-		return cmdPlugin(service.plugins, args)
 	case "tui", "menuconfig":
 		return cmdTUI()
 	case "version", "--version", "-v":
 		fmt.Println(VersionLine())
 		return 0
 	case "help", "--help", "-h":
-		fmt.Print(usageText())
+		fmt.Print(usageText(service))
 		return 0
 	case "__serve":
 		return Serve(service, intFlag(args, "--port", 0))
