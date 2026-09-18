@@ -41,6 +41,7 @@ import (
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/forward"
+	gwpolicy "github.com/rzbdz/newgate/go/modules/gateway/policy"
 	"github.com/rzbdz/newgate/go/testing/testkit"
 	"github.com/rzbdz/newgate/go/testing/upstream"
 )
@@ -97,7 +98,7 @@ type Harness struct {
 	server  *forward.Server
 	watcher *store.Watcher
 	client  *http.Client
-	// health 是组件图里那一张健康表（forward 拿到的是同一个对象）。
+	// health 是组件图里那一张健康表（它自己经 RegisterFilter 挂进了数据面）。
 	health breakerapi.Breaker
 	// sink 攒着代理自己写的日志，供测试断言「不静默」那类要求。
 	sink *logSink
@@ -148,10 +149,15 @@ func Start(t *testing.T) *Harness {
 	// 4. 真转发服务。watcher 与生产一致（1 秒轮询），所以改配置热更新这条路径
 	//    也在这层覆盖范围里。
 	//
-	//    健康表取自**真组件图**里那一个（不是新 newTable()）：这样形状检测器
-	//    的注册才算真的走通了「模块 Start → RegisterShapeDetector → 健康表」，
-	//    而测试拿到的 Snapshot 和生产是同一张表。forward 只是被注入方——它
-	//    从不注册判据，只读 Result.Shape（见 forward.go 的 [shape-400] 分支）。
+	//    策略账本取自**真组件图**里那一本（不是新 policy.New()）：这样贡献者的
+	//    注册才算真的走通了「模块 Start → gateway.RegisterFilter → 数据面」，
+	//    健康表也是生产用的那一张。forward 只是被注入方——它从不注册任何东西，
+	//    只读账本（见 forward.go 的 [shape-400] 分支）。
+	//
+	//    取值走 policy.Default()（gateway 在 Start 里装上的实例），而不是
+	//    modules.MustGet(graph.Context(), gatewayapi.Capability)：后者拿到的是
+	//    *port，而数据面要的是那一本账。这条与健康表那条的取法不同，原因是
+	//    「账本」本身就是插入口（见 modules/gateway/policy），不需要再经一层。
 	watcher, err := store.NewWatcher(time.Second)
 	if err != nil {
 		t.Fatalf("system: 配置 watcher: %v", err)
@@ -160,7 +166,7 @@ func Start(t *testing.T) *Harness {
 	watcher.Start()
 
 	health := modules.MustGet(graph.Context(), breakerapi.Capability)
-	server := forward.New(port, log.New(sink, "", 0), watcher, health)
+	server := forward.New(port, log.New(sink, "", 0), watcher, gwpolicy.Default())
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Start() }()
 	t.Cleanup(func() {

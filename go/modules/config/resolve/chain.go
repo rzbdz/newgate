@@ -34,8 +34,16 @@ type Skip struct {
 type Opts struct {
 	// Active 链头。per-agent：不同 agent 可以有不同的链头。
 	Active string
-	// Available 可用性判断（熔断器）。nil = 都可用。
-	Available func(provider, model string) bool
+	// Available 可用性判断。返回 false 时第二个值说明**为什么**不能用，
+	// 那句理由会原样进 Skip.Reason 给用户看（`newgate tier` 的「为什么不是
+	// 我想的那个」）。
+	//
+	// 为什么是「返回理由」而不是让 resolve 自己写「熔断中」：准入的判据属于
+	// 提供它的人（今天只有健康表一家，但它也可以是配额、灰度、时段），
+	// resolve 只认这个**形状**，不认任何一家的词汇。
+	//
+	// nil = 都可用。
+	Available func(provider, model string) (bool, string)
 	// Rank 最近 probe 的健康档。只重排链头之后的 fallback；值越小越优先，
 	// 相同值保持 profile/list 的原始顺序。nil = 不动态重排。
 	Rank func(provider, model string) int
@@ -147,9 +155,11 @@ func (b *chainBuilder) add(p *domain.Profile, key string, bd domain.Binding) {
 			return
 		}
 	}
-	if b.o.Available != nil && !b.o.Available(bd.Provider, bd.Model) {
-		b.skips = append(b.skips, Skip{p.Name, k, "熔断中"})
-		return
+	if b.o.Available != nil {
+		if ok, why := b.o.Available(bd.Provider, bd.Model); !ok {
+			b.skips = append(b.skips, Skip{p.Name, k, why})
+			return
+		}
 	}
 	// **标记放在准入检查之后**（2026-09-18 挪的）：原来它在最前面，于是一个被拒的
 	// 候选（没 key / 熔断 / 已禁用）再出现在别的 profile 里时，`newgate tier` 报的
@@ -186,13 +196,18 @@ func OverrideChain(source string, override domain.Binding, tier string, profiles
 	case prov.Key() == "":
 		skips = append(skips, Skip{source, override.String(), "provider 没有 api_key，覆盖不生效"})
 		return steps, skips, false
-	case o.Available != nil && !o.Available(override.Provider, override.Model):
-		skips = append(skips, Skip{source, override.String(), "熔断中，覆盖不生效"})
-		return steps, skips, false
 	}
 	if o.Disabled != nil {
 		if yes, why := o.Disabled(tier, override.String()); yes {
 			skips = append(skips, Skip{source, override.String(), "已禁用：" + why})
+			return steps, skips, false
+		}
+	}
+	// 覆盖绑定同样要过准入：被摘牌的 binding 不该因为用户在命令行点了它就能
+	// 上链（那样「点名的那个挂了」会绕过 fallback 保护，直接撞上去）。
+	if o.Available != nil {
+		if ok, why := o.Available(override.Provider, override.Model); !ok {
+			skips = append(skips, Skip{source, override.String(), why + "，覆盖不生效"})
 			return steps, skips, false
 		}
 	}

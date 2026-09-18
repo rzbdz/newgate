@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/lib/logx"
-	"github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
@@ -33,6 +32,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/gateway/dialect"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
+	"github.com/rzbdz/newgate/go/modules/gateway/policy"
 	"github.com/rzbdz/newgate/go/modules/gateway/probe"
 	"github.com/rzbdz/newgate/go/modules/gateway/protocol"
 	"github.com/rzbdz/newgate/go/modules/gateway/quirk"
@@ -53,10 +53,13 @@ type Server struct {
 	// 正在跑的会话不受影响（各 agent 读各自的绑定）。
 	Watch *store.Watcher
 
-	// Health 是注入进来的 binding 健康表（熔断 + 延迟排序）。数据面只读它
-	// 决定「这条 binding 能不能进链、排第几」，只写它回报结果；策略一概
-	// 不在这个包里，见 modules/breaker。
-	Health breaker.Breaker
+	// Filters 是注入进来的数据面策略贡献者（准入、结局裁决、控制面自报、
+	// 停机落盘，见 modules/gateway/policy）。
+	//
+	// 数据面**不认识任何一家策略**：它只知道自己有这四个决策点，谁回答、
+	// 按什么规则回答是别人的事。空账本 = 最小系统（全部候选可用、按机制
+	// 换站、不记账）。
+	Filters *policy.Registry
 
 	srv      *http.Server
 	ln       net.Listener // 优雅交接要把它作为 fd 移交新进程
@@ -77,9 +80,12 @@ type Server struct {
 	drainFlag int32
 }
 
-// New 构造尚未监听的 Server，使配置、日志和健康表依赖在启动副作用前就完整可见。
-func New(port int, lg *log.Logger, w *store.Watcher, br breaker.Breaker) *Server {
-	return &Server{Port: port, Logger: lg, Watch: w, Health: br,
+// New 构造尚未监听的 Server，使配置、日志和策略账本在启动副作用前就完整可见。
+func New(port int, lg *log.Logger, w *store.Watcher, filters *policy.Registry) *Server {
+	if filters == nil {
+		filters = policy.New()
+	}
+	return &Server{Port: port, Logger: lg, Watch: w, Filters: filters,
 		stopCh: make(chan struct{}), drainCh: make(chan struct{})}
 }
 
@@ -122,18 +128,27 @@ func (s *Server) logf(format string, a ...interface{}) {
 	}
 }
 
-// report 是数据面回报上游结局的唯一入口：一次 Report + 副作用记账 + 日志
-// 素材。四个调用点（连接失败、状态码、流中断、成功）都走它，免得某个点漏
-// 掉指标或日志。
-func (s *Server) report(provider, model string, in breaker.Input) breaker.Result {
-	res := s.Health.Report(provider, model, in)
-	switch {
-	case res.Opened:
-		metrics.Default.Inc("breaker.opened")
-	case res.Spared:
-		metrics.Default.Inc("breaker.spared")
+// outcome 是数据面回报上游结局的唯一入口：一次裁决 + 计数器 + 日志素材。
+// 四个调用点（连接失败、状态码、流中断、成功）都走它，免得某个点漏掉指标。
+//
+// 它只做**机制**：把「这一次到底怎么了」原样交给注册进来的策略，拿到判决后
+// 执行。至于「该不该记这本账」「留什么痕」全是策略的事——数据面不认识它们，
+// 包括计数器的名字。
+func (s *Server) outcome(o policy.Outcome) policy.Verdict {
+	v := s.Filters.Judge(o)
+	for _, key := range v.Metrics {
+		metrics.Default.Inc(key)
 	}
-	return res
+	return v
+}
+
+// advance 内核的换站机制：响应还没开始写、链上还有下一站。
+//
+// 这是唯一的默认方向，且**策略只能叫停**（Verdict.Stop）——不存在策略要求
+// 前进而机制要停的情形（核对过旧的失败分类表全表：除「其它 4xx」那一处政策
+// 之外，换站与否恒等于这个式子）。所以判决与机制的合成就是一次 OR。
+func advance(o policy.Outcome, v policy.Verdict) bool {
+	return !o.ResponseStarted && !o.IsLast && !v.Stop
 }
 
 // verifyProbeAttempts / verifyProbeTimeout 是「上闸前诊断」的形状：连续打
@@ -151,7 +166,7 @@ const (
 	verifyProbeTimeout  = 8 * time.Second
 )
 
-// verify 是注入给 breaker 的诊断函数（breaker.Breaker.SetVerifier）。
+// probe 是数据面借给策略的「主动探活」能力（policy.Env.Probe）。
 //
 // 现场（2026-09-17 实测，日志与 health.json 都在）：smt-deepseek 被摘了好几次，
 // 每次 reason 都是「真实流量连续失败」，而每一次手动 `newgate probe` 都是
@@ -160,9 +175,13 @@ const (
 // 时，主动、可控、可重复的那一个更硬；而摘牌的代价不对称（用户被悄悄换给别的
 // 模型、要等 60s 起的冷却），所以上闸前必须再要一次主动证据。
 //
+// 这个能力归数据面：它要读当前配置快照（provider 的 base、key、方言）并复用
+// 数据面的探活实现。策略只是**借**它——上一版是策略反过来要求数据面注入一个
+// 回调（`breaker.Breaker.SetVerifier`），方向是反的。
+//
 // fail-closed：拿不到 provider 配置、key 为空、探活报错，一律返回 false
 // ——诊断**不能**成为坏 binding 的免死金牌，它只该拦住误判。
-func (s *Server) verify(provider, model string) bool {
+func (s *Server) probe(provider, model string) bool {
 	snap := s.snap()
 	if snap == nil || snap.Providers == nil {
 		return false
@@ -173,7 +192,7 @@ func (s *Server) verify(provider, model string) bool {
 	}
 	for i := 0; i < verifyProbeAttempts; i++ {
 		status, latency, err := probe.One(p, model, verifyProbeTimeout)
-		s.logf("[breaker] 上闸前诊断 %s/%s 第 %d/%d 次：HTTP %d %v（%s）",
+		s.logf("[probe] 上闸前诊断 %s/%s 第 %d/%d 次：HTTP %d %v（%s）",
 			provider, model, i+1, verifyProbeAttempts, status, err,
 			latency.Round(time.Millisecond))
 		if err == nil && status == 200 {
@@ -183,13 +202,22 @@ func (s *Server) verify(provider, model string) bool {
 	return false
 }
 
+// serverEnv 是数据面交给策略的运行期能力（policy.Env）。
+//
+// 时刻很重要：它由 Server.Start 在**服务起来的时候**装上，不是装配期——因为
+// 它给的正是「此刻活着的这件东西」（日志、当前配置快照下的探活）。见
+// docs/02-component-framework.md 的三段法则。
+type serverEnv struct{ s *Server }
+
+// Logf 策略的日志出口。消息**整条由策略给**（数据面不替它加前缀）：谁的知识
+// 谁起名，数据面不该出现「健康表」这类别人的词。
+func (e serverEnv) Logf(format string, args ...any) { e.s.logf(format, args...) }
+
+func (e serverEnv) Probe(provider, model string) bool { return e.s.probe(provider, model) }
+
 func (s *Server) Start() error {
-	// 健康表的装载归 breaker 模块自己（它在 Start 里读 health.json）；这里只
-	// 提供日志出口。持久化失败必须说出来——健康状态不能静默丢失。
-	s.Health.SetErrorHandler(func(err error) {
-		s.logf("[breaker] 健康表读写失败（继续使用内存状态）: %v", err)
-	})
-	s.Health.SetVerifier(s.verify)
+	// 策略要的运行期能力在这里交付（探活的形状见 probe 的说明）。
+	s.Filters.BindEnv(serverEnv{s: s})
 	// 探过的东西（方言能力、上游毛病）从磁盘装回来。读不出来就说一句：
 	// 否则现象是「重启之后每个上游都要重新撞一次 404/400 才学回来」，
 	// 而原因没人知道。
@@ -267,7 +295,9 @@ func (s *Server) signalReady() {
 }
 
 func (s *Server) Shutdown() {
-	s.Health.Flush()
+	// 有账没落盘的策略在这里被叫一次（顺序在关 listener 之前：关掉之后进程
+	// 可能就退了，那笔账就丢了）。落盘失败按「不静默」报出来，但不阻断停机。
+	s.Filters.Flush(s.logf)
 	if s.srv != nil {
 		_ = s.srv.Close()
 	}
@@ -281,14 +311,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	st := snap.State
 	tc := thinkcache.Default.Stats()
-	writeJSON(w, 200, map[string]interface{}{
+	doc := map[string]interface{}{
 		"ok":              true,
 		"default_profile": st.DefaultProfile,
 		"active":          st.Active,
 		"port":            s.Port,
 		"requests":        atomic.LoadUint64(&s.requests),
 		"failures":        atomic.LoadUint64(&s.failures),
-		"breakers":        s.Health.Snapshot(),
 		"uptime_s":        int(time.Since(s.started).Seconds()),
 		"tiers":           domain.Roles,
 		// 给 `newgate restart` 探测用：支持优雅交接（socket 移交）。
@@ -306,7 +335,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"evictions":  tc.Evictions,
 			"unparsable": tc.Unparsable,
 		},
-	})
+	}
+	// 策略自己的状态节并进**顶层**（不是塞进一个 extra 对象）：老版本 CLI 读的
+	// 就是顶层那些键，挪窝会让它在优雅交接的升级窗口里看见空表。键撞车在注册期
+	// 就报错（见 policy.Registry.validate），所以这里不会互相覆盖。
+	for key, value := range s.Filters.Doc() {
+		doc[key] = value
+	}
+	writeJSON(w, 200, doc)
 }
 
 type probeHealthObservation struct {
@@ -318,9 +354,10 @@ type probeHealthObservation struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// handleHealth 接收 probe 的主动健康结论，写入 daemon 唯一的全局熔断表。
-// probe 是 4-token 极小请求；超过分类器首字节阈值仍未完成，就不具备进入
-// 交互 fallback 链的资格，即使它最终回了 200。
+// handleHealth 接收 `newgate probe` 的主动探活结论，交给注册进来的策略。
+//
+// 数据面只负责**收发与鉴权**：它把「探到了什么」翻译成中性的观察值，至于这条
+// 结论意味着什么、要不要摘牌，全是策略的事（`policy.Controller.ObserveProbes`）。
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -342,22 +379,31 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	threshold := snap.State.Timeouts.ClassifierFirstByte()
-	opened := 0
+	obs := make([]policy.ProbeObservation, 0, len(req.Observations))
 	for _, o := range req.Observations {
 		if o.Provider == "" || o.Model == "" {
 			continue
 		}
-		grade, didOpen := s.Health.RecordProbe(o.Provider, o.Model, o.Status, o.Context,
-			time.Duration(o.LatencyMs)*time.Millisecond, threshold, o.Error)
-		if didOpen {
+		obs = append(obs, policy.ProbeObservation{
+			Provider: o.Provider, Model: o.Model, Status: o.Status,
+			Latency:      time.Duration(o.LatencyMs) * time.Millisecond,
+			ContextBytes: o.Context, Error: o.Error, SlowAfter: threshold,
+		})
+	}
+	opened := 0
+	for _, ack := range s.Filters.ObserveProbes(obs) {
+		if ack.Opened {
 			opened++
-			s.logf("[probe] 熔断 %s/%s：%s（至少 60s，之后须 probe 成功才回链）",
-				o.Provider, o.Model, grade)
+		}
+		if ack.Note != "" {
+			s.logf("%s", ack.Note)
 		}
 	}
-	writeJSON(w, 200, map[string]interface{}{
-		"ok": true, "opened": opened, "breakers": s.Health.Snapshot(),
-	})
+	doc := map[string]interface{}{"ok": true, "opened": opened}
+	for key, value := range s.Filters.Doc() {
+		doc[key] = value
+	}
+	writeJSON(w, 200, doc)
 }
 
 // handleMetrics 网关计数器（只读，只听 127.0.0.1）。`newgate metrics` 的
@@ -753,8 +799,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if routeTier != "" {
 		opts := resolve.Opts{
 			Active:    active,
-			Available: s.Health.Available,
-			Rank:      func(provider, model string) int { return s.Health.Rank(provider, model, len(body)) },
+			Available: s.Filters.Admit,
+			Rank:      func(provider, model string) int { return s.Filters.Rank(provider, model, len(body)) },
 			MaxSteps:  st.Chain.Attempts(),
 		}
 		var rs []resolve.Step
@@ -800,8 +846,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// （docs/04-configuration.md）——这支持「工具界面显示真实模型名」。
 			steps, skips, tier = resolve.ResolveRequest(norm, active, snap.Profiles, snap.Providers, resolve.Opts{
 				Active:    active,
-				Available: s.Health.Available,
-				Rank:      func(provider, model string) int { return s.Health.Rank(provider, model, len(body)) },
+				Available: s.Filters.Admit,
+				Rank:      func(provider, model string) int { return s.Filters.Rank(provider, model, len(body)) },
 				MaxSteps:  st.Chain.Attempts(),
 			})
 		}
@@ -996,11 +1042,15 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					metrics.Default.Inc("timeout.first_byte.non_stream")
 				}
 			}
-			res := s.report(a.Binding.Provider, a.Binding.Model, breaker.Input{
-				Kind:   breaker.KindConnError,
-				IsLast: isLast,
-			})
-			atomic.AddUint64(&s.failures, 1)
+			o := policy.Outcome{
+				Provider: a.Binding.Provider, Model: a.Binding.Model,
+				Binding: a.Binding.String(), Kind: policy.ConnectionFailed,
+				IsLast: isLast, RequestBytes: len(body),
+			}
+			v := s.outcome(o)
+			if v.Attribute {
+				atomic.AddUint64(&s.failures, 1)
+			}
 			hint := ""
 			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
 				waitLimit := st.Timeouts.FirstByte()
@@ -1009,11 +1059,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				}
 				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
 			}
-			s.logf("[proxy] #%d %s 连接失败: %v%s%s", reqID, routeStr, derr,
-				breakerNote(res, a.Binding.Provider), hint)
+			s.logf("[proxy] #%d %s 连接失败: %v%s%s", reqID, routeStr, derr, v.Note, hint)
 			lastMsg, lastCode = fmt.Sprintf("上游 %s 连接失败: %v", a.Binding.Provider, derr), 502
 			trail = append(trail, fmt.Sprintf("%s(conn)", a.Binding))
-			if res.Verdict.Advance {
+			if advance(o, v) {
 				metrics.Default.Inc("chain.step_failed")
 				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
 				continue
@@ -1025,8 +1074,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// 定案：把这个响应交给客户端
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			// 上游说了话。先把错误原文整个读出来当证据，再**一次性**把
-			// 「沿不沿链走 / 记不记账 / 记进哪一本账」交给 breaker 的决策表。
+			// 上游说了话。先把错误原文整个读出来当证据（它是判据的输入，也是
+			// 落盘的现场），再**一次性**把「沿不沿链走 / 记不记账 / 留什么痕」
+			// 交给注册进来的策略。
 			//
 			// 2026-09-17 之前这里是两个分支各判一次：可转移的那条无条件记账，
 			// 定案的那条先豁免形状错误。判据不一致的后果是同一发 reasoning
@@ -1034,25 +1084,21 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// deepseek 摘掉。现在只有一处判据，且它是纯函数，能被穷举测完。
 			eb, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 256*1024))
 			_ = resp.Body.Close()
-			res := s.report(a.Binding.Provider, a.Binding.Model, breaker.Input{
-				Kind:          breaker.KindUpstreamStatus,
-				Status:        resp.StatusCode,
-				Body:          eb,
-				IsLast:        isLast,
-				FallbackOn400: st.Chain.FallbackOn400,
-			})
-			switch res.Verdict.Bucket {
-			case breaker.BucketNone:
-				// 请求本身有问题（非形状 400 等），不是上游的账。
-			case breaker.BucketShape:
-				metrics.Default.Inc("breaker.skipped.shape_error")
-			default:
+			o := policy.Outcome{
+				Provider: a.Binding.Provider, Model: a.Binding.Model,
+				Binding: a.Binding.String(), Kind: policy.RejectedStatus,
+				Status: resp.StatusCode, Body: eb,
+				IsLast: isLast, FallbackOn400: st.Chain.FallbackOn400,
+				RequestBytes: len(body),
+			}
+			v := s.outcome(o)
+			if v.Attribute {
 				atomic.AddUint64(&s.failures, 1)
 			}
 			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
-			if res.Verdict.Advance {
+			if advance(o, v) {
 				s.logf("[proxy] %s -> %d%s  上游说: %s", routeStr, resp.StatusCode,
-					breakerNote(res, a.Binding.Provider), trim(string(eb)))
+					v.Note, trim(string(eb)))
 				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
 				metrics.Default.Inc("chain.step_failed")
 				lastMsg, lastCode = trim(string(eb)), resp.StatusCode
@@ -1067,21 +1113,21 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			} else {
 				s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
 			}
-			if res.Shape != "" {
-				// 请求形状错误：不是客户端 schema 错，是这份 body 本身只有某家
-				// 上游挑食（典型是 DeepSeek 思考模式那两句 400），要能一眼 grep
-				// 出来。判据名由检测器自己起，转发路径不认识任何上游专有字符串。
-				s.logf("[shape-400] #%d %s 请求形状错误（判据 %s；证据 %s.*）",
-					reqID, a.Binding.String(), res.Shape, filepath.Base(base))
-				// 现场单独存档：这类 400 偶发又致命，dump 目录的 req-*/err-*
-				// 滚动清理会把它挤掉，所以另存一份到不参与滚动清理的专用目录，
-				// 并附逐条 reasoning 审计（哪几条 assistant 没有推理原文）。
-				rdir, shErr := s.saveShapeEvidence(reqID, res.Shape, body, newBody, eb,
-					r.Header, resp.Header, routeStr)
-				if shErr != nil {
-					s.logf("[shape-400] #%d 现场**没存下来**（查权限/磁盘）: %v", reqID, shErr)
-				} else {
-					s.logf("[shape-400] #%d 现场已存档 %s/", reqID, rdir)
+			if ev := v.Evidence; ev != nil && !advance(o, v) {
+				// 这类结局要能一眼 grep 出来，而且要留一份不被滚动清理挤掉的
+				// 现场。`[shape-400]` 那个字面量与目录前缀**由认领它的策略给**
+				// （见 policy.Evidence）：转发路径不认识任何上游专有字符串，
+				// 也不知道这条 400 是哪家的方言。
+				s.logf("[%s] #%d %s 请求形状错误（判据 %s；证据 %s.*）",
+					ev.Tag, reqID, a.Binding.String(), ev.Subject, filepath.Base(base))
+				if ev.Archive {
+					rdir, shErr := s.saveShapeEvidence(reqID, ev, body, newBody, eb,
+						r.Header, resp.Header, routeStr)
+					if shErr != nil {
+						s.logf("[%s] #%d 现场**没存下来**（查权限/磁盘）: %v", ev.Tag, reqID, shErr)
+					} else {
+						s.logf("[%s] #%d 现场已存档 %s/", ev.Tag, reqID, rdir)
+					}
 				}
 			}
 			s.logf("[proxy] #%d 上游原文: %s", reqID, truncate(string(redact(eb)), 2000))
@@ -1104,9 +1150,13 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(eb)
 			return
 		}
-		s.Health.Report(a.Binding.Provider, a.Binding.Model,
-			breaker.Input{Kind: breaker.KindUpstreamSuccess})
-		s.Health.ObserveSuccess(a.Binding.Provider, a.Binding.Model, len(newBody), attemptTTFT)
+		ok := policy.Outcome{
+			Provider: a.Binding.Provider, Model: a.Binding.Model,
+			Binding: a.Binding.String(), Kind: policy.Succeeded,
+			RequestBytes: len(newBody), TTFT: attemptTTFT,
+		}
+		s.outcome(ok)
+		s.Filters.Observe(ok)
 		if i > 0 {
 			metrics.Default.Inc("chain.failover")
 		}
@@ -1212,18 +1262,21 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					metrics.Default.Inc("client.cancel")
 					s.logf("[proxy] #%d 客户端取消，已掐断上游（省下后续 token）", reqID)
 				default:
-					// 首字节已经拿到、字节也已经开始往客户端写，中途上游断了。
-					// 换不了站（写出去的东西收不回），但这是实打实的可用性
-					// 问题——以前这里只打一行日志，一个每次流到一半就断的上游
-					// 在熔断表上完全隐形。
-					res := s.report(a.Binding.Provider, a.Binding.Model, breaker.Input{
-						Kind:    breaker.KindStreamTruncated,
-						Written: true,
-						IsLast:  isLast,
-					})
+					// 响应已经开始往客户端写，中途上游断了。换不了站（写出去的
+					// 东西收不回），但这是实打实的可用性问题——以前这里只打一行
+					// 日志，一个每次流到一半就断的上游在健康账本上完全隐形。
+					o := policy.Outcome{
+						Provider: a.Binding.Provider, Model: a.Binding.Model,
+						Binding: a.Binding.String(), Kind: policy.StreamCut,
+						ResponseStarted: true, IsLast: isLast,
+						RequestBytes: len(newBody), TTFT: attemptTTFT,
+					}
+					v := s.outcome(o)
+					if v.Attribute {
+						atomic.AddUint64(&s.failures, 1)
+					}
 					s.logf("[proxy] #%d 上游断流（已转发 %d 块 / %d 字节）: %v%s",
-						reqID, chunks, bytesOut, rderr,
-						breakerNote(res, a.Binding.Provider))
+						reqID, chunks, bytesOut, rderr, v.Note)
 				}
 				return
 			}
@@ -1343,24 +1396,26 @@ func (s *Server) saveErrEvidence(reqID uint64, status int, inBody, outBody, resp
 // （modules/deepseek/shape.go），但目录名取自检测器自己起的名字，所以加一条
 // 新判据就会自动多一个证据目录，转发路径不用改。
 //
-// 目录结构：dump/shape-400-<判据>/req-<id>-<unixnano>/，里面放客户端发来的、
+// 目录结构：dump/<标记>-<判据>/req-<id>-<unixnano>/，里面放客户端发来的、
 // 我们发出的、上游说的，外加一份逐条审计（哪几条 assistant 消息被补过字段）。
-// 只按总字节数封顶（512MB，约几百个现场），超了才清最旧的——正常排查用根本
-// 到不了这个量，等于「不删」。
+// 两段名字都来自策略给的 Evidence（今天标记是 "shape-400"、判据是 deepseek，
+// 于是路径与 2026-09-18 之前一字不差）。等宽上限只按总字节数封顶
+// （512MB，约几百个现场），超了才清最旧的——正常排查用根本到不了这个量，
+// 等于「不删」。
 //
-// 判据名进路径前做了白名单过滤（见 shapeDirName）：检测器是别的模块注册进来
-// 的代码，名字里带 `/` 或 `..` 就能让这个函数往配置目录外写文件。
+// 两段名字进路径前都做了白名单过滤（见 shapeDirName）：策略是别的模块注册
+// 进来的代码，名字里带 `/` 或 `..` 就能让这个函数往配置目录外写文件。
 // 与 saveErrEvidence 同理：这类现场「丢了就再也复现不了」，所以写不出去必须说
 // （2026-09-18 改，原来五个 `_ =` 加一句无条件的「现场已存档」）。
-func (s *Server) saveShapeEvidence(reqID uint64, detector string, inBody, outBody, respBody []byte,
+func (s *Server) saveShapeEvidence(reqID uint64, ev *policy.Evidence, inBody, outBody, respBody []byte,
 	reqHdr http.Header, respHdr http.Header, routeStr string) (string, error) {
-	dir := filepath.Join(paths.Config(), "dump", shapeDirName(detector),
+	dir := filepath.Join(paths.Config(), "dump", shapeDirName(ev.Tag, ev.Subject),
 		fmt.Sprintf("req-%06d-%d", reqID, time.Now().UnixNano()))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	meta := fmt.Sprintf("route: %s\nstatus: 400\ndetector: %s\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
-		routeStr, detector, headerDump(reqHdr), headerDump(respHdr))
+	meta := fmt.Sprintf("route: %s\nstatus: 400\ntag: %s\ndetector: %s\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
+		routeStr, ev.Tag, ev.Subject, headerDump(reqHdr), headerDump(respHdr))
 	var errs []error
 	for _, f := range []struct {
 		name string
@@ -1380,13 +1435,20 @@ func (s *Server) saveShapeEvidence(reqID uint64, detector string, inBody, outBod
 	return dir, errors.Join(errs...)
 }
 
-// shapeDirName 把检测器名压成一个安全的目录名：只留字母数字和 `-_.`，其余
-// 一律换成 `_`，空名退化成 `unknown`。名字会进文件路径，而检测器是**别的
-// 模块**注册进来的——不设防就等于让一个注册项决定往哪写文件。
-func shapeDirName(detector string) string {
+// shapeDirName 把「标记 + 判据名」压成一个安全的目录名：只留字母数字和
+// `-_.`，其余一律换成 `_`，空名退化成 `unknown`。两段名字都会进文件路径，
+// 而它们都来自**别的模块**注册进来的策略——不设防就等于让一个注册项决定
+// 往哪写文件（`../` 一次就能写到配置目录外面去）。
+//
+// 两段的来源不同，所以不合成一个参数：Tag 是**这一类结局**的名字（策略给，
+// 今天恒为 "shape-400"，于是 dump/shape-400-deepseek/ 这个路径与 2026-09-18
+// 之前一字不差），Subject 是**谁认领的**（形状检测器自己起的名字）。
+func shapeDirName(tag, subject string) string {
 	var b strings.Builder
-	b.WriteString("shape-400-")
-	for _, r := range detector {
+	if tag == "" {
+		tag = "shape"
+	}
+	for _, r := range tag {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
 			r == '-', r == '_', r == '.':
@@ -1395,7 +1457,18 @@ func shapeDirName(detector string) string {
 			b.WriteByte('_')
 		}
 	}
-	if b.Len() == len("shape-400-") {
+	b.WriteString("-")
+	before := b.Len()
+	for _, r := range subject {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == before {
 		b.WriteString("unknown")
 	}
 	return b.String()
@@ -1462,18 +1535,6 @@ func fmtSkips(skips []resolve.Skip) string {
 		parts = append(parts, t+"="+sk.Reason)
 	}
 	return strings.Join(parts, "; ")
-}
-
-func breakerNote(res breaker.Result, prov string) string {
-	switch {
-	case res.Opened:
-		return fmt.Sprintf("  [熔断器已打开: %s 暂时摘掉]", prov)
-	case res.Spared:
-		// 差一点摘、被诊断探活拦下来。必须打出来：这解释了「日志里有失败、
-		// newgate breaker 里却没有它」这个会让人查错方向的组合。
-		return fmt.Sprintf("  [诊断探活证明 %s 仍然可用，未摘牌]", prov)
-	}
-	return ""
 }
 
 func truncate(s string, n int) string {

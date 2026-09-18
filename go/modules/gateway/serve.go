@@ -26,11 +26,11 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/buildinfo"
 	"github.com/rzbdz/newgate/go/lib/logx"
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/forward"
+	"github.com/rzbdz/newgate/go/modules/gateway/policy"
 	"github.com/rzbdz/newgate/go/modules/gateway/thinkcache"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
@@ -38,7 +38,10 @@ import (
 // serveCommand 是守护进程本体：`newgate __serve`。
 //
 // **故意没有 HelpLine**：它是内部入口，用户不该在 help 里看到它，也不该手敲。
-type serveCommand struct{ health breakerapi.Breaker }
+//
+// 它只带 filters（数据面策略账本）进去，不带任何具体策略：账本在 Bind 期就存在
+// （gateway 的 New 里建），贡献者在各自 Start 期往里写，数据面在 Serve 期读。
+type serveCommand struct{ filters *policy.Registry }
 
 var (
 	_ cliapi.Command  = (*serveCommand)(nil)
@@ -51,7 +54,7 @@ func (serveCommand) Names() []string { return []string{"__serve"} }
 func (serveCommand) Unstyled([]string) bool { return true }
 
 func (c serveCommand) Run(_ cliapi.Host, args []string) int {
-	return Serve(c.health, intFlag(args, "--port", 0))
+	return Serve(c.filters, intFlag(args, "--port", 0))
 }
 
 // intFlag 取 `--名字 N` 或 `--名字=N` 里的整数，没有给默认值。
@@ -82,7 +85,10 @@ func intFlag(args []string, name string, def int) int {
 //   - 每个 agent 读自己的绑定（per-agent profile）
 //   - 换页是原子指针替换，不存在「读到一半配置变了」的中间态
 //   - 新配置加载失败时**保留旧快照**，正在跑的一切继续工作
-func Serve(health breakerapi.Breaker, port int) int {
+//
+// 依赖方向：数据面只认识**策略账本**（policy.Registry），不认识任何一位策略。
+// 账本由 gateway 的 New 建好（Bind 期），策略在各自 Start 期注册进来。
+func Serve(filters *policy.Registry, port int) int {
 	rot, rerr := logx.New(paths.LogFile(), 16<<20, 3) // 16MB × 4 份
 	var lg *log.Logger
 	if rerr != nil {
@@ -151,7 +157,7 @@ func Serve(health breakerapi.Breaker, port int) int {
 	thinkcache.SetErrorHandler(func(err error) {
 		lg.Printf("[thinkcache] %v", err)
 	})
-	srv := forward.New(port, lg, watcher, health)
+	srv := forward.New(port, lg, watcher, filters)
 
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
