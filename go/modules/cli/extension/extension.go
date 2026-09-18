@@ -128,21 +128,125 @@ func Arg(args []string, i int) string {
 	return args[i]
 }
 
+// Section 是帮助屏上的一个**槽位名**。
+//
+// 它就是一个字符串，靠**约定**生效，不是闭集（2026-09-18 定）：
+//
+//   - 界面自己发布一批**通用槽位键**（下面那组常量）：它们是「逻辑上想得通」的
+//     大类（接管 / 路由 / 观测 / 维护 …），谁都可以选用；
+//   - 通用槽位之外，模块可以**自己起一个名字**——先到先得，最多
+//     MaxCustomSections 个，按首次声明的顺序排在通用槽位之后；
+//   - 抢不到名额（或者根本没起名字）的一律进 SectionOthers。
+//
+// 为什么不做成闭集枚举：分类是约定，会随装机长出新成员，硬拒绝的代价是「一个新
+// 模块因为用了个新节名，整个 --help 就崩了」——而它只是想被列出来。为什么又要设
+// 上限：槽位多了 help 就退化成一堆一行的节，等于没分组。这两条与 pluginmanager
+// 的 Type 词汇表是同一个设计（顺序表 + others 兜底）。
+//
+// 上一版界面反过来维护一张「哪几节是我自己的」的名字清单（coreSection 里那个
+// switch）——**界面因为别人的节名而需要被修改**，那正是这一轮要拆掉的东西。
+type Section = string
+
+// 通用槽位键。界面发布它们，模块选用；顺序即显示顺序（见 PlanSections）。
+const (
+	SectionTakeover    Section = "接管"
+	SectionRunOnce     Section = "跑一次（不改全局状态）"
+	SectionRouting     Section = "路由与配置"
+	SectionObserve     Section = "探测与观测"
+	SectionMaintenance Section = "维护"
+	SectionModules     Section = "模块"
+	SectionUI          Section = "界面"
+
+	// SectionOthers 是**兜底槽位**：抢不到名额的、没起名字的都落这里。
+	SectionOthers Section = "其它"
+)
+
+// generalSections 是界面发布的通用槽位，顺序即显示顺序。SectionOthers 永远最后。
+var generalSections = []Section{
+	SectionTakeover, SectionRunOnce, SectionRouting,
+	SectionObserve, SectionMaintenance, SectionModules, SectionUI,
+}
+
+// MaxCustomSections 是通用槽位之外还能容纳的**自定义节**个数。
+//
+// 有上限是因为节多了 help 就等于没分组；先到先得是因为「谁先声明谁占坑」是唯一
+// 不需要界面做价值判断的规则。装到一个新模块抢不到名额时，它落进「其它」照样
+// 列得出来，只是不再独占一节。
+const MaxCustomSections = 4
+
+// SectionPlan 是一批声明过的节名到**实际显示的节**的映射，以及显示顺序。
+//
+// 它是一次装配的产物（声明顺序 = 命令注册顺序），所以由界面在渲染时现算。
+type SectionPlan struct {
+	order []Section
+	slot  map[Section]Section
+}
+
+// PlanSections 按上面的规则给每个声明过的节名定一个落点。
+//
+// declared 必须是**稳定的顺序**（命令注册顺序），因为自定义节是先到先得——顺序
+// 不定的话同一套装机会渲染出不同的 help，那种不确定性最难查。
+func PlanSections(declared []Section) SectionPlan {
+	plan := SectionPlan{slot: map[Section]Section{}}
+	var customs []Section
+	for _, name := range declared {
+		if _, done := plan.slot[name]; done {
+			continue
+		}
+		switch {
+		case name == "":
+			// 没声明 = 没有位置主张，直接进兜底。
+			plan.slot[name] = SectionOthers
+		case isGeneralSection(name):
+			plan.slot[name] = name
+		case len(customs) < MaxCustomSections:
+			customs = append(customs, name)
+			plan.slot[name] = name
+		default:
+			plan.slot[name] = SectionOthers
+		}
+	}
+	plan.order = append(plan.order, generalSections...)
+	plan.order = append(plan.order, customs...)
+	plan.order = append(plan.order, SectionOthers)
+	return plan
+}
+
+// Slot 这个声明实际显示在哪一节。
+func (p SectionPlan) Slot(declared Section) Section {
+	if s, ok := p.slot[declared]; ok {
+		return s
+	}
+	return SectionOthers
+}
+
+// Order 按显示顺序返回所有会出现（或可能为空）的节。
+func (p SectionPlan) Order() []Section { return append([]Section(nil), p.order...) }
+
+func isGeneralSection(name Section) bool {
+	for _, known := range generalSections {
+		if name == known {
+			return true
+		}
+	}
+	return false
+}
+
 // HelpLine 是命令在 `newgate --help` 里占的那一行。
 //
-// **节名与位置都由命令自己声明，界面不认识任何一节**。上一版是反过来的：界面
+// **节与位置都由命令自己声明，界面不认识任何一条命令**。上一版是反过来的：界面
 // 里写死一张 cmd(...) 清单，于是每加一个模块就要回来改界面——命令搬回模块之后
 // 界面还在硬编码它们，"搬了"就等于白搬。
 type HelpLine struct {
-	// Section 归到哪一节。节名是**装机决定的**：装哪些模块、它们各开哪一节，
-	// 由编排者（用户/开发者）自己安排，框架不认识任何一节的名字。空 = 不分组。
-	Section string
-	// Rank 决定位置：**小的在前**。节的顺序取该节所有行里最小的 Rank，节内按
-	// Rank 再按 Usage 排（同 Rank 时顺序稳定，不会每次跑都不一样）。
+	// Section 归到哪个槽位（见上面的槽位表）。挑不出来就留空，会落进
+	// SectionOthers——那是**正确的降级**，不是错误。
+	Section Section
+	// Rank 决定**节内**位置：小的在前，同 Rank 按 Usage 稳定排序。节的先后由
+	// SectionOrder 决定，不受 Rank 影响——否则一个模块调大自己的 Rank 就能把
+	// 整节搬走，槽位的意义就没了。
 	//
-	// 为什么用整数而不是固定枚举：节的集合随装机变化，枚举必然要改框架。留出
-	// 空档（10/20/30…）就是留给别人插队的余量——与「Type 的词汇表归产品层」
-	// 是同一条规矩。
+	// 为什么用整数而不是枚举：节的集合随装机变化，枚举必然要改框架。留出空档
+	// （10/20/30…）就是留给别人插队的余量。
 	Rank int
 	// Usage 左列，命令写法。
 	Usage string

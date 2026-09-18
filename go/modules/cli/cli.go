@@ -26,30 +26,16 @@ var (
 	CommitTime = "unknown"
 )
 
-// coreSection 这几节是 CLI 自己的动词（接管、跑一次、路由与配置、探测与观测、
-// 维护）；模块声明的 Section 若命中它们就并进去，否则新开一节。
-func coreSection(name string) bool {
-	switch name {
-	case "接管", "跑一次（不改全局状态）", "路由与配置", "探测与观测", "维护", "术语", "配置":
-		return true
-	}
-	return false
-}
-
-// usageText 帮助。
-//
-// 左列固定宽度、右列是**一句话结论**，细节再往里塞就会变成没人读的墙。
-// 分组按用户此刻想干什么排（接管 / 跑一次 / 路由 / 观测 / 维护），不按
-// 代码里的文件排——用户不知道也不关心命令实现在哪个文件。
 // usageText 组装 `newgate --help`。
 //
-// **界面自己不认识任何一条命令、任何一节**：所有命令行都由拥有那项能力的模块
-// 经 HelpLine 声明，这里只做组装与排版。上一版这里写死了一张 cmd(...) 清单，
+// **界面自己不认识任何一条命令、任何一个模块**：所有命令行都由拥有那项能力的
+// 模块经 HelpLine 声明，这里只做组装与排版。上一版这里写死了一张 cmd(...) 清单，
 // 结果是命令搬回模块之后界面还在硬编码它们——"搬了"等于白搬，而且每加一个模块
 // 都得回来改界面（那正是本次重构要拆掉的东西）。
 //
-// 位置由命令自己声明的 Rank 决定：节的顺序取该节最小的 Rank，节内再按 Rank、
-// Usage 排。同 Rank 时靠 Usage 兜底，保证每次跑出来顺序一致。
+// 位置由命令自己声明的 Rank 决定；节的先后由槽位规则决定（见 extension.Section
+// 与 PlanSections），节内再按 Rank、Usage 排。同 Rank 时靠 Usage 兜底，保证每次
+// 跑出来顺序一致。
 func usageText(service *service) string {
 	var b strings.Builder
 	b.WriteString(style.Bold("newgate") + " — AI CLI 的语义模型层代理\n")
@@ -73,9 +59,16 @@ func usageText(service *service) string {
 		}
 	}
 
-	// 收集：谁注入的命令，就由谁声明它在 help 里长什么样、放哪个位置。
-	sections := map[string][]HelpLine{}
-	var order []string
+	// 收集：谁注入的命令，就由谁声明它在 help 里长什么样、放哪个**槽位**。
+	//
+	// 界面在这里**不认识任何一条命令、任何一个模块**：它只认识一组通用槽位键 +
+	// 一条「自定义节先到先得、抢不到进 others」的规则（extension.PlanSections）。
+	// 装一个新模块从不要求改这里一行。
+	type entry struct {
+		declared Section
+		line     HelpLine
+	}
+	var entries []entry
 	if service != nil {
 		for _, c := range service.commands.All() {
 			doc, ok := c.(Documented)
@@ -86,43 +79,35 @@ func usageText(service *service) string {
 			if line.Usage == "" {
 				continue
 			}
-			if _, seen := sections[line.Section]; !seen {
-				order = append(order, line.Section)
-			}
-			sections[line.Section] = append(sections[line.Section], line)
+			entries = append(entries, entry{line.Section, line})
 		}
 	}
-	// 节的顺序 = 该节最小的 Rank。空 Section（不分组）排最后：它没有位置主张。
-	rankOf := func(name string) int {
-		best := -1
-		for _, line := range sections[name] {
-			if best < 0 || line.Rank < best {
-				best = line.Rank
-			}
-		}
-		return best
+	// 规划按**声明顺序**做（= 命令注册顺序），因为自定义节的名额是先到先得的。
+	declared := make([]Section, 0, len(entries))
+	for _, e := range entries {
+		declared = append(declared, e.declared)
 	}
-	sort.Slice(order, func(i, j int) bool {
-		ri, rj := rankOf(order[i]), rankOf(order[j])
-		if ri != rj {
-			return ri < rj
-		}
-		return order[i] < order[j]
-	})
+	plan := PlanSections(declared)
 
-	for _, name := range order {
-		lines := sections[name]
+	// 同一个显示节里的行按 Rank 再按 Usage 排；节的先后由 plan 决定，不参与
+	// Rank 竞争——否则掰小自己的 Rank 就能把整节搬到最前面，槽位表就白设了。
+	grouped := map[Section][]HelpLine{}
+	for _, e := range entries {
+		slot := plan.Slot(e.declared)
+		grouped[slot] = append(grouped[slot], e.line)
+	}
+	for _, slot := range plan.Order() {
+		lines := grouped[slot]
+		if len(lines) == 0 {
+			continue
+		}
 		sort.Slice(lines, func(i, j int) bool {
 			if lines[i].Rank != lines[j].Rank {
 				return lines[i].Rank < lines[j].Rank
 			}
 			return lines[i].Usage < lines[j].Usage
 		})
-		if name != "" {
-			b.WriteString("\n" + style.Bold(name) + "\n")
-		} else {
-			b.WriteString("\n")
-		}
+		b.WriteString("\n" + style.Bold(slot) + "\n")
 		for _, line := range lines {
 			cmd(line.Usage, line.Summary)
 		}

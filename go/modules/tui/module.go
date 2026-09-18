@@ -63,7 +63,7 @@ func (tuiCommand) Names() []string { return []string{"tui", "menuconfig"} }
 func (tuiCommand) Help() cliapi.HelpLine {
 	// Rank 50 = 维护那一节（与界面自己的那批同节）。数字是约定，留了空档给插队。
 	return cliapi.HelpLine{
-		Section: "维护",
+		Section: cliapi.SectionMaintenance,
 		Rank:    50,
 		Usage:   "tui",
 		Summary: "menuconfig 风格界面",

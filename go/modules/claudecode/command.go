@@ -37,7 +37,7 @@ func (nakedCommand) Names() []string { return []string{"naked"} }
 
 func (nakedCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
-		Section: "维护",
+		Section: cliapi.SectionMaintenance,
 		Usage:   "naked on|forever|off|<时长>",
 		Summary: "短路 Bash 分类器：on=60s / forever=永久 / off=关",
 	}

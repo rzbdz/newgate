@@ -48,7 +48,12 @@ func New() modules.Component {
 			// ui 是**可选**的（见 CLAUDE.md §4「ui 只是一类普通模块」）：没装任何
 			// ui 时这些命令就没有入口，但网关功能照常——本模块不依赖 ui 存在。
 			if cli, ok := modules.Get(ctx, cliapi.Capability); ok {
-				for _, cmd := range []cliapi.Command{specialCommand{}, schemaRepairCommand{}, debugCommand{}} {
+				for _, cmd := range []cliapi.Command{
+					specialCommand{}, schemaRepairCommand{}, debugCommand{},
+					// 观测面也归数据面自己：计数器怎么分组、探活探出了什么，
+					// 都是网关的语义（见 command_metrics.go / command_probe.go）。
+					metricsCommand{}, probeCommand{},
+				} {
 					release, err := cli.RegisterCommand(cmd)
 					if err != nil {
 						return err

@@ -32,7 +32,7 @@ func (debugCommand) Names() []string { return []string{"debug"} }
 
 func (debugCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
-		Section: "探测与观测",
+		Section: cliapi.SectionObserve, Rank: rankObserve,
 		Usage:   "debug on|off [分钟]",
 		Summary: "全量请求日志（默认 30 分钟自动关）",
 	}
