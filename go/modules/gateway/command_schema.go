@@ -28,7 +28,7 @@ func (schemaRepairCommand) Names() []string { return []string{"schema-repair", "
 
 func (schemaRepairCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
-		Section: "维护",
+		Section: cliapi.SectionMaintenance, Rank: rankMaintenance,
 		Usage:   "schema-repair on|off",
 		Summary: "工具 schema 缺 required 时补空数组",
 	}

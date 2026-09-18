@@ -36,7 +36,7 @@ type startCommand struct{ s *service }
 
 func (startCommand) Names() []string { return []string{"start"} }
 func (startCommand) Help() HelpLine {
-	return HelpLine{Section: "接管", Rank: rankTakeover,
+	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
 		Usage: "start", Summary: "起代理 + 接管所有 agent"}
 }
 func (c startCommand) Run(_ Host, args []string) int {
@@ -50,7 +50,7 @@ type stopCommand struct{ s *service }
 
 func (stopCommand) Names() []string { return []string{"stop"} }
 func (stopCommand) Help() HelpLine {
-	return HelpLine{Section: "接管", Rank: rankTakeover,
+	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
 		Usage: "stop", Summary: "停代理 + 所有 agent 恢复直连"}
 }
 func (c stopCommand) Run(_ Host, args []string) int {
@@ -64,7 +64,7 @@ type takeoverCommand struct{ s *service }
 
 func (takeoverCommand) Names() []string { return []string{"on", "takeover", "take"} }
 func (takeoverCommand) Help() HelpLine {
-	return HelpLine{Section: "接管", Rank: rankTakeover,
+	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
 		Usage: "on <agent>", Summary: "只接管一个"}
 }
 func (c takeoverCommand) Run(_ Host, args []string) int {
@@ -75,7 +75,7 @@ type releaseCommand struct{ s *service }
 
 func (releaseCommand) Names() []string { return []string{"off", "release", "free"} }
 func (releaseCommand) Help() HelpLine {
-	return HelpLine{Section: "接管", Rank: rankTakeover,
+	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
 		Usage: "off <agent>", Summary: "只放开一个，以后 start 也不再管它"}
 }
 func (c releaseCommand) Run(_ Host, args []string) int {
@@ -89,7 +89,7 @@ type restartCommand struct{ s *service }
 
 func (restartCommand) Names() []string { return []string{"restart"} }
 func (restartCommand) Help() HelpLine {
-	return HelpLine{Section: "接管", Rank: rankTakeover,
+	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
 		Usage: "restart", Summary: "重启代理，接管现场原样保留"}
 }
 func (c restartCommand) Run(_ Host, args []string) int {
@@ -100,7 +100,7 @@ type statusCommand struct{ s *service }
 
 func (statusCommand) Names() []string { return []string{"status"} }
 func (statusCommand) Help() HelpLine {
-	return HelpLine{Section: "接管", Rank: rankTakeover,
+	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
 		Usage: "status", Summary: "谁在走 newgate、用哪个 profile"}
 }
 func (c statusCommand) Run(_ Host, _ []string) int { return cmdStatus(c.s.agents, c.s) }
@@ -113,7 +113,7 @@ type runOnceCommand struct{ s *service }
 
 func (runOnceCommand) Names() []string { return []string{"run"} }
 func (runOnceCommand) Help() HelpLine {
-	return HelpLine{Section: "跑一次（不改全局状态）", Rank: rankRunOnce,
+	return HelpLine{Section: SectionRunOnce, Rank: rankRunOnce,
 		Usage: "run <agent> [args…]", Summary: "用某个 profile 跑一次"}
 }
 func (c runOnceCommand) Run(_ Host, args []string) int {
@@ -128,7 +128,7 @@ func (tierCommand) Names() []string {
 	return []string{"tier", "tiers", "role", "roles"}
 }
 func (tierCommand) Help() HelpLine {
-	return HelpLine{Section: "路由与配置", Rank: rankRouting,
+	return HelpLine{Section: SectionRouting, Rank: rankRouting,
 		Usage: "tier [档位]", Summary: "fallback 链：走谁、跳过了什么"}
 }
 func (tierCommand) Run(_ Host, args []string) int { return cmdTier(args) }
@@ -137,7 +137,7 @@ type profilesCommand struct{}
 
 func (profilesCommand) Names() []string { return []string{"profiles", "ls"} }
 func (profilesCommand) Help() HelpLine {
-	return HelpLine{Section: "路由与配置", Rank: rankRouting,
+	return HelpLine{Section: SectionRouting, Rank: rankRouting,
 		Usage: "profiles", Summary: "所有 profile（优先级 / 标志 / 覆盖）"}
 }
 func (profilesCommand) Run(_ Host, _ []string) int { return cmdProfiles() }
@@ -146,7 +146,7 @@ type profileCommand struct{}
 
 func (profileCommand) Names() []string { return []string{"profile"} }
 func (profileCommand) Help() HelpLine {
-	return HelpLine{Section: "路由与配置", Rank: rankRouting,
+	return HelpLine{Section: SectionRouting, Rank: rankRouting,
 		Usage: "profile kv <名> [--write]", Summary: "profile 转 KV 文本"}
 }
 func (profileCommand) Run(host Host, args []string) int {
@@ -160,7 +160,7 @@ type setProfileCommand struct{ s *service }
 
 func (setProfileCommand) Names() []string { return []string{"--set-profile"} }
 func (setProfileCommand) Help() HelpLine {
-	return HelpLine{Section: "路由与配置", Rank: rankRouting,
+	return HelpLine{Section: SectionRouting, Rank: rankRouting,
 		Usage:   "--set-profile <名> [--agent <agent>]",
 		Summary: "切 profile；省略 --agent 设全局默认"}
 }
@@ -176,47 +176,27 @@ type agentsCommand struct{ s *service }
 
 func (agentsCommand) Names() []string { return []string{"agents"} }
 func (agentsCommand) Help() HelpLine {
-	return HelpLine{Section: "路由与配置", Rank: rankRouting,
+	return HelpLine{Section: SectionRouting, Rank: rankRouting,
 		Usage: "agents", Summary: "已知 agent 及其模型槽位"}
 }
 func (c agentsCommand) Run(_ Host, _ []string) int { return cmdAgents(c.s.agents) }
 
 // ---------- 探测与观测 ----------
 
-type probeCommand struct{}
-
-func (probeCommand) Names() []string { return []string{"probe"} }
-func (probeCommand) Help() HelpLine {
-	return HelpLine{Section: "探测与观测", Rank: rankObserve,
-		Usage: "probe [profile]", Summary: "给候选打真实请求，出健康报告"}
-}
-func (probeCommand) Run(_ Host, args []string) int {
-	return cmdProbe(arg(args, 0), has(args, "--json"))
-}
-
 type breakerCommand struct{}
 
 func (breakerCommand) Names() []string { return []string{"breaker", "breakers"} }
 func (breakerCommand) Help() HelpLine {
-	return HelpLine{Section: "探测与观测", Rank: rankObserve,
+	return HelpLine{Section: SectionObserve, Rank: rankObserve,
 		Usage: "breaker", Summary: "哪些 binding 被摘牌了、为什么、多久了"}
 }
 func (breakerCommand) Run(_ Host, _ []string) int { return cmdBreaker() }
-
-type metricsCommand struct{}
-
-func (metricsCommand) Names() []string { return []string{"metrics", "stat"} }
-func (metricsCommand) Help() HelpLine {
-	return HelpLine{Section: "探测与观测", Rank: rankObserve,
-		Usage: "metrics", Summary: "代理计数器：拦截 / 超时 / 转移 / 改道"}
-}
-func (metricsCommand) Run(_ Host, _ []string) int { return cmdMetrics() }
 
 type doctorCommand struct{ s *service }
 
 func (doctorCommand) Names() []string { return []string{"doctor"} }
 func (doctorCommand) Help() HelpLine {
-	return HelpLine{Section: "探测与观测", Rank: rankObserve,
+	return HelpLine{Section: SectionObserve, Rank: rankObserve,
 		Usage: "doctor", Summary: "体检"}
 }
 func (c doctorCommand) Run(_ Host, _ []string) int { return cmdDoctor(c.s) }
@@ -225,7 +205,7 @@ type logsCommand struct{}
 
 func (logsCommand) Names() []string { return []string{"logs", "log"} }
 func (logsCommand) Help() HelpLine {
-	return HelpLine{Section: "探测与观测", Rank: rankObserve,
+	return HelpLine{Section: SectionObserve, Rank: rankObserve,
 		Usage: "logs [N] [-f]", Summary: "代理日志：终端上分页，-f 持续跟随"}
 }
 func (logsCommand) Run(_ Host, args []string) int {
@@ -236,7 +216,7 @@ type allLogsCommand struct{ s *service }
 
 func (allLogsCommand) Names() []string { return []string{"alllogs", "all-logs"} }
 func (allLogsCommand) Help() HelpLine {
-	return HelpLine{Section: "探测与观测", Rank: rankObserve,
+	return HelpLine{Section: SectionObserve, Rank: rankObserve,
 		Usage: "alllogs", Summary: "完整诊断包"}
 }
 func (c allLogsCommand) Run(_ Host, _ []string) int { return cmdAllLogs(c.s.agents, c.s) }
@@ -247,7 +227,7 @@ type reloadCommand struct{}
 
 func (reloadCommand) Names() []string { return []string{"reload"} }
 func (reloadCommand) Help() HelpLine {
-	return HelpLine{Section: "维护", Rank: rankMaint,
+	return HelpLine{Section: SectionMaintenance, Rank: rankMaint,
 		Usage: "reload", Summary: "立刻重读配置（平时 1 秒内自动热更新）"}
 }
 func (reloadCommand) Run(_ Host, _ []string) int { return cmdReload() }
@@ -256,7 +236,7 @@ type initCommand struct{}
 
 func (initCommand) Names() []string { return []string{"init"} }
 func (initCommand) Help() HelpLine {
-	return HelpLine{Section: "维护", Rank: rankMaint,
+	return HelpLine{Section: SectionMaintenance, Rank: rankMaint,
 		Usage: "init [--force]", Summary: "铺开默认配置"}
 }
 func (initCommand) Run(_ Host, args []string) int { return cmdInit(has(args, "--force")) }
@@ -265,7 +245,7 @@ type shimCommand struct{ s *service }
 
 func (shimCommand) Names() []string { return []string{"shim"} }
 func (shimCommand) Help() HelpLine {
-	return HelpLine{Section: "维护", Rank: rankMaint,
+	return HelpLine{Section: SectionMaintenance, Rank: rankMaint,
 		Usage: "shim …", Summary: "底层逃生口，平时用 on/off 就够了"}
 }
 func (c shimCommand) Run(_ Host, args []string) int {
@@ -281,7 +261,7 @@ func (versionCommand) Names() []string {
 	return []string{"version", "--version", "-v"}
 }
 func (versionCommand) Help() HelpLine {
-	return HelpLine{Section: "界面", Rank: rankSystem,
+	return HelpLine{Section: SectionUI, Rank: rankSystem,
 		Usage: "version", Summary: ""}
 }
 func (versionCommand) Run(_ Host, _ []string) int {
@@ -293,7 +273,7 @@ type helpCommand struct{ s *service }
 
 func (helpCommand) Names() []string { return []string{"help", "--help", "-h"} }
 func (helpCommand) Help() HelpLine {
-	return HelpLine{Section: "界面", Rank: rankSystem,
+	return HelpLine{Section: SectionUI, Rank: rankSystem,
 		Usage: "help", Summary: "这一屏"}
 }
 func (c helpCommand) Run(_ Host, _ []string) int {
@@ -321,7 +301,7 @@ func ownCommands(s *service) []Command {
 		startCommand{s}, stopCommand{s}, takeoverCommand{s}, releaseCommand{s},
 		restartCommand{s}, statusCommand{s}, runOnceCommand{s},
 		tierCommand{}, profilesCommand{}, profileCommand{}, setProfileCommand{s}, agentsCommand{s},
-		probeCommand{}, breakerCommand{}, metricsCommand{}, doctorCommand{s},
+		breakerCommand{}, doctorCommand{s},
 		logsCommand{}, allLogsCommand{s},
 		reloadCommand{}, initCommand{}, shimCommand{s},
 		versionCommand{}, helpCommand{s}, serveCommand{s},

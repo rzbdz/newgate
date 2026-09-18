@@ -44,7 +44,7 @@ func (specialCommand) Names() []string {
 
 func (specialCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
-		Section: "探测与观测",
+		Section: cliapi.SectionObserve, Rank: rankObserve,
 		Usage:   "st [on|off] [插件]",
 		Summary: "special_treatment 开关与说明",
 	}

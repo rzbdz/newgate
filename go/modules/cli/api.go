@@ -33,3 +33,24 @@ type (
 // 模块用它把命令/诊断/状态行注入进来（RegisterXxx）。它们永远是同一个组件提供的，
 // 分成两个端口只会让每个模块都 Need 两次。
 var Capability = ext.Capability
+
+// 帮助屏的槽位词表转发（定义在 extension，理由见那边：它是**呈现概念**，
+// 而呈现的契约归 extension 这个叶子，不归某个模块）。
+type Section = ext.Section
+
+const (
+	SectionTakeover    = ext.SectionTakeover
+	SectionRunOnce     = ext.SectionRunOnce
+	SectionRouting     = ext.SectionRouting
+	SectionObserve     = ext.SectionObserve
+	SectionMaintenance = ext.SectionMaintenance
+	SectionModules     = ext.SectionModules
+	SectionUI          = ext.SectionUI
+	SectionOthers      = ext.SectionOthers
+)
+
+// SectionPlan 是一批节名到实际显示的节的映射 + 显示顺序（规则见 extension）。
+type SectionPlan = ext.SectionPlan
+
+// PlanSections 按通用槽位 / 自定义名额 / others 兜底的规则做一次规划。
+func PlanSections(declared []Section) SectionPlan { return ext.PlanSections(declared) }

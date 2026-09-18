@@ -34,7 +34,7 @@ func (c *command) Names() []string { return []string{"plugin", "plugins"} }
 
 func (c *command) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
-		Section: "模块",
+		Section: cliapi.SectionModules,
 		Usage:   "plugin [模块[.路径]] [on|off] [时长]",
 		Summary: "全部模块按分类列出；开关某个模块或某个开关点",
 	}
