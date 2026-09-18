@@ -218,6 +218,34 @@ func ListProfiles() ([]string, error) {
 
 // ---------- state ----------
 
+// ValidateState 只回答一件事：state.json **读得出来吗**。
+//
+// 为什么需要它（2026-09-18）：LoadState 是 fail-open 的（读不出来就给零值），
+// 那是对的——一个手改坏的文件不该让所有 agent 停摆。但零值 State 里有两个字段
+// 要命：`DefaultProfile == ""` 让链头是个不存在的 profile（每个请求「无可用候选」），
+// `Port == 0` 让 daemon 监听随机端口（CLI 与客户端按配置里的端口找它，于是
+// 「代理在跑但连不上」）。而 doctor 的「文件」那一项原来只 os.Stat——**存在即 ok**，
+// 于是一个半截 JSON 会被列进 ok 里，doctor 打「全部通过」。
+//
+// 用户手上于是是一组自相矛盾的现象：配置件件都在、doctor 全绿、但没有候选 /
+// 连不上。这一项就该在他会去看的地方报出来。
+func ValidateState() error {
+	b, err := ioutil.ReadFile(paths.StateFile())
+	if err != nil {
+		return err
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return err
+	}
+	if len(probe) == 0 {
+		return fmt.Errorf("文件是空的")
+	}
+	// 顶层能解析还不够：真正要的是它能填进 domain.State（字段类型对得上）。
+	var st domain.State
+	return json.Unmarshal(b, &st)
+}
+
 func LoadState() *domain.State {
 	s := &domain.State{}
 	if b, err := ioutil.ReadFile(paths.StateFile()); err == nil {

@@ -131,7 +131,6 @@ func (b *chainBuilder) add(p *domain.Profile, key string, bd domain.Binding) {
 		b.skips = append(b.skips, Skip{p.Name, k, "与链上更前面的重复，已去重"})
 		return
 	}
-	b.seen[k] = true
 
 	prov, ok := b.provs.Providers[bd.Provider]
 	if !ok {
@@ -152,6 +151,12 @@ func (b *chainBuilder) add(p *domain.Profile, key string, bd domain.Binding) {
 		b.skips = append(b.skips, Skip{p.Name, k, "熔断中"})
 		return
 	}
+	// **标记放在准入检查之后**（2026-09-18 挪的）：原来它在最前面，于是一个被拒的
+	// 候选（没 key / 熔断 / 已禁用）再出现在别的 profile 里时，`newgate tier` 报的
+	// 是「与链上更前面的重复，已去重」——而它从没上过链，真正的原因是第一次那个。
+	// 用户唯一会问的问题是「为什么不是我想的那个」，一个指向错误的原因比没有原因
+	// 更费时间。去重语义不变：同一个 key 在链上仍然只出现一次。
+	b.seen[k] = true
 	b.steps = append(b.steps, Step{Profile: p.Name, Binding: bd, Provider: prov})
 }
 

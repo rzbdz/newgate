@@ -67,12 +67,21 @@ func (reporter) Diagnostics() []cliapi.Diagnostic {
 func checkFiles() cliapi.Diagnostic {
 	d := cliapi.Diagnostic{Rank: rankCheckFiles, Label: "文件"}
 	var missing, ok []string
-	for _, p := range []string{paths.ProvidersFile(), paths.StateFile(), paths.Mappings()} {
+	for _, p := range []string{paths.ProvidersFile(), paths.Mappings()} {
 		if _, err := os.Stat(p); err != nil {
 			missing = append(missing, filepath.Base(p))
 		} else {
 			ok = append(ok, filepath.Base(p))
 		}
+	}
+	// state.json 单独查：**存在不够，它得读得出来**。半截 JSON 走 fail-open 会给
+	// 一个零值 State（默认 profile 是空串、端口是 0），症状是「无可用候选」或
+	// 「代理在跑却连不上」，而只 os.Stat 的体检会把那个文件列进 ok 里、报全部通过
+	// ——用户拿到的是一组互相矛盾的现象（见 store.ValidateState 的说明）。
+	if err := store.ValidateState(); err != nil {
+		missing = append(missing, "state.json（"+err.Error()+"）")
+	} else {
+		ok = append(ok, "state.json")
 	}
 	extra := ""
 	if names, err := store.ListProfiles(); err == nil {

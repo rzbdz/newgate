@@ -18,10 +18,14 @@ import (
 // **它住在这里而不是 modules/cli**：这是「everything is module」的直接推论——
 // 命令是这个模块的用户界面，模块自己提供它，通过 cli.RegisterCommand 注入。
 // 2026-09-18 修过一次真实的违规：那一版把它写在 modules/cli 里，理由是「注册
-// 命令要 Need(cli)，而 cli 要渲染列表又得 Need(plugin-manager)，成环」——
-// 那个环是**自己造的**，因为它同时让 cli 去 Need 本模块。正确的拆法是反过来：
-// 让 cli 不必认识本模块（状态行走 cli.RegisterStatus 由本模块自报），于是本
-// 模块可以自由地 Need(cli) 并注册自己的命令。
+// 命令要拿到 cli 的端口，而 cli 要渲染列表又得依赖 plugin-manager，成环」——
+// 那个环是**自己造的**，因为它同时让 cli 去依赖本模块。正确的拆法是反过来：
+// 让 cli 不必认识本模块（状态行走 cli.RegisterStatus 由本模块自报）。
+//
+// **注入用 modules.Inject，不是 Need**（照抄「注册命令就 Need(cli)」会被
+// app/graph_test.go 的 TestUIStaysOutOfTheDependencyGraph 当场拦下）：Inject 是
+// 一条不参与排序的边，所以「本模块要 ui」与「ui 要渲染」不会互相顶。理由见
+// modules/cli/extension 与 component.Inject。
 type command struct{ manager Manager }
 
 var (

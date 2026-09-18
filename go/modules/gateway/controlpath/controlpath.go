@@ -6,8 +6,15 @@
 // 就是个静默失效：服务器换了路径，客户端还在打老的那个，症状是「功能突然没了」，
 // 而不是编译错误。
 //
-// 它必须是**叶子**：不能放在 gateway 根包里。gateway 现在 Need(cli)（它要注册自己的
-// 命令），所以 cli 反过来 import gateway 会成环；放在这里，两个方向都能安全引用。
+// 它必须是**叶子**：不能放在 gateway 根包里。理由是 **import 重量**——cli、
+// config、breaker、runtime 以及 gateway 自己的 controlplane 都要引这几个路径
+// 常量，放在根包里等于每个引用者都拖进整个网关实现。
+//
+// （2026-09-18 修正这条理由：原来写的是「gateway Need(cli)，所以 cli 反过来
+// import gateway 会成环」。那个环今天构造不出来——gateway 对 ui 用的是 Inject
+// 这条不排序的边，cli 的 Requires 是空的，而 Go 层面 gateway 引的是 cli/extension
+// 叶子、不是 modules/cli。结论没变，理由是另一条。）
+//
 // 同一条规矩已经有一个先例：modules/configshare/proto 把
 // `/__newgate/config` `/__newgate/secrets` 定义在它自己的叶子里。
 //
