@@ -22,10 +22,11 @@ import (
 // 那个环是**自己造的**，因为它同时让 cli 去依赖本模块。正确的拆法是反过来：
 // 让 cli 不必认识本模块（状态行走 cli.RegisterStatus 由本模块自报）。
 //
-// **注入用 modules.Inject，不是 Need**（照抄「注册命令就 Need(cli)」会被
-// app/graph_test.go 的 TestUIStaysOutOfTheDependencyGraph 当场拦下）：Inject 是
-// 一条不参与排序的边，所以「本模块要 ui」与「ui 要渲染」不会互相顶。理由见
-// modules/cli/extension 与 component.Inject。
+// **注入用 modules.Optional，不是 Need**（照抄「注册命令就 Need(cli)」会被
+// app/graph_test.go 的 TestUIStaysOutOfTheDependencyGraph 当场拦下）：弱依赖的
+// 意思是「界面在就注册进去，不在就跳过」——本模块的功能一个都不少，只是没有入口。
+// 它仍然是一条**排序边**，所以本模块的 Start 一定在界面之后就绪（见
+// component.Optional；那边记着这条边从 Optional → Inject → Optional 的来回）。
 type command struct{ manager Manager }
 
 var (

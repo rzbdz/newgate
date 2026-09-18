@@ -46,17 +46,15 @@ func New() modules.Component {
 		Name: "config-hook",
 		Type: "infra",
 		Requires: []modules.Requirement{
-			// ui 是可选的：没装 ui 时客户端描述符照常工作，只是没有 `newgate agents`
-			// 这个入口（见 CLAUDE.md §4）。
-			modules.Inject(cliapi.Capability),
+			// ui 是**弱依赖**（见 component.Optional）：装着界面就有 `newgate
+			// agents` 这个入口和术语表那一行；没装就跳过，客户端描述符照常工作。
+			modules.Optional(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(ConfigHooksCapability, ConfigHooks(registry)),
 			modules.Provide(AgentCatalogCapability, AgentCatalog(registry)),
 		},
-		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，Start 阶段它可能
-		// 还没提供端口。Attach 在全图 Start 完之后跑。
-		Attach: func(_ context.Context, ctx modules.Context) error {
+		Start: func(_ context.Context, ctx modules.Context) error {
 			ui, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil

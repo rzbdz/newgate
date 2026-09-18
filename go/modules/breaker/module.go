@@ -24,19 +24,16 @@ func New() modules.Component {
 		Name: "breaker",
 		Type: "infra",
 		Requires: []modules.Requirement{
-			// 只有**注入**（见 component.Inject）：本模块不认识界面，界面也不
-			// 依赖本模块——`newgate breaker` 是这张健康表的用户界面，归本模块。
-			modules.Inject(cliapi.Capability),
+			// ui 是**弱依赖**（见 component.Optional）：装着界面就把 `newgate
+			// breaker` 挂上去，没装就跳过——健康表本身照常工作，只是没有入口。
+			modules.Optional(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Breaker(table)),
 		},
-		Start: func(context.Context, modules.Context) error {
+		Start: func(_ context.Context, ctx modules.Context) error {
 			_ = table.UseFile(paths.HealthFile())
-			return nil
-		},
-		// 注入是第二阶段：ui 不参与排序，Start 时它可能还没提供端口。
-		Attach: func(_ context.Context, ctx modules.Context) error {
+
 			ui, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil

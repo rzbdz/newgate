@@ -25,6 +25,12 @@ func main() {
 }
 
 func run() int {
+	// 装配过程留痕：谁装了什么、什么顺序、谁的弱依赖没命中。**每个进程都记**——
+	// 优雅交接那次最需要它（新进程在后台装配，用户全程看不见），而那时判不出
+	// 「我是守护进程」（见 app.TraceToLogFile 的注释）。收尾函数在退出前摘掉出口。
+	stopTrace := app.TraceToLogFile()
+	defer stopTrace()
+
 	built, err := app.New(context.Background())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "newgate:", err)

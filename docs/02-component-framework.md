@@ -77,42 +77,67 @@ type Component struct {
     Requires []Requirement
     Provides []Provision
     Start    func(context.Context, Context) error
-    Attach   func(context.Context, Context) error  // 第二阶段，见下
     Stop     func(context.Context) error
 }
 ```
 
 一个组件可以同时是 provider 和 consumer。
 
-### 注入边（`Inject`）与生命周期第二阶段
+### 两种依赖：强依赖与弱依赖
 
-`Requirement` 有三个构造子，前两个建**排序边**，第三个不建：
+`Requirement` 只有两个构造子，都是**排序边**：
 
 | 构造子 | 提供者缺失 | 排序 |
 | --- | --- | --- |
 | `Need` | 装配失败 | 提供者在前 |
-| `Optional` | 允许 | 提供者在前（有的话） |
-| `Inject` | 允许 | **不参与排序** |
+| `Optional` | 允许（**不建边、不报错**） | 提供者在前（有的话） |
 
-`Inject` 解决「互为对端」的死结：业务模块要往 ui 注入命令，而 ui 又要依赖那些
-模块才能渲染——用 `Need`/`Optional` 的话两条箭头互指就是环。`Inject` 说「端口
-存在就给我，我不排在它后面」，环就没有了。代价是**没有顺序保证**，见下。
+弱依赖（`Optional`）的完整语义是「**你存在，我就依赖你；你不在，我就不依赖你**」：
 
-因此 Manager 是**两阶段**的：
+- **提供者在场**：照常建一条排序边，我不但拿得到端口，而且**一定排在它后面**——
+  它的 `Start` 跑完了我的才跑。这就是「往别人那里注入东西的人，要等被注入的人
+  准备好」在框架里的落点。
+- **提供者缺席**：不建边、不报错，只是 `Get` 拿不到。所以「装不装这个可选模块」
+  不会让任何模块起不来。
 
- 1. 按拓扑顺序跑完全部 `Start`；
- 2. 再跑一遍 `Attach` —— 此时任何端口都已提供，注入边拿得到对端。
+典型用户是 ui：业务模块写 `Optional(cli)`，装了界面就把自己的命令与状态行挂上去，
+没装就跳过，模块自身功能一样不缺。反方向仍然禁止：**ui 不依赖任何模块**
+（`cli.Requires` 是空的，`app/` 里的棘轮测试守着）。
 
-往 ui 注入的东西（命令、状态行、体检项、诊断素材、术语）一律放 `Attach`，
-并且把 `Release` 收进同一个 `releases`、在 `Stop` 里 `ReleaseAll`。
+### 装配是**一个**阶段
 
-两个后果要记住：
+Manager 只做一件事：按拓扑顺序跑完全部 `Start`。`Provides` 的绑定在**任何
+`Start` 之前**就全部完成（构图期），所以端口解析与启动顺序无关；受顺序影响的只
+有「谁在谁的 `Start` 里注册了什么」。弱依赖保证了这件事——注册者排在 owner 后面。
 
-- **被注入方（ui）的 `Stop` 必须幂等且无副作用**。注入边不排序，实测里
-  `breaker` 会**在 cli 之后**才停（见 `modules/cli/module.go` 的 `New` 注释），
-  晚到的 `Release` 会打到已经停掉的 ui 上。
-- **`Attach` 失败会回滚整张图**（不是只回滚到失败的那个），因为那时每个组件
-  都已经 `Start` 过了。
+停止是启动的严格逆序，所以**注册者的 `Stop` 一定先于被注册方**：撤注册时目标
+还活着。这条以前没有保证（见下），现在由依赖图给出。
+
+### 2026-09-18：`Inject` 与第二阶段 `Attach` 已删除
+
+早先版本有过第三种需求 `Inject`（允许缺席且**不参与排序**）和配套的
+`Component.Attach`（全图 `Start` 跑完之后再跑一遍的「注入阶段」）。它解的是一类
+死结：模块要往 ui 注入命令，而 ui 自己**也要依赖那些模块**才能渲染——两条箭头
+互指就是环，于是 config / runtime / config-hook 的命令永远注入不进来，只能被迫
+留在界面里。
+
+真正的解法是**把 ui 的出边砍干净**（`cli.Requires` 现在为空，界面只循环调用注入
+进来的回调）。出边没了之后，`Optional(cli)` 这条**入边**不可能成环，`Inject` 存
+在的唯一理由随之消失；`Attach` 的唯一理由是「`Start` 阶段 ui 可能还没起」——排序
+边一恢复，它也没有存在必要了。
+
+留着它们的代价是实测出来的：
+
+- 不排序 ⇒ **谁先谁后没有任何保证**。当时 9 个注入者恰好都排在 cli 之后，靠的是
+  稳定拓扑排序 + 目录名字母序，是碰巧而不是机制。
+- 停止顺序跟着一起没了保证：实测 `breaker` 在 `cli` **之后**停，它的 `Stop` 会往
+  一个已经停掉的界面账本里回写 `Release`。
+- 每个新模块作者都得先读懂 30 行注释才知道「往界面注册要写 `Attach` 而不是
+  `Start`」。
+
+现在只有两种需求，语义各自单一。`component/component_test.go` 的
+`TestOptionalIsAWeakDependency` 守着弱依赖的两条语义，`app/graph_test.go` 的
+`TestInjectorsStartAfterTheUI` 守着「注入者排在界面之后」。
 
 ### Context
 

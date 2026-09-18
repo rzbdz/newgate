@@ -2,9 +2,9 @@
 
 ## 1. 运行图
 
-下面**只画参与排序的边**（`Need` / `Optional`）。往 ui 注入的那批边是
-`Inject`（见 §4 与 `docs/02-component-framework.md`），按定义不进这张图——
-这正是 2026-09-18 能让 `cli` 从图里退出去的原因：它一条出边都没有。
+下面**只画参与排序的边**（`Need` / `Optional`）。往 ui 里的那批边也是排序边
+（`Optional(cli)`，弱依赖，见 §4 与 `docs/02-component-framework.md`），但它们
+方向一致、都从业务模块指向界面，所以单独列在下面。
 
 ```text
 Config（无出边）
@@ -12,9 +12,9 @@ ConfigHook（无出边）
 breaker（无出边，纯叶子）
 CLI（无出边）
   ▲
-  │ Inject ×9：breaker / config / config-hook / gateway / opencode-omo
-  │            plugin-manager / runtime / claudecode / tui
-  │（不排序，故不在本图）
+  │ Optional(cli) ×9（弱依赖，排序边）：breaker / config / config-hook / gateway
+  │            opencode-omo / plugin-manager / runtime / claudecode / tui
+  │ 装了界面就注册命令与状态行；没装就跳过（`ok == false`），模块功能不受影响
 
 Gateway
   ├─ Config
@@ -34,11 +34,13 @@ Wrapper
 ```
 
 箭头表示 capability 消费，不表示目录 import。实际启动顺序由 component Manager
-根据 `Requires`/`Provides` 计算（`Inject` 边不参与）。
+根据 `Requires`/`Provides` 计算：拓扑序把 `cli` 排在所有注入者**之前**，停止是
+逆序，于是注入者的 `Stop` 先把注册撤掉，界面最后停（`app/graph_test.go` 的
+`TestInjectorsStartAfterTheUI` 守着这条）。
 
 **没有 ui 时一切照常**：把 `modules/cli` 摘掉，整张图仍然装配成功，上面那 9 条
-Inject 边无人接收（各模块拿到 `ok == false` 就跳过），功能一个不少，只是没有
-命令行入口。
+弱依赖因为**没有提供者而不建边**（各模块拿到 `ok == false` 就跳过），功能一个
+不少，只是没有命令行入口。
 
 ## 2. 目录所有权
 
@@ -71,7 +73,7 @@ Inject 边无人接收（各模块拿到 `ok == false` 就跳过），功能一�
   （controlplane）、wire 类型（breaker/status）、界面契约（cli/extension）。
   它们没有「谁拥有它」这回事，装几份都一样，所以谁都能引。
 - **capability** 是**有生命周期、有所有者**的服务：健康表、网关端口、接管、
-  客户端目录、插件账本。要它就得 `Need` / `Inject`，因为框架要按它排启动顺序、
+  客户端目录、插件账本。要它就得 `Need` / `Optional`，因为框架要按它排启动顺序、
   要在 Stop 时撤销。
 
 判断标准只有一条：**这个东西需要被启动、被停止、被撤销吗？**需要，就是 capability；

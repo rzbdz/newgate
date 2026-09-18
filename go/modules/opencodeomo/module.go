@@ -46,7 +46,9 @@ func New() modules.Component {
 			modules.Need(configapi.Capability),
 			modules.Need(agentapi.ConfigHooksCapability),
 			modules.Need(opencodeapi.Capability),
-			modules.Inject(cliapi.Capability),
+			// ui 是**弱依赖**（见 component.Optional）：装着界面就把 omo 那条命令
+			// 与它的体检项挂上去，没装就跳过——槽位接管照常工作。
+			modules.Optional(cliapi.Capability),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			config := modules.MustGet(ctx, agentapi.ConfigHooksCapability)
@@ -62,17 +64,12 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, release)
-			// ui 可选（见 CLAUDE.md §4）：没装任何 ui 就没有入口，槽位接管照常。
-			return nil
-		},
-		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，所以它可能
-		// 比本模块晚起——Start 阶段它还没提供端口。Attach 在全图 Start 完之后跑。
-		Attach: func(_ context.Context, ctx modules.Context) error {
+
 			cli, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil
 			}
-			release, err := cli.RegisterCommand(omoCommand{})
+			release, err = cli.RegisterCommand(omoCommand{})
 			if err != nil {
 				return err
 			}

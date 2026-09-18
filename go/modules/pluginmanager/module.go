@@ -14,21 +14,21 @@ import (
 // 加的内核钩子**——它出现在图里靠的是 tools/genmodules 扫目录，和别的 15 个模块
 // 一样。它「特殊」只特殊在大部分模块选择依赖它。
 //
-// 依赖方向（2026-09-18 修正两次，这里是**当前**的形状）：
+// 依赖方向（2026-09-18 修正三次，这里是**当前**的形状）：
 //
 //	其他模块 ──Need──▶ plugin-manager ──Need──▶ confighook
-//	其他模块 ──Inject──▶ cli（注入命令与状态行）
+//	其他模块 ──Optional──▶ cli（装入界面就是它的 Start 里那一步）
 //
 // 两处都要看清楚：
 //
-//   - **本模块不依赖 cli**，只有一条 Inject 边（见 component.Inject）。上一版是
-//     `Need(cli)`：cli 为了渲染 `newgate plugin` 与那一行 status 去 Need 本模块，
-//     本模块又要 Need(cli) 才能注册命令 —— 环，于是命令只能被迫写在 cli 里。
+//   - **本模块不依赖 cli**，只有一条弱依赖（见 component.Optional）：cli 为了
+//     渲染 `newgate plugin` 与那一行 status 曾经 Need 过本模块，本模块又要
+//     Need(cli) 才能注册命令 —— 环，于是命令只能被迫写在 cli 里。
 //   - **cli 也不依赖本模块**（它的 Requires 是空的）。状态行经 cli.RegisterStatus
 //     自报、命令经 cli.RegisterCommand 自注册，方向是「本模块 → ui」，界面不认识
-//     任何人。Inject 不参与排序，所以这两条箭头不会互相顶。
+//     任何人。ui 把出边砍干净之后，这条弱依赖不会成环。
 //
-// 唯一的另一个 Requires 是 confighook：登记 state.json 字段必须走它的端口
+// 唯一的硬依赖是 confighook：登记 state.json 字段必须走它的端口
 // （与 modules/claudecode 登记 classifier_naked、classifier_override 同款）。
 func New() modules.Component {
 	service := &service{}
@@ -37,7 +37,9 @@ func New() modules.Component {
 		Name: "plugin-manager",
 		Type: TypeInfra,
 		Requires: []modules.Requirement{
-			modules.Inject(cliapi.Capability),
+			// ui 是**弱依赖**（见 component.Optional）：装着界面就把 `newgate plugin`
+			// 与那一行 status 挂上去，没装就跳过——开关账本照常工作。
+			modules.Optional(cliapi.Capability),
 			modules.Need(confighookapi.ConfigHooksCapability),
 		},
 		Provides: []modules.Provision{
@@ -60,12 +62,7 @@ func New() modules.Component {
 			releases = append(releases, self)
 
 			// 命令与状态行都是这个模块的用户界面，由它自己贡献——界面不认识它。
-			// ui 可选（见 CLAUDE.md §4）：没装任何 ui 就没有入口，开关账本照常工作。
-			return nil
-		},
-		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，所以它可能
-		// 比本模块晚起——Start 阶段它还没提供端口。Attach 在全图 Start 完之后跑。
-		Attach: func(_ context.Context, ctx modules.Context) error {
+			// ui 没装就跳过：开关账本照常工作，只是没有入口。
 			cli, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil

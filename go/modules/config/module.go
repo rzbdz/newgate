@@ -23,9 +23,9 @@ func New() modules.Component {
 		Name: "config",
 		Type: "infra",
 		Requires: []modules.Requirement{
-			// ui 是**可选**的：没装任何 ui 时配置照常工作，只是没有命令行入口
-			// （见 CLAUDE.md §4「ui 只是一类普通模块」）。
-			modules.Inject(cliapi.Capability),
+			// ui 是**弱依赖**（见 component.Optional）：装着界面就把本模块自己的
+			// 命令与展示面挂上去；没装就跳过，配置照常工作，只是没有命令行入口。
+			modules.Optional(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Config(port)),
@@ -36,11 +36,6 @@ func New() modules.Component {
 			// 配置**自己**的命令与展示面（tier / profiles / profile / --set-profile /
 			// init / reload，体检的文件与链路两项，status 的「配置」一行与两张表）
 			// 由本模块注入界面：界面不认识 profile，也不认识链。
-			return nil
-		},
-		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，所以它可能
-		// 比本模块晚起——Start 阶段它还没提供端口。Attach 在全图 Start 完之后跑。
-		Attach: func(_ context.Context, ctx modules.Context) error {
 			ui, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil

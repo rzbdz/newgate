@@ -10,10 +10,12 @@
 // config、breaker、runtime 以及 gateway 自己的 controlplane 都要引这几个路径
 // 常量，放在根包里等于每个引用者都拖进整个网关实现。
 //
-// （2026-09-18 修正这条理由：原来写的是「gateway Need(cli)，所以 cli 反过来
-// import gateway 会成环」。那个环今天构造不出来——gateway 对 ui 用的是 Inject
-// 这条不排序的边，cli 的 Requires 是空的，而 Go 层面 gateway 引的是 cli/extension
-// 叶子、不是 modules/cli。结论没变，理由是另一条。）
+// （2026-09-18 修正这条理由两次：先是「gateway Need(cli)，所以 cli 反过来
+// import gateway 会成环」——那个环在 cli 的出边砍空之后就不存在了；后来 gateway
+// 对 ui 用的是 Inject 这条不排序的边。现在那条边改回了 Optional(cli)（弱依赖，
+// 见 component.Optional），仍不成环：方向是 gateway → ui 一条，cli 没有任何出边，
+// 而 Go 层面 gateway 引的是 cli/extension 叶子、不是 modules/cli。结论始终没变，
+// 变的只是理由。）
 //
 // 同一条规矩已经有一个先例：modules/configshare/proto 把
 // `/__newgate/config` `/__newgate/secrets` 定义在它自己的叶子里。

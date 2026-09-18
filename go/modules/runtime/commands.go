@@ -7,8 +7,9 @@ package runtime
 // 释放回去，全是本模块在做的事。它们留在界面时，界面得认识 takeover / injection
 // / confighook 三套东西才写得出来，而它真正该做的只有「把 argv 交给对的人」。
 //
-// 命令由本模块在 Attach 阶段注入界面（见 component.Inject）：界面不参与排序，
-// 所以它可能比本模块晚起，注入必须发生在全图 Start 完之后。
+// 命令由本模块在 Start 里注册进界面：本模块对 ui 声明一条**弱依赖**
+// （Optional(cli)，见 component.Optional），于是它排在界面之后——Start 跑到这里
+// 时界面的账本已经就绪；没装界面就跳过，接管照常工作。
 
 import (
 	"encoding/json"

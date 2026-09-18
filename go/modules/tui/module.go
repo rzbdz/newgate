@@ -40,13 +40,11 @@ func New() modules.Component {
 		// Type 是产品层的分类词，取值由编排者约定（见 modules/pluginmanager）。
 		Type: "cli",
 		Requires: []modules.Requirement{
-			// ui 是**可选**的：没装 ui 时它没有入口，但模块本身照常成立
-			// （它没有别的职责）。这正是「业务模块不依赖 ui」那条规矩。
-			modules.Inject(cliapi.Capability),
+			// ui 是**弱依赖**（见 component.Optional）：装着界面就把 `newgate tui`
+			// 挂上去，没装就跳过——本模块没有别的职责，于是什么也不做。
+			modules.Optional(cliapi.Capability),
 		},
-		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，Start 阶段它可能
-		// 还没提供端口。Attach 在全图 Start 完之后跑。
-		Attach: func(_ context.Context, ctx modules.Context) error {
+		Start: func(_ context.Context, ctx modules.Context) error {
 			ui, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil

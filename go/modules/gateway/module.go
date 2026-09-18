@@ -29,11 +29,11 @@ var _ Gateway = (*port)(nil)
 // New 声明网关控制面组件。对 Config 的 Need 既表达真实依赖，
 // 也确保所有配置语义先就绪，再允许插件进入请求路径。
 //
-// 它对 ui 只声明 **Inject**（一条不参与排序的注入边，见 component.Inject）：
+// 它对 ui 只声明 **Optional**（弱依赖，见 component.Optional）：
 // `newgate st` / `metrics` / `probe` 是这一层的用户界面，插件名与开关语义都是本
 // 模块的知识，所以命令由本模块自己注册（见 command_special.go 的说明）。用
-// Inject 而不是 Need/Optional 是必须的——ui 不依赖本模块，但界面**曾经**依赖它
-// 渲染，两条箭头互指就成环，命令就只能被迫留在界面里。
+// Optional 而不是 Need 是必须的——网关不该因为「没装界面」起不来；而点击进界面
+// 的那条边是**排序边**，保证本模块的 Start 跑的时候界面已经就绪。
 func New() modules.Component {
 	port := &port{registry: special.NewRegistry()}
 	var restore func()
@@ -46,7 +46,11 @@ func New() modules.Component {
 			// 数据面要把健康表交给转发服务（forward.New 的第四个参数），
 			// 守护进程主循环也归本模块（见 serve.go）。
 			modules.Need(breakerapi.Capability),
-			modules.Inject(cliapi.Capability),
+			// ui 是**弱依赖**（见 component.Optional）：`newgate st` / `metrics` /
+			// `probe` 是本层的用户界面，装着界面就挂上去，没装就跳过——网关本身
+			// 照常工作，只是没有入口。界面不依赖本模块（它没有任何出边），所以这
+			// 条边不可能成环。
+			modules.Optional(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
@@ -64,13 +68,8 @@ func New() modules.Component {
 
 			restore = special.InstallDefault(port.registry)
 
-			// ui 是**可选**的（见 CLAUDE.md §4「ui 只是一类普通模块」）：没装任何
-			// ui 时这些命令就没有入口，但网关功能照常——本模块不依赖 ui 存在。
-			return nil
-		},
-		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，所以它可能
-		// 比本模块晚起——Start 阶段它还没提供端口。Attach 在全图 Start 完之后跑。
-		Attach: func(_ context.Context, ctx modules.Context) error {
+			// ui 是**弱依赖**（见 component.Optional）：没装任何 ui 时这些命令就没有
+			// 入口，但网关功能照常——本模块不依赖 ui 存在。
 			cli, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil

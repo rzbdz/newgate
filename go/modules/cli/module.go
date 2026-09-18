@@ -22,10 +22,11 @@ import (
 // service 是**界面**：分派与排版。
 //
 // 它拥有下面那七本账（命令、诊断、状态行、状态块、诊断素材、术语、详细模式标记），
-// 模块在 Attach 阶段往上挂。账本长在界面上是**对的**——它是「界面认得哪些东西」
-// 这件事本身；2026-09-18 曾把它下沉成一个独立的 modules/surface 模块，那是多余的
-// （见 cli/extension 的包注释）。真正要解开的那个环不在账本的位置，而在**依赖
-// 方向**：注入不能建立排序边（component.Inject）。
+// 各模块在自己的 Start 里往上挂（它们对 ui 声明一条弱依赖 Optional(cli)，所以
+// 一定排在界面之后——见 component.Optional）。账本长在界面上是**对的**——它是
+// 「界面认得哪些东西」这件事本身；2026-09-18 曾把它下沉成一个独立的 modules/surface
+// 模块，那是多余的（见 cli/extension 的包注释）。真正要解开的那个环不在账本的位置，
+// 而在**依赖方向**：界面不许有出边。
 type service struct {
 
 	// 七本账：模块通过 RegisterXxx 把自己的东西挂进来，界面在分派命令、渲染
@@ -207,22 +208,23 @@ func (s *service) moduleDiagnostics() []Diagnostic {
 
 // New 声明最终 CLI 入口，并向其他模块开放那七本账。
 //
-// # 停止顺序：**没有保证**，所以这里的 Stop 不能做真事
+// # 停止顺序：由依赖图给出，注入者先停、界面后停
 //
-// 依赖方向是 **扩展模块 → ui**（见 component.Inject），而 Inject **不参与排序**
-// ——这正是它能解开环的原因。代价要说清楚：**框架不保证 ui 先停还是后停**，实际
-// 顺序取决于声明顺序。2026-09-18 实测（全图 17 个组件）：
+// 依赖方向是 **扩展模块 → ui**，而且是一条**排序边**（Optional(cli)，见
+// component.Optional）。所以拓扑序把 cli 排在所有注入者前面，逆序停止时
+// 注入者的 Stop 一定先跑完——它们撤掉注册时界面还在。2026-09-18 实测（全图 17 个
+// 组件）：
 //
-//	start  [breaker, cli, config, …]        cli 第 2 个起
-//	stop   [… , cli(15), breaker(16)]       breaker **在 cli 之后**停
+//	start  [cli(1), breaker(2), config(3), …]        cli 第 1 个起
+//	stop   [wrapper(17), …, breaker(2), cli(1)]      注入者全停完，cli 最后停
 //
-// 也就是说 breaker 的 Stop 会在 cli 已经停完之后，才去调那个「从界面命令账本里
-// 删掉 breaker 命令」的 Release。今天无害，因为这里的 Stop 是空的；**但这意味着
-// ui 的 Stop 必须保持幂等且无副作用**——一旦它开始释放账本、关自己的 server，
-// 晚到的 Release 就会往一个已经停掉的对象里回写。
+// 这里曾经写过「停止顺序没有保证」——那是 Inject（不参与排序）时代的实情，
+// 当时实测 breaker 在 cli **之后**停。重新走排序边之后这条保证回来了：**界面
+// 的 Stop 不必再假设有人会晚到**。
 //
-// （上一版这里写着「停止顺序自然反转成扩展模块先停、cli 后停」——那是 `Need(cli)`
-// 时代由 owner 边推出的顺序，改成 Inject 之后那个机制已经不存在了。）
+// 但 Stop 仍然保持空实现，理由是另一条、与顺序无关的：界面的七本账里装的都是
+// 别人的回调，撤它们是各自模块 Stop 的事（各自留着自己的 Release）。界面自己
+// 没有要释放的资源——它不是一个 server。
 func New() modules.Component {
 	service := &service{}
 	// 界面自己的命令也走同一个账本（见 commands.go）：查重、分派、help 组装
@@ -237,9 +239,10 @@ func New() modules.Component {
 		// TestCLIDependenciesOnlyShrink，它断言这条边集为空）。
 		//
 		// 它的全部能力都来自注入：命令、status 行、体检项、术语、诊断素材，七本账
-		// 在 Start 时建好，模块在 Attach 阶段（component.Inject）往上挂。一条出边
-		// 都不留是有意的——留一条「反正用得到」的边，对方的注入就会成环，那正是
-		// 这一轮之前 config/runtime/config-hook 的命令被迫留在界面里的原因。
+		// 在 Start 时建好，各模块在自己的 Start 里往上挂（它们 Optional(cli)，所以
+		// 一定排在界面之后）。一条出边都不留是有意的——留一条「反正用得到」的边，
+		// 对方的注入就会成环，那正是这一轮之前 config/runtime/config-hook 的命令
+		// 被迫留在界面里的原因。
 		//
 		// 它仍然 Provides：进程组合根靠它把这次调用交给界面。
 		Provides: []modules.Provision{
