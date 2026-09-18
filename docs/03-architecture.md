@@ -45,7 +45,7 @@ Inject 边无人接收（各模块拿到 `ok == false` 就跳过），功能一�
 | 目录 | 所有权 |
 | --- | --- |
 | `component` | capability graph 和生命周期 |
-| `modules/config` | domain、profile resolver、store、动态 role |
+| `modules/config` | domain、profile resolver、store、动态 role（后三者同时是**共享叶子**，见下面那条注） |
 | `modules/confighook` | Agent、takeover、state field registry |
 | `modules/gateway` | HTTP 数据面和扩展执行 |
 | `modules/breaker` | binding 健康表（可用性 + 延迟排序），无依赖的叶子模块 |
@@ -58,6 +58,25 @@ Inject 边无人接收（各模块拿到 `ok == false` 就跳过），功能一�
 | `modules/<model>` | 模型族识别和上游独有行为 |
 | `modules/<client>_<model>` | 只存在于交叉点的行为 |
 | `app`（在 `modules/` 之外） | 组合根：装配清单与 `App` 所有权对象 |
+
+### 注：模块之间只认 capability，但**共享叶子**可以直接 import
+
+上表里有些目录被别的模块直接 import（`config/paths`、`config/store`、
+`config/domain`、`config/resolve`、`gateway/controlplane`、`breaker/status`、
+`cli/extension`）。**那不是依赖边**，`Requires` 里看不见它们，棘轮测试也不管
+——这是有意的，判据是「把它删掉，还剩下什么」：
+
+- **共享叶子**是一段**无状态、无生命周期**的基础设施：文件的路径（paths）、
+  配置的持久化与解析（store / domain / resolve）、控制面的读写与文档形状
+  （controlplane）、wire 类型（breaker/status）、界面契约（cli/extension）。
+  它们没有「谁拥有它」这回事，装几份都一样，所以谁都能引。
+- **capability** 是**有生命周期、有所有者**的服务：健康表、网关端口、接管、
+  客户端目录、插件账本。要它就得 `Need` / `Inject`，因为框架要按它排启动顺序、
+  要在 Stop 时撤销。
+
+判断标准只有一条：**这个东西需要被启动、被停止、被撤销吗？**需要，就是 capability；
+不需要，就是共享叶子。2026-09-18 `quirk` 从包级全局改成随请求传递，正是因为它是
+**有主的状态**（网关学到的上游事实），却走了一条共享叶子的形状。
 
 `lib` 只容纳无状态、无注册、可跨组件复用的低层工具。
 
