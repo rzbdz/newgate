@@ -248,7 +248,12 @@ func (reasoning) Apply(body []byte, r *special.Request) ([]byte, []string, error
 		sk1.add(skipCauseOf(item), toolIDsAny(item))
 		return nil // 没有原文 → 这条一个字节都不补
 	}
-	if nb, n, err := rewrite.EnsureArrayItemFieldFunc(out, "messages",
+	//    被开关点关掉的那一手**不打** per-request note：那是用户自己拧的，每发
+	//    都报一遍正是上面那条规矩要消掉的噪音。可见性走 `newgate plugin` 与
+	//    `newgate status`，不走日志。
+	if !enabled(r, SwitchBackfillReasoning) {
+		// 第 2 手被关掉，跳过。
+	} else if nb, n, err := rewrite.EnsureArrayItemFieldFunc(out, "messages",
 		"reasoning_content", valReasoning, isAssistant); err != nil {
 		// messages 形状不认识：前面那些仍然有效，这步放弃。
 		notes = append(notes, "messages 未改动（"+err.Error()+"）")
@@ -263,7 +268,7 @@ func (reasoning) Apply(body []byte, r *special.Request) ([]byte, []string, error
 	// 3) 思考模式开着 → assistant 的 content[] 开头必须有 thinking 块
 	//    （Anthropic 方言那句报错）。同样：只有真实原文才补。
 	//    只对 Anthropic 方言做：OpenAI 方言里回传推理的载体是 reasoning_content。
-	if thinkingOn && anthropicDialect(r) {
+	if thinkingOn && anthropicDialect(r) && enabled(r, SwitchBackfillThinkingBlock) {
 		restored := 0
 		var sk2 skipTally
 		valBlock := func(item []byte) []byte {
@@ -294,7 +299,10 @@ func (reasoning) Apply(body []byte, r *special.Request) ([]byte, []string, error
 	//
 	//    **不能挂在 thinkingOn 上**：2026-09-17/18 两次实测都确认，把顶层写成
 	//    thinking:{"type":"disabled"} 且不带 tools，同一条校验照样触发。
-	if nb, changed, err := repairTailShape(out); err != nil {
+	if !enabled(r, SwitchTailShape) {
+		// 第 4 手被关掉，跳过。它是唯一修根因的一手，关掉之后裸 tool_result
+		// 尾部会直接撞上游那条误报的 400。
+	} else if nb, changed, err := repairTailShape(out); err != nil {
 		notes = append(notes, "尾部形状未改动（"+err.Error()+"）")
 	} else if changed {
 		out = nb

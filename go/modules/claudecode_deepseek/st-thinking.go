@@ -9,6 +9,7 @@ import (
 	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
+	"github.com/rzbdz/newgate/go/modules/pluginmanager"
 )
 
 type thinking struct {
@@ -38,7 +39,13 @@ func (t thinking) Match(request *special.Request) bool {
 		t.model.MatchTarget(request.Model, request.Provider, request.BaseURL)
 }
 
-func (thinking) Apply(body []byte, _ *special.Request) ([]byte, []string, error) {
+func (thinking) Apply(body []byte, r *special.Request) ([]byte, []string, error) {
+	// 这一手可以被单独关掉（`newgate plugin claudecode_deepseek.inject-thinking off`）。
+	// 关掉之后 Claude Code 的请求会按缺省进 DeepSeek 思考模式，下一轮就是
+	// 「thinking 块没回传」的 400——所以它是 quirk 级而不是 safe 级。
+	if pluginmanager.Off(stateOf(r), SwitchInjectThinking) {
+		return body, nil, nil
+	}
 	if _, has := rewrite.TopLevelRaw(body, "thinking"); has {
 		return body, nil, nil
 	}

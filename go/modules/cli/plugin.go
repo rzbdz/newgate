@@ -51,13 +51,11 @@ func pluginList(manager pluginmanagerapi.Manager) int {
 	modules := manager.Modules()
 	st := store.LoadState()
 
-	total, switchable := 0, 0
+	total, switchPoints := 0, 0
 	nameW := 14
 	for _, m := range modules {
 		total++
-		if len(m.Switches) > 0 {
-			switchable++
-		}
+		switchPoints += len(m.Switches)
 		// 列宽跟着最长的名字走：模块名里有 19 字符的（claudecode-deepseek），
 		// 写死宽度会让它把右边的字挤在一起。
 		if w := style.VisibleWidth(m.Name); w > nameW {
@@ -65,7 +63,7 @@ func pluginList(manager pluginmanagerapi.Manager) int {
 		}
 	}
 	fmt.Println(style.Title("newgate plugin",
-		fmt.Sprintf("%d 个模块 · %d 个可运行期开关", total, switchable)))
+		fmt.Sprintf("%d 个模块 · %d 个可运行期开关点", total, switchPoints)))
 
 	for _, typ := range pluginmanagerapi.DisplayOrder() {
 		var group []pluginmanagerapi.Module

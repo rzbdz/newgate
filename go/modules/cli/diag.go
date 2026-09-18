@@ -25,6 +25,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
 	"github.com/rzbdz/newgate/go/modules/gateway/probe"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
+	pluginmanagerapi "github.com/rzbdz/newgate/go/modules/pluginmanager"
 	"github.com/rzbdz/newgate/go/modules/runtime/takeover"
 )
 
@@ -914,7 +915,7 @@ func logCount(args []string) int {
 	return intArg(args, 1, 0)
 }
 
-func cmdAllLogs(agents agentapi.AgentCatalog) int {
+func cmdAllLogs(agents agentapi.AgentCatalog, plugins pluginmanagerapi.Manager) int {
 	line := func(t string) { fmt.Printf("\n===== %s =====\n", t) }
 
 	line("版本与环境")
@@ -929,7 +930,7 @@ func cmdAllLogs(agents agentapi.AgentCatalog) int {
 	}
 
 	line("状态")
-	cmdStatus(agents)
+	cmdStatus(agents, plugins)
 
 	line("providers.json（密钥脱敏）")
 	if provs, err := store.LoadProviders(); err == nil {
@@ -1067,7 +1068,7 @@ func firstLine(s string) string {
 	return s
 }
 
-func cmdStatus(agents agentapi.AgentCatalog) int {
+func cmdStatus(agents agentapi.AgentCatalog, plugins pluginmanagerapi.Manager) int {
 	st := store.LoadState()
 	info, ps := proxyState()
 
@@ -1098,7 +1099,7 @@ func cmdStatus(agents agentapi.AgentCatalog) int {
 		fmt.Println(style.Field(item.Label, item.Value))
 	}
 
-	if flags := statusFlags(st); flags != "" {
+	if flags := statusFlags(st, plugins); flags != "" {
 		fmt.Println(style.Field("开关", flags))
 	}
 
@@ -1263,7 +1264,11 @@ func skipKind(reason string) string {
 }
 
 // statusFlags 一行列出非默认开关。默认状态不占版面。
-func statusFlags(st *domain.State) string {
+//
+// 运行期开关点那一段**遍历注册表**而不是逐个 if：这样任何模块新上报一个开关点，
+// status 自动就能显示它，不需要回来改这个函数——「新开关要改三处」正是上一轮
+// 开关散落各处时最容易漏的地方。
+func statusFlags(st *domain.State, plugins pluginmanagerapi.Manager) string {
 	var f []string
 	switch {
 	case st.DebugActive():
@@ -1284,7 +1289,45 @@ func statusFlags(st *domain.State) string {
 	case len(st.SpecialOff) > 0:
 		f = append(f, style.Yellow("special 关了 "+strings.Join(st.SpecialOff, ",")))
 	}
+	// 注册表里的开关点：只列离开出厂态的那些。
+	if plugins != nil {
+		for _, mod := range plugins.Modules() {
+			for _, sw := range mod.Switches {
+				enabled := switchEnabled(st, sw)
+				if enabled == sw.Default {
+					continue // 还是出厂态，不占版面
+				}
+				word := "=on"
+				if !enabled {
+					word = "=off"
+				}
+				label := sw.Path + word
+				if until := pluginmanagerapi.Remaining(st, sw.Path); !until.IsZero() {
+					label += fmt.Sprintf("(%s)", prettyDur(int(time.Until(until).Seconds())))
+				}
+				f = append(f, dangerPaint(sw.Danger)(label))
+			}
+		}
+	}
 	return strings.Join(f, "   ")
+}
+
+// switchEnabled 一条开关点现在是不是开着的。极性由出厂态决定：
+// 出厂开的（kill switch）看 Off()，出厂关的（mode）看 On()。
+func switchEnabled(st *domain.State, sw pluginmanagerapi.Switch) bool {
+	if sw.Default {
+		return !pluginmanagerapi.Off(st, sw.Path)
+	}
+	return pluginmanagerapi.On(st, sw.Path)
+}
+
+// dangerPaint footgun 用红色：它是「关掉会破坏正确性」的那一档，在 status 这种
+// 一行式输出里必须一眼能认出来。
+func dangerPaint(d pluginmanagerapi.Danger) func(string) string {
+	if d == pluginmanagerapi.DangerFootgun {
+		return style.Red
+	}
+	return style.Yellow
 }
 
 // sortedAgentIDs 稳定顺序的已知 agent 列表。

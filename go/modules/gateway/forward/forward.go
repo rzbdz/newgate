@@ -835,7 +835,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				InModel: inModel, Tier: tier, Model: a.Binding.Model,
 				Provider: a.Binding.Provider, BaseURL: a.Provider.Base(suffix),
 				Protocol: a.Provider.Protocol, Path: suffix, Stream: stream,
-				Agent: tgt.TaskCreate,
+				Agent: tgt.TaskCreate, State: st,
 			}
 			if res := special.RebaseToolLoop(newBody, toolOrigin.Provider, toolOrigin.Model,
 				candidate, st.SpecialPluginOff); len(res.Notes) > 0 {
@@ -890,6 +890,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				Path:     suffix,
 				Stream:   stream,
 				Agent:    tgt.TaskCreate,
+				State:    st,
 			}, st.SpecialPluginOff)
 			counted := map[string]bool{}
 			for _, n := range res.Notes {
