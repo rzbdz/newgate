@@ -66,6 +66,11 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, release)
+			glossaryRelease, err := ui.RegisterGlossary(glossary{AgentCatalog(registry)})
+			if err != nil {
+				return err
+			}
+			releases = append(releases, glossaryRelease)
 			return nil
 		},
 		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },

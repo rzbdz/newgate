@@ -2,21 +2,14 @@ package cli
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/rzbdz/newgate/go/lib/buildinfo"
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
-	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
-	"github.com/rzbdz/newgate/go/modules/config/store"
-
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
 // prettyMs 毫秒 → 人话。链预算是按 ms 配的（state.json 里 120000），
@@ -68,19 +61,18 @@ func cmdDoctor(service *service) int {
 	return 1
 }
 
-// sortedKeys 稳定顺序的 map 键（诊断包里几处按名字列 provider 用）。
-func sortedKeys(m map[string]domain.Provider) []string {
-	var out []string
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func cmdAllLogs(agents agentapi.AgentCatalog, service *service) int {
+// cmdAllLogs 诊断包：**把各模块交上来的原文拼起来**。
+//
+// 界面在这里只做两件事：打自己的那一段（版本、环境、状态），以及把模块交上来的
+// 素材按 Rank 顺序拼好。原文从哪来、长什么样，全是各模块自己的事——谁的数据谁
+// 自己交（见 cliapi.Dumper），界面不认识 providers.json，也不认识接管改了哪些文件。
+//
+// 上一版这一整个函数长在界面里，于是它得知道 providers 的结构、profile 的档位表、
+// 目标文件在哪、证据文件叫什么、日志在哪。这一轮把那些知识全部还了回去。
+func cmdAllLogs(service *service) int {
 	line := func(t string) { fmt.Printf("\n===== %s =====\n", t) }
 
+	// 这一段是界面自己的：它讲的是「这个进程跑在哪、什么版本、什么环境」。
 	line("版本与环境")
 	fmt.Println(VersionLine())
 	fmt.Printf("配置目录 %s\n", paths.Config())
@@ -95,93 +87,11 @@ func cmdAllLogs(agents agentapi.AgentCatalog, service *service) int {
 	line("状态")
 	cmdStatus(service)
 
-	line("providers.json（密钥脱敏）")
-	if provs, err := store.LoadProviders(); err == nil {
-		for _, n := range sortedKeys(provs.Providers) {
-			p := provs.Providers[n]
-			k := "(空)"
-			if v := p.Key(); v != "" {
-				if len(v) > 10 {
-					k = v[:7] + "…" + fmt.Sprint(len(v)) + "字符"
-				} else {
-					k = "(过短)"
-				}
-			}
-			fmt.Printf("  %-14s %-45s protocol=%-10s key=%s\n", n, p.BaseURL, p.Protocol, k)
-			// 两种方言分家的上游：另一个 base 也报出来，否则「claude 的流量
-			// 到底发去哪」在 doctor 里是黑盒。
-			if p.AnthropicURL != "" {
-				fmt.Printf("  %-14s %-45s （anthropic 方言走这条）\n", "", p.AnthropicURL)
-			}
+	for _, section := range service.dumpSections() {
+		if section.Title != "" {
+			line(section.Title)
 		}
-	}
-
-	line("所有 profile 的绑定")
-	names, _ := store.ListProfiles()
-	st := store.LoadState()
-	for _, n := range names {
-		mark := " "
-		if n == st.DefaultProfile {
-			mark = "*"
-		}
-		fb := ""
-		if n == st.DefaultProfile {
-			fb = "  (备用)"
-		}
-		fmt.Printf(" %s %s%s\n", mark, n, fb)
-		if pr, err := store.LoadProfile(n); err == nil {
-			for _, role := range domain.Roles {
-				if b, ok := pr.Resolve(role); ok {
-					fmt.Printf("      %-8s %s/%s\n", role, b.Provider, b.Model)
-				}
-			}
-		}
-	}
-
-	line("接管后的目标文件（newgate 相关片段）")
-	var configTargets []string
-	for _, id := range agents.Names() {
-		agent, ok := agents.Get(id)
-		if !ok || agent.Config == nil {
-			continue
-		}
-		configTargets = append(configTargets, agent.Config.Targets()...)
-	}
-	sort.Strings(configTargets)
-	for _, t := range configTargets {
-		b, err := ioutil.ReadFile(t)
-		if err != nil {
-			fmt.Printf("  %s : %v\n", t, err)
-			continue
-		}
-		fmt.Printf("  --- %s (%d 字节) ---\n", t, len(b))
-		for _, ln := range strings.Split(string(b), "\n") {
-			if strings.Contains(ln, "newgate") {
-				fmt.Printf("    %s\n", strings.TrimSpace(ln))
-			}
-		}
-	}
-
-	line("错误证据文件")
-	dumpDir := filepath.Join(paths.Config(), "dump")
-	ents, err := ioutil.ReadDir(dumpDir)
-	if err != nil || len(ents) == 0 {
-		fmt.Println("  （无。上游报 4xx/5xx 时会自动生成）")
-	} else {
-		for _, e := range ents {
-			fmt.Printf("  %s  %d 字节\n", filepath.Join(dumpDir, e.Name()), e.Size())
-		}
-		fmt.Println("\n  看「我们发出的」和「客户端发来的」差在哪：")
-		fmt.Printf("    diff <(jq -S . %s/err-*.client-sent.json) \\\n", dumpDir)
-		fmt.Printf("         <(jq -S . %s/err-*.we-sent.json)\n", dumpDir)
-	}
-
-	line("日志全文")
-	b, err := ioutil.ReadFile(paths.LogFile())
-	if err != nil {
-		fmt.Printf("  读不到: %v\n", err)
-	} else {
-		fmt.Print(string(b))
+		fmt.Println(strings.Join(section.Lines, "\n"))
 	}
 	return 0
 }

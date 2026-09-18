@@ -83,13 +83,17 @@ func TestDefaultGraphLayering(t *testing.T) {
 // 要拆掉的东西；症状要等到有人真想搬那条命令时才会显形（「搬不动，成环了」），
 // 在这里红比在那里红早得多。
 func TestCLIDependenciesOnlyShrink(t *testing.T) {
-	// 名字是**端口名**（capability name），不是组件名。
-	allowed := map[string]bool{
-		"config":        true,
-		"runtime":       true,
-		"agent-catalog": true, // confighook 的 AgentCatalog：界面要按 agent 分派
-		"breaker":       true,
-	}
+	// 名单现在是**空的**，而且它只该变小（2026-09-18 清到底）：
+	//
+	// 界面曾经依赖 config（读配置）、runtime（拉客户端）、agent-catalog（按 agent
+	// 分派）、breaker（构造数据面）。四条边各自对应一批「界面知道某个模块的内部」：
+	// tier/profile 的渲染、包装启动、agent 名单、健康表。它们全部搬回了拥有那些知识
+	// 的模块，界面改成从注入点拿别人报上来的东西（命令、status 行、体检项、术语、
+	// 诊断素材）。
+	//
+	// 所以这条断言现在的意思是：**界面一条出边都不许有**。任何新增的边都意味着又有
+	// 一坨别人的知识回到了界面里。
+	allowed := map[string]bool{}
 
 	app, err := New(context.Background())
 	if err != nil {

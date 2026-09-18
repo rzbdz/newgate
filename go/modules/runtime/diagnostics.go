@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/rzbdz/newgate/go/lib/style"
@@ -30,6 +31,9 @@ const (
 	rankStatusTakeover = 20
 	rankCheckTakeover  = 40
 	rankCheckBackups   = 50
+
+	// 诊断包里的位置（见 cliapi.DumpSection）。
+	rankDumpTargets = 40
 )
 
 type runtimeReporter struct{ agents confighookapi.AgentCatalog }
@@ -37,6 +41,7 @@ type runtimeReporter struct{ agents confighookapi.AgentCatalog }
 var (
 	_ cliapi.DiagnosticProvider = runtimeReporter{}
 	_ cliapi.StatusProvider     = runtimeReporter{}
+	_ cliapi.Dumper             = runtimeReporter{}
 )
 
 func (r runtimeReporter) Diagnostics() []cliapi.Diagnostic {
@@ -140,4 +145,39 @@ func checkBackups() cliapi.Diagnostic {
 	d.Line = fmt.Sprintf("%d 份原配置 · newgate stop 可还原", len(ents))
 	d.Details = append(d.Details, "backups/original/ "+strings.Join(names, " · "))
 	return d
+}
+
+// ---------- 诊断包的原始素材 ----------
+
+// Dump 交出**接管改过的那几个文件**里与 newgate 有关的片段。
+//
+// 只挑含 "newgate" 的行：目标是「用户原本的配置」，全文可能几百行且与问题无关，
+// 而诊断包要能贴进 issue。原文（不做 JSON 解析）——坏掉的 JSON 恰恰是要看的东西。
+func (r runtimeReporter) Dump() []cliapi.DumpSection {
+	s := cliapi.DumpSection{Rank: rankDumpTargets, Title: "接管后的目标文件（newgate 相关片段）"}
+	runtimeDump := s
+	var targets []string
+	for _, id := range r.agents.Names() {
+		agent, ok := r.agents.Get(id)
+		if !ok || agent.Config == nil {
+			continue
+		}
+		targets = append(targets, agent.Config.Targets()...)
+	}
+	sort.Strings(targets)
+	for _, t := range targets {
+		b, err := os.ReadFile(t)
+		if err != nil {
+			s.Lines = append(s.Lines, fmt.Sprintf("  %s : %v", t, err))
+			continue
+		}
+		s.Lines = append(s.Lines, fmt.Sprintf("  --- %s (%d 字节) ---", t, len(b)))
+		for _, ln := range strings.Split(string(b), "\n") {
+			if strings.Contains(ln, "newgate") {
+				s.Lines = append(s.Lines, "    "+strings.TrimSpace(ln))
+			}
+		}
+	}
+	_ = runtimeDump
+	return []cliapi.DumpSection{s}
 }

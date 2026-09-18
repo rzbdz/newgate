@@ -13,11 +13,13 @@ package gateway
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
+	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 )
@@ -28,6 +30,11 @@ const (
 	rankStatusProxy = 10
 	rankCheckEnv    = 20
 	rankCheckProxy  = 30
+
+	// 诊断包里的位置（见 cliapi.DumpSection）。证据与日志排在配置之后：
+	// 前面是「配置长什么样」，后面是「真发出去过什么」。
+	rankDumpEvidence = 50
+	rankDumpLog      = 60
 )
 
 type gatewayReporter struct{}
@@ -35,6 +42,7 @@ type gatewayReporter struct{}
 var (
 	_ cliapi.DiagnosticProvider = gatewayReporter{}
 	_ cliapi.StatusProvider     = gatewayReporter{}
+	_ cliapi.Dumper             = gatewayReporter{}
 )
 
 func (gatewayReporter) Diagnostics() []cliapi.Diagnostic {
@@ -129,4 +137,50 @@ func checkProxy() cliapi.Diagnostic {
 			"进程正常，请求到不了它；常见于出站代理劫持 loopback（见「环境」一项）。")
 	}
 	return d
+}
+
+// ---------- 诊断包的原始素材 ----------
+
+func (gatewayReporter) Dump() []cliapi.DumpSection {
+	return []cliapi.DumpSection{dumpEvidence(), dumpLogTail()}
+}
+
+// dumpEvidence 列出上游报错时无条件落盘的证据文件。
+//
+// 它是排查「是不是代理改坏了请求」唯一能拿出手的东西（docs/11），所以连用法
+// 一起写进诊断包——拿到包的人不必再去翻文档。
+func dumpEvidence() cliapi.DumpSection {
+	s := cliapi.DumpSection{Rank: rankDumpEvidence, Title: "错误证据文件"}
+	dir := filepath.Join(paths.Config(), "dump")
+	ents, err := os.ReadDir(dir)
+	if err != nil || len(ents) == 0 {
+		s.Lines = append(s.Lines, "  （无。上游报 4xx/5xx 时会自动生成）")
+		return s
+	}
+	for _, e := range ents {
+		info, ierr := e.Info()
+		size := int64(0)
+		if ierr == nil {
+			size = info.Size()
+		}
+		s.Lines = append(s.Lines, fmt.Sprintf("  %s  %d 字节", filepath.Join(dir, e.Name()), size))
+	}
+	s.Lines = append(s.Lines,
+		"",
+		"  看「我们发出的」和「客户端发来的」差在哪：",
+		fmt.Sprintf("    diff <(jq -S . %s/err-*.client-sent.json) \\", dir),
+		fmt.Sprintf("         <(jq -S . %s/err-*.we-sent.json)", dir))
+	return s
+}
+
+// dumpLogTail 日志全文。诊断包就是要原文，所以不做截断——它由用户自己决定怎么用。
+func dumpLogTail() cliapi.DumpSection {
+	s := cliapi.DumpSection{Rank: rankDumpLog, Title: "日志全文"}
+	b, err := os.ReadFile(paths.LogFile())
+	if err != nil {
+		s.Lines = append(s.Lines, "  读不到: "+err.Error())
+		return s
+	}
+	s.Lines = append(s.Lines, strings.Split(strings.TrimRight(string(b), "\n"), "\n")...)
+	return s
 }
