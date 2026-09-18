@@ -367,6 +367,31 @@ type CLI interface {
 	RegisterStatusBlocks(BlockProvider) (modules.Release, error)
 }
 
+// Handoff 标记这条命令会把控制权交给**别的进程**（包装启动一个客户端）。
+//
+// 界面拿它做一个判断：这类命令的输出来自那个进程，不该按 newgate 的版式去审计
+// 对齐。以前那个判断是界面自己 `detectLaunch` 猜出来的（「第一个 token 是不是
+// 已知 agent」）——那需要界面认识 agent 表；现在由命令自己声明，界面只看标记。
+type Handoff interface {
+	// HandsOff 这条命令是不是把控制权交给别的进程。
+	HandsOff()
+}
+
+// Unstyled 报告这条命令**这一次调用**的输出不是 newgate 的版式：原始配置文本
+// （`profile kv`）、逐字节日志（`logs`）、全屏界面（`tui`）、JSON（`probe --json`）。
+// 版式审计跳过它。
+//
+// **为什么由命令声明而不是界面列名单**（2026-09-18）：界面原来硬编码一张
+// `switch args[0]` 的名字表（"__serve", "logs", "alllogs", "tui", "run", "probe",
+// "profile"）——那正是「界面认识别人的命令」的又一个面，每加一个命令都要回来改
+// 界面。现在命令自己说「我这次不是版式」，界面只问一句。
+//
+// 它是**动态**的（收 args）：同一条命令可能只有某种用法不排版（`probe --json`，
+// 或 `profile kv` 这个子命令）。
+type Unstyled interface {
+	Unstyled(args []string) bool
+}
+
 // BuildInfo 把链接期版本信息显式传入界面，避免模块读取可变全局构建状态。
 type BuildInfo struct {
 	Version    string

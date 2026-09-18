@@ -27,9 +27,13 @@ type logsCommand struct{}
 var (
 	_ cliapi.Command    = (*logsCommand)(nil)
 	_ cliapi.Documented = (*logsCommand)(nil)
+	_ cliapi.Unstyled   = (*logsCommand)(nil)
 )
 
 func (logsCommand) Names() []string { return []string{"logs", "log"} }
+
+// Unstyled：逐字节日志（分页器/`-f` 跟随），不是版式。
+func (logsCommand) Unstyled([]string) bool { return true }
 
 func (logsCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionObserve, Rank: rankObserve,

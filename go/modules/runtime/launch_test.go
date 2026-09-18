@@ -1,10 +1,9 @@
-package cli
+package runtime
 
 import (
+	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 	"strings"
 	"testing"
-
-	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 )
 
 func TestSplitLaunch(t *testing.T) {
@@ -57,32 +56,5 @@ func TestSplitLaunch(t *testing.T) {
 				t.Errorf("passthrough = %q，应为 %q", got, c.passthrough)
 			}
 		})
-	}
-}
-
-func TestDetectLaunch(t *testing.T) {
-	cases := []struct {
-		args []string
-		want bool
-	}{
-		{[]string{"claude"}, true},
-		{[]string{"opencode"}, true},
-		{[]string{"run"}, true},
-		{[]string{"run", "claude"}, true},
-		{[]string{"--profile", "ds", "claude"}, true},
-		{[]string{"--profile=ds"}, true},
-		{[]string{"--preset=toy"}, true},
-		{[]string{"status"}, false},
-		{[]string{"start"}, false},
-		{[]string{"--help"}, false},
-		{[]string{"version"}, false},
-		{[]string{"profiles"}, false},
-		{[]string{"--set-profile", "cheap"}, false},
-	}
-	for _, c := range cases {
-		_, got := detectLaunch(agentstate.Catalog(), c.args)
-		if got != c.want {
-			t.Errorf("detectLaunch(%v) = %v，应为 %v", c.args, got, c.want)
-		}
 	}
 }

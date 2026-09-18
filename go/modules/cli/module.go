@@ -18,7 +18,6 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/buildinfo"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
-	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 )
 
 // service 是**界面**：分派、渲染、进程生命周期。
@@ -28,8 +27,7 @@ import (
 // 想贡献命令的模块必须 Need(cli)，而 cli 又要 Need 它们才能渲染。环解开的方式
 // 就是把账本下沉成叶子（见 modules/surface 的包注释）。
 type service struct {
-	agents  confighookapi.AgentCatalog
-	runtime runtimeapi.Runtime
+	agents confighookapi.AgentCatalog
 
 	// 三本账：模块通过 RegisterXxx 把自己的东西挂进来，界面在分派命令、渲染
 	// status / doctor 时循环调用它们。**界面不 import 任何模块**，所以它不认识
@@ -166,7 +164,8 @@ func New() modules.Component {
 		Requires: []modules.Requirement{
 			// 注意这里**没有 config**：界面不消费配置端口（渲染用的数据由 config 自己
 			// 报上来）。留着一条用不到的出边会让 config 永远注入不进来——它会成环。
-			modules.Need(runtimeapi.Capability),
+			// 只剩 config-hook：包装启动搬去 runtime 之后，界面不再需要 runtime 端口
+			// （它只把 `newgate claude …` 交给账本里那条命令）。
 			modules.Need(confighookapi.AgentCatalogCapability),
 		},
 		Provides: []modules.Provision{
@@ -174,12 +173,10 @@ func New() modules.Component {
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			service.agents = modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
-			service.runtime = modules.MustGet(ctx, runtimeapi.Capability)
 			return nil
 		},
 		Stop: func(context.Context) error {
 			service.agents = nil
-			service.runtime = nil
 			return nil
 		},
 	}

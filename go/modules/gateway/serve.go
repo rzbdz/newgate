@@ -39,9 +39,15 @@ import (
 // **故意没有 HelpLine**：它是内部入口，用户不该在 help 里看到它，也不该手敲。
 type serveCommand struct{ health breakerapi.Breaker }
 
-var _ cliapi.Command = (*serveCommand)(nil)
+var (
+	_ cliapi.Command  = (*serveCommand)(nil)
+	_ cliapi.Unstyled = (*serveCommand)(nil)
+)
 
 func (serveCommand) Names() []string { return []string{"__serve"} }
+
+// Unstyled：守护进程本体，输出是它自己的日志流（见 cliapi.Unstyled）。
+func (serveCommand) Unstyled([]string) bool { return true }
 
 func (c serveCommand) Run(_ cliapi.Host, args []string) int {
 	return Serve(c.health, intFlag(args, "--port", 0))

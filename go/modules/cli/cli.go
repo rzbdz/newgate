@@ -162,7 +162,7 @@ func slotTerm() string {
 }
 
 func runCLI(service *service, args []string) int {
-	if shouldAuditLayout(service.agents, args) {
+	if shouldAuditLayout(service, args) {
 		return auditLayout(args, func() int { return run(service, args) })
 	}
 	return run(service, args)
@@ -196,26 +196,68 @@ func run(service *service, args []string) int {
 		}
 	}
 
-	// 包装启动：newgate claude --profile=ds / newgate --profile ds claude /
-	// newgate run claude（docs/08-operations.md）。在账本查表之前判断——agent 名
-	// 与命令名是互斥的封闭集合，不会撞车。
-	if _, ok := detectLaunch(service.agents, args); ok {
-		return cmdLaunch(service.runtime, service.agents, args)
-	}
-
 	// 账本查表：模块注入的命令与界面自己的命令走同一条路。
 	//
 	// **界面在这里不认识任何一条命令**——它只知道"有人往这个账本里挂过东西"。
-	// 上一版这里是一个几百行的 switch，每一条都是一次「界面认识某个模块」，
-	// 那批命令因此永远搬不回自己的模块（见 modules/cli/commands.go 的说明）。
-	if command, ok := service.moduleCommand(args[0]); ok {
-		return command.Run(moduleCLIHost{}, args[1:])
+	// 上一版这里是一个几百行的 switch（后来是 detectLaunch + cmdLaunch），每一条
+	// 都是一次「界面认识某个模块」，那批命令因此永远搬不回自己的模块。
+	//
+	// 前置选项也要容忍：`newgate --profile ds claude` 里第一个 token 是 newgate
+	// 自己的选项，真正要执行的命令在后面。**找出那一条是 argv 解析**，所以归界面；
+	// 它叫什么、怎么解析剩下的参数，归命令自己。
+	if name := lookupName(args); name != "" {
+		if command, ok := service.moduleCommand(name); ok {
+			return command.Run(moduleCLIHost{}, dropName(args, name))
+		}
 	}
 	return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))
 }
 
 // VersionLine 是 `newgate version` 的输出（版式与取值都在 lib/buildinfo）。
 func VersionLine() string { return buildinfo.VersionLine() }
+
+// dropName 去掉 argv 里**那个动词**（第一个与 name 相同的 token），返回它的参数。
+//
+// 为什么不是 `args[1:]`：前置选项也要容忍（`newgate --profile ds claude`），那时
+// 动词不在第 0 位上。契约说「args 里没有命令名」，那就得按名字而不是按位置剥。
+func dropName(args []string, name string) []string {
+	for i, a := range args {
+		if a == name {
+			return append(append([]string{}, args[:i]...), args[i+1:]...)
+		}
+	}
+	return args
+}
+
+// lookupCommand 按同一套名字解析规则查账本。
+func lookupCommand(service *service, args []string) (Command, bool) {
+	if service == nil || len(args) == 0 {
+		return nil, false
+	}
+	return service.moduleCommand(lookupName(args))
+}
+
+// lookupName 找出这串 argv 里**该由哪条命令处理**：跳过 newgate 自己的前置选项
+// 与它们的值，取第一个位置参数；都没有就退回 args[0]（让未知命令的报错带上它）。
+//
+// 只认 `--profile` / `--preset` / `--agent` 这类「后面跟一个值」的选项形状。
+// 这个名单很短而且稳定：它是 newgate 自己的全局选项，不是命令的参数。
+func lookupName(args []string) string {
+	skipNext := false
+	for _, a := range args {
+		switch {
+		case skipNext:
+			skipNext = false
+		case a == "--profile" || a == "--preset" || a == "--agent":
+			skipNext = true
+		case strings.HasPrefix(a, "-"):
+			// 其它选项（--force / -v / --json …）由命令自己解析，跳过。
+		default:
+			return a
+		}
+	}
+	return args[0]
+}
 
 // ---------- 小工具 ----------
 
