@@ -15,7 +15,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/httpx"
 	"github.com/rzbdz/newgate/go/lib/logx"
-	"github.com/rzbdz/newgate/go/modules/cli/style"
+	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/store"

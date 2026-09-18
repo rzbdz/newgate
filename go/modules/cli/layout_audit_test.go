@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rzbdz/newgate/go/modules/cli/style"
+	"github.com/rzbdz/newgate/go/lib/style"
 )
 
 // fakeDoc 是一条模块贡献的命令，用来把「模块自己声明的 help 行」也纳入宽度

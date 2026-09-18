@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/rzbdz/newgate/go/modules/cli/style"
+	"github.com/rzbdz/newgate/go/lib/style"
 
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/runtime/injection"

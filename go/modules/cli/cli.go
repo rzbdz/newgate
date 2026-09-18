@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rzbdz/newgate/go/modules/cli/style"
+	"github.com/rzbdz/newgate/go/lib/style"
 )
 
 // Version 由 main 注入。
