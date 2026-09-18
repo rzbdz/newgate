@@ -30,8 +30,11 @@
 package quirk
 
 import (
+	"fmt"
 	"strings"
 	"sync"
+
+	modules "github.com/rzbdz/newgate/go/component"
 )
 
 // Flag 一个已知毛病。用位掩码，一个 (provider, model) 可以同时有好几个。
@@ -62,8 +65,9 @@ func (f Flag) String() string {
 // modules/gateway/special 的 `Request.Quirks`）——想要它的模块读的是手里那个
 // 请求上的字段，也就是网关自己交出来的东西，而不是一个它可以绕过去的全局。
 type Table struct {
-	mu    sync.RWMutex
-	flags map[string]Flag
+	mu         sync.RWMutex
+	flags      map[string]Flag
+	signatures []Signature
 }
 
 // Default 是 gateway 自己的那一份（probe / forward / Request 的填充都用它）。
@@ -95,6 +99,37 @@ func (t *Table) Mark(provider, model string, f Flag) bool {
 	}
 	t.flags[k] |= f
 	return true
+}
+
+// RegisterSignature 注册一条判据。撞名（同一个 Label）当场报错，不静默先到先得
+// ——与 gateway/special、breaker 的注册口同一个形状。
+func (t *Table) RegisterSignature(sig Signature) (modules.Release, error) {
+	if sig.Label == "" {
+		return nil, fmt.Errorf("quirk: signature label is required")
+	}
+	if len(sig.Any) == 0 {
+		return nil, fmt.Errorf("quirk: signature %s has no patterns", sig.Label)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, existing := range t.signatures {
+		if existing.Label == sig.Label {
+			return nil, fmt.Errorf("quirk: signature %s already registered", sig.Label)
+		}
+	}
+	t.signatures = append(t.signatures, sig)
+	return func() error {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		// 按 label 找回来删（下标会随别人的注销变化，索引不可靠）。
+		for i, existing := range t.signatures {
+			if existing.Label == sig.Label {
+				t.signatures = append(t.signatures[:i], t.signatures[i+1:]...)
+				return nil
+			}
+		}
+		return nil
+	}, nil
 }
 
 // Has 查这个 (provider, model) 有没有某个毛病。
@@ -133,38 +168,29 @@ func (t *Table) Reset() {
 	t.flags = map[string]Flag{}
 }
 
-// signature 一条「报错长这样 → 说明有这个毛病」的规则。
+// Signature 一条「报错长这样 → 说明有这个毛病」的规则。
 //
-// 加新规则的门槛：必须是**实测复现过**的报错原文，而且补丁得是语义上说得过去
-// 的。猜的规则会让我们给一堆无关请求乱加字段，比不修更糟。
-type signature struct {
-	flag  Flag
-	any   []string // 报错原文里出现任意一条即命中（小写比较）
-	label string
+// **它由拥有那个补丁的模块注册进来**（`RegisterSignature`），quirk 自己一条都
+// 不认识（2026-09-18 改）。这一条与 `gateway/special` 的 st-<上游>.go、以及
+// `breaker.RegisterShapeDetector` 是同一条规矩，理由写在 modules/deepseek/shape.go：
+//
+//	「判据待在知道真相的模块里，它才能被这个模块自己测试、自己演进，而 core 里
+//	 不再出现任何上游专有字符串。」
+//
+// 这里原本硬编码着 GLM / DeepSeek / Kimi 三家的报错原文，于是「加一家新上游」
+// 的唯一办法是改 gateway 的文件——而代价已经付过一次：kimi 那句措辞在补进来之前
+// 「一条签名都不匹配，quirk 永远学不到它」，每一次后台调用都重新撞一遍 400。
+//
+// 加新规则的门槛（写给注册方）：必须是**实测复现过**的报错原文，而且补丁得是
+// 语义上说得过去的。猜的规则会让我们给一堆无关请求乱加字段，比不修更糟。
+type Signature struct {
+	// Flag 命中之后要记的毛病位（位定义在 quirk，语义由注册方解释）。
+	Flag Flag
+	// Any 报错原文里出现任意一条即命中（小写比较）。
+	Any []string
+	// Label 学到之后写进日志的人话。
+	Label string
 }
-
-var signatures = []signature{{
-	flag: NoThinkingDisable,
-	any: []string{
-		"不支持关闭思考",            // 智谱 GLM，code 1210
-		"始终思考",               // 同上，措辞变体
-		"cannot be disabled", // deepseek: thinking options type cannot be disabled…
-		"does not support disabling thinking",
-		"thinking cannot be turned off",
-		// 2026-09-17 补：kimi。现场 dump/err-400-req000213、req000230
-		// （route: mid -> kimi/kimi-k2.7-code，Claude Code 的后台调用，
-		// thinking 字段本来没有，claudecode 的后台插件替它补了
-		// thinking:{"type":"disabled"}，上游回这句）。
-		//
-		// 加之前这句措辞**一条签名都不匹配**，所以 quirk 永远学不到它：
-		// 每一次后台调用都重新撞一遍 400。而这条路本来是和 GLM 1210 同一
-		// 个坑、同一个补丁（disabled → enabled + reasoning_effort:low），
-		// GLM 那边 2026-09-10 就学会了（日志 `#82 学到：smt-glm/glm-5.3-flash
-		// 该模型始终思考`），kimi 这边因为文案不同一直漏着。
-		"only type=enabled is allowed",
-	},
-	label: "该模型始终思考",
-}}
 
 // Learn 从一次失败的转发里学。只看 4xx——5xx 是上游自己挂了，跟请求形状无关。
 //
@@ -175,17 +201,20 @@ func (t *Table) Learn(provider, model string, status int, body []byte) []string 
 		return nil
 	}
 	low := strings.ToLower(string(body))
+	t.mu.RLock()
+	sigs := append([]Signature(nil), t.signatures...)
+	t.mu.RUnlock()
 	var learned []string
-	for _, sg := range signatures {
+	for _, sg := range sigs {
 		hit := false
-		for _, pat := range sg.any {
+		for _, pat := range sg.Any {
 			if strings.Contains(low, strings.ToLower(pat)) {
 				hit = true
 				break
 			}
 		}
-		if hit && t.Mark(provider, model, sg.flag) {
-			learned = append(learned, sg.label)
+		if hit && t.Mark(provider, model, sg.Flag) {
+			learned = append(learned, sg.Label)
 		}
 	}
 	return learned
