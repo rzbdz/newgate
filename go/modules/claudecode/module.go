@@ -24,6 +24,7 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "claudecode",
+		Type: "client",
 		Requires: []modules.Requirement{
 			modules.Need(gatewayapi.Capability),
 			modules.Need(confighookapi.ConfigHooksCapability),

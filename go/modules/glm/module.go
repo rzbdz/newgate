@@ -14,6 +14,7 @@ import (
 func New() modules.Component {
 	return modules.Component{
 		Name: "glm",
+		Type: "model",
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Model{
 				MatchTarget: MatchTarget,

@@ -26,6 +26,7 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name:     "thinking",
+		Type:     "model",
 		Requires: []modules.Requirement{modules.Need(gatewayapi.Capability)},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Service(service{})),

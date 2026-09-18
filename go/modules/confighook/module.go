@@ -40,6 +40,7 @@ func New() modules.Component {
 	}
 	return modules.Component{
 		Name: "config-hook",
+		Type: "infra",
 		Provides: []modules.Provision{
 			modules.Provide(ConfigHooksCapability, ConfigHooks(registry)),
 			modules.Provide(AgentCatalogCapability, AgentCatalog(registry)),

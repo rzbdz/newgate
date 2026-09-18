@@ -19,6 +19,7 @@ func New() modules.Component {
 	var restore func()
 	return modules.Component{
 		Name: "config",
+		Type: "infra",
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Config(port)),
 		},

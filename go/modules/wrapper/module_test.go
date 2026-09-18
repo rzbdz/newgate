@@ -46,10 +46,12 @@ func harness(t *testing.T, agents ...*agentapi.Agent) (wrapperapi.Wrapper, *fake
 	graph := testkit.Start(t,
 		modules.Component{
 			Name:     "stub-runtime",
+			Type:     "test",
 			Provides: []modules.Provision{modules.Provide(runtimeapi.Capability, runtimeapi.Runtime(runtime))},
 		},
 		modules.Component{
 			Name:     "stub-catalog",
+			Type:     "test",
 			Provides: []modules.Provision{modules.Provide(agentapi.AgentCatalogCapability, catalog.AsCatalog())},
 		},
 		wrapperapi.New(),

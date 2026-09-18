@@ -19,6 +19,7 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "claudecode-glm",
+		Type: "bridge",
 		Requires: []modules.Requirement{
 			modules.Need(gatewayapi.Capability),
 			modules.Need(claudeapi.Capability),

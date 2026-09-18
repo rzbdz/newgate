@@ -30,6 +30,7 @@ func New() modules.Component {
 	service := &service{}
 	return modules.Component{
 		Name: "runtime",
+		Type: "client",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
 			modules.Need(confighookapi.AgentCatalogCapability),

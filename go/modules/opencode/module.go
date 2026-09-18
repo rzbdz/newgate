@@ -18,6 +18,7 @@ func New() modules.Component {
 	var release modules.Release
 	return modules.Component{
 		Name:     "opencode",
+		Type:     "client",
 		Requires: []modules.Requirement{modules.Need(confighookapi.ConfigHooksCapability)},
 		Provides: []modules.Provision{
 			modules.Provide(Capability,
