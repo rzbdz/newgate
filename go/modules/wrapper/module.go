@@ -43,6 +43,7 @@ func New() modules.Component {
 	instance := &service{}
 	return modules.Component{
 		Name: "wrapper",
+		Type: "client",
 		Requires: []modules.Requirement{
 			modules.Need(runtimeapi.Capability),
 			modules.Need(agentapi.AgentCatalogCapability),

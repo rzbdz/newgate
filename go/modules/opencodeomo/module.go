@@ -41,6 +41,7 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "opencode-omo",
+		Type: "client",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
 			modules.Need(agentapi.ConfigHooksCapability),

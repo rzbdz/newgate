@@ -26,6 +26,7 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "deepseek",
+		Type: "model",
 		Requires: []modules.Requirement{
 			modules.Need(gatewayapi.Capability),
 			modules.Need(breakerapi.Capability),

@@ -20,6 +20,7 @@ func New() modules.Component {
 	table := newTable()
 	return modules.Component{
 		Name: "breaker",
+		Type: "infra",
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Breaker(table)),
 		},

@@ -35,6 +35,10 @@ func (a *App) Context() modules.Context { return a.manager.Context() }
 // ComponentNames 返回实际拓扑启动顺序，用于测试和运行时诊断。
 func (a *App) ComponentNames() []string { return a.manager.ComponentNames() }
 
+// Components 返回按启动顺序的组件定义（含 Type），供 newgate plugin 按分类枚举
+// 全部模块。用图而不是让模块自报，是为了让「没参与开关体系的模块」也列得出来。
+func (a *App) Components() []modules.Component { return a.manager.Components() }
+
 // Stop 将整个应用生命周期交还 Manager 逆序收束。
 func (a *App) Stop(ctx context.Context) error { return a.manager.Stop(ctx) }
 

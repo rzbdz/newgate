@@ -41,6 +41,7 @@ func New() modules.Component {
 	service := &service{}
 	return modules.Component{
 		Name: "cli",
+		Type: "cli",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
 			modules.Need(runtimeapi.Capability),

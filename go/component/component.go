@@ -71,11 +71,26 @@ func Provide[T any](capability Capability[T], value T) Provision {
 	return Provision{spec: capability.spec, value: value}
 }
 
+// Type 是组件的分类标签。
+//
+// 内核**不定义任何具体取值**，也不解释它——它只是一个必须存在的、稳定的分类键，
+// 供装配期枚举与产品层的元数据管理使用（`newgate plugin` 按它分组；词汇表定义在
+// modules/pluginmanager，因为「有哪些分类」是 newgate 的产品概念，不是内核概念）。
+// 这条与「模块的键不 hard-code 进 core」是同一条规矩：core 提供表，产品填内容。
+//
+// 它是空字符串以外的任意值；取值合法性由 app 层的装配测试兜（内核对取值一无所知，
+// 所以校验不了）。
+type Type string
+
 // Component 是运行时依赖图中的一个生命周期节点。
 // Requires/Provides 描述静态拓扑，Start/Stop 只处理获得依赖后的副作用；
 // 这样依赖关系可在执行前验证，停止顺序也能由同一张图可靠推导。
 type Component struct {
-	Name     string
+	Name string
+	// Type 是分类标签，必填。它跟着组件定义走，所以图一装配就能枚举出全部
+	// 组件及其分类——不需要组件配合、不需要启动，这是它和运行期开关点
+	// （modules/pluginmanager 的 RegisterSelf）的分工所在。
+	Type     Type
 	Requires []Requirement
 	Provides []Provision
 	Start    func(context.Context, Context) error
@@ -218,6 +233,17 @@ func (m *Manager) ComponentNames() []string {
 	return names
 }
 
+// Components 按启动顺序返回组件定义副本（含 Type），供 CLI 与产品层枚举。
+//
+// 只读快照：返回的是浅拷贝，调用方改不到图里的那一份。它跟 ComponentNames 的区别
+// 就是多了分类与依赖声明——`newgate plugin` 要按 Type 分组列全部模块，靠的就是这里，
+// 而不是让每个模块自报（自报会漏掉没参与的模块）。
+func (m *Manager) Components() []Component {
+	out := make([]Component, len(m.components))
+	copy(out, m.components)
+	return out
+}
+
 // Stop 只执行一次，并按启动的反方向释放组件。
 // 即使某个 Stop 失败，其余组件仍继续清理，最终返回第一个错误。
 func (m *Manager) Stop(ctx context.Context) error {
@@ -246,6 +272,11 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 	for i, component := range components {
 		if component.Name == "" {
 			return nil, nil, fmt.Errorf("component name is required")
+		}
+		// 分类键必填，但**不校验取值**：内核不认识有哪些分类（见 Type 的注释）。
+		// 取值正确性由 app 层的装配测试兜。
+		if component.Type == "" {
+			return nil, nil, fmt.Errorf("component %s: type is required", component.Name)
 		}
 		if _, exists := byName[component.Name]; exists {
 			return nil, nil, fmt.Errorf("duplicate component %s", component.Name)

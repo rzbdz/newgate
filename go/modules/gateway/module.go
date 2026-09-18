@@ -28,6 +28,7 @@ func New() modules.Component {
 	var restore func()
 	return modules.Component{
 		Name:     "gateway",
+		Type:     "gateway",
 		Requires: []modules.Requirement{modules.Need(configapi.Capability)},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
