@@ -141,9 +141,9 @@ func (p *port) RegisterRequestHook(hook Plugin) (modules.Release, error) {
 // RegisterFilter 让策略把决策逻辑插进数据面的四个决策点。
 //
 // 这是**唯一的插入口**：数据面 handler、内部 registry、以及「谁插进来了」这件事
-// 都不越过这个接口。所以 gateway 可以完全不认识 breaker，而 breaker 只要声明
-// Need(gateway) 就能把自己的状态机挂上去。形状与 RegisterRequestHook 并列，理由
-// 见 modules/gateway/policy 的包注释。
+// 都不越过这个接口。所以 gateway 可以完全不认识那张健康表（binding 的可用性与
+// 延迟账本），健康表只要声明 Need(gateway) 就能把自己的状态机挂上去。形状与
+// RegisterRequestHook 并列，理由见 modules/gateway/policy 的包注释。
 func (p *port) RegisterFilter(f Filter) (modules.Release, error) {
 	return p.filters.Register(f)
 }

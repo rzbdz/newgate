@@ -235,8 +235,11 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 
 `modules/breaker` 是照这个写出来的第一个例子：`breaker/plane.go` 是它的适配层，
 把数据面的中性 `Outcome` 翻成健康表的输入，再把记账结果翻回中性的 `Verdict`。
-**判据是可机械核对的**：`modules/gateway` 的源码里不出现 "breaker"——策略的名字、
-账本的名字、「什么算形状错误」、留下来的痕叫什么，全在贡献者那一侧。
+**判据是可机械核对的，并且有一条测试钉住它**（`modules/gateway/direction_test.go`）：
+数据面的**非测试源码**里不出现 "breaker" 这个词（`forward/` 整个目录 + `module.go` +
+`serve.go`），整个 `modules/gateway/` 也不 import 那个装逻辑的包。策略的名字、账本的
+名字、「什么算形状错误」、留下来的痕叫什么，全在贡献者那一侧。测试文件不受这条约束
+——它们引用这个词正是为了解释「为什么不 import 它」。
 
 三条语义必须记住：
 

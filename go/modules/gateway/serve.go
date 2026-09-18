@@ -5,7 +5,7 @@ package gateway
 // **为什么它住在这里**（2026-09-18）：它在跑的就是数据面本身——配置热更新的原子
 // 换页、thinkcache 的磁盘冷层、转发服务（forward.New）的启停、优雅交接的排空。
 // 这些没有一样是「命令行」的事。它留在 modules/cli 的时候，界面为了跑起来得认识
-// forward / thinkcache / breaker / config,store / runtime,daemon ——界面的依赖表
+// forward / thinkcache / 健康表 / config,store / runtime,daemon ——界面的依赖表
 // 里于是有一半是数据面。
 //
 // 搬过来之后：界面不认识进程生命周期，进程也不认识界面。`__serve` 是网关自己

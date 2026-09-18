@@ -42,8 +42,15 @@ Wrapper
 capability 不是库。翻过来之后 gateway 成了**最小系统**——它从自己的状态机里读出
 四个决策点（建链准入 / 结局裁决 / 控制面自报 / 停机落盘），留一口注册表，谁都不
 装也照常转发；健康表在**它自己的 `Start`** 里经 `RegisterFilter` 把自己挂进去。
-可机械核对：`command grep -rn breaker modules/gateway/forward/ modules/gateway/module.go
-modules/gateway/serve.go` 为空（只剩三处讲历史的注释）。
+可机械核对，**而且有测试钉住**（`modules/gateway/direction_test.go`）：那三处
+（`forward/` 整个目录 + `module.go` + `serve.go`）的**非测试源码**里不出现
+`breaker` 这个词，整个 `modules/gateway/` 也不 import 那个装逻辑的包。
+**为什么这条法则需要一条测试而不是一句注释**：破了它，编译照样过、单测与 e2e
+照样全绿——`breaker → gateway` 这条边还在，热路径里 import 一句就长回去了，而
+行为一字不变；倒置之前的样子就是这样（`forward.Server` 上挂一个 Health 字段、
+按 `BucketShape` 分支），依赖图上一点痕迹都没有，唯一的守卫是「有没有人去看」。
+`…/modules/breaker/status` 不受判据 2 约束：它是 **wire 叶子**（§2 明确允许直接
+import，优雅交接期间新旧二进制混跑，控制面文档的形状是跨版本契约）。
 
 这也是「一个模块可以往 owner 的注册表里注册，而且 owner 在它之前启动」的第一个
 真实案例，所以 §2 那条「需要被启动、被停止、被撤销吗」的判据之外，还有一条更常
