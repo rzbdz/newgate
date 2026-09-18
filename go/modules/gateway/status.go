@@ -3,6 +3,7 @@ package gateway
 import (
 	"strings"
 
+	"github.com/rzbdz/newgate/go/lib/style"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
@@ -44,6 +45,12 @@ func (switchStatus) Status() []cliapi.StatusLine {
 	}
 
 	var parts []string
+	// 解析失败先说：那意味着**下面所有开关都是回退出来的**，不是用户当前的选择。
+	// 不报的话，用户关掉的补丁可能正被静默打开，而这一屏看起来一切正常
+	// （它读的是同一个 Parse）——见 gatewaystate.Parse 的说明。
+	if cfg := gatewaystate.Parse(st); cfg.ParseErr != nil {
+		parts = append(parts, style.Red("state.json 的 gateway 段解析失败，开关已全部回退（改动可能没生效）："+cfg.ParseErr.Error()))
+	}
 	switch {
 	case gatewaystate.DebugActive(st):
 		s := "debug=on"

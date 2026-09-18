@@ -28,6 +28,10 @@ const Key = "gateway"
 // 三个字段都是「可缺席」的：SchemaRepair / SpecialTreatment 用指针以区分
 // 「没配」和「显式关闭」，SpecialOff 空切片与 nil 等价。缺席 = 出厂态（开）。
 type Config struct {
+	// ParseErr 是解析 ModuleConfig[Key] 时出的错。非 nil 意味着**下面所有字段都
+	// 是回退出来的**（读过老键，或落回出厂态），而不是用户当前的选择。展示层
+	// 必须把它说出来——见 status.go。
+	ParseErr     error
 	SchemaRepair *bool `json:"schema_repair,omitempty"`
 	// SpecialTreatment special_treatment 插件层总开关（默认开）。
 	// 插件只对认领的上游生效（gateway/special），所以开着不影响别人。
@@ -77,7 +81,14 @@ func Parse(st *domain.State) Config {
 	}
 	var c Config
 	if raw := st.ModuleConfig[Key]; len(raw) > 0 {
-		_ = json.Unmarshal(raw, &c)
+		// **解析失败要记下来，不能吞**（2026-09-18）：坏掉的这一段会让下面所有
+		// 字段退回出厂态，而不设过的字段出厂态是「全开」——也就是说用户
+		// `newgate st off deepseek` 关掉的补丁会被**静默重新打开**，而 status
+		// 上那行显示的正是同一个 Parse，看起来一切正常。
+		//
+		// 行为不变（仍然 fail-open 到出厂态，绝不让一段坏 JSON 把网关拦下来），
+		// 但错误随 Config 传出去，由 status / doctor 报成一条 warn。
+		c.ParseErr = json.Unmarshal(raw, &c)
 	}
 	leg := legacyConfig(st)
 	if c.SchemaRepair == nil {
