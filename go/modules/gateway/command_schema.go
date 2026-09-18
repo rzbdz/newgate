@@ -35,7 +35,15 @@ func (schemaRepairCommand) Help() surface.HelpLine {
 }
 
 func (schemaRepairCommand) Run(host surface.Host, args []string) int {
-	on := truthy(surface.Arg(args, 0))
+	arg := surface.Arg(args, 0)
+	// 必须显式给 on|off。**不带参数不能当成 off**：`truthy("")` 是 false，
+	// 于是「敲一下看看」会静默关掉修补——2026-09-18 我自己就这么关掉过一次
+	// （一个验证循环里裸跑了这条命令），而且直到 `newgate status` 打出
+	// schema-repair=off 才发现。默认动作必须是「什么都不做」。
+	if arg == "" {
+		return host.Die(64, "用法：newgate schema-repair on|off（不带参数不改任何东西）")
+	}
+	on := truthy(arg)
 	if err := gatewaystate.SetSchemaRepair(on); err != nil {
 		return host.Die(70, err.Error())
 	}
