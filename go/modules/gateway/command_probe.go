@@ -41,7 +41,7 @@ func (probeCommand) Names() []string { return []string{"probe"} }
 
 // Unstyled：`probe --json` 给的是机器可读的原文，不是给人看的版式。
 func (probeCommand) Unstyled(args []string) bool {
-	return cliapi.FlagValue(args, "--json") != "" || hasFlag(args, "--json")
+	return cliapi.FlagValue(args, "--json") != "" || cliapi.Flag(args, "--json")
 }
 
 func (probeCommand) Help() cliapi.HelpLine {
@@ -50,7 +50,7 @@ func (probeCommand) Help() cliapi.HelpLine {
 }
 
 func (probeCommand) Run(host cliapi.Host, args []string) int {
-	return runProbe(host, cliapi.Arg(args, 0), hasFlag(args, "--json"))
+	return runProbe(host, cliapi.Positional(args, 0), cliapi.Flag(args, "--json"))
 }
 
 // cmdProbe 主动探活：对每个候选真打一发最小请求。

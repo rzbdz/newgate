@@ -53,8 +53,8 @@ func (specialCommand) Help() cliapi.HelpLine {
 // Run 收到的 args **不含 "st" 这个动词**（见 cliapi.Command 的契约）。
 func (specialCommand) Run(host cliapi.Host, args []string) int {
 	st := store.LoadState()
-	sub := cliapi.Arg(args, 0)
-	name := cliapi.Arg(args, 1)
+	sub := cliapi.Positional(args, 0)
+	name := cliapi.Positional(args, 1)
 
 	if sub == "" || sub == "status" || sub == "ls" {
 		return specialList(host, st)

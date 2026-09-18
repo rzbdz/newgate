@@ -57,12 +57,12 @@ func (c *command) Help() cliapi.HelpLine {
 // 体系的模块也列得出来，标成「无法 runtime 开关（v1）」——「这个模块没有开关」
 // 和「这个模块忘了注册」绝不能长得一样。
 func (c *command) Run(host cliapi.Host, args []string) int {
-	sub := cliapi.Arg(args, 0)
+	sub := cliapi.Positional(args, 0)
 	switch sub {
 	case "", "ls", "list":
 		return c.list()
 	}
-	action := cliapi.Arg(args, 1)
+	action := cliapi.Positional(args, 1)
 	if action == "" {
 		return c.explain(host, sub)
 	}
@@ -70,7 +70,7 @@ func (c *command) Run(host cliapi.Host, args []string) int {
 		return host.Die(64, fmt.Sprintf(
 			"plugin: 不认识的动词 %q（用法：newgate plugin <模块>[.<路径>] on|off [时长]）", action))
 	}
-	return c.toggle(host, sub, action == "on", cliapi.Arg(args, 2))
+	return c.toggle(host, sub, action == "on", cliapi.Positional(args, 2))
 }
 
 // list 按分类分组列出全部模块。

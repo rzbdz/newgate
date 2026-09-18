@@ -546,10 +546,10 @@ func (startCommand) Help() cliapi.HelpLine {
 }
 
 func (c startCommand) Run(_ cliapi.Host, args []string) int {
-	if a := cliapi.Arg(args, 0); a != "" {
+	if a := cliapi.Positional(args, 0); a != "" {
 		return cmdTakeover(c.agents, a)
 	}
-	return cmdStart(c.agents, hasFlag(args, "--force"))
+	return cmdStart(c.agents, cliapi.Flag(args, "--force"))
 }
 
 type stopCommand struct{ agents confighookapi.AgentCatalog }
@@ -567,7 +567,7 @@ func (stopCommand) Help() cliapi.HelpLine {
 }
 
 func (stopCommand) Run(_ cliapi.Host, args []string) int {
-	if a := cliapi.Arg(args, 0); a != "" {
+	if a := cliapi.Positional(args, 0); a != "" {
 		return cmdRelease(a)
 	}
 	return cmdStop()
@@ -588,7 +588,7 @@ func (takeoverCommand) Help() cliapi.HelpLine {
 }
 
 func (c takeoverCommand) Run(_ cliapi.Host, args []string) int {
-	return cmdTakeover(c.agents, cliapi.Arg(args, 0))
+	return cmdTakeover(c.agents, cliapi.Positional(args, 0))
 }
 
 type releaseCommand struct{}
@@ -606,7 +606,7 @@ func (releaseCommand) Help() cliapi.HelpLine {
 }
 
 func (releaseCommand) Run(_ cliapi.Host, args []string) int {
-	if a := cliapi.Arg(args, 0); a != "" {
+	if a := cliapi.Positional(args, 0); a != "" {
 		return cmdRelease(a)
 	}
 	return cmdStop()
@@ -627,7 +627,7 @@ func (restartCommand) Help() cliapi.HelpLine {
 }
 
 func (c restartCommand) Run(_ cliapi.Host, args []string) int {
-	return cmdRestart(c.agents, hasFlag(args, "--force"))
+	return cmdRestart(c.agents, cliapi.Flag(args, "--force"))
 }
 
 type shimCommand struct{ agents confighookapi.AgentCatalog }
@@ -646,7 +646,7 @@ func (shimCommand) Help() cliapi.HelpLine {
 
 func (c shimCommand) Run(_ cliapi.Host, args []string) int {
 	// 不给默认 agent：客户端 id 是**各客户端模块自己的键**，界面不该知道任何一个。
-	return cmdShim(c.agents, cliapi.Arg(args, 0), cliapi.Arg(args, 1))
+	return cmdShim(c.agents, cliapi.Positional(args, 0), cliapi.Positional(args, 1))
 }
 
 // commands 是本模块注入界面的全部命令。
@@ -655,13 +655,4 @@ func commands(agents confighookapi.AgentCatalog) []cliapi.Command {
 		startCommand{agents}, stopCommand{agents}, takeoverCommand{agents},
 		releaseCommand{}, restartCommand{agents}, shimCommand{agents},
 	}
-}
-
-func hasFlag(args []string, name string) bool {
-	for _, a := range args {
-		if a == name {
-			return true
-		}
-	}
-	return false
 }

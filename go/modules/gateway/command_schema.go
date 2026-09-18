@@ -35,7 +35,7 @@ func (schemaRepairCommand) Help() cliapi.HelpLine {
 }
 
 func (schemaRepairCommand) Run(host cliapi.Host, args []string) int {
-	arg := cliapi.Arg(args, 0)
+	arg := cliapi.Positional(args, 0)
 	// 必须显式给 on|off。**不带参数不能当成 off**：`truthy("")` 是 false，
 	// 于是「敲一下看看」会静默关掉修补——2026-09-18 我自己就这么关掉过一次
 	// （一个验证循环里裸跑了这条命令），而且直到 `newgate status` 打出

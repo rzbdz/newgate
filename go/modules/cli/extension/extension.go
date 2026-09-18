@@ -166,18 +166,8 @@ type Command interface {
 	Run(Host, []string) int
 }
 
-// Arg 取模块命令的第 i 个参数，越界给空串。**下标从 0 起**——args 里没有命令名，
-// 见 Command 的契约说明。
-//
-// 为什么把它放在契约包里而不是让每个模块自己写一个三行的取参函数：2026-09-18
-// 两个模块各自写了一遍，两遍都把下标写成从 1 起，两遍都错位一格。下标基准这种东西
-// 每重写一次就多一次猜错的机会，所以只留一份实现。
-func Arg(args []string, i int) string {
-	if i < 0 || i >= len(args) {
-		return ""
-	}
-	return args[i]
-}
+// Command 是模块注册进来的命令。args 是**去掉命令名之后**的原始参数（含选项），
+// 位置参数用 Positional 取、开关用 Flag / FlagValue 取——别自己数下标。
 
 // Section 是帮助屏上的一个**槽位名**。
 //
@@ -300,11 +290,28 @@ func FlagValue(args []string, names ...string) string {
 }
 
 // Positional 取第 i 个**位置参数**（跳过 `-` 开头的），越界给空串。
+//
+// **必须是这个函数、不能数下标**（2026-09-18 实测）：契约包里曾经还有一个纯下标
+// 访问器 `Arg`，`newgate start --force` 于是把 `--force` 当成了 agent 名，报
+// 「不认识的 agent "--force"」——**而 doctor 自己就在推荐这条命令**；同一类现场
+// 还有 `newgate probe --json`（`--json` 被当成 profile 名）。两个名字、两种语义
+// 摆在一起，下一个人必然踩中错的那个，所以 `Arg` 已经删掉，只剩这一个。
+//
+// 位置参数不可能是 `-` 开头的：agent 名、profile 名、子命令全在这个集合里。
+// `--` 之后一律算位置参数（要给客户端透传以 `-` 开头的参数时用它），`--` 自己
+// 不算一个位置；单独一个 `-` 仍算位置参数（按惯例表示 stdin）。
 func Positional(args []string, i int) string {
 	var seen int
+	literal := false
 	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
-			continue
+		if !literal {
+			if a == "--" {
+				literal = true
+				continue
+			}
+			if len(a) > 1 && a[0] == '-' {
+				continue
+			}
 		}
 		if seen == i {
 			return a
@@ -312,6 +319,23 @@ func Positional(args []string, i int) string {
 		seen++
 	}
 	return ""
+}
+
+// Flag 报告命令行里有没有这个选项（`--` 之后不再有选项）。
+//
+// 只做**精确**匹配：`--profile=ds` 不算 `--profile`，那种带值的用 FlagValue。
+// 它替掉的是散在 config / gateway / runtime 里三份一模一样的 `hasFlag`——同一段
+// 三行代码抄三遍，改动时漏掉一份就是「这条命令的开关在这一层不生效」。
+func Flag(args []string, name string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == name {
+			return true
+		}
+	}
+	return false
 }
 
 // HelpLine 是命令在 `newgate --help` 里占的那一行。
