@@ -60,7 +60,15 @@ func New() modules.Component {
 				return nil
 			}
 			// catalog 在 Attach 里现取（Start 里那份是局部变量，注入阶段已经出了作用域）。
-			reporter := runtimeReporter{agents: modules.MustGet(ctx, confighookapi.AgentCatalogCapability)}
+			agents := modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
+			for _, cmd := range commands(agents) {
+				release, err := ui.RegisterCommand(cmd)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
+			}
+			reporter := runtimeReporter{agents: agents}
 			for _, register := range []func() (modules.Release, error){
 				func() (modules.Release, error) { return ui.RegisterStatus(reporter) },
 				func() (modules.Release, error) { return ui.RegisterDiagnostics(reporter) },
