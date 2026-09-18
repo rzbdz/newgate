@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/lib/durarg"
+	"github.com/rzbdz/newgate/go/lib/style"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
-	"github.com/rzbdz/newgate/go/modules/cli/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 )

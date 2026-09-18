@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rzbdz/newgate/go/lib/style"
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
-	"github.com/rzbdz/newgate/go/modules/cli/style"
 )
 
 // cmdBreaker 只回答一件事：**现在哪些 binding 出问题了、为什么**。

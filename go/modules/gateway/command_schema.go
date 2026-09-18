@@ -3,8 +3,8 @@ package gateway
 import (
 	"fmt"
 
+	"github.com/rzbdz/newgate/go/lib/style"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
-	"github.com/rzbdz/newgate/go/modules/cli/style"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 )
 

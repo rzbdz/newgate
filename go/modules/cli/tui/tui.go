@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/rzbdz/newgate/go/modules/cli/style"
+	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 )

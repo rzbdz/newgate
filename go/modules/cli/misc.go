@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rzbdz/newgate/go/modules/cli/style"
+	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/cli/tui"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/store"
