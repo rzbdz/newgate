@@ -161,3 +161,46 @@ func get(port int, path string, v interface{}) bool {
 	}
 	return json.NewDecoder(resp.Body).Decode(v) == nil
 }
+
+// Available 把 daemon 的全局熔断表冻结成一次命令内的一致快照：某条 binding 现在
+// 能不能用。daemon 不在线时不凭空判坏（ps == nil ⇒ 全部可用）——诊断退化为只看
+// 静态配置。
+func (d *Doc) Available() func(provider, model string) bool {
+	blocked := map[string]bool{}
+	if d != nil {
+		for _, b := range d.Breakers {
+			if b.Open {
+				blocked[b.Provider+"/"+b.Model] = true
+			}
+		}
+	}
+	return func(provider, model string) bool { return !blocked[provider+"/"+model] }
+}
+
+// Rank 把 daemon 算好的排序键原样递给调用方。
+//
+// **不在这里重算阈值**：3000ms / 12000ms 那套分桶只存在于 modules/breaker，抄一份
+// 的话 daemon 改阈值这边不会跟着变（2026-09-17 之前就是两边各有一份）。
+//
+// 老 daemon 不发 `rank`（优雅交接期间 CLI 与 daemon 可以来自不同版本），读不到就
+// 退化成中性值——排序退化为「按配置顺序」，不会因为版本不齐互相打架。被摘牌的
+// binding 不在这里沉底：建链期先问 Available，被摘的根本进不了候选。
+func (d *Doc) Rank() func(provider, model string) int {
+	const neutral = 1_000_000
+	scores := map[string]int{}
+	if d != nil {
+		for _, b := range d.Breakers {
+			score := neutral
+			if b.Rank != 0 {
+				score = b.Rank
+			}
+			scores[b.Provider+"/"+b.Model] = score
+		}
+	}
+	return func(provider, model string) int {
+		if score, ok := scores[provider+"/"+model]; ok {
+			return score
+		}
+		return neutral
+	}
+}

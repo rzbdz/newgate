@@ -84,21 +84,20 @@ func TestGraphCoversEveryModule(t *testing.T) {
 	}
 }
 
-// TestCLIStartsBeforeItsExtensionModules 锁住注册型扩展的**依赖方向**。
+// TestUIStaysOutOfTheDependencyGraph 锁住「ui 不是依赖」这条不变量。
 //
-// ComponentNames 是拓扑序（Manager 存的就是 resolve 排好的顺序），所以这条
-// 断言测的是真实的启动顺序，不是声明顺序。
+// 2026-09-18 之前这里断言的是「cli 排在扩展模块前面」——那时候注入是一条排序边
+// （模块 Optional(cli)，要在自己的 Start 里拿到界面再注册）。那条边恰恰是死结的
+// 来源：界面自己也要依赖那些模块（渲染要靠它们报数据），两边互指就成环，于是
+// config / runtime / config-hook 三个模块永远注入不进来，命令只能被迫留在界面里。
 //
-// 为什么值得单独立一条：2026-09-17 之前 opencodeomo 是往一个「命令端口」里
-// Provide，那条边是 `opencode-omo → cli`（omo 先起，cli 后起并取一次快照）。
-// 改成 Register 之后所有者必须是 cli，边反转成 `cli → opencode-omo`：cli 先
-// 起，扩展模块在 Start 里拿到 cli 的 service 再注册。反转本身没问题，但**反转
-// 错了会以一种很隐蔽的方式坏掉**——omo 在 cli 之前 Start，MustGet(cliapi.Capability)
-// 当场 panic；而如果哪天有人改成 Optional 取，就变成静默少一条命令。
+// 现在注入走 component.Inject：**不排序**，全图 Start 完之后在 Attach 阶段交付。
+// 所以这条不变量变成了「没有任何组件声明一条指向界面的非 late 边」——ui 装不装
+// 只影响那些贡献有没有地方去，不影响任何一个模块的功能。
 //
-// 停止顺序随之反转成扩展先停、cli 后停，这正是撤销需要的方向（释放时目标
-// 还活着），Manager 逆序收束天然保证。
-func TestCLIStartsBeforeItsExtensionModules(t *testing.T) {
+// 它比原来那条更强：原来只盯 opencode-omo 一个模块，现在任何模块将来对 ui 写错
+// 依赖方向都会在这里红。
+func TestUIStaysOutOfTheDependencyGraph(t *testing.T) {
 	testkit.Sandbox(t)
 
 	built, err := New(context.Background())
@@ -107,18 +106,16 @@ func TestCLIStartsBeforeItsExtensionModules(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = built.Stop(context.Background()) })
 
-	index := map[string]int{}
-	for i, name := range built.ComponentNames() {
-		index[name] = i
-	}
-	for _, ext := range []string{"opencode-omo"} {
-		at, ok := index[ext]
-		if !ok {
-			t.Fatalf("扩展模块 %s 不在图里（实际 %v）", ext, built.ComponentNames())
-		}
-		if index["cli"] >= at {
-			t.Fatalf("cli 在第 %d 位、%s 在第 %d 位——扩展模块必须先于 cli 注册，反过来 cli 就还没起",
-				index["cli"], ext, at)
+	for _, component := range built.Components() {
+		for _, requirement := range component.Requires {
+			if requirement.Name() != "cli" {
+				continue
+			}
+			if !requirement.Late() {
+				t.Fatalf("组件 %s 对 ui 声明了一条排序边（%s）——"+
+					"界面依赖别人渲染、别人依赖界面注入，这就是那个环；"+
+					"注入请用 modules.Inject", component.Name, requirement.Name())
+			}
 		}
 	}
 }

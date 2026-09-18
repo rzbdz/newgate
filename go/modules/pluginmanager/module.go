@@ -33,7 +33,7 @@ func New() modules.Component {
 		Name: "plugin-manager",
 		Type: TypeInfra,
 		Requires: []modules.Requirement{
-			modules.Optional(cliapi.Capability),
+			modules.Inject(cliapi.Capability),
 			modules.Need(confighookapi.ConfigHooksCapability),
 		},
 		Provides: []modules.Provision{
@@ -57,19 +57,26 @@ func New() modules.Component {
 
 			// 命令与状态行都是这个模块的用户界面，由它自己贡献——界面不认识它。
 			// ui 可选（见 CLAUDE.md §4）：没装任何 ui 就没有入口，开关账本照常工作。
-			if cli, ok := modules.Get(ctx, cliapi.Capability); ok {
-				cmd := &command{manager: service}
-				cmdRelease, err := cli.RegisterCommand(cmd)
-				if err != nil {
-					return err
-				}
-				releases = append(releases, cmdRelease)
-				statusRelease, err := cli.RegisterStatus(cmd)
-				if err != nil {
-					return err
-				}
-				releases = append(releases, statusRelease)
+			return nil
+		},
+		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，所以它可能
+		// 比本模块晚起——Start 阶段它还没提供端口。Attach 在全图 Start 完之后跑。
+		Attach: func(_ context.Context, ctx modules.Context) error {
+			cli, ok := modules.Get(ctx, cliapi.Capability)
+			if !ok {
+				return nil
 			}
+			cmd := &command{manager: service}
+			cmdRelease, err := cli.RegisterCommand(cmd)
+			if err != nil {
+				return err
+			}
+			releases = append(releases, cmdRelease)
+			statusRelease, err := cli.RegisterStatus(cmd)
+			if err != nil {
+				return err
+			}
+			releases = append(releases, statusRelease)
 			return nil
 		},
 		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },

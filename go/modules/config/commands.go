@@ -1,20 +1,33 @@
-package cli
+package config
+
+// 本文件是**配置自己的**那批命令：tier / profiles / profile kv / --set-profile /
+// agents。2026-09-18 从 modules/cli/profile.go 整体搬来。
+//
+// 为什么搬：档位怎么解析、链怎么建、跳过谁、profile 文件长什么样——全是配置的
+// 知识，界面留着一份「抄来的理解」就必然和实现漂移（这一轮之前，界面为了渲染
+// tier 得 import resolve + domain + paths + store）。搬回来之后界面既不认识
+// profile，也不认识链。
+//
+// 依赖方向：config → cli/extension（叶子契约），不是 → modules/cli。命令由本模块
+// 在 Start 里注入界面，和其它模块完全一样。
 
 import (
 	"fmt"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rzbdz/newgate/go/lib/style"
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
 
@@ -23,7 +36,7 @@ import (
 // agent — including ones with sessions in flight — untouched.
 func cmdSetProfile(agent, name string) int {
 	if err := store.SetActiveProfile(agent, name); err != nil {
-		return die(65, err.Error())
+		return style.Die(65, err.Error())
 	}
 	scope := "全局默认"
 	if agent != "" {
@@ -49,7 +62,7 @@ func cmdSetProfile(agent, name string) int {
 			fmt.Print(t.String())
 		}
 	}
-	notifyProxy()
+	controlplane.Notify()
 	fmt.Println()
 	if daemon.Running() != nil {
 		fmt.Println(style.Hint("即刻生效；已在运行的会话不受影响"))
@@ -67,7 +80,7 @@ func cmdSetProfile(agent, name string) int {
 func cmdProfiles() int {
 	names, err := store.ListProfiles()
 	if err != nil {
-		return die(65, "cannot read mappings: "+err.Error())
+		return style.Die(65, "cannot read mappings: "+err.Error())
 	}
 	st := store.LoadState()
 	var ps []*domain.Profile
@@ -124,12 +137,12 @@ func cmdProfiles() int {
 // 会永远被压着，退役比并存干净）。
 func cmdProfileKV(args []string) int {
 	if len(args) < 1 || args[0] == "" {
-		return die(64, "用法：newgate profile kv <名> [--write]")
+		return style.Die(64, "用法：newgate profile kv <名> [--write]")
 	}
 	name := args[0]
 	raw, err := store.LoadProfileRaw(name)
 	if err != nil {
-		return die(65, err.Error())
+		return style.Die(65, err.Error())
 	}
 	text := store.SerializeProfileKV(raw)
 
@@ -140,18 +153,18 @@ func cmdProfileKV(args []string) int {
 	}
 	kvPath := filepath.Join(paths.Mappings(), name+".kv")
 	if err := os.WriteFile(kvPath, []byte(text), 0o660); err != nil {
-		return die(70, "写 "+kvPath+" 失败: "+err.Error())
+		return style.Die(70, "写 "+kvPath+" 失败: "+err.Error())
 	}
 	jsonPath := filepath.Join(paths.Mappings(), name+".json")
 	if _, err := os.Stat(jsonPath); err == nil {
 		if err := os.Rename(jsonPath, jsonPath+".bak"); err != nil {
-			return die(70, "旧 json 改名失败（kv 已写入，手动处理）: "+err.Error())
+			return style.Die(70, "旧 json 改名失败（kv 已写入，手动处理）: "+err.Error())
 		}
 		fmt.Println(style.Item(style.OK, kvPath+style.Dim("   旧 .json → .json.bak")))
 	} else {
 		fmt.Println(style.Item(style.OK, kvPath))
 	}
-	notifyProxy()
+	controlplane.Notify()
 	return 0
 }
 
@@ -213,7 +226,7 @@ func matchTier(s string) string {
 func tierReport(which string) int {
 	snap, err := store.Load()
 	if err != nil {
-		return die(65, err.Error())
+		return style.Die(65, err.Error())
 	}
 	st := snap.State
 
@@ -226,7 +239,7 @@ func tierReport(which string) int {
 		if full := matchTier(which); full != "" {
 			which = full
 		} else if !domain.IsKnownRole(which) {
-			return die(64, fmt.Sprintf("未知档位 %q（%s）", which, knownRolesLine()))
+			return style.Die(64, fmt.Sprintf("未知档位 %q（%s）", which, knownRolesLine()))
 		}
 	}
 
@@ -245,9 +258,9 @@ func tierReport(which string) int {
 	if which != "" {
 		names = []string{which}
 	}
-	_, live := proxyState()
-	available := availableFromProxy(live)
-	rank := rankFromProxy(live)
+	_, live := controlplane.State()
+	available := live.Available()
+	rank := live.Rank()
 	liveHealth := healthFromProxy(live)
 
 	for _, head := range headNames {
@@ -348,6 +361,9 @@ func bindingChain(steps []resolve.Step, indent string) string {
 	return out.String()
 }
 
+// PrintChain 把编号后的候选链渲染出来，理由同 PrintSkips。
+func PrintChain(steps []resolve.Step) { fmt.Print(numberedBindingChain(steps, nil)) }
+
 func numberedBindingChain(steps []resolve.Step, extra func(resolve.Step) string) string {
 	var out strings.Builder
 	for i, step := range steps {
@@ -420,6 +436,49 @@ func skipSummary(rows []tierView) string {
 //
 // 需要一个个看的时候有别的口子：newgate profiles 看标志、doctor 看链路、
 // metrics / probe 看熔断，那些才是可操作的信息。
+// skipKind 把 skip 的自由文本归成几个可数的类目。
+func skipKind(reason string) string {
+	switch {
+	case strings.Contains(reason, "excluded"):
+		return "excluded"
+	case strings.Contains(reason, "熔断"):
+		return "熔断"
+	case strings.Contains(reason, "maxAttempts"):
+		return "超出 maxAttempts"
+	case strings.Contains(reason, "重复") || strings.Contains(reason, "去重"):
+		return "去重"
+	case strings.Contains(reason, "未定义"):
+		return "未定义"
+	case strings.Contains(reason, "api_key"):
+		return "没 key"
+	case strings.Contains(reason, "已禁用"):
+		return "已禁用"
+	case strings.Contains(reason, "成环"):
+		return "引用成环"
+	}
+	return "其他"
+}
+
+// healthFromProxy 把 daemon 的熔断表按 "provider/model" 索引成一次命令内的快照。
+// daemon 不在线时是空表——诊断退化为只看静态配置，不凭空判坏。
+func healthFromProxy(ps *controlplane.Doc) map[string]breakerapi.Status {
+	out := map[string]breakerapi.Status{}
+	if ps != nil {
+		for _, s := range ps.Breakers {
+			out[s.Provider+"/"+s.Model] = s
+		}
+	}
+	return out
+}
+
+// prettyMs 毫秒 → 人话。链预算是按 ms 配的（state.json 里 120000），
+// 打印时不该原样甩 120000ms 给用户。
+func prettyMs(ms int) string { return (time.Duration(ms) * time.Millisecond).String() }
+
+// PrintSkips 把跳过汇总渲染出来。导出是给**界面**用的：Host.PrintSkips 是模块
+// 命令（opencodeomo）能调的最小能力，而排版归本模块——界面只做转发。
+func PrintSkips(skips []resolve.Skip) { printSkips(skips) }
+
 func printSkips(skips []resolve.Skip) {
 	reasons := map[string][]resolve.Skip{}
 	for _, s := range skips {
@@ -463,49 +522,168 @@ func skipDetail(s resolve.Skip) string {
 	return s.Reason
 }
 
-// cmdAgents 已知 agent 及其模型槽位。
-//
-// 每个 agent 一个小节：头一行是身份（方言 + 当前 profile），槽位一张表。
-// 以前是一张通铺大表，说明列又长，中文一撑就错位。
-func cmdAgents(agents agentapi.AgentCatalog) int {
-	st := store.LoadState()
-	names := agents.Names()
-	sort.Strings(names)
+// ---------- 配置自己的两条维护命令 ----------
 
-	fmt.Println(style.Title("newgate agents", fmt.Sprintf("%d 个", len(names))))
-	fmt.Println(style.Rule(72))
+type initCommand struct{}
 
-	for _, n := range names {
-		a, _ := agents.Get(n)
-		profile := st.ActiveFor(a.ID)
-		if profile == "" {
-			profile = st.DefaultProfile
-		}
-		fmt.Println()
-		fmt.Println("  " + style.Bold(a.ID) +
-			style.Dim("   "+a.Dialect+" 方言") +
-			style.Dim("   profile ") + style.Cyan(profile))
-		if a.Notes != "" {
-			fmt.Println(style.Hint(a.Notes))
-		}
-		if len(a.Slots) == 0 {
-			fmt.Println(style.Hint("槽位在启动时从配置文件发现"))
-			continue
-		}
-		t := style.NewTable("槽位", "档位", "环境变量")
-		for _, s := range a.Slots {
-			t.Row(s.Name, style.Cyan(s.Tier), s.EnvVar)
-		}
-		fmt.Print(t.String())
-		// 说明单独一行：塞进表格会把整张表撑到一百多列，反而没法对读。
-		for _, s := range a.Slots {
-			if s.Desc != "" {
-				fmt.Println(style.Hint(s.Name + "  " + s.Desc))
-			}
+func (initCommand) Names() []string { return []string{"init"} }
+
+func (initCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{Section: cliapi.SectionMaintenance, Rank: 50,
+		Usage: "init [--force]", Summary: "铺开默认配置"}
+}
+
+func (initCommand) Run(_ cliapi.Host, args []string) int { return runInit(hasFlag(args, "--force")) }
+
+// runInit 铺开默认配置。它归 config：写的是 providers.json / state.json / mappings，
+// 全是本模块的文件。
+func runInit(force bool) int {
+	created, err := store.Init(force)
+	if err != nil {
+		return style.Die(70, err.Error())
+	}
+	if len(created) == 0 {
+		fmt.Println("配置已存在，无需初始化（--force 可覆盖）")
+	} else {
+		for _, c := range created {
+			fmt.Println("创建 " + c)
 		}
 	}
-
-	fmt.Println()
-	fmt.Println(style.Hint("只切单个 agent：newgate --set-profile <名> --agent <agent>"))
+	fmt.Printf("\n下一步：把上游 key 填进 %s\n", paths.ProvidersFile())
+	fmt.Println("默认写入的是占位符，必须改成你自己的 provider / endpoint / 模型名。")
+	fmt.Println("key 建议走环境变量（不落盘）：NEWGATE_KEY_<PROVIDER 大写，- 换 _>")
 	return 0
+}
+
+type reloadCommand struct{}
+
+func (reloadCommand) Names() []string { return []string{"reload"} }
+
+func (reloadCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{Section: cliapi.SectionMaintenance, Rank: 50,
+		Usage: "reload", Summary: "立刻重读配置（平时 1 秒内自动热更新）"}
+}
+
+func (reloadCommand) Run(_ cliapi.Host, _ []string) int {
+	info, _ := controlplane.State()
+	if info == nil {
+		fmt.Println(style.Item(style.Skip, "代理未运行；配置会在下次启动时读取"))
+		return 0
+	}
+	controlplane.Notify()
+	fmt.Println(style.Item(style.OK, fmt.Sprintf("已通知代理重读配置   pid %d", info.PID)))
+	fmt.Println(style.Hint("平时不需要这个命令：配置改动 1 秒内自动生效"))
+	return 0
+}
+
+// ---------- 命令声明 ----------
+//
+// 每一条都只做「解析 argv → 调本文件里的实现」：帮助行、位置、别名是**给界面看
+// 的元数据**，由拥有这条命令的模块声明（见 cliapi.Documented）。
+
+type tierCommand struct{}
+
+var (
+	_ cliapi.Command    = (*tierCommand)(nil)
+	_ cliapi.Documented = (*tierCommand)(nil)
+)
+
+func (tierCommand) Names() []string { return []string{"tier", "tiers", "role", "roles"} }
+
+func (tierCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
+		Usage: "tier [档位]", Summary: "fallback 链：走谁、跳过了什么"}
+}
+
+func (tierCommand) Run(_ cliapi.Host, args []string) int { return cmdTier(args) }
+
+type profilesCommand struct{}
+
+var (
+	_ cliapi.Command    = (*profilesCommand)(nil)
+	_ cliapi.Documented = (*profilesCommand)(nil)
+)
+
+func (profilesCommand) Names() []string { return []string{"profiles", "ls"} }
+
+func (profilesCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
+		Usage: "profiles", Summary: "所有 profile（优先级 / 标志 / 覆盖）"}
+}
+
+func (profilesCommand) Run(_ cliapi.Host, _ []string) int { return cmdProfiles() }
+
+type profileCommand struct{}
+
+var (
+	_ cliapi.Command    = (*profileCommand)(nil)
+	_ cliapi.Documented = (*profileCommand)(nil)
+)
+
+func (profileCommand) Names() []string { return []string{"profile"} }
+
+func (profileCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
+		Usage: "profile kv <名> [--write]", Summary: "profile 转 KV 文本"}
+}
+
+func (profileCommand) Run(host cliapi.Host, args []string) int {
+	if cliapi.Arg(args, 0) == "kv" {
+		return cmdProfileKV(args[1:])
+	}
+	return host.Die(64, "用法：newgate profile kv <名> [--write]")
+}
+
+type setProfileCommand struct{}
+
+var (
+	_ cliapi.Command    = (*setProfileCommand)(nil)
+	_ cliapi.Documented = (*setProfileCommand)(nil)
+)
+
+func (setProfileCommand) Names() []string { return []string{"--set-profile"} }
+
+func (setProfileCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
+		Usage:   "--set-profile <名> [--agent <agent>]",
+		Summary: "切 profile；省略 --agent 设全局默认"}
+}
+
+// Run 的形状由界面归一后给：args[0] 是 profile 名，可选的 `--agent <agent>` 跟在
+// 后面。界面负责认 `--set-profile=x` 与 `--set-profile x` 两种写法（argv 解析是它
+// 的活），语义归本模块。
+func (setProfileCommand) Run(_ cliapi.Host, args []string) int {
+	name := cliapi.Arg(args, 0)
+	if name == "" {
+		return style.Die(64, "--set-profile 需要一个 profile 名")
+	}
+	return cmdSetProfile(flagValue(args, "--agent"), name)
+}
+
+// flagValue 取 `--名字 值` 里的值，没有给空串。
+func flagValue(args []string, name string) string {
+	for i, a := range args {
+		if a == name && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// commands 是本模块注入界面的全部命令。没有它就等于没有入口——而入口是 ui 的事，
+// 本模块的功能不受影响（见 CLAUDE.md §4）。
+func commands() []cliapi.Command {
+	return []cliapi.Command{
+		tierCommand{}, profilesCommand{}, profileCommand{}, setProfileCommand{},
+		initCommand{}, reloadCommand{},
+	}
+}
+
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == name {
+			return true
+		}
+	}
+	return false
 }

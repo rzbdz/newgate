@@ -15,11 +15,9 @@ import (
 	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
-	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
-	"github.com/rzbdz/newgate/go/modules/runtime/takeover"
 )
 
 func warnShellEnvConflict(agents agentapi.AgentCatalog, toolID string) {
@@ -48,39 +46,22 @@ func prettyMs(ms int) string {
 
 func prettyDur(sec int) string { return durarg.Format(sec) }
 
-// check 一次体检里的一项。
+// cmdDoctor 体检。
 //
-// 设计是「绿的只占一行，红的才展开」：体检命令每天跑，全绿时应该一眼扫完；
-// 出问题时才需要路径、原因、修法。以前每行都顶着绝对路径和 ✓，等于把
-// 有用的信息埋进噪声里 —— 用户会开始跳着看，然后就漏掉真正的那条。
-type check struct {
-	label   string
-	mark    string
-	line    string   // 一句话结论
-	details []string // 只在有问题时展开
-}
-
-func (c check) print() {
-	fmt.Println(style.Field(c.label, style.Mark(c.mark)+" "+c.line))
-	for _, d := range c.details {
-		fmt.Println(style.Bullet(style.Dim(d)))
-	}
-}
-
+// **界面在这里一项都不认识**：每一行都由拥有那件事的模块经 RegisterDiagnostics
+// 报上来（文件/链路归 config，环境/代理归 gateway，接管/备份归 runtime），界面只
+// 做统一的排版与「有没有红的」这个结论。上一版这里写死了六项，于是界面为了它们
+// import 了 paths / store / resolve / takeover ——那都是别人的知识。
 func cmdDoctor(service *service) int {
 	fmt.Println(style.Title("newgate doctor", Version))
 	fmt.Println(style.Rule(64))
-	checks := []check{
-		checkConfig(),
-		checkChain(),
-		checkEnv(),
-		checkProxy(),
-		checkTakeover(service.agents),
-		checkBackups(),
-	}
-	for _, item := range service.moduleDiagnostics() {
+
+	checks := service.moduleDiagnostics()
+	fmt.Println()
+	bad := 0
+	for _, d := range checks {
 		mark := style.Skip
-		switch item.State {
+		switch d.State {
 		case "ok":
 			mark = style.OK
 		case "warn":
@@ -88,18 +69,13 @@ func cmdDoctor(service *service) int {
 		case "bad":
 			mark = style.Bad
 		}
-		checks = append(checks, check{
-			label: item.Label, mark: mark, line: item.Line, details: item.Details,
-		})
-	}
-
-	fmt.Println()
-	bad := 0
-	for _, c := range checks {
-		if c.mark == style.Bad {
+		if mark == style.Bad {
 			bad++
 		}
-		c.print()
+		fmt.Println(style.Field(d.Label, style.Mark(mark)+" "+d.Line))
+		for _, detail := range d.Details {
+			fmt.Println(style.Bullet(style.Dim(detail)))
+		}
 	}
 
 	fmt.Println()
@@ -109,173 +85,6 @@ func cmdDoctor(service *service) int {
 	}
 	fmt.Printf("%s %d 项异常\n", style.Mark(style.Bad), bad)
 	return 1
-}
-
-// checkConfig 三个必需文件在不在。
-func checkConfig() check {
-	c := check{label: "文件"}
-	var missing, ok []string
-	for _, p := range []string{paths.ProvidersFile(), paths.StateFile(), paths.Mappings()} {
-		if _, err := os.Stat(p); err != nil {
-			missing = append(missing, filepath.Base(p))
-		} else {
-			ok = append(ok, filepath.Base(p))
-		}
-	}
-	extra := ""
-	if names, err := store.ListProfiles(); err == nil {
-		extra = fmt.Sprintf(" · %d 个 profile", len(names))
-	}
-	if len(missing) > 0 {
-		c.mark = style.Bad
-		c.line = strings.Join(missing, " · ") + " 不存在"
-		c.details = append(c.details, "newgate init 铺开默认配置")
-		return c
-	}
-	c.mark = style.OK
-	c.line = strings.Join(ok, " · ") + extra
-	return c
-}
-
-// checkChain profile 引用的 provider 与 key 齐不齐。
-func checkChain() check {
-	c := check{label: "链路"}
-	probs := store.Validate()
-	names, _ := store.ListProfiles()
-	if len(probs) == 0 {
-		c.mark = style.OK
-		c.line = fmt.Sprintf("%d 个 profile 的 provider 与 key 均可用", len(names))
-		return c
-	}
-	c.mark = style.Bad
-	c.line = fmt.Sprintf("%d 处配置问题", len(probs))
-	c.details = probs
-	return c
-}
-
-// checkEnv 出站代理会不会把 loopback 请求劫走。
-//
-// 这是最隐蔽的一类故障：newgate 日志里一条请求都没有，因为请求根本没到我们
-// 这——客户端发给了 http_proxy，代理连不上 127.0.0.1 就回 502。
-func checkEnv() check {
-	c := check{label: "环境"}
-	set := proxyEnvSet()
-	if len(set) == 0 {
-		c.mark = style.OK
-		c.line = "无出站代理变量"
-		return c
-	}
-	noProxy := os.Getenv("no_proxy") + "," + os.Getenv("NO_PROXY")
-	covered := 0
-	for _, want := range []string{"127.0.0.1", "localhost"} {
-		if strings.Contains(noProxy, want) {
-			covered++
-		}
-	}
-	if covered == 2 {
-		c.mark = style.OK
-		c.line = "有出站代理；NO_PROXY 已放行 loopback"
-		c.details = append(c.details, set...)
-		return c
-	}
-	c.mark = style.Bad
-	c.line = "有出站代理；NO_PROXY 未放行 127.0.0.1 / localhost"
-	c.details = append(c.details, set...)
-	c.details = append(c.details,
-		"后果：客户端把 127.0.0.1:8899 的请求交给出站代理，连不上即 502；",
-		"      newgate 日志不会留下任何记录。",
-		"修复（写进 shell rc 后重开客户端）：",
-		`  export NO_PROXY="127.0.0.1,localhost,::1,$NO_PROXY"`,
-		`  export no_proxy="$NO_PROXY"`)
-	return c
-}
-
-func proxyEnvSet() []string {
-	var out []string
-	for _, n := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
-		"all_proxy", "ALL_PROXY"} {
-		if v := os.Getenv(n); v != "" {
-			out = append(out, n+"="+v)
-		}
-	}
-	return out
-}
-
-// checkProxy 代理进程与端口的两种失败要分开说：进程死了可以重启，
-// 端口在听却探不通是环境问题，重启一百次也没用。
-func checkProxy() check {
-	c := check{label: "代理"}
-	st := store.LoadState()
-	info, ps := proxyState()
-	switch {
-	case info == nil:
-		c.mark = style.Skip
-		c.line = fmt.Sprintf("未运行（端口 %d）", st.Port)
-		c.details = append(c.details, "newgate start")
-	case ps != nil:
-		c.mark = style.OK
-		c.line = fmt.Sprintf("pid %d · 127.0.0.1:%d · %s", info.PID, info.Port, prettyDur(ps.UptimeS))
-	default:
-		c.mark = style.Bad
-		c.line = fmt.Sprintf("pid %d 存活，127.0.0.1:%d HTTP 探活失败", info.PID, info.Port)
-		c.details = append(c.details,
-			"进程正常，请求到不了它；常见于出站代理劫持 loopback（见「环境」一项）。")
-	}
-	return c
-}
-
-// checkTakeover 被改写的目标文件。
-func checkTakeover(agents agentapi.AgentCatalog) check {
-	c := check{label: "接管"}
-	var on, off []string
-	for _, id := range agents.Names() {
-		agent, ok := agents.Get(id)
-		if !ok || agent.Config == nil {
-			continue
-		}
-		for _, target := range agent.Config.Targets() {
-			if _, err := os.Stat(target); err != nil {
-				continue
-			}
-			if agent.Config.IsTakenOver(target) {
-				on = append(on, filepath.Base(target))
-			} else {
-				off = append(off, filepath.Base(target))
-			}
-		}
-	}
-	if len(on) == 0 {
-		c.mark = style.Skip
-		c.line = "无文件被改写"
-		return c
-	}
-	c.mark = style.OK
-	c.line = strings.Join(on, " · ")
-	if len(off) > 0 {
-		c.details = append(c.details, "未接管："+strings.Join(off, " · "))
-	}
-	return c
-}
-
-// checkBackups 逃生舱有没有准备好：original/ 里有东西，`newgate stop` 才还原得回去。
-func checkBackups() check {
-	c := check{label: "备份"}
-	orig := filepath.Join(paths.BackupDir(), "original")
-	ents, err := ioutil.ReadDir(orig)
-	if err != nil || len(ents) == 0 {
-		c.mark = style.Skip
-		c.line = "无原始备份"
-		c.details = append(c.details, "接管过配置文件之后才会生成")
-		return c
-	}
-	c.mark = style.OK
-	var names []string
-	for _, e := range ents {
-		names = append(names, e.Name())
-	}
-	c.line = fmt.Sprintf("%d 份原配置 · newgate stop 可还原", len(ents))
-	c.details = append(c.details, "backups/original/ "+strings.Join(names, " · "))
-	return c
 }
 
 // logTailDefault 非终端输出（管道 / 重定向）时的行数。终端上给全量，
@@ -375,6 +184,16 @@ func logCount(args []string) int {
 	return intArg(args, 1, 0)
 }
 
+// sortedKeys 稳定顺序的 map 键（诊断包里几处按名字列 provider 用）。
+func sortedKeys(m map[string]domain.Provider) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func cmdAllLogs(agents agentapi.AgentCatalog, service *service) int {
 	line := func(t string) { fmt.Printf("\n===== %s =====\n", t) }
 
@@ -390,7 +209,7 @@ func cmdAllLogs(agents agentapi.AgentCatalog, service *service) int {
 	}
 
 	line("状态")
-	cmdStatus(agents, service)
+	cmdStatus(service)
 
 	line("providers.json（密钥脱敏）")
 	if provs, err := store.LoadProviders(); err == nil {
@@ -483,232 +302,27 @@ func cmdAllLogs(agents agentapi.AgentCatalog, service *service) int {
 	return 0
 }
 
-func cmdInit(force bool) int {
-	created, err := store.Init(force)
-	if err != nil {
-		return die(70, err.Error())
-	}
-	if len(created) == 0 {
-		fmt.Println("配置已存在，无需初始化（--force 可覆盖）")
-	} else {
-		for _, c := range created {
-			fmt.Println("创建 " + c)
-		}
-	}
-	fmt.Printf("\n下一步：把上游 key 填进 %s\n", paths.ProvidersFile())
-	fmt.Println("默认写入的是占位符，必须改成你自己的 provider / endpoint / 模型名。")
-	fmt.Println("key 建议走环境变量（不落盘）：NEWGATE_KEY_<PROVIDER 大写，- 换 _>")
-	return 0
-}
-
-func sortedKeys(m map[string]domain.Provider) []string {
-	var out []string
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func cmdStatus(agents agentapi.AgentCatalog, service *service) int {
-	st := store.LoadState()
-	info, ps := proxyState()
-
+// cmdStatus 一屏概览。
+//
+// **这一屏的每一行都归它的所有者**：谁的状态谁自己报（RegisterStatus /
+// RegisterStatusBlocks）。界面在这里一行都不认识——代理、接管、配置各由
+// gateway / runtime / config 报上来，界面的全部工作是按 Rank 排一下然后打印。
+func cmdStatus(service *service) int {
 	fmt.Println(style.Title("newgate "+Version, buildTimeDisplay()))
 	fmt.Println(style.Rule(64))
 
-	// 代理（数据面）：它挂了，所有走 newgate 的工具一起挂，所以排第一行。
-	switch {
-	case info == nil:
-		fmt.Println(style.Field("代理", style.Dim("未运行")+"    newgate start"))
-	case ps == nil:
-		fmt.Println(style.Field("代理", style.Yellow("端口无响应")+
-			fmt.Sprintf("   pid %d · 127.0.0.1:%d", info.PID, info.Port)))
-		fmt.Println(style.Hint("进程在，端口不通；常见于出站代理劫持 loopback。newgate doctor"))
-	default:
-		fmt.Println(style.Field("代理", style.Green("● 运行中")+fmt.Sprintf(
-			"   pid %d · 127.0.0.1:%d · %s · %dreq/%derr",
-			info.PID, info.Port, prettyDur(ps.UptimeS), ps.Requests, ps.Failures)))
-	}
-
-	// 接管：回答「谁的命令现在会走 newgate」。期望态（on/off 过什么）和现实态
-	// （磁盘上真装了什么）不一致，正是那两个对称故障的现场。
-	fmt.Println(style.Field("接管", takeoverStatusLine(ps)))
-
-	// 配置：用哪个 profile。
-	fmt.Println(style.Field("配置", configLine(agents, st)))
-	// 插件层自报的状态项由 gateway 经 RegisterStatus 代转（见它的 status.go），
-	// cli 不必认识 special 这个包。
-	// 模块自报的状态行（谁的状态谁自己报，见 RegisterStatus）。
-	for _, line := range service.statusLines(st) {
+	for _, line := range service.statusLines() {
 		fmt.Println(style.Field(line.Label, line.Value))
 	}
-
-	pr, err := store.LoadProfile(st.DefaultProfile)
-	if err != nil {
-		fmt.Println(style.Item(style.Warn, fmt.Sprintf("默认 profile %q 读不出: %v", st.DefaultProfile, err)))
-		return 0
-	}
-	provs, _ := store.LoadProviders()
-
-	fmt.Print(style.Section("档位绑定") + style.Dim("   profile "+st.DefaultProfile) + "\n")
-	t := style.NewTable("档位", "绑定", "备注")
-	for _, role := range domain.Roles {
-		b, ok := pr.Resolve(role)
-		if !ok {
-			t.Row(style.Dim(role), style.Dim("未绑定"), "")
-			continue
+	for _, block := range service.statusBlocks() {
+		if block.Title != "" {
+			fmt.Print(style.Section(block.Title) + "\n")
 		}
-		note := ""
-		if provs != nil {
-			if p, exists := provs.Providers[b.Provider]; !exists {
-				note = style.Red("provider 未定义")
-			} else if p.Key() == "" {
-				note = style.Yellow("缺 api_key")
-			}
-		}
-		t.Row(style.Cyan(role), b.String(), note)
-	}
-	fmt.Print(t.String())
-
-	if snap, err := store.Load(); err == nil {
-		// MaxSteps: 0——`status` 展示的是**完整候选链**，maxAttempts 是单次
-		// 请求的执行上限，不是 membership。传 Attempts() 会把第 4 站之后
-		// 静默裁掉，于是「normal 档里怎么没有 ark」这种观感问题（2026-09-17
-		// 实查：ark 是第 4 站，被这里截掉了）。截断的事实用下面那行提示说，
-		// 而不是让它看起来像不在链里。
-		steps, skips := resolve.BuildChain("normal", snap.Profiles, snap.Providers, resolve.Opts{
-			Active: st.DefaultProfile, Available: availableFromProxy(ps),
-			Rank:     rankFromProxy(ps),
-			MaxSteps: 0})
-		fmt.Print(style.Section("fallback 链") + style.Dim("   normal 档，按序尝试") + "\n")
-		if len(steps) == 0 {
-			fmt.Println(style.Item(style.Warn, "无可用候选   newgate tier normal"))
-		} else {
-			fmt.Print(bindingChain(steps, "  "))
-			if limit := st.Chain.Attempts(); limit < len(steps) {
-				fmt.Println(style.Hint(fmt.Sprintf(
-					"单次请求最多尝试前 %d 站；后续 %d 站仍在链中（newgate tier normal 看明细）",
-					limit, len(steps)-limit)))
-			}
-			if tail := chainTail(steps, skips); tail != "" {
-				fmt.Println(style.Hint(tail))
-			}
+		for _, l := range block.Lines {
+			fmt.Println(l)
 		}
 	}
 	return 0
-}
-
-// takeoverStatusLine 一行说清谁在走 newgate，有异常才展开。
-func takeoverStatusLine(ps *proxyInfo) string {
-	var on, off []string
-	wanted := 0
-	for _, s := range takeover.List() {
-		if s.Wanted {
-			wanted++
-		}
-		switch {
-		case s.Active:
-			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.OK))
-		case s.Wanted:
-			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.Bad))
-		default:
-			off = append(off, s.Agent)
-		}
-	}
-	if len(on) == 0 {
-		line := style.Dim("全部直连")
-		if len(off) > 0 {
-			line += "   " + style.Dim("newgate start / on <agent>")
-		}
-		return line
-	}
-	line := "   " + strings.Join(on, "   ")
-	if len(off) > 0 {
-		line += "   " + style.Dim(strings.Join(off, " ")+" off")
-	}
-	// 代理在跑却有 agent 想接管没接管上：start/build 之后漏了一步，
-	// 不补的话那个工具会静默直连。
-	if ps != nil && countActive() < wanted {
-		line += "\n" + style.Hint(style.Yellow("有 agent 声明接管但未生效，重跑 newgate start"))
-	}
-	return line
-}
-
-func countActive() int {
-	n := 0
-	for _, s := range takeover.List() {
-		if s.Active {
-			n++
-		}
-	}
-	return n
-}
-
-// configLine 一行说清用哪个 profile，有 per-agent 覆盖才展开。
-func configLine(agents agentapi.AgentCatalog, st *domain.State) string {
-	line := style.Cyan(st.DefaultProfile) + style.Dim(" 默认")
-	over := 0
-	var parts []string
-	for _, id := range sortedAgentIDs(agents) {
-		if p := st.Active[id]; p != "" && p != st.DefaultProfile {
-			parts = append(parts, id+" → "+style.Cyan(p))
-			over++
-		}
-	}
-	if over > 0 {
-		line += "   " + strings.Join(parts, "   ")
-	}
-	return line
-}
-
-// chainTail 链尾的一句话总结：还有多少候选被跳过、去哪儿看原因。
-func chainTail(steps []resolve.Step, skips []resolve.Skip) string {
-	if len(skips) == 0 {
-		return fmt.Sprintf("链上 %d 站", len(steps))
-	}
-	reasons := map[string]int{}
-	for _, s := range skips {
-		reasons[skipKind(s.Reason)]++
-	}
-	var parts []string
-	for _, k := range skipKinds {
-		if n := reasons[k]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%s %d", k, n))
-		}
-	}
-	return fmt.Sprintf("链上 %d 站；跳过 %d（%s）   newgate tier normal",
-		len(steps), len(skips), strings.Join(parts, " · "))
-}
-
-// skipKind 把 skip 的自由文本归成几个可数的类目。
-func skipKind(reason string) string {
-	switch {
-	case strings.Contains(reason, "excluded"):
-		return "excluded"
-	case strings.Contains(reason, "熔断"):
-		return "熔断"
-	case strings.Contains(reason, "maxAttempts"):
-		return "超出 maxAttempts"
-	case strings.Contains(reason, "重复") || strings.Contains(reason, "去重"):
-		return "去重"
-	case strings.Contains(reason, "未定义"):
-		return "未定义"
-	case strings.Contains(reason, "api_key"):
-		return "没 key"
-	case strings.Contains(reason, "已禁用"):
-		return "已禁用"
-	case strings.Contains(reason, "成环"):
-		return "引用成环"
-	}
-	return "其他"
-}
-
-// sortedAgentIDs 稳定顺序的已知 agent 列表。
-func sortedAgentIDs(agents agentapi.AgentCatalog) []string {
-	ids := agents.Names()
-	sort.Strings(ids)
-	return ids
 }
 
 // routingOf 已被 runtime/takeover.List() 取代——那里是接管状态的唯一事实源，

@@ -47,6 +47,7 @@ func Name[T any](capability Capability[T]) string { return capability.spec.name 
 type Requirement struct {
 	spec     capabilitySpec
 	optional bool
+	late     bool
 }
 
 // Name 返回这个需求指向的端口名，供装配期枚举与校验用（内核不解释它，就像它
@@ -72,6 +73,23 @@ func Need[T any](capability Capability[T]) Requirement {
 func Optional[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec, optional: true}
 }
+
+// Inject 建立一条**不参与排序**的注入边：端口存在就交给我，但我不排在它后面。
+//
+// 它解决的是一类死结（2026-09-18）：业务模块想往**当前装着的 ui** 里注入自己的
+// 命令与状态行，而 ui 自己也依赖那些模块（它要靠它们渲染）。用 Optional 表达
+// 「ui 可选」会建成环，因为 Optional 仍然是一条排序边；而 Inject 明确说「我不需要
+// 你在前面」——注入发生在**全图 Start 完之后**（Component.Attach），那时谁的端口
+// 都在了，顺序问题自然消失。
+//
+// 这也让 ui 从依赖图里彻底退出去：没有任何模块排在他前面或后面，装不装 ui 只
+// 影响「这些贡献有没有地方去」。
+func Inject[T any](capability Capability[T]) Requirement {
+	return Requirement{spec: capability.spec, optional: true, late: true}
+}
+
+// Late 报告这条需求是不是注入边（由 Inject 建立，不走排序、在 Attach 阶段解析）。
+func (r Requirement) Late() bool { return r.late }
 
 // Provision 把一个具体值绑定到端口。绑定会先于 Start 完成，
 // 因此依赖解析不依赖组件启动时的全局副作用。
@@ -108,7 +126,15 @@ type Component struct {
 	Requires []Requirement
 	Provides []Provision
 	Start    func(context.Context, Context) error
-	Stop     func(context.Context) error
+	// Attach 是**第二阶段**：全图 Start 完之后才跑，用于注入边（见 Inject）。
+	//
+	// 为什么需要它而不是在 Start 里做：注入边的对端（ui）自己不参与排序，Start
+	// 阶段它可能还没起。Attach 阶段保证所有端口都已提供。
+	//
+	// 它必须是幂等可撤销的：Attach 拿到的每个 Release 都由组件自己收好，在 Stop
+	// 里逆序释放——和其它注册端口完全一样。
+	Attach func(context.Context, Context) error
+	Stop   func(context.Context) error
 }
 
 // Release 撤销一次注册所有权。返回句柄而不是暴露全局 Remove，
@@ -223,6 +249,21 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 		}
 		manager.started = i + 1
 	}
+	// 第二阶段：注入边。所有端口都已提供，所以声明 Inject 的组件现在能拿到 ui。
+	for i, component := range manager.components {
+		if component.Attach == nil {
+			continue
+		}
+		if err := component.Attach(ctx, manager.context); err != nil {
+			manager.started = i + 1
+			rollbackErr := manager.Stop(ctx)
+			if rollbackErr != nil {
+				return nil, fmt.Errorf("attach component %s: %w; rollback: %v",
+					component.Name, err, rollbackErr)
+			}
+			return nil, fmt.Errorf("attach component %s: %w", component.Name, err)
+		}
+	}
 	return manager, nil
 }
 
@@ -319,6 +360,11 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 		for _, requirement := range component.Requires {
 			if err := validateSpec(specs, requirement.spec); err != nil {
 				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
+			}
+			if requirement.late {
+				// 注入边不排序：它声明的是「有就给我」，不是「我要排在它后面」。
+				// 参与排序就会成环（ui 依赖业务模块渲染，业务模块依赖 ui 注入）。
+				continue
 			}
 			indexes := providers[requirement.spec.name]
 			if len(indexes) == 0 && !requirement.optional {

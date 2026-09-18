@@ -103,7 +103,7 @@ func (statusCommand) Help() HelpLine {
 	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
 		Usage: "status", Summary: "谁在走 newgate、用哪个 profile"}
 }
-func (c statusCommand) Run(_ Host, _ []string) int { return cmdStatus(c.s.agents, c.s) }
+func (c statusCommand) Run(_ Host, _ []string) int { return cmdStatus(c.s) }
 
 // runOnceCommand 是 `newgate run <agent>` 的显式写法。
 //
@@ -121,65 +121,6 @@ func (c runOnceCommand) Run(_ Host, args []string) int {
 }
 
 // ---------- 路由与配置 ----------
-
-type tierCommand struct{}
-
-func (tierCommand) Names() []string {
-	return []string{"tier", "tiers", "role", "roles"}
-}
-func (tierCommand) Help() HelpLine {
-	return HelpLine{Section: SectionRouting, Rank: rankRouting,
-		Usage: "tier [档位]", Summary: "fallback 链：走谁、跳过了什么"}
-}
-func (tierCommand) Run(_ Host, args []string) int { return cmdTier(args) }
-
-type profilesCommand struct{}
-
-func (profilesCommand) Names() []string { return []string{"profiles", "ls"} }
-func (profilesCommand) Help() HelpLine {
-	return HelpLine{Section: SectionRouting, Rank: rankRouting,
-		Usage: "profiles", Summary: "所有 profile（优先级 / 标志 / 覆盖）"}
-}
-func (profilesCommand) Run(_ Host, _ []string) int { return cmdProfiles() }
-
-type profileCommand struct{}
-
-func (profileCommand) Names() []string { return []string{"profile"} }
-func (profileCommand) Help() HelpLine {
-	return HelpLine{Section: SectionRouting, Rank: rankRouting,
-		Usage: "profile kv <名> [--write]", Summary: "profile 转 KV 文本"}
-}
-func (profileCommand) Run(host Host, args []string) int {
-	if arg(args, 0) == "kv" {
-		return cmdProfileKV(args[1:])
-	}
-	return host.Die(64, "用法：newgate profile kv <名> [--write]")
-}
-
-type setProfileCommand struct{ s *service }
-
-func (setProfileCommand) Names() []string { return []string{"--set-profile"} }
-func (setProfileCommand) Help() HelpLine {
-	return HelpLine{Section: SectionRouting, Rank: rankRouting,
-		Usage:   "--set-profile <名> [--agent <agent>]",
-		Summary: "切 profile；省略 --agent 设全局默认"}
-}
-func (c setProfileCommand) Run(_ Host, args []string) int {
-	name := arg(args, 0)
-	if name == "" {
-		return die(64, "--set-profile 需要一个 profile 名")
-	}
-	return cmdSetProfile(findFlag(args, "--agent", "--tool", "--target"), name)
-}
-
-type agentsCommand struct{ s *service }
-
-func (agentsCommand) Names() []string { return []string{"agents"} }
-func (agentsCommand) Help() HelpLine {
-	return HelpLine{Section: SectionRouting, Rank: rankRouting,
-		Usage: "agents", Summary: "已知 agent 及其模型槽位"}
-}
-func (c agentsCommand) Run(_ Host, _ []string) int { return cmdAgents(c.s.agents) }
 
 // ---------- 探测与观测 ----------
 
@@ -222,24 +163,6 @@ func (allLogsCommand) Help() HelpLine {
 func (c allLogsCommand) Run(_ Host, _ []string) int { return cmdAllLogs(c.s.agents, c.s) }
 
 // ---------- 维护 ----------
-
-type reloadCommand struct{}
-
-func (reloadCommand) Names() []string { return []string{"reload"} }
-func (reloadCommand) Help() HelpLine {
-	return HelpLine{Section: SectionMaintenance, Rank: rankMaint,
-		Usage: "reload", Summary: "立刻重读配置（平时 1 秒内自动热更新）"}
-}
-func (reloadCommand) Run(_ Host, _ []string) int { return cmdReload() }
-
-type initCommand struct{}
-
-func (initCommand) Names() []string { return []string{"init"} }
-func (initCommand) Help() HelpLine {
-	return HelpLine{Section: SectionMaintenance, Rank: rankMaint,
-		Usage: "init [--force]", Summary: "铺开默认配置"}
-}
-func (initCommand) Run(_ Host, args []string) int { return cmdInit(has(args, "--force")) }
 
 type shimCommand struct{ s *service }
 
@@ -300,10 +223,9 @@ func ownCommands(s *service) []Command {
 	return []Command{
 		startCommand{s}, stopCommand{s}, takeoverCommand{s}, releaseCommand{s},
 		restartCommand{s}, statusCommand{s}, runOnceCommand{s},
-		tierCommand{}, profilesCommand{}, profileCommand{}, setProfileCommand{s}, agentsCommand{s},
 		breakerCommand{}, doctorCommand{s},
 		logsCommand{}, allLogsCommand{s},
-		reloadCommand{}, initCommand{}, shimCommand{s},
+		shimCommand{s},
 		versionCommand{}, helpCommand{s}, serveCommand{s},
 	}
 }

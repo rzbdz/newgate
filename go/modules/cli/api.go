@@ -19,6 +19,8 @@ type (
 	DiagnosticProvider = ext.DiagnosticProvider
 	StatusLine         = ext.StatusLine
 	StatusProvider     = ext.StatusProvider
+	StatusBlock        = ext.StatusBlock
+	BlockProvider      = ext.BlockProvider
 	Host               = ext.Host
 	Command            = ext.Command
 	HelpLine           = ext.HelpLine

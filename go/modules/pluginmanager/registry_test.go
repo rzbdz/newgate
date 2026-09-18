@@ -34,6 +34,10 @@ func (s *stubCLI) RegisterStatus(p cliapi.StatusProvider) (modules.Release, erro
 	return func() error { return nil }, nil
 }
 
+func (s *stubCLI) RegisterStatusBlocks(cliapi.BlockProvider) (modules.Release, error) {
+	return func() error { return nil }, nil
+}
+
 // stubHooks 让 plugin-manager 的 Start 能跑完。真实的 confighook 会做字段查重，
 // 那是它自己的测试该管的事；这里只关心 plugin-manager 自己那份账本。
 type stubHooks struct{ fields map[string]string }

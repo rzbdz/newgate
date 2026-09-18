@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
-	"github.com/rzbdz/newgate/go/modules/config/domain"
+	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
@@ -19,6 +19,10 @@ import (
 //
 // 只列**离开出厂态**的：三个开关全都默认开，一行「全开」不占版面也没信息量，
 // 与 status 那一屏「一眼看有没有被关掉东西」的定位一致。
+// status 行的位置（Rank 小的在前）。这几行在 status 那一屏上排在接管/配置之前
+// ——代理挂了所有走 newgate 的工具一起挂，所以它第一。
+const rankStatusPatch = 40 // 排在代理（10）之后
+
 type switchStatus struct{}
 
 var _ cliapi.StatusProvider = switchStatus{}
@@ -29,13 +33,11 @@ var _ cliapi.StatusProvider = switchStatus{}
 // （special.StatusProvider）：那一层的注册表归本模块，插件是它的一部分，
 // 所以由本模块把它们端给 cli。cli 因此不必 import gateway/special 就能显示
 // 「插件说它现在是什么状态」——谁的状态谁自己报，这一层由 owner 代收。
-func (switchStatus) Status(st *domain.State) []cliapi.StatusLine {
-	if st == nil {
-		return nil
-	}
+func (switchStatus) Status() []cliapi.StatusLine {
+	st := store.LoadState()
 	var out []cliapi.StatusLine
 	for _, item := range special.Statuses(st) {
-		out = append(out, cliapi.StatusLine{Label: item.Label, Value: item.Value})
+		out = append(out, cliapi.StatusLine{Rank: rankStatusPatch, Label: item.Label, Value: item.Value})
 	}
 
 	var parts []string
@@ -60,6 +62,7 @@ func (switchStatus) Status(st *domain.State) []cliapi.StatusLine {
 	}
 	if len(parts) > 0 {
 		out = append(out, cliapi.StatusLine{
+			Rank:  rankStatusPatch,
 			Label: "补丁开关",
 			Value: strings.Join(parts, "   ") + "   恢复：newgate st on · newgate schema-repair on · newgate debug off",
 		})

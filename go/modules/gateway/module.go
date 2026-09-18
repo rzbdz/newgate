@@ -37,7 +37,7 @@ func New() modules.Component {
 		Type: "gateway",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
-			modules.Optional(cliapi.Capability),
+			modules.Inject(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
@@ -47,25 +47,39 @@ func New() modules.Component {
 
 			// ui 是**可选**的（见 CLAUDE.md §4「ui 只是一类普通模块」）：没装任何
 			// ui 时这些命令就没有入口，但网关功能照常——本模块不依赖 ui 存在。
-			if cli, ok := modules.Get(ctx, cliapi.Capability); ok {
-				for _, cmd := range []cliapi.Command{
-					specialCommand{}, schemaRepairCommand{}, debugCommand{},
-					// 观测面也归数据面自己：计数器怎么分组、探活探出了什么，
-					// 都是网关的语义（见 command_metrics.go / command_probe.go）。
-					metricsCommand{}, probeCommand{},
-				} {
-					release, err := cli.RegisterCommand(cmd)
-					if err != nil {
-						return err
-					}
-					releases = append(releases, release)
-				}
-				// 补丁开关的状态行也归本模块自报（见 status.go）。
-				statusRelease, err := cli.RegisterStatus(switchStatus{})
+			return nil
+		},
+		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，所以它可能
+		// 比本模块晚起——Start 阶段它还没提供端口。Attach 在全图 Start 完之后跑。
+		Attach: func(_ context.Context, ctx modules.Context) error {
+			cli, ok := modules.Get(ctx, cliapi.Capability)
+			if !ok {
+				return nil
+			}
+			for _, cmd := range []cliapi.Command{
+				specialCommand{}, schemaRepairCommand{}, debugCommand{},
+				// 观测面也归数据面自己：计数器怎么分组、探活探出了什么，
+				// 都是网关的语义（见 command_metrics.go / command_probe.go）。
+				metricsCommand{}, probeCommand{},
+			} {
+				release, err := cli.RegisterCommand(cmd)
 				if err != nil {
 					return err
 				}
-				releases = append(releases, statusRelease)
+				releases = append(releases, release)
+			}
+			// 补丁开关的状态行、代理那一行、以及两条体检（环境 / 代理）都归
+			// 本模块自报（见 status.go / diagnostics.go）。
+			for _, register := range []func() (modules.Release, error){
+				func() (modules.Release, error) { return cli.RegisterStatus(switchStatus{}) },
+				func() (modules.Release, error) { return cli.RegisterStatus(gatewayReporter{}) },
+				func() (modules.Release, error) { return cli.RegisterDiagnostics(gatewayReporter{}) },
+			} {
+				release, err := register()
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
 			}
 			return nil
 		},

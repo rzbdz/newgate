@@ -12,12 +12,11 @@ package cli
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	modules "github.com/rzbdz/newgate/go/component"
 
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
-	configapi "github.com/rzbdz/newgate/go/modules/config"
-	"github.com/rzbdz/newgate/go/modules/config/domain"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 )
@@ -39,6 +38,7 @@ type service struct {
 	commands    modules.Registry[Command]
 	diagnostics modules.Registry[DiagnosticProvider]
 	statuses    modules.Registry[StatusProvider]
+	blocks      modules.Registry[BlockProvider]
 }
 
 var _ CLI = (*service)(nil)
@@ -90,6 +90,14 @@ func (s *service) RegisterStatus(provider StatusProvider) (modules.Release, erro
 	return s.statuses.Register(provider, nil)
 }
 
+// RegisterStatusBlocks 注入 `newgate status` 里的成块内容（表格等）。
+func (s *service) RegisterStatusBlocks(provider BlockProvider) (modules.Release, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("cli: 状态块提供者不能为 nil")
+	}
+	return s.blocks.Register(provider, nil)
+}
+
 // Run 注入本次构建信息后进入统一命令分派；模块命令从账本里现取（不是启动时
 // 拍快照）——注入方可能比界面晚一步才注册，现取才不会漏。
 func (s *service) Run(args []string, build BuildInfo) int {
@@ -111,20 +119,33 @@ func (s *service) moduleCommand(name string) (Command, bool) {
 	return nil, false
 }
 
-// statusLines 汇总所有模块注入的 status 行。与 moduleDiagnostics 同构。
-func (s *service) statusLines(st *domain.State) []StatusLine {
+// statusLines 汇总所有模块注入的 status 行，按 Rank 排序（同 Rank 保持注册顺序）。
+func (s *service) statusLines() []StatusLine {
 	var out []StatusLine
 	for _, provider := range s.statuses.All() {
-		out = append(out, provider.Status(st)...)
+		out = append(out, provider.Status()...)
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
 	return out
 }
 
+// statusBlocks 汇总所有模块注入的状态块，按 Rank 排序。
+func (s *service) statusBlocks() []StatusBlock {
+	var out []StatusBlock
+	for _, provider := range s.blocks.All() {
+		out = append(out, provider.StatusBlocks()...)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
+	return out
+}
+
+// moduleDiagnostics 汇总所有模块注入的体检项，按 Rank 排序（同 Rank 保持注册顺序）。
 func (s *service) moduleDiagnostics() []Diagnostic {
 	var out []Diagnostic
 	for _, provider := range s.diagnostics.All() {
 		out = append(out, provider.Diagnostics()...)
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
 	return out
 }
 
@@ -144,7 +165,8 @@ func New() modules.Component {
 		Name: "cli",
 		Type: "cli",
 		Requires: []modules.Requirement{
-			modules.Need(configapi.Capability),
+			// 注意这里**没有 config**：界面不消费配置端口（渲染用的数据由 config 自己
+			// 报上来）。留着一条用不到的出边会让 config 永远注入不进来——它会成环。
 			modules.Need(runtimeapi.Capability),
 			modules.Need(confighookapi.AgentCatalogCapability),
 			// daemon 角色要用它构造数据面（forward.New 的第四个参数），
