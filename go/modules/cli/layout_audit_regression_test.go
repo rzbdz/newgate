@@ -5,19 +5,23 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/rzbdz/newgate/go/modules/runtime/agentstate"
 )
 
-func TestLayoutAuditExemptsEveryTUIAlias(t *testing.T) {
+// TestLayoutAuditLeavesRawOutputAlone 锁住「谁不排版谁自己说」这条：界面不再
+// 维护一张命令名名单（见 cliapi.Unstyled），所以这里对着**真账本**验。
+func TestLayoutAuditLeavesRawOutputAlone(t *testing.T) {
 	t.Setenv("NEWGATE_LAYOUT_AUDIT", "1")
-	for _, args := range [][]string{{"tui"}, {"menuconfig"}} {
-		if shouldAuditLayout(agentstate.Catalog(), args) {
-			t.Fatalf("shouldAuditLayout(%q) = true; TUI must retain the real terminal", args)
-		}
+
+	var s service
+	// tui 是模块注入的命令：它自己声明 Unstyled，界面不必认识它。
+	if err := s.registerOwnCommands(); err != nil {
+		t.Fatal(err)
 	}
-	if !shouldAuditLayout(agentstate.Catalog(), []string{"restart"}) {
-		t.Fatal("formatted lifecycle output should be audited")
+	if shouldAuditLayout(&s, []string{"alllogs"}) {
+		t.Fatal("alllogs 是原始转储，不该审计版式")
+	}
+	if !shouldAuditLayout(&s, []string{"doctor"}) {
+		t.Fatal("doctor 的输出是版式，必须审计")
 	}
 }
 

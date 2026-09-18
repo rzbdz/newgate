@@ -58,9 +58,13 @@ type tuiCommand struct{}
 var (
 	_ cliapi.Command    = tuiCommand{}
 	_ cliapi.Documented = tuiCommand{}
+	_ cliapi.Unstyled   = tuiCommand{}
 )
 
 func (tuiCommand) Names() []string { return []string{"tui", "menuconfig"} }
+
+// Unstyled：全屏界面，不是 newgate 的版式（见 cliapi.Unstyled）。
+func (tuiCommand) Unstyled([]string) bool { return true }
 
 func (tuiCommand) Help() cliapi.HelpLine {
 	// Rank 50 = 维护那一节（与界面自己的那批同节）。数字是约定，留了空档给插队。

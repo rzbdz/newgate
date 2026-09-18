@@ -11,8 +11,6 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
 type widthViolation struct {
@@ -22,24 +20,22 @@ type widthViolation struct {
 	text   string
 }
 
-func shouldAuditLayout(agents agentapi.AgentCatalog, args []string) bool {
+func shouldAuditLayout(service *service, args []string) bool {
 	explicit := os.Getenv("NEWGATE_LAYOUT_AUDIT") != ""
 	if len(args) == 0 {
 		return explicit || gatewaystate.DebugActive(store.LoadState())
 	}
-	switch args[0] {
-	case "__serve", "logs", "log", "alllogs", "all-logs", "tui", "menuconfig", "run":
-		return false
-	case "probe":
-		if has(args, "--json") {
+	// 不审计的两类，**都由命令自己声明**，界面不列名单、也不猜：
+	//   - Unstyled：这次的输出本来就不是 newgate 的版式（JSON / 原始配置 / 日志）；
+	//   - Handoff：控制权要交给别的进程（包装启动一个客户端）。
+	// 上一版这里是界面里一张 `switch args[0]` 的名字表，每加一个命令都得回来改。
+	if command, ok := lookupCommand(service, args); ok {
+		if _, handoff := command.(Handoff); handoff {
 			return false
 		}
-	case "profile":
-		// `profile kv` 是给管道/文件用的原始配置，不是控制面版式。
-		return false
-	}
-	if _, launching := detectLaunch(agents, args); launching {
-		return false
+		if unstyled, ok := command.(Unstyled); ok && unstyled.Unstyled(args[1:]) {
+			return false
+		}
 	}
 	return explicit || gatewaystate.DebugActive(store.LoadState())
 }

@@ -39,21 +39,6 @@ func (statusCommand) Help() HelpLine {
 }
 func (c statusCommand) Run(_ Host, _ []string) int { return cmdStatus(c.s) }
 
-// runOnceCommand 是 `newgate run <agent>` 的显式写法。
-//
-// 它没有 HelpLine 之外的行为：argv0 分发与 `--profile` 都走 main 与 cmdLaunch
-// （见 run() 的编排）。这里注册它只是为了让它出现在 help 里、并且不被当成未知命令。
-type runOnceCommand struct{ s *service }
-
-func (runOnceCommand) Names() []string { return []string{"run"} }
-func (runOnceCommand) Help() HelpLine {
-	return HelpLine{Section: SectionRunOnce, Rank: rankRunOnce,
-		Usage: "run <agent> [args…]", Summary: "用某个 profile 跑一次"}
-}
-func (c runOnceCommand) Run(_ Host, args []string) int {
-	return cmdLaunch(c.s.runtime, c.s.agents, append([]string{"run"}, args...))
-}
-
 // ---------- 探测与观测 ----------
 
 type doctorCommand struct{ s *service }
@@ -68,6 +53,9 @@ func (c doctorCommand) Run(_ Host, _ []string) int { return cmdDoctor(c.s) }
 type allLogsCommand struct{ s *service }
 
 func (allLogsCommand) Names() []string { return []string{"alllogs", "all-logs"} }
+
+// Unstyled：诊断包是**原始转储**（日志原文 + 配置原文），不是给人扫的版式。
+func (allLogsCommand) Unstyled([]string) bool { return true }
 func (allLogsCommand) Help() HelpLine {
 	return HelpLine{Section: SectionObserve, Rank: rankObserve,
 		Usage: "alllogs", Summary: "完整诊断包"}
@@ -109,7 +97,7 @@ func (c helpCommand) Run(_ Host, _ []string) int {
 // 挪到拥有它的模块即可——见文件头的说明。
 func ownCommands(s *service) []Command {
 	return []Command{
-		statusCommand{s}, runOnceCommand{s},
+		statusCommand{s},
 		doctorCommand{s},
 		allLogsCommand{s},
 		versionCommand{}, helpCommand{s},

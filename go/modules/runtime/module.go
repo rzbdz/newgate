@@ -61,7 +61,8 @@ func New() modules.Component {
 			}
 			// catalog 在 Attach 里现取（Start 里那份是局部变量，注入阶段已经出了作用域）。
 			agents := modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
-			for _, cmd := range commands(agents) {
+			all := append(commands(agents), launchCommands(service, agents)...)
+			for _, cmd := range all {
 				release, err := ui.RegisterCommand(cmd)
 				if err != nil {
 					return err

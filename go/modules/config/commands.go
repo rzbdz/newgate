@@ -618,9 +618,13 @@ type profileCommand struct{}
 var (
 	_ cliapi.Command    = (*profileCommand)(nil)
 	_ cliapi.Documented = (*profileCommand)(nil)
+	_ cliapi.Unstyled   = (*profileCommand)(nil)
 )
 
 func (profileCommand) Names() []string { return []string{"profile"} }
+
+// Unstyled：`profile kv` 吐的是给管道/文件用的原始 KV 文本，不是控制面版式。
+func (profileCommand) Unstyled(args []string) bool { return cliapi.Arg(args, 0) == "kv" }
 
 func (profileCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,

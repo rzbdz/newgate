@@ -34,9 +34,15 @@ type probeCommand struct{}
 var (
 	_ cliapi.Command    = (*probeCommand)(nil)
 	_ cliapi.Documented = (*probeCommand)(nil)
+	_ cliapi.Unstyled   = (*probeCommand)(nil)
 )
 
 func (probeCommand) Names() []string { return []string{"probe"} }
+
+// Unstyled：`probe --json` 给的是机器可读的原文，不是给人看的版式。
+func (probeCommand) Unstyled(args []string) bool {
+	return cliapi.FlagValue(args, "--json") != "" || hasFlag(args, "--json")
+}
 
 func (probeCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionObserve, Rank: rankObserve,

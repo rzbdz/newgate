@@ -25,6 +25,8 @@ type (
 	Command            = ext.Command
 	HelpLine           = ext.HelpLine
 	Documented         = ext.Documented
+	Handoff            = ext.Handoff
+	Unstyled           = ext.Unstyled
 	CLI                = ext.CLI
 	BuildInfo          = ext.BuildInfo
 )
