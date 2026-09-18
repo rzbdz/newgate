@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/lib/style"
+	"github.com/rzbdz/newgate/go/modules/config/domain"
+	"github.com/rzbdz/newgate/go/modules/config/roleprov"
 )
 
 // Version 由 main 注入。
@@ -144,16 +146,57 @@ func usageText(service *service) string {
 	term := func(left, right string) {
 		b.WriteString("  " + style.Pad(style.Cyan(left), 10) + style.Dim(right) + "\n")
 	}
-	term("agent", "被接管的 CLI：claude / opencode")
+	term("agent", "被接管的 CLI："+agentNames(service))
 	term("tier", "能力档 heavy > normal（主力）> mid > light，另加正交的 vision")
 	term("profile", "一套「档位 → provider/模型」绑定")
-	term("槽位键", "模块贡献的动态角色（omo-sisyphus / cat-deep），写法同档位")
+	term("槽位键", slotTerm())
 	term("st", "special_treatment：只对某家上游生效的请求补丁")
 	term("plugin", "模块分类（infra/gateway/client/model/…）与它的运行期开关点")
 
 	sec("配置")
 	raw(style.Dim("~/.config/newgate/ · providers.json · mappings/*.kv · state.json"))
 	return b.String()
+}
+
+// agentNames 已知的 agent 名，**从注册表读**。
+//
+// 术语表原来写死「claude / opencode」——客户端 id 是各客户端模块的键，CLI 不该
+// 知道任何一个（2026-09-18）。装一个新客户端，帮助文本不该需要跟着改。
+func agentNames(service *service) string {
+	if service == nil || service.agents == nil {
+		return "（未装配）"
+	}
+	names := service.agents.Names()
+	if len(names) == 0 {
+		return "（无）"
+	}
+	return strings.Join(names, " / ")
+}
+
+// slotTerm 术语表里「槽位键」那一行的例子。键名由模块贡献（见
+// domain.ExtraRole），所以例子也现取——原来写死的 omo-sisyphus / cat-deep
+// 是 opencode-omo 的键，删掉那个模块之后帮助里就会留一个不存在的键。
+func slotTerm() string {
+	// 现刷一次动态角色表。它平时只在 store.Load（装配置快照）时刷新，而
+	// `--help` 不装快照——不刷新的话这里读到的永远是空的，帮助里那行例子
+	// 就会静默消失（2026-09-18 实测：改成现取之后例子没了）。读失败不挡
+	// 帮助（失败开放），最差是那行退化成不带例子的说法。
+	_ = roleprov.Refresh()
+
+	var keys []string
+	for _, r := range domain.ExtraRoles() {
+		if r.Source == "builtin" {
+			continue // 内置别名（normal→mid）是向下兼容，不是「槽位键」的例子
+		}
+		keys = append(keys, r.Key)
+	}
+	if len(keys) == 0 {
+		return "模块贡献的动态角色，写法同档位"
+	}
+	if len(keys) > 2 {
+		keys = keys[:2]
+	}
+	return "模块贡献的动态角色（" + strings.Join(keys, " / ") + "），写法同档位"
 }
 
 func runCLI(service *service, args []string) int {
