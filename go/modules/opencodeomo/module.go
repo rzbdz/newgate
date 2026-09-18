@@ -46,13 +46,12 @@ func New() modules.Component {
 			modules.Need(configapi.Capability),
 			modules.Need(agentapi.ConfigHooksCapability),
 			modules.Need(opencodeapi.Capability),
-			modules.Need(cliapi.Capability),
+			modules.Optional(cliapi.Capability),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			config := modules.MustGet(ctx, agentapi.ConfigHooksCapability)
 			configStore := modules.MustGet(ctx, configapi.Capability)
 			client := modules.MustGet(ctx, opencodeapi.Capability)
-			cli := modules.MustGet(ctx, cliapi.Capability)
 			release, err := config.BindTakeover(client.AgentID, Takeover())
 			if err != nil {
 				return err
@@ -63,16 +62,19 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, release)
-			release, err = cli.RegisterCommand(omoCommand{})
-			if err != nil {
-				return err
+			// ui 可选（见 CLAUDE.md §4）：没装任何 ui 就没有入口，槽位接管照常。
+			if cli, ok := modules.Get(ctx, cliapi.Capability); ok {
+				release, err = cli.RegisterCommand(omoCommand{})
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
+				release, err = cli.RegisterDiagnostics(diagnostics{})
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
 			}
-			releases = append(releases, release)
-			release, err = cli.RegisterDiagnostics(diagnostics{})
-			if err != nil {
-				return err
-			}
-			releases = append(releases, release)
 			return nil
 		},
 		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },

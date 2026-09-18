@@ -57,6 +57,12 @@ type Requirement struct {
 // 比把不变量塞进内核合适。
 func (r Requirement) Name() string { return r.spec.name }
 
+// Optional 报告这个需求是不是可选的（由 Optional 而非 Need 建立）。
+//
+// 与 Name 同属装配期枚举：产品层要断言「业务模块对 ui 只做可选依赖」这类
+// 层级不变量，内核只提供观测手段，不解释「ui」是什么。
+func (r Requirement) Optional() bool { return r.optional }
+
 // Need 建立硬依赖；缺少提供者时整张图拒绝启动。
 func Need[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec}

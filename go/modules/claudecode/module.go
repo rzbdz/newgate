@@ -32,7 +32,7 @@ func New() modules.Component {
 			modules.Need(thinkingapi.Capability),
 			// 注册自己的命令（newgate naked）。依赖方向是**本模块 → cli**：
 			// cli 不认识任何业务模块，模块反过来认识它。
-			modules.Need(cliapi.Capability),
+			modules.Optional(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability,
@@ -70,13 +70,15 @@ func New() modules.Component {
 			}
 			releases = append(releases, release)
 
-			// 自己的命令自己贡献：cli 不认识本模块，是本模块认识 cli。
-			cli := modules.MustGet(ctx, cliapi.Capability)
-			release, err = cli.RegisterCommand(nakedCommand{})
-			if err != nil {
-				return err
+			// 自己的命令自己贡献：界面不认识本模块，是本模块认识界面。
+			// ui 可选（见 CLAUDE.md §4）：没装任何 ui 就没有入口，本模块功能照常。
+			if cli, ok := modules.Get(ctx, cliapi.Capability); ok {
+				release, err := cli.RegisterCommand(nakedCommand{})
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
 			}
-			releases = append(releases, release)
 			return nil
 		},
 		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },

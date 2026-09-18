@@ -129,10 +129,25 @@ func Arg(args []string, i int) string {
 }
 
 // HelpLine 是命令在 `newgate --help` 里占的那一行。
+//
+// **节名与位置都由命令自己声明，界面不认识任何一节**。上一版是反过来的：界面
+// 里写死一张 cmd(...) 清单，于是每加一个模块就要回来改界面——命令搬回模块之后
+// 界面还在硬编码它们，"搬了"就等于白搬。
 type HelpLine struct {
-	Section string // 归到哪一节：接管 / 跑一次 / 路由与配置 / 探测与观测 / 维护 / 模块
-	Usage   string // 左列，命令写法
-	Summary string // 右列，一句话结论
+	// Section 归到哪一节。节名是**装机决定的**：装哪些模块、它们各开哪一节，
+	// 由编排者（用户/开发者）自己安排，框架不认识任何一节的名字。空 = 不分组。
+	Section string
+	// Rank 决定位置：**小的在前**。节的顺序取该节所有行里最小的 Rank，节内按
+	// Rank 再按 Usage 排（同 Rank 时顺序稳定，不会每次跑都不一样）。
+	//
+	// 为什么用整数而不是固定枚举：节的集合随装机变化，枚举必然要改框架。留出
+	// 空档（10/20/30…）就是留给别人插队的余量——与「Type 的词汇表归产品层」
+	// 是同一条规矩。
+	Rank int
+	// Usage 左列，命令写法。
+	Usage string
+	// Summary 右列，一句话结论。
+	Summary string
 }
 
 // Documented 是 Command 的可选搭档：命令自己声明它在 --help 里长什么样。

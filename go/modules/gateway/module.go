@@ -37,7 +37,7 @@ func New() modules.Component {
 		Type: "gateway",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
-			modules.Need(cliapi.Capability),
+			modules.Optional(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
@@ -45,21 +45,23 @@ func New() modules.Component {
 		Start: func(_ context.Context, ctx modules.Context) error {
 			restore = special.InstallDefault(port.registry)
 
-			cli := modules.MustGet(ctx, cliapi.Capability)
-			for _, cmd := range []cliapi.Command{specialCommand{}, schemaRepairCommand{}, debugCommand{}} {
-				release, err := cli.RegisterCommand(cmd)
+			// ui 是**可选**的（见 CLAUDE.md §4「ui 只是一类普通模块」）：没装任何
+			// ui 时这些命令就没有入口，但网关功能照常——本模块不依赖 ui 存在。
+			if cli, ok := modules.Get(ctx, cliapi.Capability); ok {
+				for _, cmd := range []cliapi.Command{specialCommand{}, schemaRepairCommand{}, debugCommand{}} {
+					release, err := cli.RegisterCommand(cmd)
+					if err != nil {
+						return err
+					}
+					releases = append(releases, release)
+				}
+				// 补丁开关的状态行也归本模块自报（见 status.go）。
+				statusRelease, err := cli.RegisterStatus(switchStatus{})
 				if err != nil {
 					return err
 				}
-				releases = append(releases, release)
+				releases = append(releases, statusRelease)
 			}
-
-			// 补丁开关的状态行也归本模块自报（见 status.go）。
-			statusRelease, err := cli.RegisterStatus(switchStatus{})
-			if err != nil {
-				return err
-			}
-			releases = append(releases, statusRelease)
 			return nil
 		},
 		Stop: func(context.Context) error {
