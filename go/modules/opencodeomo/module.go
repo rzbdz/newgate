@@ -12,11 +12,11 @@ import (
 	"path/filepath"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	opencodeapi "github.com/rzbdz/newgate/go/modules/opencode"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 type configTakeover struct{}
@@ -35,7 +35,7 @@ func Takeover() agentapi.ConfigTakeover { return configTakeover{} }
 //
 // 这也**反转了 cli 与 opencode-omo 的启动顺序**：2026-09-17 之前 omo 先起、
 // cli 后起并在 Start 里取一次快照；现在 cli 先起，omo 在 Start 里拿到
-// surface.Capability 再注册。停止顺序随之反转成 omo 先停、cli 后停——释放时
+// cliapi.Capability 再注册。停止顺序随之反转成 omo 先停、cli 后停——释放时
 // 目标必然还活着。
 func New() modules.Component {
 	var releases []modules.Release
@@ -46,13 +46,13 @@ func New() modules.Component {
 			modules.Need(configapi.Capability),
 			modules.Need(agentapi.ConfigHooksCapability),
 			modules.Need(opencodeapi.Capability),
-			modules.Need(surface.Capability),
+			modules.Need(cliapi.Capability),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			config := modules.MustGet(ctx, agentapi.ConfigHooksCapability)
 			configStore := modules.MustGet(ctx, configapi.Capability)
 			client := modules.MustGet(ctx, opencodeapi.Capability)
-			cli := modules.MustGet(ctx, surface.Capability)
+			cli := modules.MustGet(ctx, cliapi.Capability)
 			release, err := config.BindTakeover(client.AgentID, Takeover())
 			if err != nil {
 				return err

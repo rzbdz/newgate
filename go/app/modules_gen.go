@@ -21,7 +21,6 @@ import (
 	mod_opencodeomo "github.com/rzbdz/newgate/go/modules/opencodeomo"
 	mod_pluginmanager "github.com/rzbdz/newgate/go/modules/pluginmanager"
 	mod_runtime "github.com/rzbdz/newgate/go/modules/runtime"
-	mod_surface "github.com/rzbdz/newgate/go/modules/surface"
 	mod_thinking "github.com/rzbdz/newgate/go/modules/thinking"
 	mod_wrapper "github.com/rzbdz/newgate/go/modules/wrapper"
 )
@@ -44,7 +43,6 @@ func generatedComponents() []modules.Component {
 		mod_opencodeomo.New(),
 		mod_pluginmanager.New(),
 		mod_runtime.New(),
-		mod_surface.New(),
 		mod_thinking.New(),
 		mod_wrapper.New(),
 	}

@@ -3,9 +3,9 @@ package pluginmanager
 import (
 	"testing"
 
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 // stubHost 是 Host 的最小实现。命令只用到 Die 和 NotifyProxy，其余是接口噪音。
@@ -29,7 +29,7 @@ func (h *stubHost) PrintThinkCache() {}
 
 func (h *stubHost) NotifyProxy() { h.notified++ }
 
-var _ surface.Host = (*stubHost)(nil)
+var _ cliapi.Host = (*stubHost)(nil)
 
 // TestRunGetsArgsWithoutTheVerb 守命令的参数下标基准。
 //

@@ -14,11 +14,9 @@ import (
 // 而下面这张表说的是**我们认为谁该在谁前面**。加一条依赖把层级搞反（比如让
 // config 去依赖某个客户端模块）时，这里会红。
 //
-// 2026-09-18：命令/诊断/状态行三本账从 cli 下沉到了 **surface**（叶子模块），
-// 所以那一侧的所有者从 cli 换成了 surface。这不是改名，是解开一个环：账本长在
-// cli 上时，「想贡献命令」就必须 Need(cli)，而 cli 自己又要 Need(runtime /
-// config / gateway) 才能渲染与启动客户端——两条边首尾相接，于是 `newgate start`
-// / `tier` / `probe` 这些命令永远搬不回自己的模块。详见 modules/surface 的包注释。
+// 命令/诊断/状态行三本账长在 **cli** 的 service 上，所以「往界面上注入东西」
+// 那条边的所有者是 cli：模块 Need(cli) 才能注入（见 modules/cli/extension 的
+// 包注释）。
 func TestDefaultGraphLayering(t *testing.T) {
 	app, err := New(context.Background())
 	if err != nil {
@@ -51,12 +49,12 @@ func TestDefaultGraphLayering(t *testing.T) {
 		{"breaker", "deepseek", "deepseek 记账"},
 		{"runtime", "cli", "cli 调接管/注入"},
 		{"runtime", "wrapper", "wrapper 懒启动代理"},
-		// owner → 注册者：命令账本搬去 surface 之后，这几条都指向 surface。
-		{"surface", "cli", "cli 从这里取命令来分派与排版"},
-		{"surface", "gateway", "gateway 注册 st / schema-repair / debug"},
-		{"surface", "claudecode", "claudecode 注册 naked"},
-		{"surface", "plugin-manager", "plugin-manager 注册 plugin"},
-		{"surface", "opencode-omo", "omo 注册 omo"},
+		// owner → 注入者：账本在界面的 service 上，模块要在自己的 Start 里
+		// 把命令/状态行注入进来，所以必须排在界面之后。
+		{"cli", "gateway", "gateway 注入 st / schema-repair / debug"},
+		{"cli", "claudecode", "claudecode 注入 naked"},
+		{"cli", "plugin-manager", "plugin-manager 注入 plugin 与状态行"},
+		{"cli", "opencode-omo", "omo 注入 omo"},
 		{"gateway", "thinking", "thinking 注册请求插件"},
 		{"gateway", "deepseek", "deepseek 注册请求插件"},
 		{"gateway", "claudecode", "claudecode 注册请求插件"},
@@ -80,18 +78,28 @@ func TestDefaultGraphLayering(t *testing.T) {
 	}
 }
 
-// TestNothingDependsOnCLI 锁住「cli 是一个纯界面」。
+// TestCLIDependenciesOnlyShrink 锁住「界面不依赖任何模块」这个方向。
 //
-// 这是 2026-09-18 那次拆分要守住的**结果**：拆分之前，想贡献命令的模块必须
-// Need(cli)，于是 cli 成了所有模块的下游，而它自己又要 Need(runtime/config/
-// gateway) —— 环。拆出 surface 之后 cli 只被组合根（main）用，**没有任何模块
-// 依赖它**。
+// 目标**不是**「没人依赖界面」——那既不可能也不必要：模块要把命令注入界面，
+// 本来就得先 Need 它。目标是反过来的那一侧：**界面自己不依赖任何人**，它只是
+// 一个 ui，别人的东西是别人注入进来的回调，界面循环调用它们拿数据。
 //
-// 为什么值得一条测试：这个环不是靠一次决心解开的，是被一条一条具体的依赖重建
-// 起来的。哪天有人为了图方便写下 `modules.Need(cliapi.Capability)`，环会静默
-// 回来——症状是「又一个命令搬不出去了」，而那要等到有人真的想搬的时候才发现。
-// 在这里红，比在那里红早得多。
-func TestNothingDependsOnCLI(t *testing.T) {
+// 现在还没到那一步：下面允许名单里剩下的几个，是仍在界面手里的那批命令用的，
+// 它们要一个个搬回各自的模块（start/stop 归 runtime、tier/profiles 归 config、
+// probe/metrics 归 gateway…）。
+//
+// 这张表**只能变短**。往里加一项 = 把某条命令永远钉在界面里，而那正是这次重构
+// 要拆掉的东西；症状要等到有人真想搬那条命令时才会显形（「搬不动，成环了」），
+// 在这里红比在那里红早得多。
+func TestCLIDependenciesOnlyShrink(t *testing.T) {
+	// 名字是**端口名**（capability name），不是组件名。
+	allowed := map[string]bool{
+		"config":        true,
+		"runtime":       true,
+		"agent-catalog": true, // confighook 的 AgentCatalog：界面要按 agent 分派
+		"breaker":       true,
+	}
+
 	app, err := New(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -99,16 +107,19 @@ func TestNothingDependsOnCLI(t *testing.T) {
 	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 
 	for _, c := range app.Components() {
-		if c.Name == "cli" {
+		if c.Name != "cli" {
 			continue
 		}
 		for _, req := range c.Requires {
-			if req.Name() == "cli" {
-				t.Fatalf("%s 依赖了 cli：cli 是界面，不该被任何模块依赖——"+
-					"要贡献命令请依赖 surface（modules.Need(surface.Capability)）", c.Name)
+			if !allowed[req.Name()] {
+				t.Fatalf("界面依赖了 %q，而它不在允许名单里。界面应当**不依赖任何模块**："+
+					"命令由拥有那项能力的模块注入（见 modules/cli/extension）。"+
+					"要么把那条命令搬回它的模块，要么先想清楚为什么界面必须认识它。", req.Name())
 			}
 		}
+		return
 	}
+	t.Fatal("图里没有 cli 组件")
 }
 
 func TestGatewayReceivesModuleHooks(t *testing.T) {

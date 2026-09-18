@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/go/lib/style"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
@@ -34,27 +34,27 @@ import (
 type specialCommand struct{}
 
 var (
-	_ surface.Command    = (*specialCommand)(nil)
-	_ surface.Documented = (*specialCommand)(nil)
+	_ cliapi.Command    = (*specialCommand)(nil)
+	_ cliapi.Documented = (*specialCommand)(nil)
 )
 
 func (specialCommand) Names() []string {
 	return []string{"st", "special", "special-treatment", "special_treatment"}
 }
 
-func (specialCommand) Help() surface.HelpLine {
-	return surface.HelpLine{
+func (specialCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{
 		Section: "探测与观测",
 		Usage:   "st [on|off] [插件]",
 		Summary: "special_treatment 开关与说明",
 	}
 }
 
-// Run 收到的 args **不含 "st" 这个动词**（见 surface.Command 的契约）。
-func (specialCommand) Run(host surface.Host, args []string) int {
+// Run 收到的 args **不含 "st" 这个动词**（见 cliapi.Command 的契约）。
+func (specialCommand) Run(host cliapi.Host, args []string) int {
 	st := store.LoadState()
-	sub := surface.Arg(args, 0)
-	name := surface.Arg(args, 1)
+	sub := cliapi.Arg(args, 0)
+	name := cliapi.Arg(args, 1)
 
 	if sub == "" || sub == "status" || sub == "ls" {
 		return specialList(host, st)
@@ -122,7 +122,7 @@ func specialState(st *domain.State, name string) (mark, word string) {
 	return style.OK, "生效"
 }
 
-func specialList(host surface.Host, st *domain.State) int {
+func specialList(host cliapi.Host, st *domain.State) int {
 	ps := special.Plugins()
 	layer := style.Green("开")
 	if !gatewaystate.SpecialEnabled(st) {
@@ -147,7 +147,7 @@ func specialList(host surface.Host, st *domain.State) int {
 	return 0
 }
 
-func specialExplain(host surface.Host, st *domain.State, name string) int {
+func specialExplain(host cliapi.Host, st *domain.State, name string) int {
 	p := findPlugin(name)
 	mark, word := specialState(st, name)
 	fmt.Println(style.Title("newgate st "+name, word))
