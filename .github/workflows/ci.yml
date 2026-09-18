@@ -70,7 +70,11 @@ jobs:
         with:
           # 跟 go.mod 走，不写死版本——否则升级 toolchain 时这里会静默落后。
           go-version-file: go/go.mod
-          cache-dependency-path: go/go.sum
+          # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
+          # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
+          # 都报 "Some specified paths were not resolved, unable to cache
+          # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
+          cache-dependency-path: go/go.mod
 
       - name: gofmt
         run: make check-fmt
@@ -98,7 +102,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
-          cache-dependency-path: go/go.sum
+          # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
+          # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
+          # 都报 "Some specified paths were not resolved, unable to cache
+          # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
+          cache-dependency-path: go/go.mod
       - run: go test -race ./...
 
   # 这一档不需要上面那个 env：mock/*.sh 各自 export 自己的沙箱。
@@ -113,7 +121,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
-          cache-dependency-path: go/go.sum
+          # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
+          # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
+          # 都报 "Some specified paths were not resolved, unable to cache
+          # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
+          cache-dependency-path: go/go.mod
 
       # 两条脚本的依赖：python3（假上游）、curl（打代理）、md5sum（逐字节还原校验）。
       - name: 装依赖
