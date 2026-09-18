@@ -135,6 +135,11 @@ func (s *service) moduleDiagnostics() []Diagnostic {
 // cli 决定，停止顺序自然反转成「扩展模块先停、cli 后停」——释放时目标还活着。
 func New() modules.Component {
 	service := &service{}
+	// 界面自己的命令也走同一个账本（见 commands.go）：查重、分派、help 组装
+	// 只有一条路，run() 于是只剩编排。
+	if err := service.registerOwnCommands(); err != nil {
+		panic("cli: 自己的命令注册失败（装配期错误）: " + err.Error())
+	}
 	return modules.Component{
 		Name: "cli",
 		Type: "cli",

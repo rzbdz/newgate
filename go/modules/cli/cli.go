@@ -210,83 +210,21 @@ func run(service *service, args []string) int {
 	}
 
 	// 包装启动：newgate claude --profile=ds / newgate --profile ds claude /
-	// newgate run claude（docs/08-operations.md）。在子命令 switch 之前判断——agent 名
-	// 与子命令名是互斥的封闭集合，不会撞车。
+	// newgate run claude（docs/08-operations.md）。在账本查表之前判断——agent 名
+	// 与命令名是互斥的封闭集合，不会撞车。
 	if _, ok := detectLaunch(service.agents, args); ok {
 		return cmdLaunch(service.runtime, service.agents, args)
 	}
+
+	// 账本查表：模块注入的命令与界面自己的命令走同一条路。
+	//
+	// **界面在这里不认识任何一条命令**——它只知道"有人往这个账本里挂过东西"。
+	// 上一版这里是一个几百行的 switch，每一条都是一次「界面认识某个模块」，
+	// 那批命令因此永远搬不回自己的模块（见 modules/cli/commands.go 的说明）。
 	if command, ok := service.moduleCommand(args[0]); ok {
 		return command.Run(moduleCLIHost{}, args[1:])
 	}
-
-	switch args[0] {
-	// start / stop 带 agent 名就是单独接管/释放那一个，不带就是全面接管/停止。
-	// 用户不需要知道背后是 PATH shim 还是改配置文件——那是我们的实现细节。
-	case "start":
-		if a := arg(args, 1); a != "" {
-			return cmdTakeover(service.agents, a)
-		}
-		return cmdStart(service.agents, has(args, "--force"))
-	case "stop":
-		if a := arg(args, 1); a != "" {
-			return cmdRelease(a)
-		}
-		return cmdStop()
-	case "on", "takeover", "take":
-		return cmdTakeover(service.agents, arg(args, 1))
-	case "off", "release", "free":
-		if a := arg(args, 1); a != "" {
-			return cmdRelease(a)
-		}
-		return cmdStop()
-	case "restart":
-		return cmdRestart(service.agents, has(args, "--force"))
-	case "status":
-		return cmdStatus(service.agents, service)
-	case "reload":
-		return cmdReload()
-	case "profiles", "ls":
-		return cmdProfiles()
-	case "profile":
-		if len(args) > 1 && args[1] == "kv" {
-			return cmdProfileKV(args[2:])
-		}
-		return die(64, "用法：newgate profile kv <名> [--write]")
-	case "tier", "tiers", "role", "roles":
-		return cmdTier(args[1:])
-	case "probe":
-		return cmdProbe(arg(args, 1), has(args, "--json"))
-	case "breaker", "breakers":
-		return cmdBreaker()
-	case "metrics", "stat":
-		return cmdMetrics()
-	case "shim":
-		// 不给默认 agent：客户端 id 是**各客户端模块自己的键**，cli 不该知道
-		// 任何一个（2026-09-18 之前这里写死 "claude"）。逃生口本来也该显式。
-		return cmdShim(service.agents, arg(args, 1), arg(args, 2))
-	case "agents":
-		return cmdAgents(service.agents)
-	case "init":
-		return cmdInit(has(args, "--force"))
-	case "doctor":
-		return cmdDoctor(service)
-	case "logs", "log":
-		return cmdLogs(logCount(args), has(args, "-f") || has(args, "--follow"))
-	case "alllogs", "all-logs":
-		return cmdAllLogs(service.agents, service)
-	case "tui", "menuconfig":
-		return cmdTUI()
-	case "version", "--version", "-v":
-		fmt.Println(VersionLine())
-		return 0
-	case "help", "--help", "-h":
-		fmt.Print(usageText(service))
-		return 0
-	case "__serve":
-		return Serve(service, intFlag(args, "--port", 0))
-	default:
-		return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))
-	}
+	return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))
 }
 
 func VersionLine() string {
