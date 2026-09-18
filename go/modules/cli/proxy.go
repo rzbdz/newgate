@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlpath"
 	"net/http"
 	"time"
 
@@ -100,7 +101,7 @@ func proxyState() (info *daemon.Info, st *proxyInfo) {
 		return info, nil
 	}
 	var s proxyInfo
-	if !localGet(info.Port, "/__newgate/status", &s) {
+	if !localGet(info.Port, controlpath.Status, &s) {
 		return info, nil
 	}
 	return info, &s
@@ -113,7 +114,7 @@ func proxyMetrics(port int) (map[string]uint64, int, bool) {
 		Metrics map[string]uint64 `json:"metrics"`
 		UptimeS int               `json:"uptime_s"`
 	}
-	if !localGet(port, "/__newgate/metrics", &out) {
+	if !localGet(port, controlpath.Metrics, &out) {
 		return nil, 0, false
 	}
 	return out.Metrics, out.UptimeS, true

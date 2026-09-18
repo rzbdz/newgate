@@ -28,6 +28,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlpath"
 	"github.com/rzbdz/newgate/go/modules/gateway/dialect"
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
 	"github.com/rzbdz/newgate/go/modules/gateway/probe"
@@ -189,11 +190,11 @@ func (s *Server) Start() error {
 	s.Health.SetVerifier(s.verify)
 	probe.LoadCachedCapabilities()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/__newgate/status", s.handleStatus)
-	mux.HandleFunc("/__newgate/metrics", s.handleMetrics)
-	mux.HandleFunc("/__newgate/health", s.handleHealth)
-	mux.HandleFunc("/__newgate/stop", s.handleControlStop)
-	mux.HandleFunc("/__newgate/upgrade", s.handleControlUpgrade)
+	mux.HandleFunc(controlpath.Status, s.handleStatus)
+	mux.HandleFunc(controlpath.Metrics, s.handleMetrics)
+	mux.HandleFunc(controlpath.Health, s.handleHealth)
+	mux.HandleFunc(controlpath.Stop, s.handleControlStop)
+	mux.HandleFunc(controlpath.Upgrade, s.handleControlUpgrade)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/", s.handleProxy)
 

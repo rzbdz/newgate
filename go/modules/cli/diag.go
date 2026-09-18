@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlpath"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -266,7 +267,7 @@ func publishProbeHealth(results []probe.Result) (int, error) {
 	var response struct {
 		Opened int `json:"opened"`
 	}
-	err := localPost(info.Port, "/__newgate/health", st.ControlToken,
+	err := localPost(info.Port, controlpath.Health, st.ControlToken,
 		map[string]interface{}{"observations": observations}, &response)
 	return response.Opened, err
 }
