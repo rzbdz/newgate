@@ -1029,10 +1029,8 @@ func cmdStatus(agents agentapi.AgentCatalog, service *service) int {
 
 	// 配置：用哪个 profile。
 	fmt.Println(style.Field("配置", configLine(agents, st)))
-	for _, item := range special.Statuses(st) {
-		fmt.Println(style.Field(item.Label, item.Value))
-	}
-
+	// 插件层自报的状态项由 gateway 经 RegisterStatus 代转（见它的 status.go），
+	// cli 不必认识 special 这个包。
 	if flags := statusFlags(st); flags != "" {
 		fmt.Println(style.Field("开关", flags))
 	}
