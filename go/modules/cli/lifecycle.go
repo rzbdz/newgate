@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlpath"
 	"io"
 	"io/ioutil"
 	"log"
@@ -387,7 +388,7 @@ func tryHandoff() bool {
 		return false
 	}
 	req, err := http.NewRequest(http.MethodPost,
-		fmt.Sprintf("http://127.0.0.1:%d/__newgate/upgrade", port), nil)
+		fmt.Sprintf("http://127.0.0.1:%d%s", port, controlpath.Upgrade), nil)
 	if err != nil {
 		return false
 	}
@@ -420,7 +421,7 @@ func tryHandoff() bool {
 // handoffSupported 问 daemon 的 status 端点：支持优雅交接吗。
 func handoffSupported(port int) (bool, error) {
 	resp, err := httpx.LocalClient(3 * time.Second).
-		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/status", port))
+		Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, controlpath.Status))
 	if err != nil {
 		return false, err
 	}
@@ -493,7 +494,7 @@ func activeProblems(st *domain.State) []string {
 
 func pingProxy(port int) bool {
 	resp, err := httpx.LocalClient(1500 * time.Millisecond).
-		Get(fmt.Sprintf("http://127.0.0.1:%d/__newgate/status", port))
+		Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, controlpath.Status))
 	if err == nil {
 		defer resp.Body.Close()
 		if resp.StatusCode == 200 {

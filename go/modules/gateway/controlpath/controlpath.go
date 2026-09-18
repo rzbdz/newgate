@@ -1,0 +1,31 @@
+// Package controlpath 是网关控制面端点的路径常量。
+//
+// 为什么单开一个叶子包（2026-09-18）：这些端点是 **gateway 的 HTTP 服务器注册的**
+// （modules/gateway/forward 的 mux），而调用它们的是 CLI——`newgate status/metrics`
+// 要隔着 HTTP 去问跑着的守护进程。两边各写一遍字符串字面量，「改路径时只改了一边」
+// 就是个静默失效：服务器换了路径，客户端还在打老的那个，症状是「功能突然没了」，
+// 而不是编译错误。
+//
+// 它必须是**叶子**：不能放在 gateway 根包里。gateway 现在 Need(cli)（它要注册自己的
+// 命令），所以 cli 反过来 import gateway 会成环；放在这里，两个方向都能安全引用。
+// 同一条规矩已经有一个先例：modules/configshare/proto 把
+// `/__newgate/config` `/__newgate/secrets` 定义在它自己的叶子里。
+//
+// 与 configshare 那两个的关系：同一段 `/__newgate/` 命名空间，但**不是同一台服务器**
+// ——configshare 的端点由它自己起，这里的五个由数据面起。所以常量各归各家，不合并。
+package controlpath
+
+const (
+	// Status 守护进程状态文档：pid、端口、请求数、熔断表、推理缓存计数。
+	// `newgate status` 与所有「读 daemon 内存」的命令走它。
+	Status = "/__newgate/status"
+	// Metrics 计数器快照（内存，随重启归零）。
+	Metrics = "/__newgate/metrics"
+	// Health 主动探活结果回传口：CLI 在本进程跑完 probe，把结论交给 daemon 记账。
+	Health = "/__newgate/health"
+	// Stop 跨用户停机口。带 Bearer 令牌，是「进程没在跑」时唯一还能停下来的路。
+	Stop = "/__newgate/stop"
+	// Upgrade 优雅交接（socket fd 移交）。旧版 daemon 没注册它，所以调用方
+	// 必须先探能力再动手——盲发会被当成未知路径。
+	Upgrade = "/__newgate/upgrade"
+)
