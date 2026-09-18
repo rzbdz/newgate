@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/lib/style"
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
+	"github.com/rzbdz/newgate/go/modules/breaker/status"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
@@ -321,21 +321,29 @@ func tierReport(which string) int {
 	return 0
 }
 
-func bindingHealthLabel(h breakerapi.Status) string {
+// bindingHealthLabel 一行说清这条 binding 现在什么状态。
+//
+// **阈值与档位名都来自 breaker/status**（2026-09-18）：这里曾经自己抄了一份
+// 3000/12000，于是 daemon 改口径这一屏不会跟着变。
+func bindingHealthLabel(h status.Status) string {
 	if h.Open {
 		return style.Red("熔断")
 	}
+	grade := status.Grade(h.ScoreMs, h.ScoreMs > 0)
 	switch {
-	case h.ScoreMs > 0 && h.ScoreMs < 3000:
-		return style.Green(fmt.Sprintf("流畅 %dms", h.ScoreMs))
-	case h.ScoreMs >= 3000 && h.ScoreMs <= 12000:
-		return style.Yellow(fmt.Sprintf("可用 %dms", h.ScoreMs))
-	case h.ScoreMs > 12000:
-		return style.Red(fmt.Sprintf("卡顿 %dms", h.ScoreMs))
-	case h.Grade == breakerapi.ProbeUnavailable:
+	case grade == status.LatencyUnknown && h.Grade == status.ProbeUnavailable:
 		return style.Red("不可用")
-	default:
+	case grade == status.LatencyUnknown:
 		return style.Dim("未探")
+	}
+	label := fmt.Sprintf("%s %dms", grade, h.ScoreMs)
+	switch grade {
+	case status.LatencyFast:
+		return style.Green(label)
+	case status.LatencyOK:
+		return style.Yellow(label)
+	default:
+		return style.Red(label)
 	}
 }
 
@@ -461,8 +469,8 @@ func skipKind(reason string) string {
 
 // healthFromProxy 把 daemon 的熔断表按 "provider/model" 索引成一次命令内的快照。
 // daemon 不在线时是空表——诊断退化为只看静态配置，不凭空判坏。
-func healthFromProxy(ps *controlplane.Doc) map[string]breakerapi.Status {
-	out := map[string]breakerapi.Status{}
+func healthFromProxy(ps *controlplane.Doc) map[string]status.Status {
+	out := map[string]status.Status{}
 	if ps != nil {
 		for _, s := range ps.Breakers {
 			out[s.Provider+"/"+s.Model] = s
@@ -475,8 +483,11 @@ func healthFromProxy(ps *controlplane.Doc) map[string]breakerapi.Status {
 // 打印时不该原样甩 120000ms 给用户。
 func prettyMs(ms int) string { return (time.Duration(ms) * time.Millisecond).String() }
 
-// PrintSkips 把跳过汇总渲染出来。导出是给**界面**用的：Host.PrintSkips 是模块
-// 命令（opencodeomo）能调的最小能力，而排版归本模块——界面只做转发。
+// PrintSkips 把跳过汇总渲染出来。导出的理由：**需要它的模块命令**（opencodeomo
+// 的 `newgate omo`）直接调它，排版归本模块。
+//
+// 它曾经挂在界面的 `Host` 上（界面替模块转发），2026-09-18 摘掉了——转发让界面
+// import 配置，而界面不该认识任何模块。
 func PrintSkips(skips []resolve.Skip) { printSkips(skips) }
 
 func printSkips(skips []resolve.Skip) {

@@ -19,17 +19,18 @@ import (
 	"github.com/rzbdz/newgate/go/lib/buildinfo"
 )
 
-// service 是**界面**：分派、渲染、进程生命周期。
+// service 是**界面**：分派与排版。
 //
-// 它**不拥有**命令/诊断/状态行那三本账——那些归 modules/surface（一个叶子
-// 模块），因为 cli 一旦同时是「账本所有者」和「界面」，依赖方向就成环：
-// 想贡献命令的模块必须 Need(cli)，而 cli 又要 Need 它们才能渲染。环解开的方式
-// 就是把账本下沉成叶子（见 modules/surface 的包注释）。
+// 它拥有下面那七本账（命令、诊断、状态行、状态块、诊断素材、术语、详细模式标记），
+// 模块在 Attach 阶段往上挂。账本长在界面上是**对的**——它是「界面认得哪些东西」
+// 这件事本身；2026-09-18 曾把它下沉成一个独立的 modules/surface 模块，那是多余的
+// （见 cli/extension 的包注释）。真正要解开的那个环不在账本的位置，而在**依赖
+// 方向**：注入不能建立排序边（component.Inject）。
 type service struct {
 
-	// 三本账：模块通过 RegisterXxx 把自己的东西挂进来，界面在分派命令、渲染
-	// status / doctor 时循环调用它们。**界面不 import 任何模块**，所以它不认识
-	// 任何人——别人的东西是别人注入进来的回调。
+	// 七本账：模块通过 RegisterXxx 把自己的东西挂进来，界面在分派命令、渲染
+	// status / doctor / alllogs 时循环调用它们。**界面不 import 任何模块**，所以
+	// 它不认识任何人——别人的东西是别人注入进来的回调。
 	commands    modules.Registry[Command]
 	diagnostics modules.Registry[DiagnosticProvider]
 	statuses    modules.Registry[StatusProvider]
@@ -204,11 +205,24 @@ func (s *service) moduleDiagnostics() []Diagnostic {
 	return out
 }
 
-// New 声明最终 CLI 入口，并向其他模块开放命令与诊断两个扩展点。
+// New 声明最终 CLI 入口，并向其他模块开放那七本账。
 //
-// 依赖方向是 **cli → 扩展模块**（不是反过来）：cli 先起，扩展模块在 Start 里
-// 拿到 cli 的 service 再注册。所以 opencodeomo 那条边由 registry 的所有者
-// cli 决定，停止顺序自然反转成「扩展模块先停、cli 后停」——释放时目标还活着。
+// # 停止顺序：**没有保证**，所以这里的 Stop 不能做真事
+//
+// 依赖方向是 **扩展模块 → ui**（见 component.Inject），而 Inject **不参与排序**
+// ——这正是它能解开环的原因。代价要说清楚：**框架不保证 ui 先停还是后停**，实际
+// 顺序取决于声明顺序。2026-09-18 实测（全图 17 个组件）：
+//
+//	start  [breaker, cli, config, …]        cli 第 2 个起
+//	stop   [… , cli(15), breaker(16)]       breaker **在 cli 之后**停
+//
+// 也就是说 breaker 的 Stop 会在 cli 已经停完之后，才去调那个「从界面命令账本里
+// 删掉 breaker 命令」的 Release。今天无害，因为这里的 Stop 是空的；**但这意味着
+// ui 的 Stop 必须保持幂等且无副作用**——一旦它开始释放账本、关自己的 server，
+// 晚到的 Release 就会往一个已经停掉的对象里回写。
+//
+// （上一版这里写着「停止顺序自然反转成扩展模块先停、cli 后停」——那是 `Need(cli)`
+// 时代由 owner 边推出的顺序，改成 Inject 之后那个机制已经不存在了。）
 func New() modules.Component {
 	service := &service{}
 	// 界面自己的命令也走同一个账本（见 commands.go）：查重、分派、help 组装
@@ -222,7 +236,7 @@ func New() modules.Component {
 		// **没有 Requires**：界面不依赖任何模块（见 app/default_test.go 的
 		// TestCLIDependenciesOnlyShrink，它断言这条边集为空）。
 		//
-		// 它的全部能力都来自注入：命令、status 行、体检项、术语、诊断素材，四本账
+		// 它的全部能力都来自注入：命令、status 行、体检项、术语、诊断素材，七本账
 		// 在 Start 时建好，模块在 Attach 阶段（component.Inject）往上挂。一条出边
 		// 都不留是有意的——留一条「反正用得到」的边，对方的注入就会成环，那正是
 		// 这一轮之前 config/runtime/config-hook 的命令被迫留在界面里的原因。

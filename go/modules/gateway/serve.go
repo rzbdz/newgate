@@ -108,7 +108,10 @@ func Serve(health breakerapi.Breaker, port int) int {
 	// 控制令牌必须先于 watcher 落盘：别的用户 `newgate stop` 发不出信号，
 	// 只能走 /__newgate/stop，daemon 一启动就得能验它。这里是最后兜底
 	// （cmdStart / launch.Launch 在 Spawn 前已经各兜一次，正常早就有）。
-	if st := store.EnsureControlToken(); st.ControlToken != "" {
+	if st, err := store.EnsureControlToken(); err != nil {
+		// daemon 照常起：没有令牌只是跨用户停机不可用，不该拦下整个代理。
+		lg.Printf("控制令牌写不出去（跨用户停机不可用）: %v", err)
+	} else if st.ControlToken != "" {
 		lg.Printf("控制端点 /__newgate/stop 已就绪（跨用户停机可用）")
 	}
 

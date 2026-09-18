@@ -250,12 +250,18 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 		manager.started = i + 1
 	}
 	// 第二阶段：注入边。所有端口都已提供，所以声明 Inject 的组件现在能拿到 ui。
-	for i, component := range manager.components {
+	for _, component := range manager.components {
 		if component.Attach == nil {
 			continue
 		}
 		if err := component.Attach(ctx, manager.context); err != nil {
-			manager.started = i + 1
+			// **不要动 manager.started**：Attach 阶段每个组件都已经 Start 过了，
+			// 回滚范围就是整张图。这里曾经写成 `started = i + 1`（照抄 Start 那段），
+			// 于是第 i 个之后的组件**启动了却永远不 Stop**——它们的 Stop 里装的是
+			// ReleaseAll（注入给界面的命令与状态行、注册进 gateway 的请求插件、
+			// confighook 的字段）、以及 restore()（agentstate 的全局桥、档位兼容
+			// 层）。2026-09-18 补的 Attach 阶段把这条路径带出来了，而当时的测试只
+			// 覆盖了 Start 失败（见 TestAttachFailureRollsBackTheWholeGraph）。
 			rollbackErr := manager.Stop(ctx)
 			if rollbackErr != nil {
 				return nil, fmt.Errorf("attach component %s: %w; rollback: %v",

@@ -71,6 +71,10 @@ func (r *shapeRegistry) Register(d ShapeDetector) (modules.Release, error) {
 	}
 	r.next++
 	token := r.next
+	// tokens 这张表**不是**为了容忍重复注册（那已经在上面被拒了），而是为了让
+	// **陈旧 Release 无害**：注销之后再注册同一个键会拿到新 token，那个旧
+	// Release 一旦晚到就会把新注册删掉。比对 token 拦的正是这一种。
+	// （看代码时容易以为这条分支不可达——那是漏掉了「注销 → 再注册」。）
 	r.tokens[d.Name()] = token
 	r.detectors = append(append([]ShapeDetector(nil), r.detectors...), d)
 	return func() error {

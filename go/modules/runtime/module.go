@@ -48,6 +48,15 @@ func New() modules.Component {
 			catalog := modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
 			restore = agentstate.Set(catalog)
 
+			// state.json 里的 taken_over 归本模块（on/off 收尾时写它）。登记它
+			// 才有人拦「两个模块抢同一个字段」——这张表以前只覆盖三处写入里的一半。
+			hooks := modules.MustGet(ctx, confighookapi.ConfigHooksCapability)
+			fieldRelease, err := hooks.RegisterStateField("runtime", "taken_over")
+			if err != nil {
+				return err
+			}
+			releases = append(releases, fieldRelease)
+
 			// 接管的状态行与两条体检（接管 / 备份）由本模块自报：写这些文件的
 			// 是本模块，界面不该替它读 original/ 目录（见 diagnostics.go）。
 			return nil

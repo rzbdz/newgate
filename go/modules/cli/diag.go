@@ -4,21 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/rzbdz/newgate/go/lib/buildinfo"
-	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 )
-
-// prettyMs 毫秒 → 人话。链预算是按 ms 配的（state.json 里 120000），
-// 打印时不该原样甩 120000ms 给用户。
-func prettyMs(ms int) string {
-	return (time.Duration(ms) * time.Millisecond).String()
-}
-
-func prettyDur(sec int) string { return durarg.Format(sec) }
 
 // cmdDoctor 体检。
 //

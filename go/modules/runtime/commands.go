@@ -201,7 +201,11 @@ func cmdStart(agents confighookapi.AgentCatalog, force bool) int {
 	// 令牌先于 Spawn 落盘：daemon 一起来就要能验 /__newgate/stop。
 	// 也是为了防竞态——下面 Spawn 之后 st 还会被 SaveState 写回，
 	// 先确保 st 里带着令牌，写回就不会把 daemon 已生成的令牌冲掉。
-	st := store.EnsureControlToken()
+	st, err := store.EnsureControlToken()
+	if err != nil {
+		// 不拦：用户要的是把代理起起来，为一行令牌拒绝启动更糟。但后果明说。
+		fmt.Fprintln(os.Stderr, style.Mark(style.Warn)+" 控制令牌写不出去（跨用户 newgate stop 会不可用）: "+err.Error())
+	}
 	// 没 key 就别接管——接管了每个请求都是错误，而用户的配置已经被改了
 	if probs := activeProblems(st); len(probs) > 0 && !force {
 		fmt.Fprintf(os.Stderr, "newgate: 配置不可用，拒绝接管\n")
@@ -252,7 +256,12 @@ func cmdStart(agents confighookapi.AgentCatalog, force bool) int {
 	}
 
 	st.TakenOver = true
-	_ = store.SaveState(st)
+	// **不能吞这个错**：上面刚打印了「代理已启动」、下面还要打印「配置改动 1 秒内
+	// 自动热更新」。写盘失败（CLAUDE.md §3.1 记的那个 umask 权限坑就是现场）时
+	// TakenOver 没落盘，下次 start 的行为与用户以为的正相反，而屏幕上全是绿的。
+	if err := store.SaveState(st); err != nil {
+		return style.Die(70, "接管状态写不回 state.json："+err.Error())
+	}
 	fmt.Println()
 	fmt.Println(style.Hint("配置改动 1 秒内自动热更新，无需重启"))
 	fmt.Println(style.Hint("原配置备份 " + paths.BackupDir() + "/original/"))
@@ -350,7 +359,10 @@ func cmdStop() int {
 
 	st := store.LoadState()
 	st.TakenOver = false
-	_ = store.SaveState(st)
+	// 同上：这一步写不出去，下次 start 会以为「用户从没放手过」。
+	if err := store.SaveState(st); err != nil {
+		return style.Die(70, "接管状态写不回 state.json："+err.Error())
+	}
 
 	fmt.Println()
 	fmt.Println(style.Hint("所有工具已恢复直连；PATH 里那行仍指向空 shim 目录，无害"))

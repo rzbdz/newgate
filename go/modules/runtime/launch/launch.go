@@ -58,7 +58,11 @@ func Launch(a *agentapi.Agent, args []string, o Options) int {
 	// 代理懒启动；否则 agent 一进来就 connection refused。
 	// （EnsureControlToken：别的用户停这个懒起的 daemon 也得有令牌可用）
 	if daemon.Running() == nil {
-		_ = store.EnsureControlToken()
+		// 写不出去只警告不拦：用户此刻要的是「把客户端拉起来」，为一行令牌
+		// 拒绝启动更糟。但后果要说清楚——那个 daemon 没法被别人停。
+		if _, err := store.EnsureControlToken(); err != nil {
+			fmt.Fprintf(os.Stderr, "newgate: 控制令牌写不出去（跨用户 newgate stop 会不可用）: %v\n", err)
+		}
 		fmt.Fprintf(os.Stderr, "newgate: proxy not running, starting…\n")
 		if _, err := daemon.Spawn(st.Port); err != nil {
 			fmt.Fprintf(os.Stderr, "newgate: failed to start proxy: %v\n"+

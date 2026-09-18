@@ -28,13 +28,13 @@
 //
 // # 边界
 //
-// 本包只允许 import component 与 config 的**叶子**（domain / resolve，都是轻的
-// 基础设施）。它一旦变重，上面那条「模块引得起」立刻失效。
+// 本包**不 import 任何 config 包**，只剩 component 一件：契约类型（命令、状态行、
+// 诊断、术语、诊断素材）全是纯数据，没有一个字段是企业配置语义。
 //
-// 2026-09-18 起这里 import 的是 config/resolve 而不是 config 根包：根包要
-// import 本包（模块往界面注入东西时要用这里的类型），两者互引就成环了。链的
-// Step / Skip 本来就定义在 resolve（config/api.go 只是别名转发），所以直接引
-// 叶子即可——这正是 docs/03-architecture.md §3 那条「定义下沉到实现包」。
+// 2026-09-18 之前这里 import 过 config/resolve（`Host.PrintChain` 收 []Step），
+// 而 config 根包要 import 本包（模块注入时用这里的类型），两者互引就是环——那次是
+// 靠「引 resolve 这个叶子」绕开的。后来 PrintChain 从 Host 上摘掉（模块直接调
+// config 的渲染器），这条 import 也就不需要了。
 package extension
 
 import (
@@ -117,10 +117,9 @@ type StatusProvider interface {
 // 只有 CLI 做得成」——而不是「这样我就不用把逻辑搬过去了」。
 type Host interface {
 	Die(code int, message string) int
-	LiveRouting() (
-		available func(provider, model string) bool,
-		rank func(provider, model string) int,
-	)
+	// LiveRouting 也**不在 Host 上**（2026-09-18 移走）：它给的是守护进程自报的
+	// 熔断表快照，那是数据面/控制面的数据（modules/gateway/controlplane.Doc 的
+	// Available / Rank），不是「只有界面做得成」的事。谁要谁直接读那个叶子。
 	NotifyProxy()
 
 	// DaemonRunning 守护进程现在在跑吗（读 pidfile）。

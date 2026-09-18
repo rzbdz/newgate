@@ -5,7 +5,7 @@
 在 `go/modules/<name>/module.go` 定义：
 
 ```go
-func New() component.Component
+func New() modules.Component
 ```
 
 按需声明 `Requires`、`Provides`、`Start` 和 `Stop`。**不需要改任何清单**：

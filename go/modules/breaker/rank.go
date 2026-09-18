@@ -3,6 +3,8 @@ package breaker
 import (
 	"sync"
 	"time"
+
+	"github.com/rzbdz/newgate/go/modules/breaker/status"
 )
 
 // ranker 是「这条 binding 现在大概多快」的预测器，与可用性账本分开：
@@ -91,10 +93,12 @@ func (r *ranker) rankLocked(key string, contextBytes int) int {
 	if !known {
 		return 1_000_000
 	}
-	switch {
-	case ms < 3000:
+	// 档位与阈值都来自 breaker/status（**只有一份**）：排序键就是把档位编进
+	// 数值里，所以它和 UI 上那句「流畅 / 可用 / 卡顿」读的是同一套数。
+	switch status.Grade(ms, true) {
+	case status.LatencyFast:
 		return ms
-	case ms <= 12000:
+	case status.LatencyOK:
 		return 2_000_000 + ms
 	default:
 		return 3_000_000 + ms

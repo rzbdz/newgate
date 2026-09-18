@@ -15,12 +15,18 @@ func TestEnsureControlToken(t *testing.T) {
 	t.Setenv("NEWGATE_HOME", dir)
 	_ = os.MkdirAll(filepath.Join(dir, "mappings"), 0o755)
 
-	s := EnsureControlToken()
+	s, err := EnsureControlToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(s.ControlToken) < 32 {
 		t.Fatalf("令牌太短（%d 字符），熵不够: %q", len(s.ControlToken), s.ControlToken)
 	}
 
-	again := EnsureControlToken()
+	again, err := EnsureControlToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if again.ControlToken != s.ControlToken {
 		t.Fatalf("第二次调用换了令牌: %s → %s", s.ControlToken, again.ControlToken)
 	}

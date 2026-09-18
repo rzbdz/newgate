@@ -73,3 +73,54 @@ type Status struct {
 	// 探活证明它还通）。数字为累计次数，跨重启保留。
 	Spared int `json:"spared,omitempty"`
 }
+
+// Latency 是延迟样本的档位。**阈值只在这里定义一次**（2026-09-18）。
+//
+// 排序（谁先上链）与展示（流畅 / 可用 / 卡顿）读的是同一套数。之前有三份各自的
+// 3000 / 12000 拷贝：modules/breaker 的排序键、gateway 的 metrics 渲染、config 的
+// tier 渲染。改一处另两处不会跟着变——这个仓库为同一件事付过一次代价（
+// modules/cli/proxy.go 的注释记着 2026-09-17 那次「两边各有一份」），所以现在只
+// 留一个来源：阈值在这里，档位名也在这里。
+type Latency int
+
+const (
+	LatencyFast    Latency = iota // < FastMs
+	LatencyOK                     // <= SlowMs
+	LatencySlow                   // > SlowMs
+	LatencyUnknown                // 没有样本
+)
+
+const (
+	// FastMs 是「流畅」的上界。
+	FastMs = 3000
+	// SlowMs 是「可用」的上界；超过它就算卡顿。
+	SlowMs = 12000
+)
+
+// Grade 把一个延迟样本归到档位。sampled=false（没探过）给 LatencyUnknown。
+func Grade(scoreMs int, sampled bool) Latency {
+	switch {
+	case !sampled:
+		return LatencyUnknown
+	case scoreMs < FastMs:
+		return LatencyFast
+	case scoreMs <= SlowMs:
+		return LatencyOK
+	default:
+		return LatencySlow
+	}
+}
+
+// String 是这几个档位给人看的说法。
+func (l Latency) String() string {
+	switch l {
+	case LatencyFast:
+		return "流畅"
+	case LatencyOK:
+		return "可用"
+	case LatencySlow:
+		return "卡顿"
+	default:
+		return "未评分"
+	}
+}

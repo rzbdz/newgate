@@ -73,14 +73,46 @@ Component 是图节点：
 ```go
 type Component struct {
     Name     string
+    Type     Type                                  // 分类标签，内核不解释取值
     Requires []Requirement
     Provides []Provision
     Start    func(context.Context, Context) error
+    Attach   func(context.Context, Context) error  // 第二阶段，见下
     Stop     func(context.Context) error
 }
 ```
 
 一个组件可以同时是 provider 和 consumer。
+
+### 注入边（`Inject`）与生命周期第二阶段
+
+`Requirement` 有三个构造子，前两个建**排序边**，第三个不建：
+
+| 构造子 | 提供者缺失 | 排序 |
+| --- | --- | --- |
+| `Need` | 装配失败 | 提供者在前 |
+| `Optional` | 允许 | 提供者在前（有的话） |
+| `Inject` | 允许 | **不参与排序** |
+
+`Inject` 解决「互为对端」的死结：业务模块要往 ui 注入命令，而 ui 又要依赖那些
+模块才能渲染——用 `Need`/`Optional` 的话两条箭头互指就是环。`Inject` 说「端口
+存在就给我，我不排在它后面」，环就没有了。代价是**没有顺序保证**，见下。
+
+因此 Manager 是**两阶段**的：
+
+ 1. 按拓扑顺序跑完全部 `Start`；
+ 2. 再跑一遍 `Attach` —— 此时任何端口都已提供，注入边拿得到对端。
+
+往 ui 注入的东西（命令、状态行、体检项、诊断素材、术语）一律放 `Attach`，
+并且把 `Release` 收进同一个 `releases`、在 `Stop` 里 `ReleaseAll`。
+
+两个后果要记住：
+
+- **被注入方（ui）的 `Stop` 必须幂等且无副作用**。注入边不排序，实测里
+  `breaker` 会**在 cli 之后**才停（见 `modules/cli/module.go` 的 `New` 注释），
+  晚到的 `Release` 会打到已经停掉的 ui 上。
+- **`Attach` 失败会回滚整张图**（不是只回滚到失败的那个），因为那时每个组件
+  都已经 `Start` 过了。
 
 ### Context
 

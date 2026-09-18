@@ -217,8 +217,8 @@ CLI 和 GUI 没有功能差集：CLI 能做的，API 一定暴露了。
 ## 11. 实现顺序（建议）
 
 1. `modules/remote/cli.go`：`newgate remote use/status/off`，写 `state.json`。
-2. 修改 `modules/cli/lifecycle.go` 的 `start` 路径：remote 模式下跳过本地 daemon 启动。
-3. 修改 `modules/cli/proxy.go` 的 `proxyState()`：先看 remote 地址，再落回 127.0.0.1。
+2. 修改 `modules/runtime/commands.go` 的 `start` 路径：remote 模式下跳过本地 daemon 启动。
+3. 修改 `modules/gateway/controlplane` 的控制面客户端：先看 remote 地址，再落回 127.0.0.1。
 4. `modules/remote/tenant.go`：Tailscale 节点名解析（依赖 `tailscale.com/client/tailscale`）。
 5. `modules/remote/audit.go`：审计日志（SSE + 文件落盘）。
 6. `web/`：PWA 控制面（独立前端，不在本 module 里）。

@@ -12,6 +12,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 )
 
 type omoCommand struct{}
@@ -309,7 +310,9 @@ func omoExplain(host cliapi.Host, key string) int {
 		}
 	}
 
-	available, rank := host.LiveRouting()
+	// 熔断表快照直接读控制面叶子（见 cliapi.Host 的说明：LiveRouting 不再走界面）。
+	_, doc := controlplane.State()
+	available, rank := doc.Available(), doc.Rank()
 	for _, head := range names {
 		fmt.Print(style.Section("链头 "+head) + style.Dim("   "+strings.Join(heads[head], ", ")) + "\n")
 		steps, skips := resolve.BuildChain(key, snap.Profiles, snap.Providers, resolve.Opts{

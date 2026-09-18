@@ -2,26 +2,43 @@
 
 ## 1. 运行图
 
-```text
-Config
-  ├─ Gateway
-  ├─ Runtime
-  └─ CLI
+下面**只画参与排序的边**（`Need` / `Optional`）。往 ui 注入的那批边是
+`Inject`（见 §4 与 `docs/02-component-framework.md`），按定义不进这张图——
+这正是 2026-09-18 能让 `cli` 从图里退出去的原因：它一条出边都没有。
 
-ConfigHook
-  ├─ Claude Code
-  ├─ OpenCode
-  └─ OpenCode OMO
+```text
+Config（无出边）
+ConfigHook（无出边）
+breaker（无出边，纯叶子）
+CLI（无出边）
+  ▲
+  │ Inject ×9：breaker / config / config-hook / gateway / opencode-omo
+  │            plugin-manager / runtime / claudecode / tui
+  │（不排序，故不在本图）
 
 Gateway
-  ├─ Thinking
-  ├─ Claude Code behavior
-  ├─ DeepSeek behavior
-  └─ cross-components
+  ├─ Config
+  ├─ breaker
+  └─ Thinking / Claude Code behavior / DeepSeek behavior / cross-components
+
+Runtime
+  ├─ Config
+  └─ ConfigHook
+
+PluginManager
+  └─ ConfigHook
+
+Wrapper
+  ├─ Runtime
+  └─ ConfigHook
 ```
 
 箭头表示 capability 消费，不表示目录 import。实际启动顺序由 component Manager
-根据 `Requires`/`Provides` 计算。
+根据 `Requires`/`Provides` 计算（`Inject` 边不参与）。
+
+**没有 ui 时一切照常**：把 `modules/cli` 摘掉，整张图仍然装配成功，上面那 9 条
+Inject 边无人接收（各模块拿到 `ok == false` 就跳过），功能一个不少，只是没有
+命令行入口。
 
 ## 2. 目录所有权
 
@@ -32,8 +49,11 @@ Gateway
 | `modules/confighook` | Agent、takeover、state field registry |
 | `modules/gateway` | HTTP 数据面和扩展执行 |
 | `modules/breaker` | binding 健康表（可用性 + 延迟排序），无依赖的叶子模块 |
+| `modules/pluginmanager` | 运行期开关账本 + 模块分类词汇表 |
+| `modules/tui` | menuconfig 风格终端界面（与 cli 同级的另一个 ui） |
+| `modules/configshare` | 多机共享配置（预留，见 `docs/12-newgate-remote.md`） |
 | `modules/runtime` | daemon、进程启动、shim、takeover |
-| `modules/cli` | 命令解析、TUI、诊断输出 |
+| `modules/cli` | 参数分派、渲染排版、进程退出码；命令/诊断/状态行由各 owner 注入，**界面不认识任何模块** |
 | `modules/<client>` | 客户端描述和客户端独有行为 |
 | `modules/<model>` | 模型族识别和上游独有行为 |
 | `modules/<client>_<model>` | 只存在于交叉点的行为 |
