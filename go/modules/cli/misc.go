@@ -4,15 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rzbdz/newgate/go/lib/style"
-	"github.com/rzbdz/newgate/go/modules/cli/tui"
 )
-
-func cmdTUI() int {
-	if err := tui.Run(); err != nil {
-		return die(70, err.Error())
-	}
-	return 0
-}
 
 // printThinkCache 展示推理内容缓存的命中情况。
 //

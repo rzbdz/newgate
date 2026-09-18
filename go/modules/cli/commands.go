@@ -273,15 +273,6 @@ func (c shimCommand) Run(_ Host, args []string) int {
 	return cmdShim(c.s.agents, arg(args, 0), arg(args, 1))
 }
 
-type tuiCommand struct{}
-
-func (tuiCommand) Names() []string { return []string{"tui", "menuconfig"} }
-func (tuiCommand) Help() HelpLine {
-	return HelpLine{Section: "维护", Rank: rankMaint,
-		Usage: "tui", Summary: "menuconfig 风格界面"}
-}
-func (tuiCommand) Run(_ Host, _ []string) int { return cmdTUI() }
-
 // ---------- 界面自身 ----------
 
 type versionCommand struct{}
@@ -332,7 +323,7 @@ func ownCommands(s *service) []Command {
 		tierCommand{}, profilesCommand{}, profileCommand{}, setProfileCommand{s}, agentsCommand{s},
 		probeCommand{}, breakerCommand{}, metricsCommand{}, doctorCommand{s},
 		logsCommand{}, allLogsCommand{s},
-		reloadCommand{}, initCommand{}, shimCommand{s}, tuiCommand{},
+		reloadCommand{}, initCommand{}, shimCommand{s},
 		versionCommand{}, helpCommand{s}, serveCommand{s},
 	}
 }
