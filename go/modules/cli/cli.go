@@ -168,7 +168,7 @@ func run(service *service, args []string) int {
 	case "restart":
 		return cmdRestart(service.agents, has(args, "--force"))
 	case "status":
-		return cmdStatus(service.agents)
+		return cmdStatus(service.agents, service.plugins)
 	case "reload":
 		return cmdReload()
 	case "profiles", "ls":
@@ -197,7 +197,7 @@ func run(service *service, args []string) int {
 	case "logs", "log":
 		return cmdLogs(logCount(args), has(args, "-f") || has(args, "--follow"))
 	case "alllogs", "all-logs":
-		return cmdAllLogs(service.agents)
+		return cmdAllLogs(service.agents, service.plugins)
 	case "debug":
 		return cmdDebug(args)
 	case "naked":

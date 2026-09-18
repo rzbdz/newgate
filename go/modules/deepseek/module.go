@@ -13,6 +13,7 @@ import (
 	modules "github.com/rzbdz/newgate/go/component"
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
+	pluginmanagerapi "github.com/rzbdz/newgate/go/modules/pluginmanager"
 )
 
 // New 声明 DeepSeek 模型组件，同时提供模型判定端口并注册模型侧协议修补。
@@ -30,6 +31,9 @@ func New() modules.Component {
 		Requires: []modules.Requirement{
 			modules.Need(gatewayapi.Capability),
 			modules.Need(breakerapi.Capability),
+			// 上报细粒度开关点（第 2/3/4 手各自可关）。这是**自愿**参与：
+			// 不写这一行也能装配，只是这些开关点不会出现在 newgate plugin 里。
+			modules.Need(pluginmanagerapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Model{
@@ -51,6 +55,14 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, release)
+
+			// 上报开关点：Apply 里那三手各自可关。名字与路径都在 switches.go。
+			pm := modules.MustGet(ctx, pluginmanagerapi.Capability)
+			self, err := pm.RegisterSelf("deepseek", Switches())
+			if err != nil {
+				return err
+			}
+			releases = append(releases, self)
 			return nil
 		},
 		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },

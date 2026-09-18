@@ -15,6 +15,7 @@ import (
 	claudeapi "github.com/rzbdz/newgate/go/modules/claudecode"
 	deepseekapi "github.com/rzbdz/newgate/go/modules/deepseek"
 	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
+	pluginmanagerapi "github.com/rzbdz/newgate/go/modules/pluginmanager"
 )
 
 // New 声明 Claude Code × DeepSeek 交叉组件。
@@ -28,6 +29,7 @@ func New() modules.Component {
 			modules.Need(gatewayapi.Capability),
 			modules.Need(claudeapi.Capability),
 			modules.Need(deepseekapi.Capability),
+			modules.Need(pluginmanagerapi.Capability),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			gateway := modules.MustGet(ctx, gatewayapi.Capability)
@@ -40,6 +42,12 @@ func New() modules.Component {
 				}
 				releases = append(releases, release)
 			}
+			pm := modules.MustGet(ctx, pluginmanagerapi.Capability)
+			self, err := pm.RegisterSelf("claudecode-deepseek", Switches())
+			if err != nil {
+				return err
+			}
+			releases = append(releases, self)
 			return nil
 		},
 		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },

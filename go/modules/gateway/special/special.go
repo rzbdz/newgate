@@ -44,6 +44,13 @@ import (
 // 故意不含 http.Request：插件只该看请求的**语义归属**（发给谁、什么模型），
 // 看不到也改不了头、认证、连接。想动这些的补丁不属于这一层。
 //
+// **State 不违反上面那条**，两者是不同的东西：http.Request 是**这次连接**（头、
+// 认证、重试、响应生命周期——插件碰不得）；State 是**这份配置快照**（哪些开关
+// 点被关了、超时多久），Respond 与 Route 本来就已经在单独收它，只有 Apply 与
+// RebaseToolLoop 拿不到，于是插件没法查自己的开关点。补上它就是为了抹平这个
+// 不一致。约定与前一条相同：**只读**，改了它不会传回热路径，只会让同一发请求
+// 里的后续插件看到不一致的世界。
+//
 // 链上只有一份事实源：body 字节。r.Model 是它在每一步之后的**视图**——
 // 插件改写了 body 的 model 字段后，由 Apply 框架自动同步（见
 // syncContextModel），排在后面的插件立刻看到新值。插件不需要、也不应该
@@ -64,6 +71,12 @@ type Request struct {
 	Path     string
 	Stream   bool
 	Agent    string
+
+	// State 是本次请求看到的那份配置快照，插件据此查自己的运行期开关点
+	// （modules/pluginmanager 的 Off/On）。它和本次请求的其它字段一样是**只读**的，
+	// 而且**允许为 nil**（测试与旧调用面常见）——查开关点的函数都按「nil = 没关」
+	// 处理，所以插件不需要自己判空。
+	State *domain.State
 }
 
 // Plugin 是模块可以挂到请求处理链的 typed capability。
