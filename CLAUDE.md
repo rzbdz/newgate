@@ -44,13 +44,13 @@ go vet ./... && gofmt -l component modules cmd
 
 | 目录 | 管什么 | 改这里当你在做… |
 | --- | --- | --- |
-| `component` | typed capability、依赖 DAG、生命周期 | 组件框架本身 |
+| `component` | typed capability、依赖 DAG、生命周期（含 `Inject` 注入边与 `Attach` 第二阶段） | 组件框架本身 |
 | `modules/config/{domain,resolve,roleprov,store}` | Config 组件、配置语义、动态角色、fallback 纯函数、持久化 | 档位与配置 |
 | `modules/gateway/{forward,special,rewrite,thinkcache}` | 网关组件及其内部实现 | 转发、扩展与思维链 |
 | `modules/breaker` | binding 健康表：可用性 + 延迟排序，**无 Requires**（叶子，被注入数据面与 CLI） | 熔断策略与恢复 |
 | `modules/confighook` | agent/config/state-field 注册端口 | 配置文件接管 |
 | `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
-| `modules/cli` | CLI 组件与命令壳 | `newgate <动词>` |
+| `modules/cli` | 命令行界面：分派、排版、注入点（**不含任何业务知识**，见 §4） | `newgate <动词>` 的分派与 help |
 | `modules/<客户端或模型>` | Claude Code、DeepSeek、组合行为 | 新增可组合组件 |
 | `app`（在 `modules/` 之外） | 组合根：装配清单与 `App` 所有权对象 | 换默认装配 |
 | `tools/genmodules` | 构建期扫描 `modules/` 生成装配清单 | 改模块发现规则 |
@@ -58,8 +58,9 @@ go vet ./... && gofmt -l component modules cmd
 
 每个 `modules/<name>`（无例外）都必须在根目录提供唯一的 `module.go`，由它用
 `New()` 直接返回 `component.Component`，并声明 `Requires`、`Provides`、`Start`
-和 `Stop`。注册型 capability 必须返回 `component.Release`，consumer 在 `Stop`
-中逆序释放。复杂实现可以拆文件或子包，但入口文件名和所在层级不能变化。
+和 `Stop`（要往 ui 注入的模块再加一个 `Attach`，见 §4）。注册型 capability 必须
+返回 `component.Release`，consumer 在 `Stop` 中逆序释放。复杂实现可以拆文件或
+子包，但入口文件名和所在层级不能变化。
 
 **公开 capability 和接口写在模块根目录的 `api.go`**（2026-09-17 起，不再用
 `<module>/api/` 子包）；禁止建立中心化 contracts 包。契约类型若实现方需要反向
@@ -211,25 +212,45 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
   core 只认「键 → 缺省绑定」这张表，解析路径与档位完全一样（引用展开，见
   `resolve.BuildChain`）。接一个新插件 = 新注册一个 Provider，core 不动。
 - **ui 只是一类普通模块，cli 是其中一个**（2026-09-18 定）。将来 tui / web 都会
-  是独立模块，走同一套模式。由此推出一条硬规矩：
+  是独立模块，走同一套模式。由此推出三条硬规矩：
 
-  - **业务模块不依赖任何 ui**。它们在自己 `Start` 里**可选地**（`Optional` +
-    `Get` 而非 `Need` + `MustGet`）往当前存在的 ui 注入自己的控制面（命令、
-    状态行、诊断）：谁在就注入给谁，谁不在就跳过。
+  - **业务模块不依赖任何 ui**。它们往当前存在的 ui 注入自己的控制面，谁在就注入
+    给谁，谁不在就跳过。
   - **没装任何 ui 时，一切功能照常**。最坏情况只是「这些模块没有入口」——
     不影响任何模块的功能与运作；反过来，要操作某个模块的控制面，**至少得装
     一个 ui 模块**。
-  - **ui 自己不依赖任何模块**。它只提供注入点，在分派命令、渲染 status/doctor
-    时循环调用别人注入进来的回调拿数据。命令的实现住在拥有那项能力的模块里
-    （`newgate st` 归 gateway、`newgate plugin` 归 plugin-manager），不是写在
-    界面里。判断一个东西该不该留在 ui：**把它删掉，业务模块还成立吗？** 成立
-    就不该留在 ui。
+  - **ui 自己不依赖任何模块**。`modules/cli` 的 `Requires` 是**空的**，目录里不
+    含任何业务知识。判断一个东西该不该留在 ui：**把它删掉，业务模块还成立吗？**
+    成立就不该留在 ui。
 
-  这条曾经被违反得很彻底：账本长在 cli 身上、命令写在 cli 的 switch 里，于是
-  「想贡献一条命令」必须 `Need(cli)`，而 cli 自己又要 `Need(runtime/config/
-  gateway)` 才能渲染 —— 那批命令（`start` / `tier` / `probe` …）因此永远搬不回
-  自己的模块。`app/` 里有一条棘轮测试（`TestCLIDependenciesOnlyShrink`）守着
-  这个方向：界面的依赖名单**只能变短**。
+  **注入是第二阶段**（`component.Inject` + `Component.Attach`）。这条是解开那个
+  死结的关键，2026-09-18 之前没有它：往 ui 注入曾经要声明 `Optional(cli)`，那是
+  一条**排序边**，而 ui 自己又要依赖那些模块才能渲染——两条箭头互指就是环，于是
+  config / runtime / config-hook 的命令永远注入不进来，只能被迫留在界面里。
+
+  `Inject(cli)` 明确说「我不需要排在你后面」：全图 `Start` 跑完之后，框架再跑一遍
+  每个组件的 `Attach`，那时所有端口都已提供。ui 因此**从依赖图里退出去**了——没有
+  任何组件排在它前面或后面。`app/` 里两条棘轮测试守着这个方向：
+  `TestCLIDependenciesOnlyShrink`（界面出边集合必须为空）与
+  `TestUIStaysOutOfTheDependencyGraph`（谁也不许对 ui 声明非 late 边）。
+
+  **界面全部的能力都来自注入**，端口都在 `modules/cli/extension`：
+
+  | 端口 | 交什么 | 谁交（举例） |
+  | --- | --- | --- |
+  | `RegisterCommand` | 一条命令（含 `HelpLine` 声明的槽位与位置） | 每个拥有动词的模块 |
+  | `RegisterStatus` | status 里的一行 | gateway（代理）、runtime（接管）、config（配置） |
+  | `RegisterStatusBlocks` | status 里的成块内容（表格） | config（档位绑定、fallback 链） |
+  | `RegisterDiagnostics` | doctor 里的一项 | config、gateway、runtime |
+  | `RegisterDump` | 诊断包（`alllogs`）里的原始素材 | config、gateway、runtime |
+  | `RegisterGlossary` | 帮助屏术语表里属于自己的一行 | config-hook（agent）、config（槽位键） |
+  | `RegisterVerbose` | 「我的详细模式开着」 | gateway（debug） |
+
+  于是 `--help`、`status`、`doctor`、`alllogs` 全是**纯汇总**：里面每一行、每张表、
+  每段原文都由拥有那份数据的人产出，**装一个新模块不需要改这四条命令里的任何一行**。
+
+  两条可选接口让命令自己声明例外，省得界面列名单：`Handoff`（这条命令马上要把
+  控制权交给别的进程）、`Unstyled`（这一次的输出不是版式——JSON / KV 原文 / 日志）。
 - **提交**：英文 subject（`fix(scope): …` / `feat(scope): …`），正文说明
   「现场是什么样、为什么这么改、验证了什么」。概念的设计动机写在所属
   package 或声明旁；行为变化才更新专题文档。结尾只带

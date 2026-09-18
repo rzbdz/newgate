@@ -42,13 +42,25 @@ type Service interface {
     RegisterPlugin(Plugin) (component.Release, error)
 }
 
-// consumer 侧：Consume 别人的 service 来注入
+// consumer 侧：拿到别人的 service 来注入
 Requires: []component.Requirement{
-    component.Need(cliapi.Capability),
+    // 注入 ui 用 Inject 而**不是** Need/Optional —— 见下面「ui 的注入是第二阶段」
+    component.Inject(cliapi.Capability),
+    component.Need(confighookapi.ConfigHooksCapability),
 },
 Start: func(_ context.Context, ctx component.Context) error {
-    cli := component.MustGet(ctx, cliapi.Capability)
-    release, err := cli.RegisterCommand(myCommand{})
+    // Start 只做**自己的**初始化（注册端口、装状态）
+    hooks := component.MustGet(ctx, confighookapi.ConfigHooksCapability)
+    release, err := hooks.RegisterStateField("mymod", "my_field")
+    …
+},
+// 往 ui 里挂东西在 Attach 里做：那时所有端口都已提供
+Attach: func(_ context.Context, ctx component.Context) error {
+    ui, ok := component.Get(ctx, cliapi.Capability)
+    if !ok {
+        return nil // 没装 ui = 没有入口，功能照常
+    }
+    release, err := ui.RegisterCommand(myCommand{})
     if err != nil {
         return err
     }
@@ -57,6 +69,40 @@ Start: func(_ context.Context, ctx component.Context) error {
 },
 Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 ```
+
+### ui 的注入是第二阶段（`component.Inject` + `Attach`）
+
+`modules/cli` 是**界面**，不是依赖。往它注入**不能**用 `Need`/`Optional`：那两种
+都建立**排序边**，而界面自己也曾依赖那些模块（它要渲染别人报上来的 status）——
+两条箭头互指就是环，环一出现，那些模块的命令就永远注入不进来，只能被迫留在界面
+里。2026-09-18 之前 config / runtime / config-hook 的命令就是这样被困住的。
+
+`component.Inject(cap)` 声明「端口存在就给我，但**我不排在它后面**」。框架分两阶段
+装配：先跑完所有 `Start`，再跑所有 `Attach`。到 `Attach` 时任何一个端口都已提供，
+顺序问题自然消失，界面也就**从依赖图里退出去**了——没有任何组件排在它前面或后面，
+装不装 ui 只影响「这些贡献有没有地方去」。
+
+界面上的注入点（都在 `modules/cli/extension`）：
+
+| 端口 | 交什么 | 例子 |
+| --- | --- | --- |
+| `RegisterCommand` | 一条命令（`Names` 声明动词，`HelpLine` 声明它在 help 里的槽位与位置） | 每个拥有动词的模块 |
+| `RegisterStatus` | `newgate status` 里的一行（`Rank` 决定行序） | gateway：代理；runtime：接管；config：配置 |
+| `RegisterStatusBlocks` | status 里的成块内容（表格等，自己排版） | config：档位绑定、fallback 链 |
+| `RegisterDiagnostics` | `newgate doctor` 里的一项 | config、gateway、runtime |
+| `RegisterDump` | `alllogs` 诊断包里的原始素材 | config、gateway、runtime |
+| `RegisterGlossary` | help 末尾术语表里属于自己的一行 | config-hook：agent；config：槽位键 |
+| `RegisterVerbose` | 「我的详细模式开着」 | gateway：debug |
+
+两条**可选接口**让命令自己声明版式例外，省得界面维护一张命令名名单：
+
+- `Handoff` —— 这条命令马上要把控制权交给别的进程（包装启动一个客户端）；
+- `Unstyled(args)` —— **这一次**的输出不是版式（JSON、KV 原文、日志流）。收 args
+  是因为同一条命令可能只有某种用法不排版（`probe --json`、`profile kv`）。
+
+**界面里不许出现的东西**：任何一条命令的实现、任何一张数据表、任何一处「读某个
+模块的 state/配置文件」。`modules/cli` 的 `Requires` 是空的，`app/` 里两条棘轮测试
+（`TestCLIDependenciesOnlyShrink`、`TestUIStaysOutOfTheDependencyGraph`）守着它。
 
 注册 API 返回 `(component.Release, error)`，在写锁内做查重、冲突返回错误（不要
 静默先到先得）；consumer 在 `Stop` 中逆序释放。
