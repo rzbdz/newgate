@@ -407,13 +407,12 @@ type State struct {
 
 	// ModuleConfig 保存 core 不认识的顶层配置原文。store 负责无损读写，
 	// 具体模块按自己声明的字段解码；core 不因此知道 Claude、OMO 等概念。
+	//
+	// 2026-09-18：debug / schema_repair / special_treatment 三个开关从本 struct
+	// 的 typed 字段搬进了各自模块的这一段（见 modules/gateway/gatewaystate）。
+	// 判据是「这个键是谁的词汇」——它们全是网关的，放在共享配置里就等于
+	// 加一个网关开关要动 config。
 	ModuleConfig map[string][]byte `json:"-"`
-
-	// Debug 打印每个请求的完整头/体（密钥脱敏）。出错时无论如何都会记全。
-	Debug bool `json:"debug"`
-	// DebugUntil 自动过期时刻（RFC3339）。debug 单条能记 8KB+，
-	// 忘了关会把磁盘写满，所以默认只开一段时间。
-	DebugUntil string `json:"debug_until,omitempty"`
 }
 
 // Normalize 补默认值。读盘后调用。
@@ -448,22 +447,4 @@ func (s *State) TakeoverWanted(agent string) bool {
 		return v
 	}
 	return true
-}
-
-// DebugActive debug 是否仍在有效期内。过期即视为关闭。
-//
-// debug 单条请求能记 8KB+（opencode 的系统提示就有 97KB），忘了关会把
-// 磁盘写满，所以默认带过期时间。
-func (s *State) DebugActive() bool {
-	if !s.Debug {
-		return false
-	}
-	if s.DebugUntil == "" {
-		return true // 显式永久开
-	}
-	t, err := time.Parse(time.RFC3339, s.DebugUntil)
-	if err != nil {
-		return true
-	}
-	return time.Now().Before(t)
 }

@@ -321,16 +321,6 @@ func ClearActiveProfile(agent string) error {
 	return SaveState(s)
 }
 
-func SetDebug(on bool, untilRFC3339 string) error {
-	s := LoadState()
-	s.Debug = on
-	s.DebugUntil = ""
-	if on {
-		s.DebugUntil = untilRFC3339
-	}
-	return SaveState(s)
-}
-
 // SetTakeoverWanted 记下「用户要不要接管这个 agent」（期望态）。
 // 只改期望态，不碰磁盘——具体怎么接管是 runtime/takeover 的事。
 func SetTakeoverWanted(agent string, want bool) error {

@@ -14,6 +14,7 @@ package gatewaystate
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/store"
@@ -34,6 +35,16 @@ type Config struct {
 	// SpecialOff 单独关掉的插件名。排查「是不是 newgate 改坏了请求」时
 	// 关掉某一个比关掉整层更精确。名字见 `newgate st`。
 	SpecialOff []string `json:"special_treatment_off,omitempty"`
+
+	// Debug 全量请求日志（转发侧逐条 dump）。**必须限时**：一发请求的
+	// body 可以到 8KB 以上（opencode 的 system prompt 单独就 ~97KB），
+	// 忘了关会把磁盘写满。DebugUntil 空 = 显式永久开。
+	//
+	// 用指针是为了让「没设过」与「显式关掉」可区分——迁移期逐字段回退老键
+	// 靠的就是这个区分（nil 才回退）。
+	Debug *bool `json:"debug,omitempty"`
+	// DebugUntil RFC3339。Debug 为真且这里过了期，就等于没开（懒过期）。
+	DebugUntil string `json:"debug_until,omitempty"`
 }
 
 // legacy 是迁移前的老键名：这三个开关曾经声明成 domain.State 上的 typed 字段，
@@ -43,15 +54,23 @@ type Config struct {
 // / SaveState），所以老键既不会自动消失、也不会被新的读路径看到。不读它，一个
 // 显式 `special_treatment: false` 过的机器在升级后会**静默变回全开**——用户关掉的
 // 东西自己回来了，而且没有任何提示。
-var legacy = struct{ SchemaRepair, SpecialTreatment, SpecialOff string }{
-	"schema_repair", "special_treatment", "special_treatment_off",
+var legacy = struct{ SchemaRepair, SpecialTreatment, SpecialOff, Debug, DebugUntil string }{
+	"schema_repair", "special_treatment", "special_treatment_off", "debug", "debug_until",
 }
 
 // Parse 解析 gateway 那一段。**永不失败**：没有这一段、或者 JSON 坏掉，
 // 都当「出厂态」——全开、没有单独关掉的插件（fail-open：读不出来就别关人东西）。
 //
-// 新段缺席时读一次老键（迁移期）。一旦新段存在（哪怕是 `{}`），就只认它——
-// 否则用户把开关都拨回出厂态之后，老键会把旧值复活。
+// 迁移期**逐字段**回退老键：只在新段里**没设过**那个字段时才读老键。
+//
+// 为什么不是「新段存在就整段不读老键」：那在「新段已经写了、老键还没删」的窗口里
+// 会静默丢设置。实测踩过——分两步搬（先搬 schema-repair、后搬 debug）时，第一次
+// 写入就建好了新段，于是后来搬的 debug 永远读不到老值，state.json 顶层留着一个
+// 看着像生效的 `debug: true` 而网关已经不读它了。
+//
+// 为什么逐字段回退不会让旧值复活：老键在**第一次写入时就被删掉**（见 update），
+// 回退窗口只存在于升级那一次；而且已设过的字段不参与回退，用户把开关拨回出厂态
+// 之后（字段被显式写成非 nil）也不会被老值翻回去。
 func Parse(st *domain.State) Config {
 	if st == nil {
 		return Config{}
@@ -59,9 +78,24 @@ func Parse(st *domain.State) Config {
 	var c Config
 	if raw := st.ModuleConfig[Key]; len(raw) > 0 {
 		_ = json.Unmarshal(raw, &c)
-		return c
 	}
-	return legacyConfig(st)
+	leg := legacyConfig(st)
+	if c.SchemaRepair == nil {
+		c.SchemaRepair = leg.SchemaRepair
+	}
+	if c.SpecialTreatment == nil {
+		c.SpecialTreatment = leg.SpecialTreatment
+	}
+	if len(c.SpecialOff) == 0 {
+		c.SpecialOff = leg.SpecialOff
+	}
+	if c.Debug == nil {
+		c.Debug = leg.Debug
+	}
+	if c.DebugUntil == "" {
+		c.DebugUntil = leg.DebugUntil
+	}
+	return c
 }
 
 func legacyConfig(st *domain.State) Config {
@@ -82,6 +116,18 @@ func legacyConfig(st *domain.State) Config {
 		var v []string
 		if json.Unmarshal(raw, &v) == nil {
 			c.SpecialOff = v
+		}
+	}
+	if raw := st.ModuleConfig[legacy.Debug]; len(raw) > 0 {
+		var v bool
+		if json.Unmarshal(raw, &v) == nil {
+			c.Debug = &v
+		}
+	}
+	if raw := st.ModuleConfig[legacy.DebugUntil]; len(raw) > 0 {
+		var v string
+		if json.Unmarshal(raw, &v) == nil {
+			c.DebugUntil = v
 		}
 	}
 	return c
@@ -110,6 +156,32 @@ func PluginOff(st *domain.State, name string) bool {
 	return Parse(st).pluginOff(name)
 }
 
+// DebugActive 全量请求日志现在开着吗。**懒过期**：Debug 为真但到点了就算没开，
+// 不需要谁去把它关掉——转发路径上的每一次判断都会自然得到 false。
+//
+// 解析不出时间戳时按「开着」算：宁可多记一段日志，也不能因为一个手改坏的
+// 时间戳把用户特意打开的东西静默关掉。
+func DebugActive(st *domain.State) bool {
+	return Parse(st).debugActive()
+}
+
+func (c Config) debugActive() bool {
+	if c.Debug == nil || !*c.Debug {
+		return false
+	}
+	if c.DebugUntil == "" {
+		return true // 显式永久开
+	}
+	t, err := time.Parse(time.RFC3339, c.DebugUntil)
+	if err != nil {
+		return true
+	}
+	return time.Now().Before(t)
+}
+
+// DebugUntilDisplay 到期时刻的原文，供 status 展示（空 = 不限时）。
+func DebugUntilDisplay(st *domain.State) string { return Parse(st).DebugUntil }
+
 func (c Config) repairOn() bool  { return c.SchemaRepair == nil || *c.SchemaRepair }
 func (c Config) specialOn() bool { return c.SpecialTreatment == nil || *c.SpecialTreatment }
 
@@ -132,6 +204,17 @@ func SetSchemaRepair(on bool) error {
 // SetSpecialTreatment 开关整个 special_treatment 层。
 func SetSpecialTreatment(on bool) error {
 	return update(func(c *Config) { c.SpecialTreatment = &on })
+}
+
+// SetDebug 开关全量请求日志。untilRFC3339 空 = 不限时。
+func SetDebug(on bool, untilRFC3339 string) error {
+	return update(func(c *Config) {
+		c.Debug = &on
+		c.DebugUntil = ""
+		if on {
+			c.DebugUntil = untilRFC3339
+		}
+	})
 }
 
 // SetSpecialPlugin 单独开关一个插件。关 = 记进 SpecialOff，开 = 从里面删掉。
@@ -173,5 +256,7 @@ func update(mutate func(*Config)) error {
 	delete(st.ModuleConfig, legacy.SchemaRepair)
 	delete(st.ModuleConfig, legacy.SpecialTreatment)
 	delete(st.ModuleConfig, legacy.SpecialOff)
+	delete(st.ModuleConfig, legacy.Debug)
+	delete(st.ModuleConfig, legacy.DebugUntil)
 	return store.SaveState(st)
 }

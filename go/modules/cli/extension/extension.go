@@ -78,6 +78,13 @@ type Host interface {
 	PrintSkips([]configapi.Skip)
 	NotifyProxy()
 
+	// DaemonRunning 守护进程现在在跑吗（读 pidfile）。
+	//
+	// 只有 CLI 做得成这件事：它拥有进程生命周期（起停、优雅交接、pidfile
+	// 的读写时机）。命令想问的其实是「我这一改有人立刻读吗」——不在跑就只是
+	// 落了个盘，下次起来才生效，跟用户说清楚比让他以为已经生效强。
+	DaemonRunning() bool
+
 	// PrintThinkCache 打印推理缓存的命中计数。
 	//
 	// 数字只能从**跑着的守护进程**取：缓存在守护进程的内存里，CLI 是另一个

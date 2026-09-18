@@ -39,6 +39,16 @@ func (switchStatus) Status(st *domain.State) []cliapi.StatusLine {
 	}
 
 	var parts []string
+	switch {
+	case gatewaystate.DebugActive(st):
+		s := "debug=on"
+		if until := gatewaystate.DebugUntilDisplay(st); until != "" {
+			s += "（到 " + until + "）"
+		}
+		parts = append(parts, s)
+	case gatewaystate.Parse(st).Debug != nil && *gatewaystate.Parse(st).Debug:
+		parts = append(parts, "debug=已过期")
+	}
 	if !gatewaystate.RepairEnabled(st) {
 		parts = append(parts, "schema-repair=off")
 	}
@@ -51,7 +61,7 @@ func (switchStatus) Status(st *domain.State) []cliapi.StatusLine {
 	if len(parts) > 0 {
 		out = append(out, cliapi.StatusLine{
 			Label: "补丁开关",
-			Value: strings.Join(parts, "   ") + "   恢复：newgate st on · newgate schema-repair on",
+			Value: strings.Join(parts, "   ") + "   恢复：newgate st on · newgate schema-repair on · newgate debug off",
 		})
 	}
 	return out
