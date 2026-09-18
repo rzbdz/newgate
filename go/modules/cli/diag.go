@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/rzbdz/newgate/go/modules/gateway/controlpath"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -267,7 +268,7 @@ func publishProbeHealth(results []probe.Result) (int, error) {
 	var response struct {
 		Opened int `json:"opened"`
 	}
-	err := localPost(info.Port, controlpath.Health, st.ControlToken,
+	err := controlplane.Post(info.Port, controlpath.Health, st.ControlToken,
 		map[string]interface{}{"observations": observations}, &response)
 	return response.Opened, err
 }
@@ -304,7 +305,7 @@ func cmdMetrics() int {
 	if info == nil {
 		return die(69, "代理没在运行（newgate start）——计数器在 daemon 内存里")
 	}
-	counter, uptime, ok := proxyMetrics(info.Port)
+	counter, uptime, ok := controlplane.Metrics(info.Port)
 	if !ok {
 		return die(69, fmt.Sprintf("连不上代理 127.0.0.1:%d（newgate doctor）", info.Port))
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/rzbdz/newgate/go/modules/gateway/controlpath"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 	"io"
 	"io/ioutil"
 	"log"
@@ -492,27 +493,7 @@ func activeProblems(st *domain.State) []string {
 	return out
 }
 
-func pingProxy(port int) bool {
-	resp, err := httpx.LocalClient(1500 * time.Millisecond).
-		Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, controlpath.Status))
-	if err == nil {
-		defer resp.Body.Close()
-		if resp.StatusCode == 200 {
-			return true
-		}
-	}
-	return httpx.TCPAlive("127.0.0.1", port, 500*time.Millisecond)
-}
+func pingProxy(port int) bool { return controlplane.Ping(port) }
 
-// notifyProxy 让运行中的代理立刻重读配置。
-//
-// 平时配置改动靠 watcher 的 1 秒轮询，对**手工编辑文件**足够快；
-// 但 CLI 命令（--set-profile 等）是用户刚敲下的，必须立刻生效，
-// 所以显式发 SIGHUP 强制重载。
-func notifyProxy() {
-	i := daemon.Running()
-	if i == nil {
-		return
-	}
-	_ = syscall.Kill(i.PID, syscall.SIGHUP)
-}
+// notifyProxy 让运行中的代理立刻重读配置（转发到控制面叶子）。
+func notifyProxy() { controlplane.Notify() }

@@ -1,39 +1,16 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"github.com/rzbdz/newgate/go/modules/gateway/controlpath"
-	"net/http"
-	"time"
-
-	"github.com/rzbdz/newgate/go/lib/httpx"
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
-	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
+	breakerstatus "github.com/rzbdz/newgate/go/modules/breaker/status"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 )
 
-// 代理自报的运行时状态。整页状态（status / metrics / st）都只发**一次**
-// 这个请求就拿全——以前每个命令各打各的探活，数字还可能对不上。
-type proxyInfo struct {
-	OK       bool                `json:"ok"`
-	Port     int                 `json:"port"`
-	UptimeS  int                 `json:"uptime_s"`
-	Requests uint64              `json:"requests"`
-	Failures uint64              `json:"failures"`
-	Breakers []breakerapi.Status `json:"breakers"`
-	Handoff  bool                `json:"handoff"`
-	Default  string              `json:"default_profile"`
-	Active   map[string]string   `json:"active"`
-	Think    struct {
-		Entries   int   `json:"entries"`
-		Bytes     int64 `json:"bytes"`
-		MaxBytes  int64 `json:"max_bytes"`
-		Hits      int64 `json:"hits"`
-		Misses    int64 `json:"misses"`
-		Evictions int64 `json:"evictions"`
-	} `json:"thinkcache"`
-}
+// proxyInfo 是控制面状态文档的别名。
+//
+// 文档形状与客户端都在 modules/gateway/controlplane（共享叶子）：读守护进程的
+// 自报状态不再是界面独有的能力，任何模块都能读——那正是把 metrics / breaker /
+// probe 这些命令搬回各自模块的前提。
+type proxyInfo = controlplane.Doc
 
 // availableFromProxy 把 daemon 的全局熔断表冻结成一次 CLI 命令内的一致快照。
 // daemon 不在线时不凭空判坏：诊断退化为只看静态配置。
@@ -80,8 +57,8 @@ func rankFromProxy(ps *proxyInfo) func(provider, model string) int {
 	}
 }
 
-func healthFromProxy(ps *proxyInfo) map[string]breakerapi.Status {
-	out := map[string]breakerapi.Status{}
+func healthFromProxy(ps *proxyInfo) map[string]breakerstatus.Status {
+	out := map[string]breakerstatus.Status{}
 	if ps != nil {
 		for _, status := range ps.Breakers {
 			out[status.Provider+"/"+status.Model] = status
@@ -90,71 +67,5 @@ func healthFromProxy(ps *proxyInfo) map[string]breakerapi.Status {
 	return out
 }
 
-// proxyState 代理的进程信息 + 自报状态。
-//
-// pid 来自 pidfile（进程还在不在），info 来自 HTTP（它自己怎么想的）。
-// 两者都可能单独失败：进程活着但端口不响应，正是「出站代理劫持 loopback」
-// 那个经典故障，必须能分开表达（见 doctor）。
-func proxyState() (info *daemon.Info, st *proxyInfo) {
-	info = daemon.Running()
-	if info == nil || info.Port <= 0 {
-		return info, nil
-	}
-	var s proxyInfo
-	if !localGet(info.Port, controlpath.Status, &s) {
-		return info, nil
-	}
-	return info, &s
-}
-
-// proxyMetrics 网关计数器。和 status 是两个端点（计数器是 daemon 内存里
-// 的一张 map，status 只挑几个数报），所以单独取一次。
-func proxyMetrics(port int) (map[string]uint64, int, bool) {
-	var out struct {
-		Metrics map[string]uint64 `json:"metrics"`
-		UptimeS int               `json:"uptime_s"`
-	}
-	if !localGet(port, controlpath.Metrics, &out) {
-		return nil, 0, false
-	}
-	return out.Metrics, out.UptimeS, true
-}
-
-func localGet(port int, path string, v interface{}) bool {
-	resp, err := httpx.LocalClient(1500 * time.Millisecond).
-		Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, path))
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return false
-	}
-	return json.NewDecoder(resp.Body).Decode(v) == nil
-}
-
-func localPost(port int, path, token string, body, out interface{}) error {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequest(http.MethodPost,
-		fmt.Sprintf("http://127.0.0.1:%d%s", port, path), bytes.NewReader(raw))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := httpx.LocalClient(3 * time.Second).Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("daemon 返回 HTTP %d", resp.StatusCode)
-	}
-	if out == nil {
-		return nil
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
-}
+// proxyState 代理的进程信息 + 自报状态。薄薄一层转发，调用点不必改。
+func proxyState() (*controlplane.Info, *proxyInfo) { return controlplane.State() }

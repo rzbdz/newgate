@@ -10,6 +10,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,11 +41,19 @@ func coreSection(name string) bool {
 // 左列固定宽度、右列是**一句话结论**，细节再往里塞就会变成没人读的墙。
 // 分组按用户此刻想干什么排（接管 / 跑一次 / 路由 / 观测 / 维护），不按
 // 代码里的文件排——用户不知道也不关心命令实现在哪个文件。
+// usageText 组装 `newgate --help`。
+//
+// **界面自己不认识任何一条命令、任何一节**：所有命令行都由拥有那项能力的模块
+// 经 HelpLine 声明，这里只做组装与排版。上一版这里写死了一张 cmd(...) 清单，
+// 结果是命令搬回模块之后界面还在硬编码它们——"搬了"等于白搬，而且每加一个模块
+// 都得回来改界面（那正是本次重构要拆掉的东西）。
+//
+// 位置由命令自己声明的 Rank 决定：节的顺序取该节最小的 Rank，节内再按 Rank、
+// Usage 排。同 Rank 时靠 Usage 兜底，保证每次跑出来顺序一致。
 func usageText(service *service) string {
 	var b strings.Builder
 	b.WriteString(style.Bold("newgate") + " — AI CLI 的语义模型层代理\n")
 
-	sec := func(t string) { b.WriteString("\n" + style.Bold(t) + "\n") }
 	// 左列按显示宽度补齐（CJK 双宽），右列一律暗色——扫读时先看命令名，
 	// 需要时再看说明。
 	cmd := func(left, right string) {
@@ -63,97 +72,74 @@ func usageText(service *service) string {
 			}
 		}
 	}
-	raw := func(line string) { b.WriteString("  " + line + "\n") }
 
-	// 模块贡献的 help 行：按它们**自己声明的** Section 归位。
-	//
-	// 这一步是「命令搬回各模块」的另一半。命令搬走了而 help 不搬，等于 cli 还
-	// 认识那个模块——`Documented` 端口存在就是为了这个，不消费它等于没搬。
-	//
-	// 认不出的 Section 会新开一节，排在已知几节之后。**不报错**：节名是呈现
-	// 概念，一个模块想给自己新开一节是正当的，为它把 --help 打崩才荒唐。
-	contrib := map[string][]HelpLine{}
-	var extra []string
+	// 收集：谁注入的命令，就由谁声明它在 help 里长什么样、放哪个位置。
+	sections := map[string][]HelpLine{}
+	var order []string
 	if service != nil {
 		for _, c := range service.commands.All() {
 			doc, ok := c.(Documented)
 			if !ok {
-				continue
+				continue // 可选接口：没声明就不占一行，但仍然能用
 			}
 			line := doc.Help()
 			if line.Usage == "" {
 				continue
 			}
-			if _, known := contrib[line.Section]; !known && !coreSection(line.Section) {
-				extra = append(extra, line.Section)
+			if _, seen := sections[line.Section]; !seen {
+				order = append(order, line.Section)
 			}
-			contrib[line.Section] = append(contrib[line.Section], line)
+			sections[line.Section] = append(sections[line.Section], line)
 		}
 	}
-	emit := func(section string) {
-		for _, line := range contrib[section] {
+	// 节的顺序 = 该节最小的 Rank。空 Section（不分组）排最后：它没有位置主张。
+	rankOf := func(name string) int {
+		best := -1
+		for _, line := range sections[name] {
+			if best < 0 || line.Rank < best {
+				best = line.Rank
+			}
+		}
+		return best
+	}
+	sort.Slice(order, func(i, j int) bool {
+		ri, rj := rankOf(order[i]), rankOf(order[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return order[i] < order[j]
+	})
+
+	for _, name := range order {
+		lines := sections[name]
+		sort.Slice(lines, func(i, j int) bool {
+			if lines[i].Rank != lines[j].Rank {
+				return lines[i].Rank < lines[j].Rank
+			}
+			return lines[i].Usage < lines[j].Usage
+		})
+		if name != "" {
+			b.WriteString("\n" + style.Bold(name) + "\n")
+		} else {
+			b.WriteString("\n")
+		}
+		for _, line := range lines {
 			cmd(line.Usage, line.Summary)
 		}
 	}
 
-	sec("接管")
-	cmd("start", "起代理 + 接管所有 agent")
-	cmd("stop", "停代理 + 所有 agent 恢复直连")
-	cmd("on <agent>", "只接管一个")
-	cmd("off <agent>", "只放开一个，以后 start 也不再管它")
-	cmd("restart", "重启代理，接管现场原样保留")
-	cmd("status", "谁在走 newgate、用哪个 profile")
-	cmd("reload", "立刻重读配置（平时 1 秒内自动热更新）")
-	emit("接管")
-
-	sec("跑一次（不改全局状态）")
-	cmd("<agent> [--profile <名>] [args…]", "用某个 profile 跑一次")
-	cmd("run <agent> [args…]", "同上，显式写法")
-	cmd("newgate-<名> <agent> …", "argv0 分发，等价 --profile <名>")
-
-	sec("路由与配置")
-	cmd("tier [档位]", "fallback 链：走谁、跳过了什么")
-	cmd("profiles", "所有 profile（优先级 / 标志 / 覆盖）")
-	cmd("--set-profile <名> [--agent <agent>]", "切 profile；省略 --agent 设全局默认")
-	cmd("profile kv <名> [--write]", "profile 转 KV 文本")
-	cmd("agents", "已知 agent 及其模型槽位")
-	emit("路由与配置")
-
-	sec("探测与观测")
-	cmd("probe [profile]", "给候选打真实请求，出健康报告")
-	cmd("breaker", "哪些 binding 被摘牌了、为什么、多久了")
-	cmd("metrics", "代理计数器：拦截 / 超时 / 转移 / 改道")
-	cmd("doctor", "体检")
-	cmd("logs [N] [-f]", "代理日志：终端上分页，-f 持续跟随")
-	cmd("alllogs", "完整诊断包")
-	emit("探测与观测")
-
-	sec("维护")
-	cmd("init [--force]", "铺开默认配置")
-	cmd("shim …", "底层逃生口，平时用 on/off 就够了")
-	cmd("tui", "menuconfig 风格界面")
-	cmd("version", "")
-	emit("维护")
-
-	// 模块自开的节。
-	for _, name := range extra {
-		sec(name)
-		emit(name)
-	}
-
-	sec("术语")
+	// 术语表是**界面自己的**东西：用户不知道某个词是什么意思时看的字典。它不是
+	// 命令行清单（那是模块的），所以留在这里；能推导的一律现取（agent 名、槽位键
+	// 都来自注册表），不写死。
+	b.WriteString("\n" + style.Bold("术语") + "\n")
 	term := func(left, right string) {
-		b.WriteString("  " + style.Pad(style.Cyan(left), 10) + style.Dim(right) + "\n")
+		b.WriteString("  " + style.Pad(style.Cyan(left), 12) + style.Dim(right) + "\n")
 	}
 	term("agent", "被接管的 CLI："+agentNames(service))
-	term("tier", "能力档 heavy > normal（主力）> mid > light，另加正交的 vision")
 	term("profile", "一套「档位 → provider/模型」绑定")
 	term("槽位键", slotTerm())
-	term("st", "special_treatment：只对某家上游生效的请求补丁")
-	term("plugin", "模块分类（infra/gateway/client/model/…）与它的运行期开关点")
-
-	sec("配置")
-	raw(style.Dim("~/.config/newgate/ · providers.json · mappings/*.kv · state.json"))
+	b.WriteString("\n" + style.Bold("配置") + "\n")
+	b.WriteString("  " + style.Dim("~/.config/newgate/ · providers.json · mappings/*.kv · state.json") + "\n")
 	return b.String()
 }
 
