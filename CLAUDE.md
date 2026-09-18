@@ -47,7 +47,7 @@ go vet ./... && gofmt -l component modules cmd
 | `component` | typed capability、依赖 DAG、生命周期（强依赖 `Need` / 弱依赖 `Optional`，单阶段装配），以及装配过程的 trace 出口 | 组件框架本身 |
 | `modules/config/{domain,resolve,roleprov,store}` | Config 组件、配置语义、动态角色、fallback 纯函数、持久化（后三个同时是**共享叶子**，谁都能直接 import，不算依赖边） | 档位与配置 |
 | `modules/gateway/{forward,special,rewrite,thinkcache}` | 网关组件及其内部实现 | 转发、扩展与思维链 |
-| `modules/breaker` | binding 健康表：可用性 + 延迟排序，**无 Requires**（叶子，被注入数据面与 CLI） | 熔断策略与恢复 |
+| `modules/breaker` | binding 健康表：可用性 + 延迟排序。`Need(gateway)`——它是**插进数据面四个决策点的策略**，不是被 gateway import 的库（方向 2026-09-18 翻过） | 熔断策略与恢复 |
 | `modules/confighook` | agent/config/state-field 注册端口 | 配置文件接管 |
 | `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
 | `modules/cli` | 命令行界面：分派、排版、注入点（**不含任何业务知识**，见 §4） | `newgate <动词>` 的分派与 help |
@@ -268,6 +268,10 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
   `Apply`（改了什么）。用户能 `newgate st off <名字>` 单独摘掉。
   只对某一类客户端生效的补丁，判据用 `special.claudeCode(r)`，别按
   「Agent 非空」猜。
+- **新的数据面策略**（摘谁的牌、记哪本账、什么算失败、留什么痕）→ 实现
+  `gateway/policy` 的口，在自己的 `Start` 里 `RegisterFilter` 挂进去；**别让
+  gateway import 你**，判据是 `command grep -rn <你的模块名> modules/gateway/`
+  为空。一个都不装时网关是最小系统，照常转发。见 `docs/09-extension-guide.md` §7。
 
 ---
 

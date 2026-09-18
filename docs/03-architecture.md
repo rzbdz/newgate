@@ -9,8 +9,8 @@
 ```text
 Config（无出边）
 ConfigHook（无出边）
-breaker（无出边，纯叶子）
 CLI（无出边）
+GLM（无出边）
   ▲
   │ Optional(cli) ×9（弱依赖，排序边）：breaker / config / config-hook / gateway
   │            opencode-omo / plugin-manager / runtime / claudecode / tui
@@ -18,8 +18,12 @@ CLI（无出边）
 
 Gateway
   ├─ Config
-  ├─ breaker
-  └─ Thinking / Claude Code behavior / DeepSeek behavior / cross-components
+  ├─ Thinking / Claude Code behavior / cross-components
+  └─ DeepSeek
+       └─ plugin-manager
+
+breaker
+  └─ Gateway
 
 Runtime
   ├─ Config
@@ -32,6 +36,20 @@ Wrapper
   ├─ Runtime
   └─ ConfigHook
 ```
+
+**`breaker → Gateway` 这条边的方向是 2026-09-18 翻过来的**（那天之前是
+`Gateway ├─ breaker`）。理由与判据见 §2：健康表有生命周期、有所有者，是
+capability 不是库。翻过来之后 gateway 成了**最小系统**——它从自己的状态机里读出
+四个决策点（建链准入 / 结局裁决 / 控制面自报 / 停机落盘），留一口注册表，谁都不
+装也照常转发；健康表在**它自己的 `Start`** 里经 `RegisterFilter` 把自己挂进去。
+可机械核对：`command grep -rn breaker modules/gateway/forward/ modules/gateway/module.go
+modules/gateway/serve.go` 为空（只剩三处讲历史的注释）。
+
+这也是「一个模块可以往 owner 的注册表里注册，而且 owner 在它之前启动」的第一个
+真实案例，所以 §2 那条「需要被启动、被停止、被撤销吗」的判据之外，还有一条更常
+被违反的规矩——**`Start` 只做两件事：起自己的服务、往 owner 注册自己的贡献；
+它不得把「别人注册了什么」当作自己启动的输入**（见
+`docs/02-component-framework.md` 的三段法则）。
 
 箭头表示 capability 消费，不表示目录 import。实际启动顺序由 component Manager
 根据 `Requires`/`Provides` 计算：拓扑序把 `cli` 排在所有注入者**之前**，停止是
@@ -50,7 +68,7 @@ Wrapper
 | `modules/config` | domain、profile resolver、store、动态 role（后三者同时是**共享叶子**，见下面那条注） |
 | `modules/confighook` | Agent、takeover、state field registry |
 | `modules/gateway` | HTTP 数据面和扩展执行 |
-| `modules/breaker` | binding 健康表（可用性 + 延迟排序），无依赖的叶子模块 |
+| `modules/breaker` | binding 健康表（可用性 + 延迟排序）。**作为策略插进 gateway 的四个决策点**（`Need(gateway)`），不再被任何模块 import——这条边的方向 2026-09-18 翻过，先例与判据见 §1 |
 | `modules/pluginmanager` | 运行期开关账本 + 模块分类词汇表 |
 | `modules/tui` | menuconfig 风格终端界面（与 cli 同级的另一个 ui） |
 | `modules/configshare` | 多机共享配置（预留，见 `docs/12-newgate-remote.md`） |
