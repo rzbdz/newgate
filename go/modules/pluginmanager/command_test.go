@@ -3,9 +3,9 @@ package pluginmanager
 import (
 	"testing"
 
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 // stubHost 是 Host 的最小实现。命令只用到 Die 和 NotifyProxy，其余是接口噪音。
@@ -29,12 +29,12 @@ func (h *stubHost) PrintThinkCache() {}
 
 func (h *stubHost) NotifyProxy() { h.notified++ }
 
-var _ cliapi.Host = (*stubHost)(nil)
+var _ surface.Host = (*stubHost)(nil)
 
 // TestRunGetsArgsWithoutTheVerb 守命令的参数下标基准。
 //
 // 分派器**把动词剥掉**才交给 Run：`newgate plugin X off 90s` → Run 收到
-// `["X","off","90s"]`。这条契约 2026-09-18 之前没写在 cli/extension 上，于是照
+// `["X","off","90s"]`。这条契约 2026-09-18 之前没写在契约包上，于是照
 // os.Args 的直觉按 1 起下标写，整条命令错位一格：
 //
 //	newgate plugin deepseek          → 打成了列表（不是展开）

@@ -14,16 +14,11 @@ import (
 // 而下面这张表说的是**我们认为谁该在谁前面**。加一条依赖把层级搞反（比如让
 // config 去依赖某个客户端模块）时，这里会红。
 //
-// 2026-09-18：`cli` 从「消费者」一侧挪到了「owner」一侧。它之前被列在消费者里
-// 是因为它 Require runtime/breaker；但自从各模块开始经 cli.RegisterCommand 贡献
-// 自己的命令（gateway 的 `st`、claudecode 的 `naked`、plugin-manager 的 `plugin`、
-// opencode-omo 的 `omo`），cli 就成了**命令 / 状态行 / 诊断三个扩展点的 owner**
-// ——注册者必须排在 owner 之后，所以 cli 必须早于所有想露面的模块。它 Require
-// runtime/breaker 只说明它在地基里排得靠后，不说明它是业务模块。
-//
-// 断言成「每一对 owner→注册者」的相对位置，而不是「前三个是谁」：装配清单是按
-// 字母序扫描 modules/ 生成的，拓扑并列时按声明位置决胜，绝对顺序是生成顺序的
-// 副产品，不是设计意图（2026-09-17 breaker 就因为字母序排到了首位）。
+// 2026-09-18：命令/诊断/状态行三本账从 cli 下沉到了 **surface**（叶子模块），
+// 所以那一侧的所有者从 cli 换成了 surface。这不是改名，是解开一个环：账本长在
+// cli 上时，「想贡献命令」就必须 Need(cli)，而 cli 自己又要 Need(runtime /
+// config / gateway) 才能渲染与启动客户端——两条边首尾相接，于是 `newgate start`
+// / `tier` / `probe` 这些命令永远搬不回自己的模块。详见 modules/surface 的包注释。
 func TestDefaultGraphLayering(t *testing.T) {
 	app, err := New(context.Background())
 	if err != nil {
@@ -56,11 +51,12 @@ func TestDefaultGraphLayering(t *testing.T) {
 		{"breaker", "deepseek", "deepseek 记账"},
 		{"runtime", "cli", "cli 调接管/注入"},
 		{"runtime", "wrapper", "wrapper 懒启动代理"},
-		// owner → 注册者：这几条是「命令住回各模块」之后的层级。
-		{"cli", "gateway", "gateway 注册 st"},
-		{"cli", "claudecode", "claudecode 注册 naked"},
-		{"cli", "plugin-manager", "plugin-manager 注册 plugin"},
-		{"cli", "opencode-omo", "omo 注册 omo"},
+		// owner → 注册者：命令账本搬去 surface 之后，这几条都指向 surface。
+		{"surface", "cli", "cli 从这里取命令来分派与排版"},
+		{"surface", "gateway", "gateway 注册 st / schema-repair / debug"},
+		{"surface", "claudecode", "claudecode 注册 naked"},
+		{"surface", "plugin-manager", "plugin-manager 注册 plugin"},
+		{"surface", "opencode-omo", "omo 注册 omo"},
 		{"gateway", "thinking", "thinking 注册请求插件"},
 		{"gateway", "deepseek", "deepseek 注册请求插件"},
 		{"gateway", "claudecode", "claudecode 注册请求插件"},
@@ -81,6 +77,37 @@ func TestDefaultGraphLayering(t *testing.T) {
 	opencode, ok := app.Get("opencode")
 	if !ok || opencode.Config == nil {
 		t.Fatal("opencode takeover was not injected by opencode-omo")
+	}
+}
+
+// TestNothingDependsOnCLI 锁住「cli 是一个纯界面」。
+//
+// 这是 2026-09-18 那次拆分要守住的**结果**：拆分之前，想贡献命令的模块必须
+// Need(cli)，于是 cli 成了所有模块的下游，而它自己又要 Need(runtime/config/
+// gateway) —— 环。拆出 surface 之后 cli 只被组合根（main）用，**没有任何模块
+// 依赖它**。
+//
+// 为什么值得一条测试：这个环不是靠一次决心解开的，是被一条一条具体的依赖重建
+// 起来的。哪天有人为了图方便写下 `modules.Need(cliapi.Capability)`，环会静默
+// 回来——症状是「又一个命令搬不出去了」，而那要等到有人真的想搬的时候才发现。
+// 在这里红，比在那里红早得多。
+func TestNothingDependsOnCLI(t *testing.T) {
+	app, err := New(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
+
+	for _, c := range app.Components() {
+		if c.Name == "cli" {
+			continue
+		}
+		for _, req := range c.Requires {
+			if req.Name() == "cli" {
+				t.Fatalf("%s 依赖了 cli：cli 是界面，不该被任何模块依赖——"+
+					"要贡献命令请依赖 surface（modules.Need(surface.Capability)）", c.Name)
+			}
+		}
 	}
 }
 

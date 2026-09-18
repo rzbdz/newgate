@@ -49,6 +49,14 @@ type Requirement struct {
 	optional bool
 }
 
+// Name 返回这个需求指向的端口名，供装配期枚举与校验用（内核不解释它，就像它
+// 不解释 Type 的取值：core 提供表，产品填内容）。
+//
+// 加它的原因很具体：产品层要断言「没有任何组件依赖 cli」这类层级不变量，而
+// Requirement 的字段是私有的、外面看不到。断言写在产品层、观测手段由内核提供，
+// 比把不变量塞进内核合适。
+func (r Requirement) Name() string { return r.spec.name }
+
 // Need 建立硬依赖；缺少提供者时整张图拒绝启动。
 func Need[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec}

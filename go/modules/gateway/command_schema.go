@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/rzbdz/newgate/go/lib/style"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 // schemaRepairCommand 是 `newgate schema-repair on|off`。
@@ -20,22 +20,22 @@ import (
 type schemaRepairCommand struct{}
 
 var (
-	_ cliapi.Command    = (*schemaRepairCommand)(nil)
-	_ cliapi.Documented = (*schemaRepairCommand)(nil)
+	_ surface.Command    = (*schemaRepairCommand)(nil)
+	_ surface.Documented = (*schemaRepairCommand)(nil)
 )
 
 func (schemaRepairCommand) Names() []string { return []string{"schema-repair", "schema_repair"} }
 
-func (schemaRepairCommand) Help() cliapi.HelpLine {
-	return cliapi.HelpLine{
+func (schemaRepairCommand) Help() surface.HelpLine {
+	return surface.HelpLine{
 		Section: "维护",
 		Usage:   "schema-repair on|off",
 		Summary: "工具 schema 缺 required 时补空数组",
 	}
 }
 
-func (schemaRepairCommand) Run(host cliapi.Host, args []string) int {
-	on := truthy(cliapi.Arg(args, 0))
+func (schemaRepairCommand) Run(host surface.Host, args []string) int {
+	on := truthy(surface.Arg(args, 0))
 	if err := gatewaystate.SetSchemaRepair(on); err != nil {
 		return host.Die(70, err.Error())
 	}

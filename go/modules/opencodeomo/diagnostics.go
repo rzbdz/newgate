@@ -4,17 +4,17 @@ import (
 	"fmt"
 	"os"
 
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 type diagnostics struct{}
 
-var _ cliapi.DiagnosticProvider = (*diagnostics)(nil)
+var _ surface.DiagnosticProvider = (*diagnostics)(nil)
 
-func (diagnostics) Diagnostics() []cliapi.Diagnostic {
+func (diagnostics) Diagnostics() []surface.Diagnostic {
 	reg := ReadOmoSlots()
 	if reg == nil {
-		return []cliapi.Diagnostic{{
+		return []surface.Diagnostic{{
 			Label: "槽位", State: "skip",
 			Line: "无注册表（未接管过 oh-my-openagent）",
 		}}
@@ -26,18 +26,18 @@ func (diagnostics) Diagnostics() []cliapi.Diagnostic {
 		}
 	}
 	if keys == 0 {
-		return []cliapi.Diagnostic{{
+		return []surface.Diagnostic{{
 			Label: "槽位", State: "skip", Line: "注册表为空",
 		}}
 	}
 	if fi, err := os.Stat(SlotsFile()); err == nil && fi.Mode().Perm()&0o040 == 0 {
-		return []cliapi.Diagnostic{{
+		return []surface.Diagnostic{{
 			Label: "槽位", State: "warn",
 			Line:    fmt.Sprintf("%d 个槽位键，但注册表组不可读（跑 daemon 的另一个用户看不到）", keys),
 			Details: []string{"chmod 0660 " + SlotsFile()},
 		}}
 	}
-	item := cliapi.Diagnostic{
+	item := surface.Diagnostic{
 		Label: "槽位", State: "ok",
 		Line: fmt.Sprintf("%d 个槽位键 · 模式 %s", keys, modeName(reg)),
 	}
@@ -45,7 +45,7 @@ func (diagnostics) Diagnostics() []cliapi.Diagnostic {
 		item.Details = append(item.Details,
 			fmt.Sprintf("%d 个键有建议档位（newgate omo ls 查看）", n))
 	}
-	return []cliapi.Diagnostic{item}
+	return []surface.Diagnostic{item}
 }
 
 func modeName(reg *OmoSlots) string {

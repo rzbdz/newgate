@@ -12,8 +12,8 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
@@ -27,7 +27,7 @@ var _ Gateway = (*port)(nil)
 //
 // 它也 Need(cli)：`newgate st` 是这一层的用户界面，插件名与开关语义都是本模块的
 // 知识，所以命令由本模块自己注册（见 command_special.go 的说明）。这条边不会成环
-// ——cli 靠 modules/cli/extension 那个叶子包得到契约，不 import 任何业务模块。
+// ——cli 靠 modules/surface 那个叶子模块得到契约，不 import 任何业务模块。
 func New() modules.Component {
 	port := &port{registry: special.NewRegistry()}
 	var restore func()
@@ -37,7 +37,7 @@ func New() modules.Component {
 		Type: "gateway",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
-			modules.Need(cliapi.Capability),
+			modules.Need(surface.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
@@ -45,8 +45,8 @@ func New() modules.Component {
 		Start: func(_ context.Context, ctx modules.Context) error {
 			restore = special.InstallDefault(port.registry)
 
-			cli := modules.MustGet(ctx, cliapi.Capability)
-			for _, cmd := range []cliapi.Command{specialCommand{}, schemaRepairCommand{}, debugCommand{}} {
+			cli := modules.MustGet(ctx, surface.Capability)
+			for _, cmd := range []surface.Command{specialCommand{}, schemaRepairCommand{}, debugCommand{}} {
 				release, err := cli.RegisterCommand(cmd)
 				if err != nil {
 					return err

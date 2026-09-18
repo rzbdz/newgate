@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 	"github.com/rzbdz/newgate/go/testing/testkit"
 )
 
@@ -31,7 +31,7 @@ func (h *nakedHost) PrintThinkCache() {}
 
 func (h *nakedHost) NotifyProxy() { h.notified++ }
 
-var _ cliapi.Host = (*nakedHost)(nil)
+var _ surface.Host = (*nakedHost)(nil)
 
 // nakedNow 读当前裸奔配置。
 func nakedNow(t *testing.T) (NakedConfig, bool) {

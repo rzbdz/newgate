@@ -6,8 +6,8 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 const nakedDefaultTTL = 60 * time.Second
@@ -29,14 +29,14 @@ const nakedDefaultTTL = 60 * time.Second
 type nakedCommand struct{}
 
 var (
-	_ cliapi.Command    = (*nakedCommand)(nil)
-	_ cliapi.Documented = (*nakedCommand)(nil)
+	_ surface.Command    = (*nakedCommand)(nil)
+	_ surface.Documented = (*nakedCommand)(nil)
 )
 
 func (nakedCommand) Names() []string { return []string{"naked"} }
 
-func (nakedCommand) Help() cliapi.HelpLine {
-	return cliapi.HelpLine{
+func (nakedCommand) Help() surface.HelpLine {
+	return surface.HelpLine{
 		Section: "维护",
 		Usage:   "naked on|forever|off|<时长>",
 		Summary: "短路 Bash 分类器：on=60s / forever=永久 / off=关",
@@ -46,8 +46,8 @@ func (nakedCommand) Help() cliapi.HelpLine {
 // Run 分派子命令。为什么不复用 `newgate st on/off`：st 管的是插件层整体开关、
 // 不带时间语义；裸奔需要细粒度到期，而且输出必须足够醒目——用户打开的是自家
 // 安全门。
-func (nakedCommand) Run(host cliapi.Host, args []string) int {
-	sub := cliapi.Arg(args, 0)
+func (nakedCommand) Run(host surface.Host, args []string) int {
+	sub := surface.Arg(args, 0)
 	switch sub {
 	case "", "off":
 		return nakedOff(host)
@@ -65,7 +65,7 @@ func (nakedCommand) Run(host cliapi.Host, args []string) int {
 	}
 }
 
-func nakedOff(host cliapi.Host) int {
+func nakedOff(host surface.Host) int {
 	s := store.LoadState()
 	delete(s.ModuleConfig, NakedConfigKey)
 	if err := store.SaveState(s); err != nil {
@@ -76,7 +76,7 @@ func nakedOff(host cliapi.Host) int {
 	return 0
 }
 
-func nakedOn(host cliapi.Host, ttl time.Duration) int {
+func nakedOn(host surface.Host, ttl time.Duration) int {
 	cfg := NakedConfig{
 		Mode:      "on",
 		ExpiresAt: time.Now().Add(ttl),
@@ -92,7 +92,7 @@ func nakedOn(host cliapi.Host, ttl time.Duration) int {
 	return 0
 }
 
-func nakedForever(host cliapi.Host) int {
+func nakedForever(host surface.Host) int {
 	cfg := NakedConfig{Mode: "forever"}
 	if err := saveNakedConfig(cfg); err != nil {
 		return host.Die(70, err.Error())

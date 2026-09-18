@@ -1,27 +1,39 @@
-// Package extension 是 CLI 的扩展契约：模块贡献命令、诊断、状态行时实现的那组
-// 接口，以及 CLI 自己的端口身份。
+// Package surface 是「进程对用户暴露的那一层」的注册表：命令、诊断、状态行。
 //
-// 为什么这些类型不放在 modules/cli 根包（2026-09-18 改）：
+// # 为什么它必须是一个独立的模块（2026-09-18）
 //
-// 根包很重——它 import 了 runtime（daemon/takeover/injection）、gateway
-// （forward/special/probe/…）和 breaker，因为 CLI 要负责进程生命周期、守护进程
-// 主循环和一堆渲染。模块若为了拿到 `Command` 接口去 import 根包，就等于把这些
-// 全拖进自己的依赖里，于是：
+// 这些注册表原来长在 modules/cli 自己的 service 上。那让 cli 同时是两样东西：
+// **注册表的所有者**和**交互界面**（分派 + 渲染 + 进程生命周期）。于是依赖方向
+// 被锁死：
 //
-//   - 谁 import 了那个模块，就再也无法被 runtime / gateway 的**测试**引用
-//     —— 那两处的测试要造客户端描述符，一 import 就成环（实测：
-//     `runtime/launch` 与 `runtime/takeover` 的测试当场编译不过）；
-//   - **gateway 永远无法注册自己的命令**：gateway → cli 与 cli → gateway 直接
-//     成环，于是 `newgate st` / `schema-repair` 只能被迫写在 cli 里。
+//	gateway / runtime / config ──Need──▶ cli        （为了注册自己的命令）
+//	cli ──Need──▶ runtime / config / breaker        （为了渲染与启动客户端）
 //
-// 把契约下沉成叶子包之后，箭头变成 `modules/* → cli/extension → config` 与
-// `cli → modules/*`，两条边不再首尾相接，环就没有了。这与 gateway/api.go 把插件
-// 契约下沉到 gateway/special 是**同一条规矩**：「契约类型若实现方需要反向引用，
-// 定义下沉到实现包、根 api.go 做类型别名转发」（docs/03-architecture.md §3）。
+// 两条边首尾相接就是**环**。后果不是「不优雅」，是具体的能力搬不动：
+// `newgate start`（runtime 的）、`newgate tier`（config 的）、`newgate probe`
+// （gateway 的）——**每一个想搬回自己模块的命令都搬不动**，因为那个模块一旦
+// Need(cli) 就与 cli 现有的 Need 成环。所以它们只能继续写在 cli 里，而 cli
+// 就继续认识它本不该认识的每一个模块。
 //
-// 这个包只允许 import component 与 config（都是轻的基础设施）。它一旦变重，
-// 上面两条好处立刻消失——所以它不是「另一个 api.go」，它是**边界**。
-package extension
+// 把注册表下沉成这个叶子模块之后，箭头变成：
+//
+//	所有模块 ──Need──▶ surface ◀──Need── cli
+//
+// surface 没有任何业务依赖，所以谁都能依赖它；cli 回到「只是界面」——它依赖
+// surface 去分派与渲染，而**别人依赖 surface 而不是 cli**，环就没有了。
+//
+// # 边界（这条是硬要求）
+//
+// 本包只允许 import component 与 config/domain（都是轻的基础设施）。它一旦
+// 变重——尤其是一旦 import 了任何业务模块——上面那条「谁都能依赖它」立刻失效，
+// 环会原样回来。所以别把渲染、日志、HTTP 这些东西放进来：那些是 cli 的事。
+//
+// # 谁提供什么
+//
+// 本模块只拥有「贡献点」与账本，不拥有任何具体命令。命令由拥有那项能力的
+// 模块自己注册（`newgate st` 归 gateway、`newgate naked` 归 claudecode、
+// `newgate plugin` 归 plugin-manager）。cli 只负责分派与排版。
+package surface
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
@@ -56,15 +68,14 @@ type StatusLine struct {
 // 模块保留自己的知识，CLI 只负责排版。
 //
 // 为什么需要它（而不是让 CLI 直接去读某个模块）：`status` 要显示「哪些开关点是
-// 非出厂态」，而那份账本归 plugin-manager。CLI 若为了这一行去 Need 它，就会
-// 反过来挡住它注册自己的命令（成环）——于是「谁的状态谁自己报」不只是好看，
-// 它是解开那个环的唯一办法。
+// 非出厂态」，而那份账本归 plugin-manager。CLI 若为了这一行去读它，那一行就会
+// 把两个模块焊在一起——「谁的状态谁自己报」是解开这种耦合的唯一办法。
 type StatusProvider interface {
 	Status(*domain.State) []StatusLine
 }
 
 // Host 是扩展命令可使用的最小 CLI 能力集合。
-// 它避免 Command 获得整个 service，并明确哪些交互仍由主 CLI 统一控制。
+// 它避免 Command 获得整个 CLI 内部，并明确哪些交互仍由主 CLI 统一控制。
 //
 // 加一个方法要慎重：它是**所有**模块命令都能看到的面积。判断标准是「这件事
 // 只有 CLI 做得成」——而不是「这样我就不用把逻辑搬过去了」。
@@ -93,19 +104,6 @@ type Host interface {
 	PrintThinkCache()
 }
 
-// Arg 取模块命令的第 i 个参数，越界给空串。**下标从 0 起**——args 里没有命令名，
-// 见 Command 的契约说明。
-//
-// 为什么把它放在契约包里而不是让每个模块自己写一个三行的取参函数：2026-09-18
-// 两个模块各自写了一遍，两遍都把下标写成从 1 起，两遍都错位一格。下标基准这种东西
-// 每重写一次就多一次猜错的机会，所以只留一份实现，模块调它就没有「猜」这个环节了。
-func Arg(args []string, i int) string {
-	if i < 0 || i >= len(args) {
-		return ""
-	}
-	return args[i]
-}
-
 // Command 是模块向 CLI 贡献的命令端口；Names 声明路由名，Run 执行命令语义。
 //
 // **args 里没有命令名**：`newgate plugin deepseek off` 分派到 `plugin` 这条命令时，
@@ -120,6 +118,19 @@ type Command interface {
 	Run(Host, []string) int
 }
 
+// Arg 取模块命令的第 i 个参数，越界给空串。**下标从 0 起**——args 里没有命令名，
+// 见 Command 的契约说明。
+//
+// 为什么把它放在契约包里而不是让每个模块自己写一个三行的取参函数：2026-09-18
+// 两个模块各自写了一遍，两遍都把下标写成从 1 起，两遍都错位一格。下标基准这种东西
+// 每重写一次就多一次猜错的机会，所以只留一份实现。
+func Arg(args []string, i int) string {
+	if i < 0 || i >= len(args) {
+		return ""
+	}
+	return args[i]
+}
+
 // HelpLine 是命令在 `newgate --help` 里占的那一行。
 type HelpLine struct {
 	Section string // 归到哪一节：接管 / 跑一次 / 路由与配置 / 探测与观测 / 维护 / 模块
@@ -129,7 +140,7 @@ type HelpLine struct {
 
 // Documented 是 Command 的可选搭档：命令自己声明它在 --help 里长什么样。
 //
-// 为什么必须有它：命令从 cli 的 switch 搬回各模块之后，`newgate --help` 不能再
+// 为什么必须有它：命令从 CLI 的 switch 搬回各模块之后，`newgate --help` 不能再
 // 硬编码那些行——**硬编码就等于「命令搬了、CLI 还认识它」，白搬**。help 是
 // 「CLI 认识哪些模块」的另一个面，两个面得一起搬。
 //
@@ -140,23 +151,13 @@ type Documented interface {
 	Help() HelpLine
 }
 
-// BuildInfo 把链接期版本信息显式传入 CLI，避免模块读取可变全局构建状态。
-type BuildInfo struct {
-	Version    string
-	BuildTime  string
-	CommitTime string
-}
-
-// CLI 是进程组合根最终调用的命令行入口，也是命令与诊断的**扩展点所有者**。
+// Surface 是这个模块对外提供的端口：模块往这里贡献，CLI 从这里取来分派与排版。
 //
-// 为什么扩展点长在 CLI 自己的 service 上，而不是另开一个「命令」端口让模块
-// 往里面 Provide：后者没有生命周期。模块认领一个命令名之后没人能撤销它，也
-// 没人查重——两个模块认领同一个名字是静默先到先得（2026-09-17 实测）。走
-// Register 则每次贡献都拿到一个 Release，owner 负责在 Stop 时逆序释放。
-// 全仓库的跨模块贡献从此只有这一种写法，见 docs/09-extension-guide.md §3。
-type CLI interface {
-	Run(args []string, build BuildInfo) int
-
+// 为什么贡献必须是 Register 而不是让模块 Provide 一个「命令端口」：后者没有生命
+// 周期。模块认领一个命令名之后没人能撤销它，也没人查重——两个模块认领同一个名字
+// 是静默先到先得（2026-09-17 实测）。走 Register 则每次贡献都拿到一个 Release，
+// 由贡献者自己在 Stop 时释放。
+type Surface interface {
 	// RegisterCommand 贡献一条命令。命令名（Names）是查重的逻辑键，撞名当场
 	// 报错而不是先到先得。
 	RegisterCommand(Command) (modules.Release, error)
@@ -165,7 +166,16 @@ type CLI interface {
 	RegisterDiagnostics(DiagnosticProvider) (modules.Release, error)
 	// RegisterStatus 贡献 `newgate status` 里的若干行，理由同 RegisterDiagnostics。
 	RegisterStatus(StatusProvider) (modules.Release, error)
+
+	// Commands 当前全部命令（按注册顺序），供分派与 --help 组装。
+	Commands() []Command
+	// Lookup 按名字找一条命令。Names 里的每个别名都能命中。
+	Lookup(name string) (Command, bool)
+	// Diagnostics 收集全部模块的 doctor 输出。
+	Diagnostics() []Diagnostic
+	// Statuses 收集全部模块贡献的 status 行。
+	Statuses(*domain.State) []StatusLine
 }
 
-// Capability 是 CLI 的端口身份。
-var Capability = modules.NewCapability[CLI]("cli")
+// Capability 是这一层的端口身份。模块用它注册自己的命令；CLI 用它取来分派。
+var Capability = modules.NewCapability[Surface]("surface")

@@ -1,10 +1,13 @@
-package cli
+package surface
 
 import (
 	"strings"
 	"testing"
 )
 
+// 这些测试跟着账本一起从 modules/cli 搬过来（2026-09-18）。账本搬到哪，
+// 它的不变量就该守在哪——留在 cli 那边只会变成测不到任何东西的空壳。
+//
 // 这条测试锁的是一个**曾经真实存在**的静默 bug（2026-09-17 实测）：
 // 在组件框架还允许 `Provides: Provide(别人的能力, 值)` 的年代，两个模块认领
 // 同一个命令名时**先到先得，没有任何报错**——后注册的那条永远不会被分派到，
@@ -29,7 +32,7 @@ func TestRegisterCommandRejectsDuplicateName(t *testing.T) {
 	if got := len(s.commands.All()); got != 1 {
 		t.Errorf("注册失败后账本条目 = %d, want 1（校验不通过就不该插入）", got)
 	}
-	if _, ok := s.moduleCommand("other"); ok {
+	if _, ok := s.Lookup("other"); ok {
 		t.Error("注册失败的命令名却能分派到——校验和插入不是原子的")
 	}
 }
@@ -49,10 +52,10 @@ func TestRegisterCommandReleaseRemovesOnlyItsOwn(t *testing.T) {
 	if err := first(); err != nil {
 		t.Fatalf("撤销报错: %v", err)
 	}
-	if _, ok := s.moduleCommand("a"); ok {
+	if _, ok := s.Lookup("a"); ok {
 		t.Error("撤销后 a 仍可分派")
 	}
-	if _, ok := s.moduleCommand("b"); !ok {
+	if _, ok := s.Lookup("b"); !ok {
 		t.Error("撤销 a 却把 b 也带走了")
 	}
 
@@ -61,7 +64,7 @@ func TestRegisterCommandReleaseRemovesOnlyItsOwn(t *testing.T) {
 	if err := first(); err != nil {
 		t.Errorf("重复撤销应当是无害的 no-op，实际报错: %v", err)
 	}
-	if _, ok := s.moduleCommand("b"); !ok {
+	if _, ok := s.Lookup("b"); !ok {
 		t.Error("陈旧 Release 把别人的条目删掉了")
 	}
 }
@@ -84,7 +87,7 @@ func TestRegisterDiagnosticsIsAdditive(t *testing.T) {
 			t.Fatalf("第 %d 次注册诊断应当成功: %v", i+1, err)
 		}
 	}
-	if got := len(s.moduleDiagnostics()); got != 2 {
+	if got := len(s.Diagnostics()); got != 2 {
 		t.Errorf("诊断条目 = %d, want 2（诊断不该查重）", got)
 	}
 }

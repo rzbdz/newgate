@@ -552,7 +552,7 @@ func cmdDoctor(service *service) int {
 		checkTakeover(service.agents),
 		checkBackups(),
 	}
-	for _, item := range service.moduleDiagnostics() {
+	for _, item := range service.ui.Diagnostics() {
 		mark := style.Skip
 		switch item.State {
 		case "ok":
@@ -1032,7 +1032,7 @@ func cmdStatus(agents agentapi.AgentCatalog, service *service) int {
 	// 插件层自报的状态项由 gateway 经 RegisterStatus 代转（见它的 status.go），
 	// cli 不必认识 special 这个包。
 	// 模块自报的状态行（谁的状态谁自己报，见 RegisterStatus）。
-	for _, line := range service.statusLines(st) {
+	for _, line := range service.ui.Statuses(st) {
 		fmt.Println(style.Field(line.Label, line.Value))
 	}
 

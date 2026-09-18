@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/go/lib/durarg"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 // Status 贡献 `newgate status` 里的「模块开关」一行：只列**离开出厂态**的那些。
@@ -19,7 +19,7 @@ import (
 //
 // 与 cli 里那行核心开关（debug / schema-repair / special_treatment）分开显示：
 // 那几个是 domain.State 上的字段，不属于本模块的账本。
-func (c *command) Status(st *domain.State) []cliapi.StatusLine {
+func (c *command) Status(st *domain.State) []surface.StatusLine {
 	if st == nil {
 		return nil
 	}
@@ -46,7 +46,7 @@ func (c *command) Status(st *domain.State) []cliapi.StatusLine {
 	if len(parts) == 0 {
 		return nil
 	}
-	return []cliapi.StatusLine{{Label: "模块开关", Value: strings.Join(parts, "   ")}}
+	return []surface.StatusLine{{Label: "模块开关", Value: strings.Join(parts, "   ")}}
 }
 
 // switchEnabled 一条开关点现在是不是开着的。极性由出厂态决定：
