@@ -53,6 +53,13 @@ func New() modules.Component {
 				}
 				releases = append(releases, release)
 			}
+
+			// 补丁开关的状态行也归本模块自报（见 status.go）。
+			statusRelease, err := cli.RegisterStatus(switchStatus{})
+			if err != nil {
+				return err
+			}
+			releases = append(releases, statusRelease)
 			return nil
 		},
 		Stop: func(context.Context) error {

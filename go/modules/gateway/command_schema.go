@@ -5,7 +5,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/style"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
-	"github.com/rzbdz/newgate/go/modules/config/store"
+	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 )
 
 // schemaRepairCommand 是 `newgate schema-repair on|off`。
@@ -36,7 +36,7 @@ func (schemaRepairCommand) Help() cliapi.HelpLine {
 
 func (schemaRepairCommand) Run(host cliapi.Host, args []string) int {
 	on := truthy(cliapi.Arg(args, 0))
-	if err := store.SetSchemaRepair(on); err != nil {
+	if err := gatewaystate.SetSchemaRepair(on); err != nil {
 		return host.Die(70, err.Error())
 	}
 	if on {

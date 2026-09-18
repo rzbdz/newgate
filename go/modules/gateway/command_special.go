@@ -8,6 +8,7 @@ import (
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
@@ -70,7 +71,7 @@ func (specialCommand) Run(host cliapi.Host, args []string) int {
 	on := sub == "on"
 
 	if name == "" {
-		if err := store.SetSpecialTreatment(on); err != nil {
+		if err := gatewaystate.SetSpecialTreatment(on); err != nil {
 			return host.Die(70, err.Error())
 		}
 		if on {
@@ -86,7 +87,7 @@ func (specialCommand) Run(host cliapi.Host, args []string) int {
 	if findPlugin(name) == nil {
 		return host.Die(65, fmt.Sprintf("没有叫 %q 的插件（newgate st 看清单）", name))
 	}
-	if err := store.SetSpecialPlugin(name, on); err != nil {
+	if err := gatewaystate.SetSpecialPlugin(name, on); err != nil {
 		return host.Die(70, err.Error())
 	}
 	if on {
@@ -94,7 +95,7 @@ func (specialCommand) Run(host cliapi.Host, args []string) int {
 	} else {
 		fmt.Println(style.Item(style.Skip, "插件 "+name+" 已关"))
 	}
-	if !st.SpecialEnabled() {
+	if !gatewaystate.SpecialEnabled(st) {
 		fmt.Println(style.Hint("整层仍处于关闭状态，需要先 newgate st on"))
 	}
 	host.NotifyProxy()
@@ -113,9 +114,9 @@ func findPlugin(name string) special.Plugin {
 // specialState 单个插件此刻的状态：层开关 + 单插件开关。
 func specialState(st *domain.State, name string) (mark, word string) {
 	switch {
-	case !st.SpecialEnabled():
+	case !gatewaystate.SpecialEnabled(st):
 		return style.Skip, "整层关闭"
-	case st.SpecialPluginOff(name):
+	case gatewaystate.PluginOff(st, name):
 		return style.Bad, "已单独关闭"
 	}
 	return style.OK, "生效"
@@ -124,7 +125,7 @@ func specialState(st *domain.State, name string) (mark, word string) {
 func specialList(host cliapi.Host, st *domain.State) int {
 	ps := special.Plugins()
 	layer := style.Green("开")
-	if !st.SpecialEnabled() {
+	if !gatewaystate.SpecialEnabled(st) {
 		layer = style.Yellow("关（整层）")
 	}
 	fmt.Println(style.Title("newgate st", fmt.Sprintf("special_treatment %s · %d 个插件", layer, len(ps))))
@@ -153,7 +154,7 @@ func specialExplain(host cliapi.Host, st *domain.State, name string) int {
 	fmt.Println(style.Rule(72))
 	fmt.Println(style.Item(mark, p.Why()))
 	fmt.Println()
-	if st.SpecialPluginOff(name) {
+	if gatewaystate.PluginOff(st, name) {
 		fmt.Println(style.Hint("打开：newgate st on " + name))
 	} else {
 		fmt.Println(style.Hint("关闭：newgate st off " + name))
