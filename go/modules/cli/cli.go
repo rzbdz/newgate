@@ -84,6 +84,7 @@ func usageText() string {
 	cmd("alllogs", "完整诊断包")
 	cmd("debug on|off [分钟]", "全量请求日志（默认 30 分钟自动关）")
 	cmd("st [on|off] [插件]", "special_treatment 开关与说明")
+	cmd("plugin [模块[.路径]] [on|off] [时长]", "全部模块按分类列出；开关某个模块或某个开关点")
 
 	sec("维护")
 	cmd("naked on|forever|off|<时长>", "短路 Bash 分类器：on=60s / forever=永久 / off=关")
@@ -102,6 +103,7 @@ func usageText() string {
 	term("profile", "一套「档位 → provider/模型」绑定")
 	term("槽位键", "模块贡献的动态角色（omo-sisyphus / cat-deep），写法同档位")
 	term("st", "special_treatment：只对某家上游生效的请求补丁")
+	term("plugin", "模块分类（infra/gateway/client/model/…）与它的运行期开关点")
 
 	sec("配置")
 	raw(style.Dim("~/.config/newgate/ · providers.json · mappings/*.kv · state.json"))
@@ -204,6 +206,8 @@ func run(service *service, args []string) int {
 		return cmdSchemaRepair(len(args) > 1 && truthy(args[1]))
 	case "st", "special", "special-treatment", "special_treatment":
 		return cmdSpecial(args)
+	case "plugin", "plugins":
+		return cmdPlugin(service.plugins, args)
 	case "tui", "menuconfig":
 		return cmdTUI()
 	case "version", "--version", "-v":

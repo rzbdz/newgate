@@ -18,6 +18,7 @@ import (
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
+	pluginmanagerapi "github.com/rzbdz/newgate/go/modules/pluginmanager"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 )
 
@@ -25,6 +26,11 @@ type service struct {
 	agents  confighookapi.AgentCatalog
 	runtime runtimeapi.Runtime
 	health  breakerapi.Breaker
+
+	// plugins 是 `newgate plugin` 的数据源。命令实现住在**这里**（cli 自己的
+	// cmdPlugin），不住在 plugin-manager 里——那会成环：plugin-manager 要注册
+	// 命令就得 Need(cli)，而 cli 要渲染列表又得 Need(plugin-manager)。
+	plugins pluginmanagerapi.Manager
 
 	commands    modules.Registry[Command]
 	diagnostics modules.Registry[DiagnosticProvider]
@@ -49,6 +55,9 @@ func New() modules.Component {
 			// daemon 角色要用它构造数据面（forward.New 的第四个参数），
 			// CLI 角色要用它把 /__newgate/status 的 breakers 解出来。
 			modules.Need(breakerapi.Capability),
+			// `newgate plugin` 的账本。cli 依赖它而不是反过来——见 service.plugins
+			// 字段上的注释（反过来会成环）。
+			modules.Need(pluginmanagerapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, CLI(service)),
@@ -57,12 +66,14 @@ func New() modules.Component {
 			service.agents = modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
 			service.runtime = modules.MustGet(ctx, runtimeapi.Capability)
 			service.health = modules.MustGet(ctx, breakerapi.Capability)
+			service.plugins = modules.MustGet(ctx, pluginmanagerapi.Capability)
 			return nil
 		},
 		Stop: func(context.Context) error {
 			service.agents = nil
 			service.runtime = nil
 			service.health = nil
+			service.plugins = nil
 			return nil
 		},
 	}

@@ -7,6 +7,7 @@ import (
 
 	cliapi "github.com/rzbdz/newgate/go/modules/cli"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
+	pluginmanagerapi "github.com/rzbdz/newgate/go/modules/pluginmanager"
 	wrapperapi "github.com/rzbdz/newgate/go/modules/wrapper"
 )
 
@@ -26,6 +27,13 @@ func New(ctx context.Context) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 组合根把图交给开关账本。为什么必须有这一步：plugin-manager 是「系统里有
+	// 哪几块」的权威，但组件看不到装配自己的那张图（Manager 不注入给组件），
+	// 所以只有组合根能递。普通模块要贡献事实走 RegisterSelf，不走这里。
+	//
+	// 只读快照，不持有 Manager——app 仍然是唯一的所有权对象。
+	modules.MustGet(manager.Context(), pluginmanagerapi.Capability).
+		SetCatalog(manager.Components())
 	return &App{manager: manager}, nil
 }
 

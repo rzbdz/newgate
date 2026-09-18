@@ -19,6 +19,7 @@ import (
 	mod_glm "github.com/rzbdz/newgate/go/modules/glm"
 	mod_opencode "github.com/rzbdz/newgate/go/modules/opencode"
 	mod_opencodeomo "github.com/rzbdz/newgate/go/modules/opencodeomo"
+	mod_pluginmanager "github.com/rzbdz/newgate/go/modules/pluginmanager"
 	mod_runtime "github.com/rzbdz/newgate/go/modules/runtime"
 	mod_thinking "github.com/rzbdz/newgate/go/modules/thinking"
 	mod_wrapper "github.com/rzbdz/newgate/go/modules/wrapper"
@@ -40,6 +41,7 @@ func generatedComponents() []modules.Component {
 		mod_glm.New(),
 		mod_opencode.New(),
 		mod_opencodeomo.New(),
+		mod_pluginmanager.New(),
 		mod_runtime.New(),
 		mod_thinking.New(),
 		mod_wrapper.New(),
