@@ -6,9 +6,9 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 const debugDefaultMinutes = 30
@@ -24,22 +24,22 @@ const debugDefaultMinutes = 30
 type debugCommand struct{}
 
 var (
-	_ cliapi.Command    = (*debugCommand)(nil)
-	_ cliapi.Documented = (*debugCommand)(nil)
+	_ surface.Command    = (*debugCommand)(nil)
+	_ surface.Documented = (*debugCommand)(nil)
 )
 
 func (debugCommand) Names() []string { return []string{"debug"} }
 
-func (debugCommand) Help() cliapi.HelpLine {
-	return cliapi.HelpLine{
+func (debugCommand) Help() surface.HelpLine {
+	return surface.HelpLine{
 		Section: "探测与观测",
 		Usage:   "debug on|off [分钟]",
 		Summary: "全量请求日志（默认 30 分钟自动关）",
 	}
 }
 
-func (debugCommand) Run(host cliapi.Host, args []string) int {
-	on := truthy(cliapi.Arg(args, 0))
+func (debugCommand) Run(host surface.Host, args []string) int {
+	on := truthy(surface.Arg(args, 0))
 	ttl := debugDefaultMinutes * time.Minute
 	if on {
 		for _, a := range args {

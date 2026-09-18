@@ -4,8 +4,8 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 // New 声明运行期开关账本。
@@ -33,7 +33,7 @@ func New() modules.Component {
 		Name: "plugin-manager",
 		Type: TypeInfra,
 		Requires: []modules.Requirement{
-			modules.Need(cliapi.Capability),
+			modules.Need(surface.Capability),
 			modules.Need(confighookapi.ConfigHooksCapability),
 		},
 		Provides: []modules.Provision{
@@ -56,7 +56,7 @@ func New() modules.Component {
 			releases = append(releases, self)
 
 			// 命令与状态行都是这个模块的用户界面，由它自己贡献——cli 不认识它。
-			cli := modules.MustGet(ctx, cliapi.Capability)
+			cli := modules.MustGet(ctx, surface.Capability)
 			cmd := &command{manager: service}
 			cmdRelease, err := cli.RegisterCommand(cmd)
 			if err != nil {

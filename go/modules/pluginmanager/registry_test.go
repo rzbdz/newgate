@@ -6,33 +6,10 @@ import (
 	"time"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 	"github.com/rzbdz/newgate/go/testing/testkit"
 )
-
-// stubCLI 让 plugin-manager 的 Start 能跑完：它要注册自己的命令与状态行。
-// 真实的 cli 会做命令查重、诊断汇总、help 组装，那些是它自己的测试该管的事。
-type stubCLI struct {
-	commands []cliapi.Command
-	statuses []cliapi.StatusProvider
-}
-
-func (s *stubCLI) Run([]string, cliapi.BuildInfo) int { return 0 }
-
-func (s *stubCLI) RegisterCommand(c cliapi.Command) (modules.Release, error) {
-	s.commands = append(s.commands, c)
-	return func() error { return nil }, nil
-}
-
-func (s *stubCLI) RegisterDiagnostics(cliapi.DiagnosticProvider) (modules.Release, error) {
-	return func() error { return nil }, nil
-}
-
-func (s *stubCLI) RegisterStatus(p cliapi.StatusProvider) (modules.Release, error) {
-	s.statuses = append(s.statuses, p)
-	return func() error { return nil }, nil
-}
 
 // stubHooks 让 plugin-manager 的 Start 能跑完。真实的 confighook 会做字段查重，
 // 那是它自己的测试该管的事；这里只关心 plugin-manager 自己那份账本。
@@ -64,11 +41,11 @@ func start(t *testing.T) Manager {
 			Type:     "infra",
 			Provides: []modules.Provision{modules.Provide(confighookapi.ConfigHooksCapability, confighookapi.ConfigHooks(hooks))},
 		},
-		modules.Component{
-			Name:     "stub-cli",
-			Type:     "cli",
-			Provides: []modules.Provision{modules.Provide(cliapi.Capability, cliapi.CLI(&stubCLI{}))},
-		},
+		// 直接装**真的** surface：它现在是叶子模块（只依赖 component 与
+		// config/domain），测试装得起来，而且顺带把真账本的查重逻辑一起测到。
+		// 2026-09-18 之前这里得手写一个 stub，因为账本长在 modules/cli 上，
+		// 而 cli 拖着 runtime/gateway——装不动。
+		surface.New(),
 		New(),
 	)
 	if hooks.fields["plugin-manager"] != StateKey {

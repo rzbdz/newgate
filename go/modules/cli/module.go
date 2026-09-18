@@ -11,25 +11,43 @@ package cli
 
 import (
 	"context"
-	"fmt"
 
 	modules "github.com/rzbdz/newgate/go/component"
 
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
-	"github.com/rzbdz/newgate/go/modules/config/domain"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
+	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
+// service 是**界面**：分派、渲染、进程生命周期。
+//
+// 它**不拥有**命令/诊断/状态行那三本账——那些归 modules/surface（一个叶子
+// 模块），因为 cli 一旦同时是「账本所有者」和「界面」，依赖方向就成环：
+// 想贡献命令的模块必须 Need(cli)，而 cli 又要 Need 它们才能渲染。环解开的方式
+// 就是把账本下沉成叶子（见 modules/surface 的包注释）。
 type service struct {
 	agents  confighookapi.AgentCatalog
 	runtime runtimeapi.Runtime
 	health  breakerapi.Breaker
 
-	commands    modules.Registry[Command]
-	diagnostics modules.Registry[DiagnosticProvider]
-	statuses    modules.Registry[StatusProvider]
+	ui surface.Surface
+}
+
+// BuildInfo 是链接期注入的版本信息；main 传进来，界面负责展示。
+//
+// 它留在 cli 而不是 surface：这是**界面自己的**身份，跟「模块往界面上贡献什么」
+// 无关。surface 那边只有贡献契约。
+type BuildInfo struct {
+	Version    string
+	BuildTime  string
+	CommitTime string
+}
+
+// CLI 是进程组合根最终调用的命令行入口。
+type CLI interface {
+	Run(args []string, build BuildInfo) int
 }
 
 var _ CLI = (*service)(nil)
@@ -45,6 +63,8 @@ func New() modules.Component {
 		Name: "cli",
 		Type: "cli",
 		Requires: []modules.Requirement{
+			// 账本在叶子模块里，cli 只是它的一个消费者。
+			modules.Need(surface.Capability),
 			modules.Need(configapi.Capability),
 			modules.Need(runtimeapi.Capability),
 			modules.Need(confighookapi.AgentCatalogCapability),
@@ -56,6 +76,7 @@ func New() modules.Component {
 			modules.Provide(Capability, CLI(service)),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
+			service.ui = modules.MustGet(ctx, surface.Capability)
 			service.agents = modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
 			service.runtime = modules.MustGet(ctx, runtimeapi.Capability)
 			service.health = modules.MustGet(ctx, breakerapi.Capability)
@@ -65,57 +86,10 @@ func New() modules.Component {
 			service.agents = nil
 			service.runtime = nil
 			service.health = nil
+			service.ui = nil
 			return nil
 		},
 	}
-}
-
-// RegisterCommand 贡献一条命令；命令名撞车当场报错。
-//
-// 报错文案是中文：这条是**面向插件作者**的业务冲突（「我的命令名被谁占了」），
-// 不是框架级装配错误，跟 cli 里其他用户可见的文案保持一致。查重在
-// Registry.Register 的写锁内跑，所以并发注册同一个名字也只会有一个成功。
-func (s *service) RegisterCommand(command Command) (modules.Release, error) {
-	if command == nil {
-		return nil, fmt.Errorf("cli: 命令不能为 nil")
-	}
-	names := command.Names()
-	if len(names) == 0 {
-		return nil, fmt.Errorf("cli: 命令必须至少声明一个名字（Names）")
-	}
-	return s.commands.Register(command, func(existing []Command) error {
-		for _, other := range existing {
-			for _, have := range other.Names() {
-				for _, want := range names {
-					if have == want {
-						return fmt.Errorf("cli: 命令名 %q 已被占用", want)
-					}
-				}
-			}
-		}
-		return nil
-	})
-}
-
-// RegisterDiagnostics 贡献一组 doctor 输出。诊断可叠加，不查重。
-func (s *service) RegisterDiagnostics(provider DiagnosticProvider) (modules.Release, error) {
-	if provider == nil {
-		return nil, fmt.Errorf("cli: 诊断提供者不能为 nil")
-	}
-	return s.diagnostics.Register(provider, nil)
-}
-
-// RegisterStatus 贡献 `newgate status` 里的若干行。与诊断同理：可叠加、不查重。
-//
-// 这条端口的存在是为了**不让 cli 反向认识模块**：`status` 要显示「哪些开关点是
-// 非出厂态」，而那份账本归 plugin-manager。cli 若为了那一行去 Need 它，就会挡住
-// 它注册自己的命令（cli → pluginmanager → cliapi → cli 成环）。谁的状态谁自己
-// 报，是解开那个环的办法。
-func (s *service) RegisterStatus(provider StatusProvider) (modules.Release, error) {
-	if provider == nil {
-		return nil, fmt.Errorf("cli: 状态提供者不能为 nil")
-	}
-	return s.statuses.Register(provider, nil)
 }
 
 // Run 注入本次构建信息后进入统一命令分派；模块命令从 Registry 账本里现取
@@ -125,32 +99,4 @@ func (s *service) Run(args []string, build BuildInfo) int {
 	BuildTime = build.BuildTime
 	CommitTime = build.CommitTime
 	return runCLI(s, args)
-}
-
-func (s *service) moduleCommand(name string) (Command, bool) {
-	for _, command := range s.commands.All() {
-		for _, candidate := range command.Names() {
-			if candidate == name {
-				return command, true
-			}
-		}
-	}
-	return nil, false
-}
-
-// statusLines 汇总所有模块贡献的 status 行。与 moduleDiagnostics 同构。
-func (s *service) statusLines(st *domain.State) []StatusLine {
-	var out []StatusLine
-	for _, provider := range s.statuses.All() {
-		out = append(out, provider.Status(st)...)
-	}
-	return out
-}
-
-func (s *service) moduleDiagnostics() []Diagnostic {
-	var out []Diagnostic
-	for _, provider := range s.diagnostics.All() {
-		out = append(out, provider.Diagnostics()...)
-	}
-	return out
 }
