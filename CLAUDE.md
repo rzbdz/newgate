@@ -10,11 +10,16 @@ newgate：把 AI CLI（claude / opencode）的模型选择收敛到**语义档�
 ## 0. 三条先知道的（都踩过）
 
 1. **先确认哪份 checkout 是线上**。跑着的 daemon 用的是
-   `/root/workspace/newgate-ponyfish`（分支 `feature/newapi`），不是
-   `/root/workspace/newgate`（停在 main 的旧快照，落后十几个提交）。
+   `/root/workspace/newgate-ponyfish`（也就是**主开发 worktree，分支 `main`**），
+   不是 `/root/workspace/newgate`（停在 `deprecated` 的旧快照）。
    改错那份 = 改完编译出来和线上行为对不上。
    判断线上版本：`go version -m /root/.local/bin/newgate | grep vcs.revision`，
    或看日志里那行 `newgate <版本> … 启动`。
+
+   **分支流（2026-09-18 起）**：`main` 是唯一主分支，本地与 `origin/main` 同源。
+   开发从 `main` 切分支 → 完事合回 `main`。曾经的主分支 `clean-tree` 已删除
+   （2026-09-18，`c3bd2ed` 已整体并入 `main`）。`/root/workspace/newgate` 那个
+   worktree 停在 `deprecated`（= 旧 main 血统的最后一版），只作历史留存，别在上面改。
 2. **本机 shell 的三个坑**：`grep` 是 ugrep 包装、会静默吞结果 → 一律写
    `command grep`；`go test ./...` 必须在 `go/` 子目录里跑（module 根在那）；
    `/bin/sh` 是 dash，没有 `exec -a`，测试里要「argv0 是特定名字」得用
