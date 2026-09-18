@@ -16,10 +16,13 @@ import (
 // 而下面这张表说的是**我们认为谁该在谁前面**。加一条依赖把层级搞反（比如让
 // config 去依赖某个客户端模块）时，这里会红。
 //
-// 命令/诊断/状态行三本账长在 **cli** 的 service 上，但注入**不是**一条排序边：
-// 模块声明 modules.Inject(cli)，框架在全图 Start 完之后（Attach 阶段）把界面交给
-// 它们（见 component.Inject）。所以下面这张表里没有「cli → 注入者」那一批——ui 从
-// 依赖图里退出去了，装不装 ui 只影响「这些贡献有没有地方去」。
+// 命令/诊断/状态行三本账长在 **cli** 的 service 上，而注入是一条**排序边**：
+// 模块声明 modules.Optional(cli)（弱依赖，见 component.Optional），于是它们全部排在
+// 界面之后——Start 里注册时界面的账本已经就绪；没装界面就跳过，模块功能不受影响。
+// ui 因此从「被依赖」的位置上退了出去：装不装 ui 只影响这些贡献有没有地方去。
+//
+// 表里的「plugin-manager → deepseek」那两条是**弱依赖**（开关点上报）：owner 先起，
+// 注册者后起——同上，也是一条排序边。
 func TestDefaultGraphLayering(t *testing.T) {
 	app, err := New(context.Background())
 	if err != nil {

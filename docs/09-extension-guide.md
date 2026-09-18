@@ -44,23 +44,21 @@ type Service interface {
 
 // consumer 侧：拿到别人的 service 来注入
 Requires: []component.Requirement{
-    // 注入 ui 用 Inject 而**不是** Need/Optional —— 见下面「ui 的注入是第二阶段」
-    component.Inject(cliapi.Capability),
+    // 往 ui 里挂东西用 Optional（弱依赖）——见下面「ui 是弱依赖」
+    component.Optional(cliapi.Capability),
     component.Need(confighookapi.ConfigHooksCapability),
 },
 Start: func(_ context.Context, ctx component.Context) error {
-    // Start 只做**自己的**初始化（注册端口、装状态）
+    // Start 做**自己的**初始化（注册端口、装状态）
     hooks := component.MustGet(ctx, confighookapi.ConfigHooksCapability)
     release, err := hooks.RegisterStateField("mymod", "my_field")
     …
-},
-// 往 ui 里挂东西在 Attach 里做：那时所有端口都已提供
-Attach: func(_ context.Context, ctx component.Context) error {
+    // 往 ui 里挂东西也在 Start 里——Optional 是一条排序边，界面一定先起
     ui, ok := component.Get(ctx, cliapi.Capability)
     if !ok {
         return nil // 没装 ui = 没有入口，功能照常
     }
-    release, err := ui.RegisterCommand(myCommand{})
+    release, err = ui.RegisterCommand(myCommand{})
     if err != nil {
         return err
     }
@@ -70,17 +68,29 @@ Attach: func(_ context.Context, ctx component.Context) error {
 Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 ```
 
-### ui 的注入是第二阶段（`component.Inject` + `Attach`）
+### ui 是弱依赖（`component.Optional`）
 
-`modules/cli` 是**界面**，不是依赖。往它注入**不能**用 `Need`/`Optional`：那两种
-都建立**排序边**，而界面自己也曾依赖那些模块（它要渲染别人报上来的 status）——
-两条箭头互指就是环，环一出现，那些模块的命令就永远注入不进来，只能被迫留在界面
-里。2026-09-18 之前 config / runtime / config-hook 的命令就是这样被困住的。
+`modules/cli` 是**界面**，不是依赖。往它注入用 `Optional`（弱依赖）：装了界面就
+把命令/状态行挂上去，没装就跳过，模块功能一个都不少。
 
-`component.Inject(cap)` 声明「端口存在就给我，但**我不排在它后面**」。框架分两阶段
-装配：先跑完所有 `Start`，再跑所有 `Attach`。到 `Attach` 时任何一个端口都已提供，
-顺序问题自然消失，界面也就**从依赖图里退出去**了——没有任何组件排在它前面或后面，
-装不装 ui 只影响「这些贡献有没有地方去」。
+```go
+component.Optional(cliapi.Capability)   // 对，弱依赖
+component.Need(cliapi.Capability)       // 错，app 的棘轮当场红
+```
+
+**为什么不是 `Need`**：那等于宣称「没有界面我就活不了」，会把界面重新拖回依赖图
+里，`app/graph_test.go` 的 `TestUIStaysOutOfTheDependencyGraph` 会当场拦下。
+
+**为什么能用 `Optional`（而不是以前那种「不排序的注入边」）**：因为界面自己已经
+**没有任何出边**（`cli.Requires` 是空的，`TestCLIDependenciesOnlyShrink` 守着）。
+箭头只有「模块 → 界面」一个方向，成不了环。2026-09-18 之前界面依赖那些模块才能
+渲染，两条箭头互指，于是需要 `Component.Inject` + `Attach` 那套两阶段机制来绕；
+出边砍干净之后那套机制整个删掉了（见 `component.Optional` 的注释与
+`docs/02-component-framework.md`）。
+
+它仍然是**排序边**，这一点很重要：注册者一定排在界面之后，`Start` 里注册时界面的
+账本已经就绪，逆序停止时也一定是注册者先停、界面后停。`app/graph_test.go` 的
+`TestInjectorsStartAfterTheUI` 守着这条顺序——以前它靠目录名字母序碰巧成立。
 
 界面上的注入点（都在 `modules/cli/extension`）：
 

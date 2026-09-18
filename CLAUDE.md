@@ -44,7 +44,7 @@ go vet ./... && gofmt -l component modules cmd
 
 | 目录 | 管什么 | 改这里当你在做… |
 | --- | --- | --- |
-| `component` | typed capability、依赖 DAG、生命周期（含 `Inject` 注入边与 `Attach` 第二阶段） | 组件框架本身 |
+| `component` | typed capability、依赖 DAG、生命周期（强依赖 `Need` / 弱依赖 `Optional`，单阶段装配），以及装配过程的 trace 出口 | 组件框架本身 |
 | `modules/config/{domain,resolve,roleprov,store}` | Config 组件、配置语义、动态角色、fallback 纯函数、持久化（后三个同时是**共享叶子**，谁都能直接 import，不算依赖边） | 档位与配置 |
 | `modules/gateway/{forward,special,rewrite,thinkcache}` | 网关组件及其内部实现 | 转发、扩展与思维链 |
 | `modules/breaker` | binding 健康表：可用性 + 延迟排序，**无 Requires**（叶子，被注入数据面与 CLI） | 熔断策略与恢复 |
@@ -58,9 +58,9 @@ go vet ./... && gofmt -l component modules cmd
 
 每个 `modules/<name>`（无例外）都必须在根目录提供唯一的 `module.go`，由它用
 `New()` 直接返回 `component.Component`，并声明 `Requires`、`Provides`、`Start`
-和 `Stop`（要往 ui 注入的模块再加一个 `Attach`，见 §4）。注册型 capability 必须
-返回 `component.Release`，consumer 在 `Stop` 中逆序释放。复杂实现可以拆文件或
-子包，但入口文件名和所在层级不能变化。
+和 `Stop`。**生命周期只有这两个阶段**：没有 `Attach`，也没有「注入阶段」（见 §4）。
+注册型 capability 必须返回 `component.Release`，consumer 在 `Stop` 中逆序释放。
+复杂实现可以拆文件或子包，但入口文件名和所在层级不能变化。
 
 **公开 capability 和接口写在模块根目录的 `api.go`**（2026-09-17 起，不再用
 `<module>/api/` 子包）；禁止建立中心化 contracts 包。契约类型若实现方需要反向
@@ -223,16 +223,24 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
     含任何业务知识。判断一个东西该不该留在 ui：**把它删掉，业务模块还成立吗？**
     成立就不该留在 ui。
 
-  **注入是第二阶段**（`component.Inject` + `Component.Attach`）。这条是解开那个
-  死结的关键，2026-09-18 之前没有它：往 ui 注入曾经要声明 `Optional(cli)`，那是
-  一条**排序边**，而 ui 自己又要依赖那些模块才能渲染——两条箭头互指就是环，于是
-  config / runtime / config-hook 的命令永远注入不进来，只能被迫留在界面里。
+  **注入是一条弱依赖**（`component.Optional(cli)`）。往界面里注册命令/状态行的
+  模块声明它：**界面在，就注册进去；界面不在，就跳过**——模块功能一个都不少，
+  只是没有入口。
 
-  `Inject(cli)` 明确说「我不需要排在你后面」：全图 `Start` 跑完之后，框架再跑一遍
-  每个组件的 `Attach`，那时所有端口都已提供。ui 因此**从依赖图里退出去**了——没有
-  任何组件排在它前面或后面。`app/` 里两条棘轮测试守着这个方向：
-  `TestCLIDependenciesOnlyShrink`（界面出边集合必须为空）与
-  `TestUIStaysOutOfTheDependencyGraph`（谁也不许对 ui 声明非 late 边）。
+  **为什么现在能用 `Optional` 了**：因为它是一条**排序边**，而排序边会不会成环
+  取决于界面有没有出边——界面现在**一条出边都没有**（`cli.Requires` 是空的），
+  箭头只有「模块 → 界面」一个方向。2026-09-18 之前界面依赖那些模块才能渲染，
+  两条箭头互指成环，于是被迫引入 `component.Inject`（不排序的注入边）+
+  `Component.Attach`（全图 `Start` 之后再跑一遍的第二阶段）来绕开。出边砍干净
+  那套机制就整个删掉了——它带来的代价是实测出来的：顺序**没有任何保证**（当时
+  9 个注入者恰好都在 cli 之后，靠目录名字母序碰巧成立）、停止顺序跟着失去保证
+  （`breaker` 在 `cli` 之后停）。现在顺序由依赖图给出，逆序停止时注入者的
+  `Stop` 一定先跑完，界面最后停。
+
+  `app/` 里三条棘轮测试守着这个方向：
+  `TestCLIDependenciesOnlyShrink`（界面出边集合必须为空）、
+  `TestUIStaysOutOfTheDependencyGraph`（对 ui 只许 `Optional`，不许 `Need`）、
+  `TestInjectorsStartAfterTheUI`（注入者必须排在界面之后）。
 
   **界面全部的能力都来自注入**，端口都在 `modules/cli/extension`：
 

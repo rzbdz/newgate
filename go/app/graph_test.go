@@ -91,12 +91,15 @@ func TestGraphCoversEveryModule(t *testing.T) {
 // 来源：界面自己也要依赖那些模块（渲染要靠它们报数据），两边互指就成环，于是
 // config / runtime / config-hook 三个模块永远注入不进来，命令只能被迫留在界面里。
 //
-// 现在注入走 component.Inject：**不排序**，全图 Start 完之后在 Attach 阶段交付。
-// 所以这条不变量变成了「没有任何组件声明一条指向界面的非 late 边」——ui 装不装
-// 只影响那些贡献有没有地方去，不影响任何一个模块的功能。
+// 当时绕开那个环的办法另有其人：component.Inject（一条**不参与排序**的注入边）
+// 加 Component.Attach（全图 Start 之后再跑一遍的注入阶段）。那套机制在
+// 2026-09-18 晚些时候删掉了——环的真正解法是把 **ui 的出边砍干净**
+// （cli.Requires 现在为空），出边没了以后 Optional(cli) 这条**入边**不可能成环，
+// 于是注入可以回到 Start 里、回到一条正常的排序边上（见 component.Optional）。
 //
-// 它比原来那条更强：原来只盯 opencode-omo 一个模块，现在任何模块将来对 ui 写错
-// 依赖方向都会在这里红。
+// 所以这条不变量现在的写法是：**没有任何组件对界面声明一条非 Optional 的边**。
+// 换句话说，对 ui 只允许弱依赖——装着就注册，不装就跳过；不允许 Need，那等于
+// 宣称「没有界面我就活不了」，也就把界面重新拖回了依赖图里。
 func TestUIStaysOutOfTheDependencyGraph(t *testing.T) {
 	testkit.Sandbox(t)
 
@@ -111,11 +114,72 @@ func TestUIStaysOutOfTheDependencyGraph(t *testing.T) {
 			if requirement.Name() != "cli" {
 				continue
 			}
-			if !requirement.Late() {
-				t.Fatalf("组件 %s 对 ui 声明了一条排序边（%s）——"+
+			if !requirement.Optional() {
+				t.Fatalf("组件 %s 对 ui 声明了硬依赖（%s）——"+
 					"界面依赖别人渲染、别人依赖界面注入，这就是那个环；"+
-					"注入请用 modules.Inject", component.Name, requirement.Name())
+					"对 ui 请用 modules.Optional（弱依赖）", component.Name, requirement.Name())
 			}
 		}
+	}
+}
+
+// TestInjectorsStartAfterTheUI 锁住「注入别人的人要等被注入的人」这条顺序。
+//
+// 这是用户 2026-09-18 的原话落到测试上：**注入别人的模块，一定要等那个被注入的
+// 人加载完；被注入的人不该等注入他的人**。落到本仓库就是：往界面里注册命令与
+// 状态行的模块，必须排在 `cli` 后面。
+//
+// # 为什么值得一条自己的测试
+//
+// 它以前**没有**保证。Inject（不参与排序）时代，9 个注入者的顺序纯粹是稳定拓扑
+// 排序碰出来的——实测恰好都在 cli 之后，靠的是目录名字母序。任一次目录改名、或
+// 加一个排在 cli 前面的注入者，顺序就反过来，而症状是「界面先起、命令后到」：
+// 谁先谁后只在这一瞬间有差别，跑完就看不见了。
+//
+// 现在这条顺序由 Optional(cli) 这条**排序边**给出（见 component.Optional），
+// 也就是由机制保证。这条测试守的是「机制真的还在」——有人把 Optional(cli) 换回
+// Need(cli) 之外的写法、或者干脆删掉那条 Requires，这里就红。
+//
+// 「cli 先起」不等于「cli 早于一切」：cli 自己不依赖任何模块（TestCLIDependenciesOnlyShrink），
+// 所以它就是拓扑序里最前面那几个之一，先于它意味着基本没什么要在它前面。
+func TestInjectorsStartAfterTheUI(t *testing.T) {
+	testkit.Sandbox(t)
+
+	built, err := New(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = built.Stop(context.Background()) })
+
+	names := built.ComponentNames()
+	at := map[string]int{}
+	for i, name := range names {
+		at[name] = i
+	}
+	ui, ok := at["cli"]
+	if !ok {
+		t.Fatalf("component order = %v; 图里没有 cli", names)
+	}
+
+	// 注入者名单从**声明**里读（谁 Optional(cli)），不是写死的清单：新模块加一条
+	// 弱依赖就自动进这条断言，不需要回来改测试。
+	injectors := 0
+	for _, component := range built.Components() {
+		for _, requirement := range component.Requires {
+			if requirement.Name() != "cli" {
+				continue
+			}
+			injectors++
+			if at[component.Name] < ui {
+				t.Fatalf("component order = %v; %s(%d) 排在 cli(%d) 之前 —— "+
+					"它就是往界面里注册命令/状态行的那个模块，"+
+					"排前面意味着它的 Start 跑的时候界面可能还没就绪",
+					names, component.Name, at[component.Name], ui)
+			}
+		}
+	}
+	if injectors == 0 {
+		t.Fatal("没有任何模块声明 Optional(cli) —— 界面的七本账全是空的，" +
+			"要么是注入点被拆了，要么是这条依赖被误删了")
 	}
 }

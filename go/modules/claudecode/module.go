@@ -30,9 +30,10 @@ func New() modules.Component {
 			modules.Need(gatewayapi.Capability),
 			modules.Need(confighookapi.ConfigHooksCapability),
 			modules.Need(thinkingapi.Capability),
-			// 注册自己的命令（newgate naked）。依赖方向是**本模块 → cli**：
+			// ui 是**弱依赖**（见 component.Optional）：`newgate naked` 是本模块的
+			// 命令，装着界面就注册进去，没装就跳过。依赖方向是**本模块 → cli**：
 			// cli 不认识任何业务模块，模块反过来认识它。
-			modules.Inject(cliapi.Capability),
+			modules.Optional(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability,
@@ -71,17 +72,12 @@ func New() modules.Component {
 			releases = append(releases, release)
 
 			// 自己的命令自己贡献：界面不认识本模块，是本模块认识界面。
-			// ui 可选（见 CLAUDE.md §4）：没装任何 ui 就没有入口，本模块功能照常。
-			return nil
-		},
-		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，所以它可能
-		// 比本模块晚起——Start 阶段它还没提供端口。Attach 在全图 Start 完之后跑。
-		Attach: func(_ context.Context, ctx modules.Context) error {
+			// ui 没装就跳过（见上面那条 Optional）：模块功能照常。
 			cli, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil
 			}
-			release, err := cli.RegisterCommand(nakedCommand{})
+			release, err = cli.RegisterCommand(nakedCommand{})
 			if err != nil {
 				return err
 			}

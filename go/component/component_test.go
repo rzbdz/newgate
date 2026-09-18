@@ -113,44 +113,74 @@ func TestManyCapabilityInjectsAllProviders(t *testing.T) {
 	_ = manager.Stop(context.Background())
 }
 
-// TestAttachFailureRollsBackTheWholeGraph：Attach 阶段失败时，**整张图**都要回滚。
+// TestOptionalIsAWeakDependency 锁住 Optional 的**两条**语义。
 //
-// 这条测试是补出来的（2026-09-18）：Attach 是注入边用的第二阶段，判断失败路径时
-// 照抄了 Start 那段「回滚范围 = 已经 Start 过的前 i 个」，而 Attach 跑的时候每个
-// 组件都早已 Start 完 —— 于是第 i 个之后的组件启动了却永远不 Stop，注入给界面的
-// 命令、注册进 gateway 的插件、agentstate 的全局桥全部泄漏。三个组件、第二个的
-// Attach 失败，就能看出 c 有没有被停。
-func TestAttachFailureRollsBackTheWholeGraph(t *testing.T) {
-	var events []string
-	_, err := New(fakeLoader{components: []Component{
-		{
-			Type: "test", Name: "a",
-			Start:  func(context.Context, Context) error { events = append(events, "start a"); return nil },
-			Attach: func(context.Context, Context) error { events = append(events, "attach a"); return nil },
-			Stop:   func(context.Context) error { events = append(events, "stop a"); return nil },
-		},
-		{
-			Type: "test", Name: "b",
-			Start:  func(context.Context, Context) error { events = append(events, "start b"); return nil },
-			Attach: func(context.Context, Context) error { return context.Canceled },
-			Stop:   func(context.Context) error { events = append(events, "stop b"); return nil },
-		},
-		{
-			// 它的 Attach 根本不会被调到（b 先失败），但它**已经 Start 过了**，
-			// 所以必须被 Stop —— 这正是原来漏掉的那一段。
-			Type: "test", Name: "c",
-			Start: func(context.Context, Context) error { events = append(events, "start c"); return nil },
-			Stop:  func(context.Context) error { events = append(events, "stop c"); return nil },
-		},
-	}})
-	if err == nil {
-		t.Fatal("失败的 Attach 应当让整次装配失败")
-	}
-	want := []string{"start a", "start b", "start c", "attach a",
-		"stop c", "stop b", "stop a"}
-	if !reflect.DeepEqual(events, want) {
-		t.Fatalf("事件序列 = %v，应为 %v（Attach 失败必须回滚**整张图**）", events, want)
-	}
+// 它取代了 2026-09-18 删掉的 Attach 阶段测试（TestAttachFailureRollsBackTheWholeGraph）。
+// 那条测试守的是「Attach 失败要回滚整张图」——Attach 连同 Inject 一起删了（理由见
+// component.Optional 的注释：它当初要解的环，随 cli 不再有任何出边而消失）。删掉
+// 一个机制的同时得把**它承担的那条不变量**接过来，否则就是静默降级。
+//
+// 两条语义各自都要有现场：
+//
+//  1. 提供者在场 → Optional 是一条**排序边**：注册者排在提供者后面，于是它在
+//     Start 里一定能拿到端口。这一条正是「注入别人的人要等被注入的人」——它以前
+//     由 Attach 阶段保证（全图 Start 完之后再跑一遍），现在由排序保证，更强也更简单。
+//  2. 提供者缺席 → **不建边、不报错**：注册者照常启动，只是拿不到端口。
+func TestOptionalIsAWeakDependency(t *testing.T) {
+	t.Run("provider present", func(t *testing.T) {
+		ui := NewCapability[string]("weak.ui")
+		var events []string
+		manager, err := New(fakeLoader{components: []Component{
+			{
+				// 声明在前、却排在后面：证明顺序来自那条弱依赖边，而不是声明位置。
+				Type: "test", Name: "registrant", Requires: []Requirement{Optional(ui)},
+				Start: func(_ context.Context, ctx Context) error {
+					value, ok := Get(ctx, ui)
+					if !ok {
+						// 端口在 Start 时应当已经可用——「等被注入的人」就是这一条。
+						t.Fatal("Optional 命中时端口应当已提供（排序边没生效？）")
+					}
+					events = append(events, "start registrant sees "+value)
+					return nil
+				},
+			},
+			{
+				Type: "test", Name: "ui", Provides: []Provision{Provide(ui, "surface")},
+				Start: func(context.Context, Context) error {
+					events = append(events, "start ui")
+					return nil
+				},
+			},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = manager.Stop(context.Background())
+		want := []string{"start ui", "start registrant sees surface"}
+		if !reflect.DeepEqual(events, want) {
+			t.Fatalf("事件序列 = %v，应为 %v（弱依赖命中必须建排序边）", events, want)
+		}
+	})
+
+	t.Run("provider absent", func(t *testing.T) {
+		ui := NewCapability[string]("weak.missing")
+		manager, err := New(fakeLoader{components: []Component{
+			{
+				Type: "test", Name: "registrant", Requires: []Requirement{Optional(ui)},
+				Start: func(_ context.Context, ctx Context) error {
+					// 缺席不是错误，只是拿不到端口：注册者必须照常起得来。
+					if _, ok := Get(ctx, ui); ok {
+						t.Fatal("没有提供者时不该拿到端口")
+					}
+					return nil
+				},
+			},
+		}})
+		if err != nil {
+			t.Fatalf("弱依赖缺席不该让装配失败: %v", err)
+		}
+		_ = manager.Stop(context.Background())
+	})
 }
 
 func TestFailedComponentParticipatesInRollback(t *testing.T) {

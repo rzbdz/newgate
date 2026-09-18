@@ -37,9 +37,10 @@ func New() modules.Component {
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
 			modules.Need(confighookapi.AgentCatalogCapability),
-			// ui 是可选的：没装 ui 时接管照常工作，只是没有 `newgate status`
-			// 里那一行和 doctor 的那两项（见 CLAUDE.md §4）。
-			modules.Inject(cliapi.Capability),
+			// ui 是**弱依赖**（见 component.Optional）：接管的状态行与两条体检、
+			// 以及本模块那一族命令（start/stop/on/off/restart…）都归它自己贡献，
+			// 装着界面就挂上去，没装就跳过——接管照常工作，只是没有入口。
+			modules.Optional(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Runtime(service)),
@@ -59,30 +60,25 @@ func New() modules.Component {
 
 			// 接管的状态行与两条体检（接管 / 备份）由本模块自报：写这些文件的
 			// 是本模块，界面不该替它读 original/ 目录（见 diagnostics.go）。
-			return nil
-		},
-		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，所以它可能
-		// 比本模块晚起——Start 阶段它还没提供端口。Attach 在全图 Start 完之后跑。
-		Attach: func(_ context.Context, ctx modules.Context) error {
-			ui, ok := modules.Get(ctx, cliapi.Capability)
+			//
+			// catalog 在这里现取（Start 的参数已经出了作用域，而下面两处都要用）。
+			cli, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil
 			}
-			// catalog 在 Attach 里现取（Start 里那份是局部变量，注入阶段已经出了作用域）。
-			agents := modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
-			all := append(commands(agents), launchCommands(service, agents)...)
+			all := append(commands(catalog), launchCommands(service, catalog)...)
 			for _, cmd := range all {
-				release, err := ui.RegisterCommand(cmd)
+				release, err := cli.RegisterCommand(cmd)
 				if err != nil {
 					return err
 				}
 				releases = append(releases, release)
 			}
-			reporter := runtimeReporter{agents: agents}
+			reporter := runtimeReporter{agents: catalog}
 			for _, register := range []func() (modules.Release, error){
-				func() (modules.Release, error) { return ui.RegisterStatus(reporter) },
-				func() (modules.Release, error) { return ui.RegisterDiagnostics(reporter) },
-				func() (modules.Release, error) { return ui.RegisterDump(reporter) },
+				func() (modules.Release, error) { return cli.RegisterStatus(reporter) },
+				func() (modules.Release, error) { return cli.RegisterDiagnostics(reporter) },
+				func() (modules.Release, error) { return cli.RegisterDump(reporter) },
 			} {
 				release, err := register()
 				if err != nil {

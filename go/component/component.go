@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 )
 
 // capabilitySpec 是 Capability 的运行时身份。泛型保证调用点类型安全，
@@ -44,10 +46,12 @@ func Name[T any](capability Capability[T]) string { return capability.spec.name 
 
 // Requirement 描述组件启动前必须解析的端口，而不是保存服务实例。
 // optional 只放宽"没有提供者"这一种情况，端口类型仍然严格校验。
+//
+// 只有两种需求：**硬依赖**（Need）与**弱依赖**（Optional）。2026-09-18 之前还有
+// 第三种（Inject：不建边的注入边），它已经删掉——理由见 Optional 的注释。
 type Requirement struct {
 	spec     capabilitySpec
 	optional bool
-	late     bool
 }
 
 // Name 返回这个需求指向的端口名，供装配期枚举与校验用（内核不解释它，就像它
@@ -64,32 +68,53 @@ func (r Requirement) Name() string { return r.spec.name }
 // 层级不变量，内核只提供观测手段，不解释「ui」是什么。
 func (r Requirement) Optional() bool { return r.optional }
 
-// Need 建立硬依赖；缺少提供者时整张图拒绝启动。
+// Need 建立**硬依赖**：缺少提供者时整张图拒绝启动，而且「我排在提供者后面」
+// 是明确的排序边。
 func Need[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec}
 }
 
-// Optional 建立可选依赖；存在提供者时仍会建立生命周期顺序。
+// Optional 建立**弱依赖**：你存在，我就依赖你；你不在，我就不依赖你。
+//
+// 语义是两条，一起成立：
+//
+//   - **排序**：有提供者时照常建边——我排在它后面，它的 Start 一定先跑完。
+//     这是我「等它准备好」的地方，也是「注入别人的人要等被注入的人」这句话
+//     在框架里的落点（2026-09-18 之前这条要靠 Component.Attach 兜，见下）。
+//   - **缺席即无依赖**：没有提供者时**不建边、不报错**，只是拿不到端口。
+//     所以「装不装这个模块」不会让别的模块起不来。
+//
+// 典型用户是 ui：业务模块 Optional(cli) —— 装了 cli，就在它的 Start 里把命令
+// 挂上去；没装，跳过，模块自身功能一样不缺。反方向仍然禁止：**ui 不依赖任何
+// 模块**（cli 的 Requires 是空的，见 app/default_test.go 的棘轮）。
+//
+// # 2026-09-18：这里曾经是 Inject + 第二阶段 Attach，已删除
+//
+// 早先版本为了躲一个**已不存在的环**，引入了第三种需求 `Inject`（optional 且
+// 不参与排序）和配套的 `Component.Attach`（全图 Start 跑完之后再跑一遍的注入
+// 阶段）。那个环是这么来的：当时注入是一条排序边，而 ui **自己也要依赖那些
+// 模块**才能渲染——两条箭头互指，config / runtime / config-hook 的命令因此
+// 永远注入不进来，只能被迫留在界面里。
+//
+// 环的真正解法是**把 ui 的出边砍干净**（cli.Requires 现在为空，界面只循环
+// 调用注入进来的回调）。出边没了之后，Optional(cli) 这条入边不可能成环，
+// Inject 存在的唯一理由随之消失；Attach 的唯一理由是「Start 时 ui 可能还没
+// 起」——排序边一恢复，它也就没有存在必要了。
+//
+// 留着它们不是零成本，实测代价有三条：
+//
+//   - inject 不参与排序 ⇒ **谁先谁后没有任何保证**。今天 9 个注入者恰好都排在
+//     cli 之后，靠的是稳定拓扑排序 + 目录名字母序——碰巧，不是机制。
+//   - 停止顺序跟着一起没了保证：实测 breaker 在 cli **之后**停，也就是它的
+//     Stop 会往一个已经停掉的界面账本里回写 Release。今天无害（cli.Stop 是空
+//     的），靠约定撑着。
+//   - 每个新模块作者都得先读懂 30 行注释才知道「往界面注册要写 Attach 而不是
+//     Start」——modules/pluginmanager/command.go 上那条警告就是这个症状。
+//
+// 现在只有两种需求，语义各自单一：Need 是硬依赖，Optional 是弱依赖。
 func Optional[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec, optional: true}
 }
-
-// Inject 建立一条**不参与排序**的注入边：端口存在就交给我，但我不排在它后面。
-//
-// 它解决的是一类死结（2026-09-18）：业务模块想往**当前装着的 ui** 里注入自己的
-// 命令与状态行，而 ui 自己也依赖那些模块（它要靠它们渲染）。用 Optional 表达
-// 「ui 可选」会建成环，因为 Optional 仍然是一条排序边；而 Inject 明确说「我不需要
-// 你在前面」——注入发生在**全图 Start 完之后**（Component.Attach），那时谁的端口
-// 都在了，顺序问题自然消失。
-//
-// 这也让 ui 从依赖图里彻底退出去：没有任何模块排在他前面或后面，装不装 ui 只
-// 影响「这些贡献有没有地方去」。
-func Inject[T any](capability Capability[T]) Requirement {
-	return Requirement{spec: capability.spec, optional: true, late: true}
-}
-
-// Late 报告这条需求是不是注入边（由 Inject 建立，不走排序、在 Attach 阶段解析）。
-func (r Requirement) Late() bool { return r.late }
 
 // Provision 把一个具体值绑定到端口。绑定会先于 Start 完成，
 // 因此依赖解析不依赖组件启动时的全局副作用。
@@ -126,15 +151,7 @@ type Component struct {
 	Requires []Requirement
 	Provides []Provision
 	Start    func(context.Context, Context) error
-	// Attach 是**第二阶段**：全图 Start 完之后才跑，用于注入边（见 Inject）。
-	//
-	// 为什么需要它而不是在 Start 里做：注入边的对端（ui）自己不参与排序，Start
-	// 阶段它可能还没起。Attach 阶段保证所有端口都已提供。
-	//
-	// 它必须是幂等可撤销的：Attach 拿到的每个 Release 都由组件自己收好，在 Stop
-	// 里逆序释放——和其它注册端口完全一样。
-	Attach func(context.Context, Context) error
-	Stop   func(context.Context) error
+	Stop     func(context.Context) error
 }
 
 // Release 撤销一次注册所有权。返回句柄而不是暴露全局 Remove，
@@ -216,29 +233,41 @@ func New(loaders ...Loader) (*Manager, error) {
 
 // NewContext 收集组件、验证端口、拓扑排序并依次启动。
 // 任一 Start 失败都会立即逆序停止已经进入生命周期的节点。
+//
+// 全过程经 tracef 报出去（见 trace.go）：扫到几个组件、每个声明了什么、排出来
+// 什么顺序、每个起了多久。这是「模块为什么这么加载」的唯一一手材料——它只在
+// 装配期存在，事后从 Manager 里问不出来。
 func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 	var components []Component
-	for _, loader := range loaders {
+	for i, loader := range loaders {
 		loaded, err := loader.Load()
 		if err != nil {
+			tracef("装配：第 %d 个 loader 报错：%v", i+1, err)
 			return nil, err
 		}
+		tracef("装配：第 %d 个 loader 交出 %d 个组件", i+1, len(loaded))
 		components = append(components, loaded...)
 	}
 	ordered, values, err := resolve(components)
 	if err != nil {
+		tracef("装配：构图失败：%v", err)
 		return nil, err
 	}
 	manager := &Manager{
 		components: ordered,
 		context:    Context{values: values},
 	}
+	assembledAt := time.Now()
 	for i, component := range manager.components {
+		began := time.Now()
 		if component.Start != nil {
 			if err := component.Start(ctx, manager.context); err != nil {
 				// Start 可能在报错前已经注册扩展或占用资源，因此失败节点也进入
 				// 回滚范围；组件的 Stop 必须能处理部分初始化。
 				manager.started = i + 1
+				tracef("启动 %d/%d %s 失败（用时 %s）：%v",
+					i+1, len(manager.components), component.Name,
+					time.Since(began).Round(time.Microsecond), err)
 				rollbackErr := manager.Stop(ctx)
 				if rollbackErr != nil {
 					return nil, fmt.Errorf("start component %s: %w; rollback: %v",
@@ -248,28 +277,12 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 			}
 		}
 		manager.started = i + 1
+		tracef("启动 %d/%d %s 完成（用时 %s）",
+			i+1, len(manager.components), component.Name,
+			time.Since(began).Round(time.Microsecond))
 	}
-	// 第二阶段：注入边。所有端口都已提供，所以声明 Inject 的组件现在能拿到 ui。
-	for _, component := range manager.components {
-		if component.Attach == nil {
-			continue
-		}
-		if err := component.Attach(ctx, manager.context); err != nil {
-			// **不要动 manager.started**：Attach 阶段每个组件都已经 Start 过了，
-			// 回滚范围就是整张图。这里曾经写成 `started = i + 1`（照抄 Start 那段），
-			// 于是第 i 个之后的组件**启动了却永远不 Stop**——它们的 Stop 里装的是
-			// ReleaseAll（注入给界面的命令与状态行、注册进 gateway 的请求插件、
-			// confighook 的字段）、以及 restore()（agentstate 的全局桥、档位兼容
-			// 层）。2026-09-18 补的 Attach 阶段把这条路径带出来了，而当时的测试只
-			// 覆盖了 Start 失败（见 TestAttachFailureRollsBackTheWholeGraph）。
-			rollbackErr := manager.Stop(ctx)
-			if rollbackErr != nil {
-				return nil, fmt.Errorf("attach component %s: %w; rollback: %v",
-					component.Name, err, rollbackErr)
-			}
-			return nil, fmt.Errorf("attach component %s: %w", component.Name, err)
-		}
-	}
+	tracef("装配完成：%d 个组件，用时 %s", len(manager.components),
+		time.Since(assembledAt).Round(time.Millisecond))
 	return manager, nil
 }
 
@@ -307,29 +320,50 @@ func (m *Manager) Components() []Component {
 
 // Stop 只执行一次，并按启动的反方向释放组件。
 // 即使某个 Stop 失败，其余组件仍继续清理，最终返回第一个错误。
+//
+// 与 Start 对称地报事件：停止顺序是启动顺序的逆序，而「谁在谁之后停」正是
+// 「晚到的 Release 会不会回写一个已经停掉的对象」这类问题的唯一现场。
 func (m *Manager) Stop(ctx context.Context) error {
 	var first error
 	m.stopOnce.Do(func() {
+		tracef("停止：按启动逆序释放 %d 个组件", m.started)
 		for i := m.started - 1; i >= 0; i-- {
 			component := m.components[i]
 			if component.Stop == nil {
+				tracef("停止 %d/%d %s 跳过（没有 Stop）", i+1, m.started, component.Name)
 				continue
 			}
-			if err := component.Stop(ctx); err != nil && first == nil {
-				first = fmt.Errorf("stop component %s: %w", component.Name, err)
+			began := time.Now()
+			if err := component.Stop(ctx); err != nil {
+				tracef("停止 %d/%d %s 失败（用时 %s）：%v",
+					i+1, m.started, component.Name,
+					time.Since(began).Round(time.Microsecond), err)
+				if first == nil {
+					first = fmt.Errorf("stop component %s: %w", component.Name, err)
+				}
+				continue
 			}
+			tracef("停止 %d/%d %s 完成（用时 %s）",
+				i+1, m.started, component.Name,
+				time.Since(began).Round(time.Microsecond))
 		}
+		tracef("停止：完成")
 	})
 	return first
 }
 
 // resolve 在任何副作用发生前验证端口并生成稳定拓扑顺序。
 // 同序候选按原始声明位置排序，使扩展点和诊断输出可复现。
+//
+// 每一步都经 tracef 报出去。排查「某个模块为什么没起」「顺序为什么是这样」时
+// 需要的是**过程**（谁声明了什么、哪条弱依赖因为没人提供而跳过、拓扑排序在
+// 第几轮把谁放出来），而 return 值只有结果。
 func resolve(components []Component) ([]Component, map[string][]any, error) {
 	byName := make(map[string]int, len(components))
 	specs := make(map[string]capabilitySpec)
 	providers := make(map[string][]int)
 	values := make(map[string][]any)
+	tracef("构图：收到 %d 个组件声明，按声明顺序如下", len(components))
 	for i, component := range components {
 		if component.Name == "" {
 			return nil, nil, fmt.Errorf("component name is required")
@@ -343,6 +377,7 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 			return nil, nil, fmt.Errorf("duplicate component %s", component.Name)
 		}
 		byName[component.Name] = i
+		tracef("  声明 %2d  %s", i+1, describeComponent(component))
 		for _, provision := range component.Provides {
 			if err := validateSpec(specs, provision.spec); err != nil {
 				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
@@ -362,20 +397,28 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 
 	edges := make([]map[int]bool, len(components))
 	indegree := make([]int, len(components))
+	edgeTotal := 0
 	for consumer, component := range components {
 		for _, requirement := range component.Requires {
 			if err := validateSpec(specs, requirement.spec); err != nil {
 				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
 			}
-			if requirement.late {
-				// 注入边不排序：它声明的是「有就给我」，不是「我要排在它后面」。
-				// 参与排序就会成环（ui 依赖业务模块渲染，业务模块依赖 ui 注入）。
+			indexes := providers[requirement.spec.name]
+			if len(indexes) == 0 {
+				if !requirement.optional {
+					return nil, nil, fmt.Errorf("component %s requires missing capability %s",
+						component.Name, requirement.spec.name)
+				}
+				// 弱依赖缺席：**不建边，也不报错**。这条是「你存在就有依赖，你不
+				// 存在就没依赖」的落点，所以要明说，否则和下一条（真的建了边）
+				// 在日志里长得一样。
+				tracef("  弱依赖缺席 %s 需要 %s —— 没有提供者，跳过（不建边、不影响启动）",
+					component.Name, requirement.spec.name)
 				continue
 			}
-			indexes := providers[requirement.spec.name]
-			if len(indexes) == 0 && !requirement.optional {
-				return nil, nil, fmt.Errorf("component %s requires missing capability %s",
-					component.Name, requirement.spec.name)
+			if requirement.optional {
+				tracef("  弱依赖命中 %s 需要 %s —— %d 个提供者，照常建排序边",
+					component.Name, requirement.spec.name, len(indexes))
 			}
 			for _, provider := range indexes {
 				if provider == consumer {
@@ -387,10 +430,13 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 				if !edges[provider][consumer] {
 					edges[provider][consumer] = true
 					indegree[consumer]++
+					edgeTotal++
 				}
 			}
 		}
 	}
+	tracef("构图：%d 个组件，%d 条排序边（Need 与命中提供者的 Optional；没人提供的 Optional 不成边）",
+		len(components), edgeTotal)
 
 	var ready []int
 	for i := range components {
@@ -418,8 +464,23 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 		}
 	}
 	if len(ordered) != len(components) {
+		// 环的现场：把还卡着的组件点名——只说「有环」的话，下一步得靠人工二分。
+		var stuck []string
+		for i, component := range components {
+			if indegree[i] > 0 {
+				stuck = append(stuck, component.Name)
+			}
+		}
+		sort.Strings(stuck)
+		tracef("构图：依赖成环，仍被卡住的组件：%s", strings.Join(stuck, " "))
 		return nil, nil, fmt.Errorf("component capability dependency cycle")
 	}
+
+	order := make([]string, 0, len(ordered))
+	for _, component := range ordered {
+		order = append(order, component.Name)
+	}
+	tracef("构图：拓扑顺序 %s", strings.Join(order, " → "))
 	return ordered, values, nil
 }
 

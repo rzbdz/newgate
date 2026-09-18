@@ -9,7 +9,8 @@ package gateway
 // 里于是有一半是数据面。
 //
 // 搬过来之后：界面不认识进程生命周期，进程也不认识界面。`__serve` 是网关自己
-// 注入界面的命令（Attach 阶段），用户看不见它（故意没有 HelpLine）。
+// 在 Start 里注册进界面的命令（本模块对 ui 是弱依赖 Optional(cli)），用户看不见
+// 它（故意没有 HelpLine）。
 //
 // 依赖方向：gateway → cli/extension（叶子契约），不是 → modules/cli。
 
