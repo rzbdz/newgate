@@ -10,8 +10,18 @@
 //
 // # 它依赖什么
 //
-// 只依赖 config/store（读写 profile）。**不依赖 cli**：它只是把一个命令注入进去，
-// 而那是可选的（没装任何 ui 时这个模块什么也不做，自己的功能不受影响）。
+// 只依赖 config/store 与 gateway/controlplane 两个**共享叶子**（前者读写 profile、
+// 后者写完之后通知守护进程重读）。**不依赖 cli**：它只是把一个命令注入进去，而那
+// 是可选的（没装任何 ui 时这个模块什么也不做，自己的功能不受影响）。
+//
+// 为什么可以直接用 store：它是被 gateway / runtime / config 共同使用的叶子包（与
+// config/paths 同级），不是「某个模块的内部结构」——所以这条 import 不是依赖边，
+// Requires 里看不见它是对的（棘轮只看 Requires，这一点是**有意**的：store 与
+// paths 属于「共享基础设施」那一档，跟 lib/ 同类）。
+//
+// 写完之后的 controlplane.Notify() 也不是正确性必需（watcher 的指纹覆盖
+// state.json，最迟 1 秒自己会读），但仓库里每个写配置的点都这么通知——理由见
+// tui.go 里的注释。
 package tui
 
 import (

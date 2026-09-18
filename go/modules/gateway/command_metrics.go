@@ -21,6 +21,7 @@ import (
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
+	"github.com/rzbdz/newgate/go/modules/breaker/status"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
@@ -200,28 +201,20 @@ func healthDisplayRank(h breakerapi.Status) int {
 // modelHealthState 把一行健康快照翻成给人看的档位名。
 //
 // 注意它读的是**分档明细**（Scores/Buckets），不是 daemon 算好的排序键 Rank
-// ——这里要显示「哪个上下文档位多少毫秒」，而 Rank 只编码 ≤4K 那一档。排序
-// 策略（谁先上链）仍然只有 [rankFromProxy] 读的那一个来源；这里的 3000/12000
-// 只是同一套数在**显示**上的复用。要改口径就两边一起改，别只改一处。
+// ——这里要显示「哪个上下文档位多少毫秒」，而 Rank 只编码 ≤4K 那一档。
+//
+// 档位名与阈值来自 breaker/status（**只有一份**，2026-09-18）：这里曾经自己
+// 抄了一份 3000/12000，与 breaker 的排序阈值各自演化。
 func modelHealthState(h breakerapi.Status) string {
 	if h.Open {
-		score, _ := modelDisplayScore(h)
-		if h.Grade == breakerapi.ProbeLaggy || score > 12000 {
+		score, sampled := modelDisplayScore(h)
+		if h.Grade == breakerapi.ProbeLaggy || status.Grade(score, sampled) == status.LatencySlow {
 			return "卡顿"
 		}
 		return "不可用"
 	}
 	score, sampled := modelDisplayScore(h)
-	switch {
-	case sampled && score < 3000:
-		return "流畅"
-	case sampled && score <= 12000:
-		return "可用"
-	case sampled:
-		return "卡顿"
-	default:
-		return "未评分"
-	}
+	return status.Grade(score, sampled).String()
 }
 
 func modelScoreLine(h breakerapi.Status) string {

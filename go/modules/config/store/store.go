@@ -285,13 +285,19 @@ func NewControlToken() string {
 // 兜一次底）：令牌先落盘，daemon 起来时 watcher 的初次加载就能读到，
 // 不存在「daemon 拿着空令牌跑着」的窗口。之后所有 LoadState→SaveState
 // 的调用方（--set-profile 等）都从盘上重新读，令牌不会被冲掉。
-func EnsureControlToken() *domain.State {
+// 写盘失败**必须报出去**：令牌写不出去时 /__newgate/stop 与 /__newgate/upgrade
+// 会拒掉所有请求（跨用户停机就没了），而调用方原来拿不到任何信号。与
+// CLAUDE.md §3.1 记的那个 umask 权限坑是同一条现场。
+func EnsureControlToken() (*domain.State, error) {
 	s := LoadState()
-	if s.ControlToken == "" {
-		s.ControlToken = NewControlToken()
-		_ = SaveState(s)
+	if s.ControlToken != "" {
+		return s, nil
 	}
-	return s
+	s.ControlToken = NewControlToken()
+	if err := SaveState(s); err != nil {
+		return s, fmt.Errorf("写控制令牌: %w", err)
+	}
+	return s, nil
 }
 
 // SetActiveProfile 设置某个 agent 的链头。agent 为空 = 设全局默认。

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	modules "github.com/rzbdz/newgate/go/component"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
@@ -140,5 +142,34 @@ func TestGatewayReceivesModuleHooks(t *testing.T) {
 		if !found {
 			t.Fatalf("gateway hooks = %v, missing %s", names, want)
 		}
+	}
+}
+
+// TestExactlyOneUI 断言「装着的 ui 只有一个」。
+//
+// 为什么需要它（2026-09-18 实测）：端口不声明基数（component 的设计如此），而
+// cli.Capability 恰恰是**按设计唯一**的——进程组合根最终调用的入口只能有一个。
+// 但 owner 没做唯一性保证，于是装第二个 ui 的后果是**完全静默**的：它装配成功、
+// 不报错、拿到的命令/状态行/体检项/诊断素材/术语全是零个（注入点用
+// modules.Get，多 provider 时只给声明顺序里的第一个）。
+//
+// 更阴的是「谁赢」取决于**目录名字母序**（generatedComponents 按目录名排序，
+// Get 取第一个）：加一个目录名排在 cli 之前的 ui，真 cli 就变成被忽略的那一个，
+// 而 app.CLI().Run() 会把整条命令行交给它——一次由目录命名造成的静默接管。
+//
+// 这条测试把静默变成红。真要做多 ui（路线里写了 tui / web），得先把注入点改成
+// GetAll 并把贡献发给每一个 ui，那时这条断言要跟着改。
+func TestExactlyOneUI(t *testing.T) {
+	built, err := New(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = built.Stop(context.Background()) })
+
+	uis := modules.GetAll(built.Context(), cliapi.Capability)
+	if len(uis) != 1 {
+		t.Fatalf("装了 %d 个 ui，应当是 1 个。"+
+			"多个 ui 时注入只会进「声明顺序第一个」（依赖目录名字母序），"+
+			"其余的完全静默——见这条测试的注释。", len(uis))
 	}
 }

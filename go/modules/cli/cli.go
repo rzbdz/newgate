@@ -227,32 +227,6 @@ func lookupName(args []string) string {
 // die 是界面自己的报错出口（版式在 lib/style，各模块共用同一份）。
 func die(code int, msg string) int { return style.Die(code, msg) }
 
-func has(ss []string, s string) bool {
-	for _, x := range ss {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
-func arg(ss []string, i int) string {
-	if i < len(ss) && !strings.HasPrefix(ss[i], "-") {
-		return ss[i]
-	}
-	return ""
-}
-
-func intArg(ss []string, i, def int) int {
-	if v := arg(ss, i); v != "" {
-		var n int
-		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
-			return n
-		}
-	}
-	return def
-}
-
 func optValue(args []string, i int, name string) string {
 	if strings.Contains(args[i], "=") {
 		return strings.SplitN(args[i], "=", 2)[1]
@@ -276,15 +250,3 @@ func findFlag(args []string, names ...string) string {
 	}
 	return ""
 }
-
-func intFlag(args []string, name string, def int) int {
-	if v := findFlag(args, name); v != "" {
-		var n int
-		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
-			return n
-		}
-	}
-	return def
-}
-
-func truthy(s string) bool { return s == "on" || s == "1" || s == "true" || s == "yes" }

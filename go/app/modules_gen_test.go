@@ -1,12 +1,12 @@
 package app
 
 import (
-	"bytes"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	modscan "github.com/rzbdz/newgate/go/tools/genmodules/scan"
 )
 
 // TestGeneratedModuleListIsCurrent 拦住「往 modules/ 加了目录但忘了重新生成」
@@ -42,23 +42,17 @@ func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	}
 }
 
-// moduleDirs 返回 modules/ 下所有「含根 module.go」的目录名。
+// moduleDirs 返回 modules/ 下所有「是组件」的目录名。
+//
+// 用的就是**生成器那把尺子**（tools/genmodules/scan）：判据曾经有两份、口径还
+// 不同（这里用 bytes.Contains 找字面量，生成器用 AST 看返回值），于是照文档写
+// `func New() component.Component` 的模块会被生成器装进清单、却数不进这里，
+// 报出一个完全指不到真因的失败（2026-09-18 实测，见 scan 的包注释）。
 func moduleDirs(t *testing.T, modulesDir string) []string {
 	t.Helper()
-	entries, err := os.ReadDir(modulesDir)
+	dirs, err := modscan.Dirs(modulesDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(modulesDir, entry.Name(), "module.go"))
-		if err != nil || !bytes.Contains(data, []byte("func New() modules.Component")) {
-			continue
-		}
-		out = append(out, entry.Name())
-	}
-	return out
+	return dirs
 }

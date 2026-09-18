@@ -18,10 +18,6 @@ type nakedHost struct {
 
 func (h *nakedHost) Die(code int, message string) int { h.died, h.msg = code, message; return code }
 
-func (h *nakedHost) LiveRouting() (func(string, string) bool, func(string, string) int) {
-	return nil, nil
-}
-
 func (h *nakedHost) DaemonRunning() bool { return false }
 
 func (h *nakedHost) PrintThinkCache() {}

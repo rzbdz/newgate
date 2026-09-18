@@ -11,6 +11,7 @@ import (
 	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/store"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 )
 
 // ---------- 零依赖 raw mode ----------
@@ -170,6 +171,12 @@ func Run() error {
 			if err := store.SetActiveProfile("", names[cur]); err != nil {
 				msg = style.Mark(style.Bad) + " " + err.Error()
 			} else {
+				// 通知守护进程「立刻」重读。**不是正确性必需**：watcher 的指纹覆盖
+				// state.json（store/watch.go 的 signature），所以最迟 1 秒后一样生效；
+				// 但这是用户在界面上刚敲下的一下，1 秒的延迟会被当成「没生效」。仓库里
+				// 每一个写配置的地方都这么通知（config/commands.go、opencodeomo），
+				// tui 原来少这一下（2026-09-18 补）。
+				controlplane.Notify()
 				st = store.LoadState()
 				msg = style.Mark(style.OK) + " 已切到 " + style.Cyan(names[cur]) + style.Dim("   下个请求生效")
 			}

@@ -19,13 +19,10 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
+
+	modscan "github.com/rzbdz/newgate/go/tools/genmodules/scan"
 )
 
 const (
@@ -92,49 +89,16 @@ func moduleRoot() (string, error) {
 // 字母序而非目录遍历序：生成结果必须与文件系统返回顺序无关，
 // 否则不同机器上 diff 会飘。
 func scan(componentsDir string) ([]module, error) {
-	entries, err := os.ReadDir(componentsDir)
+	names, err := modscan.Dirs(componentsDir)
 	if err != nil {
 		return nil, err
 	}
-	var out []module
-	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		name := entry.Name()
+	out := make([]module, 0, len(names))
+	for _, name := range names {
 		// 约定：目录名里的下划线在 import 别名里保留（Go 标识符允许下划线）
-		if !isComponent(filepath.Join(componentsDir, name, "module.go")) {
-			continue
-		}
 		out = append(out, module{dir: name, alias: "mod_" + name})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].dir < out[j].dir })
 	return out, nil
-}
-
-// isComponent 判断一个 module.go 是否导出 `func New() modules.Component`。
-// 只解析不编译：这一步在构建之前跑，不能依赖源码当时能通过类型检查。
-func isComponent(path string) bool {
-	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
-	if err != nil {
-		return false
-	}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "New" || fn.Recv != nil {
-			continue
-		}
-		results := fn.Type.Results
-		if results == nil || len(results.List) != 1 {
-			continue
-		}
-		sel, ok := results.List[0].Type.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "Component" {
-			continue
-		}
-		return true
-	}
-	return false
 }
 
 // render 生成组件清单源码。生成物本身也要 gofmt 干净，见下面手写的缩进。

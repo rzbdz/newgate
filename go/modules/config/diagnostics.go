@@ -151,8 +151,8 @@ func sortStrings(ss []string) {
 
 func (reporter) StatusBlocks() []cliapi.StatusBlock {
 	st := store.LoadState()
-	info, doc := controlplane.State()
-	return []cliapi.StatusBlock{bindingBlock(st), chainBlock(st, info, doc)}
+	_, doc := controlplane.State()
+	return []cliapi.StatusBlock{bindingBlock(st), chainBlock(st, doc)}
 }
 
 // bindingBlock 默认 profile 的档位绑定表。
@@ -188,7 +188,7 @@ func bindingBlock(st *domain.State) cliapi.StatusBlock {
 }
 
 // chainBlock normal 档的完整候选链。
-func chainBlock(st *domain.State, info *controlplane.Info, doc *controlplane.Doc) cliapi.StatusBlock {
+func chainBlock(st *domain.State, doc *controlplane.Doc) cliapi.StatusBlock {
 	block := cliapi.StatusBlock{Rank: rankBlockChain}
 	snap, err := store.Load()
 	if err != nil {
@@ -215,7 +215,6 @@ func chainBlock(st *domain.State, info *controlplane.Info, doc *controlplane.Doc
 	if tail := chainTail(steps, skips); tail != "" {
 		block.Lines = append(block.Lines, style.Hint(tail))
 	}
-	_ = info
 	return block
 }
 

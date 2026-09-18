@@ -15,7 +15,9 @@ import (
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
+	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 
+	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
@@ -26,9 +28,11 @@ var _ Gateway = (*port)(nil)
 // New 声明网关控制面组件。对 Config 的 Need 既表达真实依赖，
 // 也确保所有配置语义先就绪，再允许插件进入请求路径。
 //
-// 它也 Need(cli)：`newgate st` 是这一层的用户界面，插件名与开关语义都是本模块的
-// 知识，所以命令由本模块自己注册（见 command_special.go 的说明）。这条边不会成环
-// ——cli 靠 modules/surface 那个叶子模块得到契约，不 import 任何业务模块。
+// 它对 ui 只声明 **Inject**（一条不参与排序的注入边，见 component.Inject）：
+// `newgate st` / `metrics` / `probe` 是这一层的用户界面，插件名与开关语义都是本
+// 模块的知识，所以命令由本模块自己注册（见 command_special.go 的说明）。用
+// Inject 而不是 Need/Optional 是必须的——ui 不依赖本模块，但界面**曾经**依赖它
+// 渲染，两条箭头互指就成环，命令就只能被迫留在界面里。
 func New() modules.Component {
 	port := &port{registry: special.NewRegistry()}
 	var restore func()
@@ -47,6 +51,16 @@ func New() modules.Component {
 			modules.Provide(Capability, Gateway(port)),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
+			// state.json 里的 "gateway" 段归本模块（补丁开关、debug 到期时间）。
+			// 登记它才有人拦「两个模块抢同一个字段」——以前这张表只覆盖了三处
+			// 写入里的一半，gateway 与 runtime 的键被占用时不会当场报错。
+			hooks := modules.MustGet(ctx, confighookapi.ConfigHooksCapability)
+			fieldRelease, err := hooks.RegisterStateField("gateway", gatewaystate.Key)
+			if err != nil {
+				return err
+			}
+			releases = append(releases, fieldRelease)
+
 			restore = special.InstallDefault(port.registry)
 
 			// ui 是**可选**的（见 CLAUDE.md §4「ui 只是一类普通模块」）：没装任何

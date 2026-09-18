@@ -16,10 +16,6 @@ type stubHost struct {
 
 func (h *stubHost) Die(code int, message string) int { h.died, h.msg = code, message; return code }
 
-func (h *stubHost) LiveRouting() (func(string, string) bool, func(string, string) int) {
-	return nil, nil
-}
-
 func (h *stubHost) DaemonRunning() bool { return false }
 
 func (h *stubHost) PrintThinkCache() {}

@@ -14,15 +14,19 @@ import (
 // 加的内核钩子**——它出现在图里靠的是 tools/genmodules 扫目录，和别的 15 个模块
 // 一样。它「特殊」只特殊在大部分模块选择依赖它。
 //
-// 依赖方向（2026-09-18 修正过一次）：
+// 依赖方向（2026-09-18 修正两次，这里是**当前**的形状）：
 //
-//	其他模块 ──Need──▶ plugin-manager ──Need──▶ cli ──Need──▶ confighook
+//	其他模块 ──Need──▶ plugin-manager ──Need──▶ confighook
+//	其他模块 ──Inject──▶ cli（注入命令与状态行）
 //
-// **cli 不认识本模块**，本模块认识 cli。上一版是反的（cli 为了渲染 `newgate plugin`
-// 和 status 那一行去 Need 本模块），结果是本模块再也不能把自己的命令注册进 cli
-// ——cli → pluginmanager → cliapi → cli 成环，于是命令只能被迫写在 cli 里。
-// 现在状态行由本模块经 cli.RegisterStatus 自报、命令经 cli.RegisterCommand 自注册，
-// cli 不需要认识任何模块，那个环就不存在了。
+// 两处都要看清楚：
+//
+//   - **本模块不依赖 cli**，只有一条 Inject 边（见 component.Inject）。上一版是
+//     `Need(cli)`：cli 为了渲染 `newgate plugin` 与那一行 status 去 Need 本模块，
+//     本模块又要 Need(cli) 才能注册命令 —— 环，于是命令只能被迫写在 cli 里。
+//   - **cli 也不依赖本模块**（它的 Requires 是空的）。状态行经 cli.RegisterStatus
+//     自报、命令经 cli.RegisterCommand 自注册，方向是「本模块 → ui」，界面不认识
+//     任何人。Inject 不参与排序，所以这两条箭头不会互相顶。
 //
 // 唯一的另一个 Requires 是 confighook：登记 state.json 字段必须走它的端口
 // （与 modules/claudecode 登记 classifier_naked、classifier_override 同款）。
