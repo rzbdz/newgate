@@ -6,6 +6,7 @@ import (
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
+	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
 // switchStatus 把本模块的三个补丁开关报给 `newgate status`。
@@ -23,10 +24,20 @@ type switchStatus struct{}
 var _ cliapi.StatusProvider = switchStatus{}
 
 // Status 见类型说明。st 为 nil 时什么都不报（快照还没装上）。
+//
+// 除了本模块自己的三个开关，这里还**代转**插件层自报的状态项
+// （special.StatusProvider）：那一层的注册表归本模块，插件是它的一部分，
+// 所以由本模块把它们端给 cli。cli 因此不必 import gateway/special 就能显示
+// 「插件说它现在是什么状态」——谁的状态谁自己报，这一层由 owner 代收。
 func (switchStatus) Status(st *domain.State) []cliapi.StatusLine {
 	if st == nil {
 		return nil
 	}
+	var out []cliapi.StatusLine
+	for _, item := range special.Statuses(st) {
+		out = append(out, cliapi.StatusLine{Label: item.Label, Value: item.Value})
+	}
+
 	var parts []string
 	if !gatewaystate.RepairEnabled(st) {
 		parts = append(parts, "schema-repair=off")
@@ -37,11 +48,11 @@ func (switchStatus) Status(st *domain.State) []cliapi.StatusLine {
 	case len(gatewaystate.Parse(st).SpecialOff) > 0:
 		parts = append(parts, "special 关了 "+strings.Join(gatewaystate.Parse(st).SpecialOff, ","))
 	}
-	if len(parts) == 0 {
-		return nil
+	if len(parts) > 0 {
+		out = append(out, cliapi.StatusLine{
+			Label: "补丁开关",
+			Value: strings.Join(parts, "   ") + "   恢复：newgate st on · newgate schema-repair on",
+		})
 	}
-	return []cliapi.StatusLine{{
-		Label: "补丁开关",
-		Value: strings.Join(parts, "   ") + "   恢复：newgate st on · newgate schema-repair on",
-	}}
+	return out
 }
