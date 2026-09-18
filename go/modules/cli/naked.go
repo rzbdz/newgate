@@ -33,7 +33,7 @@ func cmdNaked(args []string) int {
 	case "on":
 		return nakedOn(nakedDefaultTTL)
 	default:
-		d, err := parseNakedDuration(sub)
+		d, err := parseDurationArg(sub)
 		if err != nil {
 			return die(64, fmt.Sprintf(
 				"naked: 不认识的时长 %q（支持 on / forever / off / 30s / 2m / 2min / 1h）", sub))
@@ -94,9 +94,11 @@ func saveNakedConfig(cfg claudecode.NakedConfig) error {
 	return store.SaveState(s)
 }
 
-// parseNakedDuration 把用户输入转成 time.Duration。
+// parseDurationArg 把用户输入转成 time.Duration。
+//
+// 名字不带 naked：naked 与 plugin 两条命令共用它（时长参数的写法该一致）。
 // 先尝试标准语法（30s / 2m / 1h），再把 "min"/"mins" 规范化为 "m"。
-func parseNakedDuration(s string) (time.Duration, error) {
+func parseDurationArg(s string) (time.Duration, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		return d, nil
 	}
