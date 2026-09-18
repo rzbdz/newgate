@@ -270,8 +270,10 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
   「Agent 非空」猜。
 - **新的数据面策略**（摘谁的牌、记哪本账、什么算失败、留什么痕）→ 实现
   `gateway/policy` 的口，在自己的 `Start` 里 `RegisterFilter` 挂进去；**别让
-  gateway import 你**，判据是 `command grep -rn <你的模块名> modules/gateway/`
-  为空。一个都不装时网关是最小系统，照常转发。见 `docs/09-extension-guide.md` §7。
+  gateway import 你**——数据面的非测试源码里连你的名字都不该出现（`modules/
+  gateway/direction_test.go` 那条棘轮测试守着方向：它拒「名字」也拒 `import`
+  策略包本身，只有 `…/breaker/status` 那种 wire 叶子除外）。一个都不装时网关是
+  最小系统，照常转发。见 `docs/09-extension-guide.md` §7。
 
 ---
 

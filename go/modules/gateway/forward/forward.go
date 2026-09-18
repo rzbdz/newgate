@@ -177,7 +177,7 @@ const (
 //
 // 这个能力归数据面：它要读当前配置快照（provider 的 base、key、方言）并复用
 // 数据面的探活实现。策略只是**借**它——上一版是策略反过来要求数据面注入一个
-// 回调（`breaker.Breaker.SetVerifier`），方向是反的。
+// 回调（`SetVerifier`），方向是反的。
 //
 // fail-closed：拿不到 provider 配置、key 为空、探活报错，一律返回 false
 // ——诊断**不能**成为坏 binding 的免死金牌，它只该拦住误判。
