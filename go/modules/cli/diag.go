@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rzbdz/newgate/go/lib/buildinfo"
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
@@ -35,7 +36,7 @@ func prettyDur(sec int) string { return durarg.Format(sec) }
 // 做统一的排版与「有没有红的」这个结论。上一版这里写死了六项，于是界面为了它们
 // import 了 paths / store / resolve / takeover ——那都是别人的知识。
 func cmdDoctor(service *service) int {
-	fmt.Println(style.Title("newgate doctor", Version))
+	fmt.Println(style.Title("newgate doctor", buildinfo.Version()))
 	fmt.Println(style.Rule(64))
 
 	checks := service.moduleDiagnostics()
@@ -290,7 +291,7 @@ func cmdAllLogs(agents agentapi.AgentCatalog, service *service) int {
 // RegisterStatusBlocks）。界面在这里一行都不认识——代理、接管、配置各由
 // gateway / runtime / config 报上来，界面的全部工作是按 Rank 排一下然后打印。
 func cmdStatus(service *service) int {
-	fmt.Println(style.Title("newgate "+Version, buildTimeDisplay()))
+	fmt.Println(style.Title("newgate "+buildinfo.Version(), buildinfo.BuildTimeDisplay()))
 	fmt.Println(style.Rule(64))
 
 	for _, line := range service.statusLines() {

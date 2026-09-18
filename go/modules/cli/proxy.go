@@ -69,3 +69,12 @@ func healthFromProxy(ps *proxyInfo) map[string]breakerstatus.Status {
 
 // proxyState 代理的进程信息 + 自报状态。薄薄一层转发，调用点不必改。
 func proxyState() (*controlplane.Info, *proxyInfo) { return controlplane.State() }
+
+// pingProxy 端口上的控制面活着吗。
+func pingProxy(port int) bool { return controlplane.Ping(port) }
+
+// notifyProxy 让运行中的代理立刻重读配置（转发到控制面叶子）。
+//
+// 为什么这一步归界面：命令改完配置要**立刻**生效，而界面是发起改动的那一方
+// （见 Host.NotifyProxy）。
+func notifyProxy() { controlplane.Notify() }

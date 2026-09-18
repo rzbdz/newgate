@@ -122,16 +122,6 @@ func (c helpCommand) Run(_ Host, _ []string) int {
 	return 0
 }
 
-// serveCommand 是守护进程本体：`newgate __serve`（由 daemon.Spawn 拉起）。
-//
-// **故意没有 HelpLine**：它是内部入口，用户不该在 help 里看到它，也不该手敲。
-type serveCommand struct{ s *service }
-
-func (serveCommand) Names() []string { return []string{"__serve"} }
-func (c serveCommand) Run(_ Host, args []string) int {
-	return Serve(c.s, intFlag(args, "--port", 0))
-}
-
 // ownCommands 是界面自己的命令。
 //
 // 注册进同一个账本（而不是留在 run() 的 switch 里）：查重、分派、help 组装走
@@ -142,7 +132,7 @@ func ownCommands(s *service) []Command {
 		statusCommand{s}, runOnceCommand{s},
 		breakerCommand{}, doctorCommand{s},
 		logsCommand{}, allLogsCommand{s},
-		versionCommand{}, helpCommand{s}, serveCommand{s},
+		versionCommand{}, helpCommand{s},
 	}
 }
 

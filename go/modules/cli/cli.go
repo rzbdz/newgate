@@ -11,18 +11,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
+	"github.com/rzbdz/newgate/go/lib/buildinfo"
 	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/roleprov"
-)
-
-// Version 由 main 注入。
-var (
-	Version    = "dev"
-	BuildTime  = "unknown"
-	CommitTime = "unknown"
 )
 
 // usageText 组装 `newgate --help`。
@@ -221,29 +214,8 @@ func run(service *service, args []string) int {
 	return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))
 }
 
-func VersionLine() string {
-	return fmt.Sprintf("newgate %s\n  构建于 %s\n  提交于 %s",
-		Version, buildTimeDisplay(), stampDisplay(CommitTime))
-}
-
-// pretty ldflags 传不了空格，用下划线占位，展示时换回。
-func pretty(s string) string { return strings.ReplaceAll(s, "_", " ") }
-
-// buildTimeDisplay 构建时间的展示串。
-func buildTimeDisplay() string { return stampDisplay(BuildTime) }
-
-// stampDisplay 把 ldflags 里的时间戳渲染成**一个**本地时间。
-//
-// 2026-09-18 之前这里印两个时间（UTC 原文 + 换算出本地），因为 Makefile 用
-// `date -u` 打 UTC，而 commitTime 走 git 的本地时间——同一行两个时区，看的人
-// 得自己换算。现在 Makefile 统一打本地时区（`%z` 带偏移），这里也就只印一个。
-// 解析不了（dev 构建没注入，值是 "unknown"）就原样回，不硬凑。
-func stampDisplay(s string) string {
-	if t, err := time.Parse("2006-01-02_15:04:05Z0700", s); err == nil {
-		return t.Local().Format("2006-01-02 15:04:05 MST")
-	}
-	return pretty(s)
-}
+// VersionLine 是 `newgate version` 的输出（版式与取值都在 lib/buildinfo）。
+func VersionLine() string { return buildinfo.VersionLine() }
 
 // ---------- 小工具 ----------
 

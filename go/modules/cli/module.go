@@ -16,7 +16,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/go/component"
 
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
+	"github.com/rzbdz/newgate/go/lib/buildinfo"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 )
@@ -30,7 +30,6 @@ import (
 type service struct {
 	agents  confighookapi.AgentCatalog
 	runtime runtimeapi.Runtime
-	health  breakerapi.Breaker
 
 	// 三本账：模块通过 RegisterXxx 把自己的东西挂进来，界面在分派命令、渲染
 	// status / doctor 时循环调用它们。**界面不 import 任何模块**，所以它不认识
@@ -101,9 +100,9 @@ func (s *service) RegisterStatusBlocks(provider BlockProvider) (modules.Release,
 // Run 注入本次构建信息后进入统一命令分派；模块命令从账本里现取（不是启动时
 // 拍快照）——注入方可能比界面晚一步才注册，现取才不会漏。
 func (s *service) Run(args []string, build BuildInfo) int {
-	Version = build.Version
-	BuildTime = build.BuildTime
-	CommitTime = build.CommitTime
+	// 构建信息是**进程级事实**，注入到共享叶子；界面自己只用它，守护进程也要用
+	// （启动日志那行 `newgate <版本> … 启动`）。
+	buildinfo.Set(build.Version, build.BuildTime, build.CommitTime)
 	return runCLI(s, args)
 }
 
@@ -169,9 +168,6 @@ func New() modules.Component {
 			// 报上来）。留着一条用不到的出边会让 config 永远注入不进来——它会成环。
 			modules.Need(runtimeapi.Capability),
 			modules.Need(confighookapi.AgentCatalogCapability),
-			// daemon 角色要用它构造数据面（forward.New 的第四个参数），
-			// CLI 角色要用它把 /__newgate/status 的 breakers 解出来。
-			modules.Need(breakerapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, CLI(service)),
@@ -179,13 +175,11 @@ func New() modules.Component {
 		Start: func(_ context.Context, ctx modules.Context) error {
 			service.agents = modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
 			service.runtime = modules.MustGet(ctx, runtimeapi.Capability)
-			service.health = modules.MustGet(ctx, breakerapi.Capability)
 			return nil
 		},
 		Stop: func(context.Context) error {
 			service.agents = nil
 			service.runtime = nil
-			service.health = nil
 			return nil
 		},
 	}
