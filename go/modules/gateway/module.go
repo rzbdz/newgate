@@ -12,6 +12,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 
@@ -37,6 +38,9 @@ func New() modules.Component {
 		Type: "gateway",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
+			// 数据面要把健康表交给转发服务（forward.New 的第四个参数），
+			// 守护进程主循环也归本模块（见 serve.go）。
+			modules.Need(breakerapi.Capability),
 			modules.Inject(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
@@ -61,6 +65,9 @@ func New() modules.Component {
 				// 观测面也归数据面自己：计数器怎么分组、探活探出了什么，
 				// 都是网关的语义（见 command_metrics.go / command_probe.go）。
 				metricsCommand{}, probeCommand{},
+				// 守护进程本体：`newgate __serve`。它以前是界面的命令，但它跑的
+				// 是数据面（见 serve.go）。
+				serveCommand{health: modules.MustGet(ctx, breakerapi.Capability)},
 			} {
 				release, err := cli.RegisterCommand(cmd)
 				if err != nil {

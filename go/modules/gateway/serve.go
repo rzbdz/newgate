@@ -1,21 +1,71 @@
-package cli
+package gateway
+
+// 本文件是**守护进程的主循环**：`newgate __serve`（由 daemon.Spawn 拉起）。
+//
+// **为什么它住在这里**（2026-09-18）：它在跑的就是数据面本身——配置热更新的原子
+// 换页、thinkcache 的磁盘冷层、转发服务（forward.New）的启停、优雅交接的排空。
+// 这些没有一样是「命令行」的事。它留在 modules/cli 的时候，界面为了跑起来得认识
+// forward / thinkcache / breaker / config,store / runtime,daemon ——界面的依赖表
+// 里于是有一半是数据面。
+//
+// 搬过来之后：界面不认识进程生命周期，进程也不认识界面。`__serve` 是网关自己
+// 注入界面的命令（Attach 阶段），用户看不见它（故意没有 HelpLine）。
+//
+// 依赖方向：gateway → cli/extension（叶子契约），不是 → modules/cli。
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/rzbdz/newgate/go/lib/buildinfo"
 	"github.com/rzbdz/newgate/go/lib/logx"
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 	"github.com/rzbdz/newgate/go/modules/gateway/forward"
 	"github.com/rzbdz/newgate/go/modules/gateway/thinkcache"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
+
+// serveCommand 是守护进程本体：`newgate __serve`。
+//
+// **故意没有 HelpLine**：它是内部入口，用户不该在 help 里看到它，也不该手敲。
+type serveCommand struct{ health breakerapi.Breaker }
+
+var _ cliapi.Command = (*serveCommand)(nil)
+
+func (serveCommand) Names() []string { return []string{"__serve"} }
+
+func (c serveCommand) Run(_ cliapi.Host, args []string) int {
+	return Serve(c.health, intFlag(args, "--port", 0))
+}
+
+// intFlag 取 `--名字 N` 或 `--名字=N` 里的整数，没有给默认值。
+func intFlag(args []string, name string, def int) int {
+	for i, a := range args {
+		v := ""
+		switch {
+		case a == name && i+1 < len(args):
+			v = args[i+1]
+		case strings.HasPrefix(a, name+"="):
+			v = strings.TrimPrefix(a, name+"=")
+		default:
+			continue
+		}
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			return n
+		}
+	}
+	return def
+}
 
 // Serve 是守护进程的主循环。
 //
@@ -25,7 +75,7 @@ import (
 //   - 每个 agent 读自己的绑定（per-agent profile）
 //   - 换页是原子指针替换，不存在「读到一半配置变了」的中间态
 //   - 新配置加载失败时**保留旧快照**，正在跑的一切继续工作
-func Serve(service *service, port int) int {
+func Serve(health breakerapi.Breaker, port int) int {
 	rot, rerr := logx.New(paths.LogFile(), 16<<20, 3) // 16MB × 4 份
 	var lg *log.Logger
 	if rerr != nil {
@@ -86,7 +136,7 @@ func Serve(service *service, port int) int {
 	if err := thinkcache.AttachDisk(paths.ThinkCacheFile(), 100<<20); err != nil {
 		lg.Printf("thinkcache 落盘关闭（继续纯内存）: %v", err)
 	}
-	srv := forward.New(port, lg, watcher, service.health)
+	srv := forward.New(port, lg, watcher, health)
 
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
@@ -136,7 +186,7 @@ func Serve(service *service, port int) int {
 	}()
 
 	lg.Printf("newgate %s (构建于 %s) 启动，默认 profile=%s，配置热更新已开启",
-		Version, buildTimeDisplay(), watcher.Current().State.DefaultProfile)
+		buildinfo.Version(), buildinfo.BuildTimeDisplay(), watcher.Current().State.DefaultProfile)
 	if err := srv.Start(); err != nil {
 		// 优雅交接的排空：listener 已移交新进程，Serve 因此返回——但这
 		// 不是退出的时候。等在途请求流完（Drained），再直接退（os.Exit
@@ -159,8 +209,3 @@ func Serve(service *service, port int) int {
 	}
 	return 0
 }
-
-func pingProxy(port int) bool { return controlplane.Ping(port) }
-
-// notifyProxy 让运行中的代理立刻重读配置（转发到控制面叶子）。
-func notifyProxy() { controlplane.Notify() }
