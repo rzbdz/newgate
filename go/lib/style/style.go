@@ -10,6 +10,7 @@
 package style
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -526,4 +527,13 @@ func sum(ns []int) int {
 		total += n
 	}
 	return total
+}
+
+// Die 把一条错误按统一版式写到 stderr，并返回退出码。
+//
+// 放在这里（而不是每个模块自己写三行）的理由：每个模块都可能要从命令里报错，
+// 而「newgate: 前缀 + 换行缩进」是**界面版式**的一部分——各写一份必然漂移。
+func Die(code int, msg string) int {
+	fmt.Fprintln(os.Stderr, WrapLine("newgate: "+msg, "  "))
+	return code
 }

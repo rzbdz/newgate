@@ -28,19 +28,26 @@
 //
 // # 边界
 //
-// 本包只允许 import component 与 config（都是轻的基础设施）。它一旦变重，
-// 上面那条「模块引得起」立刻失效。
+// 本包只允许 import component 与 config 的**叶子**（domain / resolve，都是轻的
+// 基础设施）。它一旦变重，上面那条「模块引得起」立刻失效。
+//
+// 2026-09-18 起这里 import 的是 config/resolve 而不是 config 根包：根包要
+// import 本包（模块往界面注入东西时要用这里的类型），两者互引就成环了。链的
+// Step / Skip 本来就定义在 resolve（config/api.go 只是别名转发），所以直接引
+// 叶子即可——这正是 docs/03-architecture.md §3 那条「定义下沉到实现包」。
 package extension
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
-	configapi "github.com/rzbdz/newgate/go/modules/config"
-	"github.com/rzbdz/newgate/go/modules/config/domain"
+	"github.com/rzbdz/newgate/go/modules/config/resolve"
 )
 
 // Diagnostic 是模块交给 CLI 展示的一组结构化状态，
 // 让模块保留诊断知识，而 CLI 只负责统一编排和输出。
 type Diagnostic struct {
+	// Rank 决定行序（小的在前）。与 StatusLine.Rank 同理：体检项的先后是版面
+	// 判断，由贡献者声明，界面不写死任何一项。
+	Rank    int
 	Label   string
 	State   string
 	Line    string
@@ -57,8 +64,34 @@ type DiagnosticProvider interface {
 // 与 Diagnostic 分开是因为两者的**时机**不同：doctor 是人主动敲的体检，可以
 // 展开细节；status 是每次都会看一眼的概览，只该占一行。
 type StatusLine struct {
+	// Rank 决定**行序**（小的在前）。同 Rank 保持注册顺序，稳定。
+	//
+	// 「代理排第一行」这类判断是**版面**判断，所以由贡献者声明而不是界面写死
+	// ——界面一旦写死「哪一行排第一」，那一行就成了界面认识某个模块的证据。
+	Rank  int
 	Label string
 	Value string
+}
+
+// StatusBlock 是一段**已经排好版**的状态输出：可选节标题 + 若干行。
+//
+// 为什么允许预渲染（而不是只报 label/value）：`status` 里有两块是表格（档位绑定、
+// fallback 链），它们的排版与数据是一体的 know-how——让界面重排就得把 resolve
+// 的知识搬回界面，那正是这一轮要拆掉的东西。所以块的**内容与排版**都由 owner 给，
+// 界面只决定**位置**（Rank）。
+//
+// 它是可选端口：多数模块只需要 StatusLine。
+type StatusBlock struct {
+	Rank int
+	// Title 空 = 不打印节标题（用于接在上一段后面的续行）。
+	Title string
+	// Lines 已排好版，逐行原样输出。
+	Lines []string
+}
+
+// BlockProvider 允许模块给 `newgate status` 贡献成块的内容，理由见 StatusBlock。
+type BlockProvider interface {
+	StatusBlocks() []StatusBlock
 }
 
 // StatusProvider 允许模块给 `newgate status` 贡献一行，理由同 DiagnosticProvider：
@@ -68,7 +101,12 @@ type StatusLine struct {
 // 非出厂态」，而那份账本归 plugin-manager。CLI 若为了这一行去读它，那一行就会
 // 把两个模块焊在一起——「谁的状态谁自己报」是解开这种耦合的唯一办法。
 type StatusProvider interface {
-	Status(*domain.State) []StatusLine
+	// Status 由**贡献者自己**装所需的配置快照（store.LoadState），界面不传。
+	//
+	// 为什么不把 state 传进来（2026-09-18）：那会让界面为了转手一份 state 而
+	// import config/domain + config/store——「界面认识配置的内部结构」正是这一轮
+	// 要拆掉的东西。谁的知识谁自己取，界面只负责循环与排版。
+	Status() []StatusLine
 }
 
 // Host 是扩展命令可使用的最小 CLI 能力集合。
@@ -82,8 +120,8 @@ type Host interface {
 		available func(provider, model string) bool,
 		rank func(provider, model string) int,
 	)
-	PrintChain([]configapi.Step)
-	PrintSkips([]configapi.Skip)
+	PrintChain([]resolve.Step)
+	PrintSkips([]resolve.Skip)
 	NotifyProxy()
 
 	// DaemonRunning 守护进程现在在跑吗（读 pidfile）。
@@ -291,6 +329,9 @@ type CLI interface {
 	RegisterDiagnostics(DiagnosticProvider) (modules.Release, error)
 	// RegisterStatus 注入 `newgate status` 里的若干行，理由同 RegisterDiagnostics。
 	RegisterStatus(StatusProvider) (modules.Release, error)
+	// RegisterStatusBlocks 注入 `newgate status` 里的成块内容（表格等），
+	// 理由见 StatusBlock。
+	RegisterStatusBlocks(BlockProvider) (modules.Release, error)
 }
 
 // BuildInfo 把链接期版本信息显式传入界面，避免模块读取可变全局构建状态。

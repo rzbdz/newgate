@@ -9,7 +9,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -190,7 +189,17 @@ func run(service *service, args []string) int {
 			if name == "" {
 				return die(64, "--set-profile 需要一个 profile 名")
 			}
-			return cmdSetProfile(findFlag(args, "--agent", "--tool", "--target"), name)
+			// 认得出这个选项的形状（argv 解析是界面的活），但**语义归 config**：
+			// 归一成 config 那条命令认识的形状再交给它。
+			command, ok := service.moduleCommand("--set-profile")
+			if !ok {
+				return die(64, "--set-profile 没有实现（装配缺了 config 模块）")
+			}
+			rest := []string{name}
+			if agent := findFlag(args, "--agent", "--tool", "--target"); agent != "" {
+				rest = append(rest, "--agent", agent)
+			}
+			return command.Run(moduleCLIHost{}, rest)
 		}
 	}
 
@@ -238,10 +247,8 @@ func stampDisplay(s string) string {
 
 // ---------- 小工具 ----------
 
-func die(code int, msg string) int {
-	fmt.Fprintln(os.Stderr, style.WrapLine("newgate: "+msg, "  "))
-	return code
-}
+// die 是界面自己的报错出口（版式在 lib/style，各模块共用同一份）。
+func die(code int, msg string) int { return style.Die(code, msg) }
 
 func has(ss []string, s string) bool {
 	for _, x := range ss {

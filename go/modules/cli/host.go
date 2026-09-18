@@ -1,8 +1,7 @@
 package cli
 
 import (
-	"fmt"
-
+	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
@@ -21,11 +20,11 @@ func (moduleCLIHost) LiveRouting() (
 	return availableFromProxy(live), rankFromProxy(live)
 }
 
-func (moduleCLIHost) PrintChain(steps []resolve.Step) {
-	fmt.Print(numberedBindingChain(steps, nil))
-}
+// 链与跳过的**排版归 config**（本文件只转发）：那是配置的知识，界面借给模块
+// 命令用一下而已。见 modules/config/commands.go 的 PrintChain / PrintSkips。
+func (moduleCLIHost) PrintChain(steps []resolve.Step) { configapi.PrintChain(steps) }
 
-func (moduleCLIHost) PrintSkips(skips []resolve.Skip) { printSkips(skips) }
+func (moduleCLIHost) PrintSkips(skips []resolve.Skip) { configapi.PrintSkips(skips) }
 func (moduleCLIHost) NotifyProxy()                    { notifyProxy() }
 func (moduleCLIHost) PrintThinkCache()                { printThinkCache() }
 func (moduleCLIHost) DaemonRunning() bool             { return daemon.Running() != nil }

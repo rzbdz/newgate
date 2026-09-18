@@ -10,11 +10,14 @@
 package confighook
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
 
 	modules "github.com/rzbdz/newgate/go/component"
+
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 )
 
 type registry struct {
@@ -38,13 +41,34 @@ func New() modules.Component {
 		fields: make(map[string]string),
 		tokens: make(map[string]uint64),
 	}
+	var releases []modules.Release
 	return modules.Component{
 		Name: "config-hook",
 		Type: "infra",
+		Requires: []modules.Requirement{
+			// ui 是可选的：没装 ui 时客户端描述符照常工作，只是没有 `newgate agents`
+			// 这个入口（见 CLAUDE.md §4）。
+			modules.Inject(cliapi.Capability),
+		},
 		Provides: []modules.Provision{
 			modules.Provide(ConfigHooksCapability, ConfigHooks(registry)),
 			modules.Provide(AgentCatalogCapability, AgentCatalog(registry)),
 		},
+		// 注入是**第二阶段**（见 modules.Inject）：ui 不参与排序，Start 阶段它可能
+		// 还没提供端口。Attach 在全图 Start 完之后跑。
+		Attach: func(_ context.Context, ctx modules.Context) error {
+			ui, ok := modules.Get(ctx, cliapi.Capability)
+			if !ok {
+				return nil
+			}
+			release, err := ui.RegisterCommand(agentsCommand{AgentCatalog(registry)})
+			if err != nil {
+				return err
+			}
+			releases = append(releases, release)
+			return nil
+		},
+		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },
 	}
 }
 
