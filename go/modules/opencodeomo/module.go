@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	cliapi "github.com/rzbdz/newgate/go/modules/cli"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"

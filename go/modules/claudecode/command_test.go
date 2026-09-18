@@ -25,7 +25,9 @@ func (h *nakedHost) LiveRouting() (func(string, string) bool, func(string, strin
 
 func (h *nakedHost) PrintChain([]configapi.Step) {}
 func (h *nakedHost) PrintSkips([]configapi.Skip) {}
-func (h *nakedHost) NotifyProxy()                { h.notified++ }
+func (h *nakedHost) PrintThinkCache()            {}
+
+func (h *nakedHost) NotifyProxy() { h.notified++ }
 
 var _ cliapi.Host = (*nakedHost)(nil)
 

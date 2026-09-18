@@ -74,12 +74,12 @@ func Provide[T any](capability Capability[T], value T) Provision {
 // Type 是组件的分类标签。
 //
 // 内核**不定义任何具体取值**，也不解释它——它只是一个必须存在的、稳定的分类键，
-// 供装配期枚举与产品层的元数据管理使用（`newgate plugin` 按它分组；词汇表定义在
-// modules/pluginmanager，因为「有哪些分类」是 newgate 的产品概念，不是内核概念）。
-// 这条与「模块的键不 hard-code 进 core」是同一条规矩：core 提供表，产品填内容。
+// 供装配期枚举与上层按类展示、统计、治理使用。**有哪些分类是产品概念，不是内核
+// 概念**，所以词汇表归产品层；内核只提供这个字段。这与「模块的键不 hard-code 进
+// core」是同一条规矩：core 提供表，产品填内容。
 //
-// 它是空字符串以外的任意值；取值合法性由 app 层的装配测试兜（内核对取值一无所知，
-// 所以校验不了）。
+// 它是空字符串以外的任意值；内核对取值一无所知，因此校验不了——取值是否落在
+// 产品层认识的集合里，由产品层自己兜（通常是一条装配测试）。
 type Type string
 
 // Component 是运行时依赖图中的一个生命周期节点。
@@ -88,8 +88,8 @@ type Type string
 type Component struct {
 	Name string
 	// Type 是分类标签，必填。它跟着组件定义走，所以图一装配就能枚举出全部
-	// 组件及其分类——不需要组件配合、不需要启动，这是它和运行期开关点
-	// （modules/pluginmanager 的 RegisterSelf）的分工所在。
+	// 组件及其分类——不需要组件配合、不需要启动。需要运行期才知道的东西
+	// 不能放这里：那是模块在 Start 时向某个 owner 注册的事，不是静态元数据。
 	Type     Type
 	Requires []Requirement
 	Provides []Provision
@@ -233,11 +233,11 @@ func (m *Manager) ComponentNames() []string {
 	return names
 }
 
-// Components 按启动顺序返回组件定义副本（含 Type），供 CLI 与产品层枚举。
+// Components 按启动顺序返回组件定义副本（含 Type），供上层枚举。
 //
 // 只读快照：返回的是浅拷贝，调用方改不到图里的那一份。它跟 ComponentNames 的区别
-// 就是多了分类与依赖声明——`newgate plugin` 要按 Type 分组列全部模块，靠的就是这里，
-// 而不是让每个模块自报（自报会漏掉没参与的模块）。
+// 就是多了分类与依赖声明。枚举的权威来源是这里而不是「谁自报过」——自报会漏掉
+// 没参与那些机制的组件，而「没参与」和「忘了注册」在结果上必须长得不一样。
 func (m *Manager) Components() []Component {
 	out := make([]Component, len(m.components))
 	copy(out, m.components)

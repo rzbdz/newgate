@@ -26,3 +26,4 @@ func (moduleCLIHost) PrintChain(steps []resolve.Step) {
 
 func (moduleCLIHost) PrintSkips(skips []resolve.Skip) { printSkips(skips) }
 func (moduleCLIHost) NotifyProxy()                    { notifyProxy() }
+func (moduleCLIHost) PrintThinkCache()                { printThinkCache() }
