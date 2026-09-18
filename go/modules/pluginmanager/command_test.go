@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
-	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 )
 
@@ -21,9 +20,7 @@ func (h *stubHost) LiveRouting() (func(string, string) bool, func(string, string
 	return nil, nil
 }
 
-func (h *stubHost) PrintChain([]configapi.Step) {}
-func (h *stubHost) PrintSkips([]configapi.Skip) {}
-func (h *stubHost) DaemonRunning() bool         { return false }
+func (h *stubHost) DaemonRunning() bool { return false }
 
 func (h *stubHost) PrintThinkCache() {}
 

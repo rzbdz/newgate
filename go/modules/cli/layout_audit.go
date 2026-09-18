@@ -3,14 +3,12 @@ package cli
 import (
 	"bufio"
 	"fmt"
-	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 	"io"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/rzbdz/newgate/go/lib/style"
-	"github.com/rzbdz/newgate/go/modules/config/store"
 )
 
 type widthViolation struct {
@@ -23,7 +21,7 @@ type widthViolation struct {
 func shouldAuditLayout(service *service, args []string) bool {
 	explicit := os.Getenv("NEWGATE_LAYOUT_AUDIT") != ""
 	if len(args) == 0 {
-		return explicit || gatewaystate.DebugActive(store.LoadState())
+		return explicit || service.verboseOn()
 	}
 	// 不审计的两类，**都由命令自己声明**，界面不列名单、也不猜：
 	//   - Unstyled：这次的输出本来就不是 newgate 的版式（JSON / 原始配置 / 日志）；
@@ -37,7 +35,7 @@ func shouldAuditLayout(service *service, args []string) bool {
 			return false
 		}
 	}
-	return explicit || gatewaystate.DebugActive(store.LoadState())
+	return explicit || service.verboseOn()
 }
 
 func auditLayout(args []string, run func() int) int {

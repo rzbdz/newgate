@@ -30,6 +30,7 @@ type (
 	Dumper             = ext.Dumper
 	DumpSection        = ext.DumpSection
 	Glossarist         = ext.Glossarist
+	Verbose            = ext.Verbose
 	GlossaryLine       = ext.GlossaryLine
 	CLI                = ext.CLI
 	BuildInfo          = ext.BuildInfo
