@@ -9,18 +9,44 @@ name: CI
 #
 # 三档对应 docs/10-testing-security.md 的三层粒度：
 #
-#   static  格式 / vet / 生成清单 / 单测      —— 秒级，每次 push 都跑
+#   static  格式 / vet / 生成清单 / 单测      —— 秒级
 #   race    带竞态检测的单测                  —— 只跑并发相关包
 #   e2e     真二进制 + 假上游 + 假客户端      —— 零 token，覆盖真行为
 #
 # 需要真 token 的 `mock/e2e_reasoning_affinity.sh` **不在**这里：它会花真钱，
 # 只能人工按需跑。
-
+#
+# ---- 触发条件：只在 main 上跑（2026-09-18 改）----
+#
+# 开发流程是「从 main 切分支 → 干完合回 main」，所以**只有合进 main 的那一下**
+# 需要一次权威判定。之前 `push: branches: [main, feature/**]` 加 `pull_request:`
+# 是每推一次分支、每开一个 PR 都跑一轮，run 列表里大半是还没定稿的中间态——
+# 真正要看的「main 现在绿不绿」反而被埋了。
+#
+# 这个取舍有代价，要说清楚：**没有 PR 门禁了**。合进 main 之前不再有自动判定，
+# 所以「推之前先本地跑 `cd go && make ci`」从好习惯变成了流程的一部分——那条
+# 命令在本地复刻下面这三档（含干净 runner 的配置目录），见 go/Makefile 的
+# `ci` 目标。坏的 main 比坏的 PR 严重得多：main 一红，所有人下次拉下来都是红的。
+#
+# `workflow_dispatch` 保留：偶尔需要在某个分支上手动验一次（比如动了 CI 本身），
+# 那是显式动作，不会自己堆记录。
 on:
   push:
-    branches: [main, "feature/**"]
-  pull_request:
+    branches: [main]
   workflow_dispatch:
+
+# 同一分支上后一次推送取消前一次未跑完的：main 上连续合入时，中间那次的结果
+# 已经没人会看了，留着只是刷屏。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# runner 本来就是干净的，这里仍然**显式**钉住配置目录：让「测试偷偷依赖运行它的
+# 那台机器上的配置」在任何 runner 上都必然暴露，而不是碰运气。与本地 `make ci`
+# 的沙箱同一个意图（那条命令就是照这个写的）。
+# e2e 的两个脚本各自 export 自己的沙箱，不受影响。
+env:
+  NEWGATE_HOME: ${{ runner.temp }}/newgate-ci
 
 permissions:
   contents: read
