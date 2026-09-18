@@ -1,4 +1,4 @@
-package cli
+package pluginmanager
 
 import (
 	"fmt"
@@ -6,49 +6,71 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rzbdz/newgate/go/lib/durarg"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/cli/style"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	pluginmanagerapi "github.com/rzbdz/newgate/go/modules/pluginmanager"
 )
 
-// cmdPlugin 是运行期开关的唯一用户界面。
+// command 是 `newgate plugin`。
 //
-// 用法：
+// **它住在这里而不是 modules/cli**：这是「everything is module」的直接推论——
+// 命令是这个模块的用户界面，模块自己提供它，通过 cli.RegisterCommand 注入。
+// 2026-09-18 修过一次真实的违规：那一版把它写在 modules/cli 里，理由是「注册
+// 命令要 Need(cli)，而 cli 要渲染列表又得 Need(plugin-manager)，成环」——
+// 那个环是**自己造的**，因为它同时让 cli 去 Need 本模块。正确的拆法是反过来：
+// 让 cli 不必认识本模块（状态行走 cli.RegisterStatus 由本模块自报），于是本
+// 模块可以自由地 Need(cli) 并注册自己的命令。
+type command struct{ manager Manager }
+
+var (
+	_ cliapi.Command        = (*command)(nil)
+	_ cliapi.Documented     = (*command)(nil)
+	_ cliapi.StatusProvider = (*command)(nil)
+)
+
+func (c *command) Names() []string { return []string{"plugin", "plugins"} }
+
+func (c *command) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{
+		Section: "模块",
+		Usage:   "plugin [模块[.路径]] [on|off] [时长]",
+		Summary: "全部模块按分类列出；开关某个模块或某个开关点",
+	}
+}
+
+// Run 的用法（**args 里没有 "plugin" 这个动词**，分派器已经剥掉了，见
+// cliapi.Command 的契约说明）：
 //
 //	newgate plugin                          按分类列出全部模块
 //	newgate plugin <模块>                    展开一个模块：它的开关点与当前状态
 //	newgate plugin <模块> on|off [时长]       开/关这个模块的**全部**开关点
 //	newgate plugin <模块>.<路径> on|off [时长] 只开/关一个开关点
 //
-// 为什么命令实现住在这里（cli）而不是 plugin-manager 里：plugin-manager 要贡献
-// 这条命令就得 Need(cli.Capability)，而 cli 要渲染列表又得 Need(plugin-manager)
-// ——成环。所以照 cmdBreaker / cmdSpecial / cmdNaked 的先例：命令是 cli 的，
-// 数据从 capability 取。
-//
-// 列表的枚举源是**组件图**（经 plugin-manager 合并），不是「谁上报过」。这样没
-// 参与开关体系的模块也列得出来，标成「无法 runtime 开关（v1）」——「这个模块
-// 没有开关」和「这个模块忘了注册」绝不能长得一样。
-func cmdPlugin(manager pluginmanagerapi.Manager, args []string) int {
-	sub := arg(args, 1)
+// 列表的枚举源是**组件图**（经本模块合并），不是「谁上报过」。这样没参与开关
+// 体系的模块也列得出来，标成「无法 runtime 开关（v1）」——「这个模块没有开关」
+// 和「这个模块忘了注册」绝不能长得一样。
+func (c *command) Run(host cliapi.Host, args []string) int {
+	sub := cliapi.Arg(args, 0)
 	switch sub {
 	case "", "ls", "list":
-		return pluginList(manager)
+		return c.list()
 	}
-	action := arg(args, 2)
+	action := cliapi.Arg(args, 1)
 	if action == "" {
-		return pluginExplain(manager, sub)
+		return c.explain(host, sub)
 	}
 	if action != "on" && action != "off" {
-		return die(64, fmt.Sprintf(
+		return host.Die(64, fmt.Sprintf(
 			"plugin: 不认识的动词 %q（用法：newgate plugin <模块>[.<路径>] on|off [时长]）", action))
 	}
-	return pluginToggle(manager, sub, action == "on", arg(args, 3))
+	return c.toggle(host, sub, action == "on", cliapi.Arg(args, 2))
 }
 
-// pluginList 按分类分组列出全部模块。
-func pluginList(manager pluginmanagerapi.Manager) int {
-	modules := manager.Modules()
+// list 按分类分组列出全部模块。
+func (c *command) list() int {
+	modules := c.manager.Modules()
 	st := store.LoadState()
 
 	total, switchPoints := 0, 0
@@ -65,8 +87,8 @@ func pluginList(manager pluginmanagerapi.Manager) int {
 	fmt.Println(style.Title("newgate plugin",
 		fmt.Sprintf("%d 个模块 · %d 个可运行期开关点", total, switchPoints)))
 
-	for _, typ := range pluginmanagerapi.DisplayOrder() {
-		var group []pluginmanagerapi.Module
+	for _, typ := range DisplayOrder() {
+		var group []Module
 		for _, m := range modules {
 			if groupOf(m.Type) == typ {
 				group = append(group, m)
@@ -93,7 +115,7 @@ func pluginList(manager pluginmanagerapi.Manager) int {
 }
 
 // printModuleLine 渲染列表里的一行：模块名 + 它的开关点概览。
-func printModuleLine(st *domain.State, m pluginmanagerapi.Module, nameW int) {
+func printModuleLine(st *domain.State, m Module, nameW int) {
 	name := style.Pad(m.Name, nameW) + " "
 	if len(m.Switches) == 0 {
 		fmt.Println("  " + name + style.Dim("无法 runtime 开关（v1）"))
@@ -110,17 +132,17 @@ func printModuleLine(st *domain.State, m pluginmanagerapi.Module, nameW int) {
 	}
 }
 
-// pluginExplain 展开一个模块或一个开关点。
-func pluginExplain(manager pluginmanagerapi.Manager, target string) int {
+// explain 展开一个模块或一个开关点。
+func (c *command) explain(host cliapi.Host, target string) int {
 	st := store.LoadState()
 
-	if sw, ok := manager.Lookup(target); ok {
-		return explainSwitch(st, sw)
+	if sw, ok := c.manager.Lookup(target); ok {
+		return explainSwitch(host, st, sw)
 	}
 
-	m, ok := findModule(manager, target)
+	m, ok := findModule(c.manager, target)
 	if !ok {
-		return die(65, fmt.Sprintf("没有叫 %q 的模块或开关点（newgate plugin 看清单）", target))
+		return host.Die(65, fmt.Sprintf("没有叫 %q 的模块或开关点（newgate plugin 看清单）", target))
 	}
 	if len(m.Switches) == 0 {
 		fmt.Println(style.Title("newgate plugin "+m.Name, string(m.Type)))
@@ -135,7 +157,7 @@ func pluginExplain(manager pluginmanagerapi.Manager, target string) int {
 		fmt.Println(style.Item(style.OK, style.Bold(sw.Path)+"  "+switchState(st, sw)))
 		fmt.Println("    " + style.Dim(sw.Title))
 		fmt.Println("    " + style.Dim("关掉会发生什么："+sw.Why))
-		if sw.Danger != pluginmanagerapi.DangerSafe {
+		if sw.Danger != DangerSafe {
 			fmt.Println("    " + dangerColor(sw.Danger)(fmt.Sprintf("危险级别 %s", sw.Danger)))
 		}
 	}
@@ -144,13 +166,13 @@ func pluginExplain(manager pluginmanagerapi.Manager, target string) int {
 	return 0
 }
 
-func explainSwitch(st *domain.State, sw pluginmanagerapi.Switch) int {
+func explainSwitch(host cliapi.Host, st *domain.State, sw Switch) int {
 	fmt.Println(style.Title("newgate plugin "+sw.Path, string(sw.Danger)))
 	fmt.Println(style.Rule(72))
 	fmt.Println(style.Item(style.OK, sw.Title))
 	fmt.Println(style.Item(style.Skip, "现在："+switchState(st, sw)))
 	fmt.Println(style.Item(style.Skip, "关掉会发生什么："+sw.Why))
-	if sw.Danger == pluginmanagerapi.DangerFootgun {
+	if sw.Danger == DangerFootgun {
 		fmt.Println(style.Item(style.Bad, "这是 footgun：打开/关闭必须带时限，不接受 forever"))
 	}
 	verb := "off"
@@ -162,27 +184,27 @@ func explainSwitch(st *domain.State, sw pluginmanagerapi.Switch) int {
 	return 0
 }
 
-// pluginToggle 改一个或一组开关点。
-func pluginToggle(manager pluginmanagerapi.Manager, target string, on bool, dur string) int {
-	switches, err := targetsOf(manager, target)
+// toggle 改一个或一组开关点。
+func (c *command) toggle(host cliapi.Host, target string, on bool, dur string) int {
+	switches, err := c.targetsOf(target)
 	if err != nil {
-		return die(65, err.Error())
+		return host.Die(65, err.Error())
 	}
 
 	ttl, forever, derr := switchTTL(dur)
 	if derr != nil {
-		return die(64, derr.Error())
+		return host.Die(64, derr.Error())
 	}
 
 	st := store.LoadState()
-	cfg := pluginmanagerapi.Parse(rawConfig(st)).Prune()
+	cfg := Parse(rawConfig(st)).Prune()
 
 	var changed []string
 	for _, sw := range switches {
 		// footgun 不接受「永久」：这是结构性保证的一半（另一半在注册期——
 		// footgun 必须声明 TTL > 0，所以哪怕不给时长也有兜底时限）。
-		if sw.Danger == pluginmanagerapi.DangerFootgun && forever {
-			return die(64, fmt.Sprintf(
+		if sw.Danger == DangerFootgun && forever {
+			return host.Die(64, fmt.Sprintf(
 				"plugin: %s 是 footgun，不接受 forever（给个时长，如 5m）", sw.Path))
 		}
 		// 出厂态决定这条走哪张表：Default=true 是 kill switch（写 Off 表），
@@ -204,26 +226,27 @@ func pluginToggle(manager pluginmanagerapi.Manager, target string, on bool, dur 
 
 	raw, merr := cfg.Marshal()
 	if merr != nil {
-		return die(70, "plugin: 序列化失败: "+merr.Error())
+		return host.Die(70, "plugin: 序列化失败: "+merr.Error())
 	}
 	if st.ModuleConfig == nil {
 		st.ModuleConfig = map[string][]byte{}
 	}
-	st.ModuleConfig[pluginmanagerapi.StateKey] = raw
+	st.ModuleConfig[StateKey] = raw
 	if serr := store.SaveState(st); serr != nil {
-		return die(70, serr.Error())
+		return host.Die(70, serr.Error())
 	}
-	notifyProxy()
+	host.NotifyProxy()
 
 	mark, word := style.OK, "已打开"
 	if !on {
 		mark, word = style.Warn, "已关闭"
 	}
 	fmt.Println(style.Item(mark, fmt.Sprintf("%s %s", word, strings.Join(changed, ", "))))
+	after := store.LoadState()
 	for _, sw := range switches {
-		if until := pluginmanagerapi.Remaining(store.LoadState(), sw.Path); !until.IsZero() {
+		if until := Remaining(after, sw.Path); !until.IsZero() {
 			fmt.Println(style.Hint(fmt.Sprintf("  %s 还有 %s 自动恢复",
-				sw.Path, prettyDur(int(time.Until(until).Seconds())))))
+				sw.Path, durarg.Format(int(time.Until(until).Seconds())))))
 		}
 	}
 	if !on {
@@ -234,15 +257,15 @@ func pluginToggle(manager pluginmanagerapi.Manager, target string, on bool, dur 
 
 // targetsOf 把用户给的目标解析成一组开关点。带点的是单个路径，不带点的是模块名
 // （模块名里没有点——组件名用连字符，所以这条判据不会歧义）。
-func targetsOf(manager pluginmanagerapi.Manager, target string) ([]pluginmanagerapi.Switch, error) {
+func (c *command) targetsOf(target string) ([]Switch, error) {
 	if strings.Contains(target, ".") {
-		sw, ok := manager.Lookup(target)
+		sw, ok := c.manager.Lookup(target)
 		if !ok {
 			return nil, fmt.Errorf("没有叫 %q 的开关点（newgate plugin 看清单）", target)
 		}
-		return []pluginmanagerapi.Switch{sw}, nil
+		return []Switch{sw}, nil
 	}
-	m, ok := findModule(manager, target)
+	m, ok := findModule(c.manager, target)
 	if !ok {
 		return nil, fmt.Errorf("没有叫 %q 的模块（newgate plugin 看清单）", target)
 	}
@@ -252,13 +275,13 @@ func targetsOf(manager pluginmanagerapi.Manager, target string) ([]pluginmanager
 	return m.Switches, nil
 }
 
-func findModule(manager pluginmanagerapi.Manager, name string) (pluginmanagerapi.Module, bool) {
+func findModule(manager Manager, name string) (Module, bool) {
 	for _, m := range manager.Modules() {
 		if m.Name == name {
 			return m, true
 		}
 	}
-	return pluginmanagerapi.Module{}, false
+	return Module{}, false
 }
 
 // switchTTL 解析时长参数。空串 = 用开关点自己的默认 TTL；"forever" = 不限时。
@@ -269,7 +292,7 @@ func switchTTL(s string) (time.Duration, bool, error) {
 	case "forever":
 		return 0, true, nil
 	}
-	d, err := parseDurationArg(s)
+	d, err := durarg.Parse(s)
 	if err != nil {
 		return 0, false, fmt.Errorf(
 			"plugin: 不认识的时长 %q（支持 30s / 2m / 2min / 1h / forever）", s)
@@ -278,7 +301,7 @@ func switchTTL(s string) (time.Duration, bool, error) {
 }
 
 // effectiveTTL 这次该记多长时限：用户给了就用用户的，没给就用开关点声明的默认值。
-func effectiveTTL(sw pluginmanagerapi.Switch, ttl time.Duration, forever bool) time.Time {
+func effectiveTTL(sw Switch, ttl time.Duration, forever bool) time.Time {
 	if forever {
 		return time.Time{}
 	}
@@ -291,15 +314,15 @@ func effectiveTTL(sw pluginmanagerapi.Switch, ttl time.Duration, forever bool) t
 	return time.Now().Add(ttl)
 }
 
-func setEntry(table map[string]pluginmanagerapi.Entry, path string, until time.Time) map[string]pluginmanagerapi.Entry {
+func setEntry(table map[string]Entry, path string, until time.Time) map[string]Entry {
 	if table == nil {
-		table = map[string]pluginmanagerapi.Entry{}
+		table = map[string]Entry{}
 	}
-	table[path] = pluginmanagerapi.Entry{Until: until}
+	table[path] = Entry{Until: until}
 	return table
 }
 
-func dropEntry(table map[string]pluginmanagerapi.Entry, path string) map[string]pluginmanagerapi.Entry {
+func dropEntry(table map[string]Entry, path string) map[string]Entry {
 	delete(table, path)
 	return table
 }
@@ -309,19 +332,19 @@ func rawConfig(st *domain.State) []byte {
 	if st == nil {
 		return nil
 	}
-	return st.ModuleConfig[pluginmanagerapi.StateKey]
+	return st.ModuleConfig[StateKey]
 }
 
 // groupOf 把未知分类归到 others。**不报错**：分类是产品概念，会随版本长出新成员，
 // 硬拒绝会让一个新模块因为用了个新分类词就把整个列表打崩，而它其实只是想被分到
 // 「其它」里。约定俗成 + 留余量。
-func groupOf(t pluginmanagerapi.Type) pluginmanagerapi.Type {
-	for _, known := range pluginmanagerapi.DisplayOrder() {
+func groupOf(t Type) Type {
+	for _, known := range DisplayOrder() {
 		if t == known {
 			return t
 		}
 	}
-	return pluginmanagerapi.TypeOthers
+	return TypeOthers
 }
 
 // shortPath 列表里只显示模块名之后的那一段（模块名已经在左边一列了）。
@@ -332,31 +355,31 @@ func shortPath(path string) string {
 	return path
 }
 
-// switchState 渲染一条开关点现在的状态。第二个返回值表示它是不是「非出厂态」。
-func switchState(st *domain.State, sw pluginmanagerapi.Switch) string {
-	until := pluginmanagerapi.Remaining(st, sw.Path)
+// switchState 渲染一条开关点现在的状态。
+func switchState(st *domain.State, sw Switch) string {
+	until := Remaining(st, sw.Path)
 	suffix := ""
 	if !until.IsZero() {
 		suffix = style.Dim(fmt.Sprintf("（还有 %s）",
-			prettyDur(int(time.Until(until).Seconds()))))
+			durarg.Format(int(time.Until(until).Seconds()))))
 	}
 	if sw.Default {
-		if pluginmanagerapi.Off(st, sw.Path) {
+		if Off(st, sw.Path) {
 			return dangerColor(sw.Danger)("已关") + suffix
 		}
 		return style.Dim("开") + suffix
 	}
-	if pluginmanagerapi.On(st, sw.Path) {
+	if On(st, sw.Path) {
 		return dangerColor(sw.Danger)("已开") + suffix
 	}
 	return style.Dim("关") + suffix
 }
 
-func dangerColor(d pluginmanagerapi.Danger) func(string) string {
+func dangerColor(d Danger) func(string) string {
 	switch d {
-	case pluginmanagerapi.DangerFootgun:
+	case DangerFootgun:
 		return style.Red
-	case pluginmanagerapi.DangerQuirk:
+	case DangerQuirk:
 		return style.Yellow
 	default:
 		return style.Green
