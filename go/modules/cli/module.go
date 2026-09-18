@@ -17,8 +17,8 @@ import (
 
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
+	"github.com/rzbdz/newgate/go/modules/config/domain"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
-	pluginmanagerapi "github.com/rzbdz/newgate/go/modules/pluginmanager"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 )
 
@@ -27,13 +27,9 @@ type service struct {
 	runtime runtimeapi.Runtime
 	health  breakerapi.Breaker
 
-	// plugins 是 `newgate plugin` 的数据源。命令实现住在**这里**（cli 自己的
-	// cmdPlugin），不住在 plugin-manager 里——那会成环：plugin-manager 要注册
-	// 命令就得 Need(cli)，而 cli 要渲染列表又得 Need(plugin-manager)。
-	plugins pluginmanagerapi.Manager
-
 	commands    modules.Registry[Command]
 	diagnostics modules.Registry[DiagnosticProvider]
+	statuses    modules.Registry[StatusProvider]
 }
 
 var _ CLI = (*service)(nil)
@@ -55,9 +51,6 @@ func New() modules.Component {
 			// daemon 角色要用它构造数据面（forward.New 的第四个参数），
 			// CLI 角色要用它把 /__newgate/status 的 breakers 解出来。
 			modules.Need(breakerapi.Capability),
-			// `newgate plugin` 的账本。cli 依赖它而不是反过来——见 service.plugins
-			// 字段上的注释（反过来会成环）。
-			modules.Need(pluginmanagerapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, CLI(service)),
@@ -66,14 +59,12 @@ func New() modules.Component {
 			service.agents = modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
 			service.runtime = modules.MustGet(ctx, runtimeapi.Capability)
 			service.health = modules.MustGet(ctx, breakerapi.Capability)
-			service.plugins = modules.MustGet(ctx, pluginmanagerapi.Capability)
 			return nil
 		},
 		Stop: func(context.Context) error {
 			service.agents = nil
 			service.runtime = nil
 			service.health = nil
-			service.plugins = nil
 			return nil
 		},
 	}
@@ -114,6 +105,19 @@ func (s *service) RegisterDiagnostics(provider DiagnosticProvider) (modules.Rele
 	return s.diagnostics.Register(provider, nil)
 }
 
+// RegisterStatus 贡献 `newgate status` 里的若干行。与诊断同理：可叠加、不查重。
+//
+// 这条端口的存在是为了**不让 cli 反向认识模块**：`status` 要显示「哪些开关点是
+// 非出厂态」，而那份账本归 plugin-manager。cli 若为了那一行去 Need 它，就会挡住
+// 它注册自己的命令（cli → pluginmanager → cliapi → cli 成环）。谁的状态谁自己
+// 报，是解开那个环的办法。
+func (s *service) RegisterStatus(provider StatusProvider) (modules.Release, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("cli: 状态提供者不能为 nil")
+	}
+	return s.statuses.Register(provider, nil)
+}
+
 // Run 注入本次构建信息后进入统一命令分派；模块命令从 Registry 账本里现取
 // （不是启动时拍快照）——扩展模块可能比 CLI 晚一步才注册，现取才不会漏。
 func (s *service) Run(args []string, build BuildInfo) int {
@@ -132,6 +136,15 @@ func (s *service) moduleCommand(name string) (Command, bool) {
 		}
 	}
 	return nil, false
+}
+
+// statusLines 汇总所有模块贡献的 status 行。与 moduleDiagnostics 同构。
+func (s *service) statusLines(st *domain.State) []StatusLine {
+	var out []StatusLine
+	for _, provider := range s.statuses.All() {
+		out = append(out, provider.Status(st)...)
+	}
+	return out
 }
 
 func (s *service) moduleDiagnostics() []Diagnostic {
