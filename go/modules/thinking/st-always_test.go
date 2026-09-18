@@ -45,15 +45,19 @@ func init() {
 // 注册表是全局的，用完必须 Reset，别脏了别的测试。
 func markAlwaysThinks(t *testing.T, provider, model string) {
 	t.Helper()
-	quirk.Reset()
-	quirk.Mark(provider, model, quirk.NoThinkingDisable)
-	t.Cleanup(quirk.Reset)
+	quirk.Default.Reset()
+	quirk.Default.Mark(provider, model, quirk.NoThinkingDisable)
+	t.Cleanup(quirk.Default.Reset)
 }
 
 func req(model, provider, baseURL string) *special.Request {
 	return &special.Request{
 		Model: model, Provider: provider, BaseURL: baseURL,
 		Protocol: "anthropic", Path: "/messages",
+		// 网关在真实路径上会把这张表带在每次请求上（special.Request.Quirks）。
+		// 测试必须照着补上——不补就等于模拟了一个「网关没给表」的世界，那正是
+		// 这条依赖从「包级全局」改成「请求字段」之后暴露出来的东西。
+		Quirks: quirk.Default,
 	}
 }
 

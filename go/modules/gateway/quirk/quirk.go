@@ -49,31 +49,58 @@ func (f Flag) String() string {
 	return "未知"
 }
 
-var (
+// Table 是这张「上游毛病」表。
+//
+// **它是一个实例，不是包级变量**（2026-09-18 改）：包级 map 是典型的 service
+// locator——别的模块（thinking 的 st-always）直接调 `quirk.Has(...)` 就依赖上了
+// gateway 数据面写进去的状态，而那条依赖在 `Requires`、依赖图、棘轮测试里都看
+// 不见。docs/03-architecture.md §5 明写「不得新增 service locator」，本仓库也为
+// breaker 修过一模一样的问题（见 modules/breaker/shape.go 的说明：健康表做成
+// table 实例，就是因为它要在测试里起很多份而不互相污染）。
+//
+// 现在由 gateway 持有唯一的 Default，并经它的 capability 端口交出去（见
+// gateway.Gateway.Quirks）——想要它的模块必须**声明**这条依赖。
+type Table struct {
 	mu    sync.RWMutex
-	flags = map[string]Flag{}
-)
+	flags map[string]Flag
+}
+
+// Default 是 gateway 自己的那一份（probe / forward / Request 的填充都用它）。
+//
+// **它是 gateway 的内部约定，不是给别的模块用的**。别的模块要读这张表，走
+// `special.Request.Quirks`（网关在每次请求上带过去的那一个）——那是一条**声明过**
+// 的依赖（消费方必然已经 Need 了 gateway 的端口），而这里写 `quirk.Default.Has(...)`
+// 会重新引入一条依赖图上看不见的 service locator。
+//
+// 为什么不把它设成不导出：probe 与 forward 是本模块的**兄弟包**，它们要的是同一
+// 份状态，而 Go 的 internal/ 会把 gopher 挡在外面却也挡住它们命名这个类型；真正
+// 要防的是「别的模块直接调」，那一条由 `special.Request.Quirks` 这条正路 + 下面
+// 这段注释管着。
+var Default = NewTable()
+
+// NewTable 建一张空表（测试里要隔离时用）。
+func NewTable() *Table { return &Table{flags: map[string]Flag{}} }
 
 func key(provider, model string) string { return provider + "/" + model }
 
 // Mark 记一笔。返回 true 表示这是**新学到的**——调用方据此决定要不要打日志，
 // 免得同一件事每个请求都刷一行。
-func Mark(provider, model string, f Flag) bool {
+func (t *Table) Mark(provider, model string, f Flag) bool {
 	k := key(provider, model)
-	mu.Lock()
-	defer mu.Unlock()
-	if flags[k]&f == f {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.flags[k]&f == f {
 		return false
 	}
-	flags[k] |= f
+	t.flags[k] |= f
 	return true
 }
 
 // Has 查这个 (provider, model) 有没有某个毛病。
-func Has(provider, model string, f Flag) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	return flags[key(provider, model)]&f != 0
+func (t *Table) Has(provider, model string, f Flag) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.flags[key(provider, model)]&f != 0
 }
 
 // Entry 给 newgate status / doctor 展示。
@@ -83,11 +110,11 @@ type Entry struct {
 	Flags    Flag
 }
 
-func Snapshot() []Entry {
-	mu.RLock()
-	defer mu.RUnlock()
+func (t *Table) Snapshot() []Entry {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	var out []Entry
-	for k, f := range flags {
+	for k, f := range t.flags {
 		i := strings.LastIndexByte(k, '/')
 		if i < 0 {
 			continue
@@ -97,11 +124,12 @@ func Snapshot() []Entry {
 	return out
 }
 
-// Reset 仅供测试。
-func Reset() {
-	mu.Lock()
-	defer mu.Unlock()
-	flags = map[string]Flag{}
+// Reset 清空（测试隔离用；生产代码不该调它——这张表是「一次失败换永久免疫」，
+// 跨装配保留是**预期语义**，不是污染）。
+func (t *Table) Reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.flags = map[string]Flag{}
 }
 
 // signature 一条「报错长这样 → 说明有这个毛病」的规则。
@@ -141,7 +169,7 @@ var signatures = []signature{{
 //
 // 返回学到的东西（人话，可以直接写日志）；什么都没学到就返回 nil。
 // 认不出的报错一律不猜：宁可让用户看到原始报错，也不能瞎加字段。
-func Learn(provider, model string, status int, body []byte) []string {
+func (t *Table) Learn(provider, model string, status int, body []byte) []string {
 	if status < 400 || status >= 500 || len(body) == 0 {
 		return nil
 	}
@@ -155,7 +183,7 @@ func Learn(provider, model string, status int, body []byte) []string {
 				break
 			}
 		}
-		if hit && Mark(provider, model, sg.flag) {
+		if hit && t.Mark(provider, model, sg.flag) {
 			learned = append(learned, sg.label)
 		}
 	}

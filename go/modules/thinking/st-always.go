@@ -59,7 +59,7 @@ func BestEffortDisableThink(body []byte, r *special.Request) ([]byte, []string, 
 	//    翻译按 (provider, r.Model) 的 quirk 决定——body 已被切到别的模型
 	//    就别动手：「glm-5.3 不能关思考」推不出「glm-4.5-air 不能关」。
 	if bm, has := rewrite.TopLevelString(out, "model"); (!has || bm == "" || bm == r.Model) &&
-		quirk.Has(r.Provider, r.Model, quirk.NoThinkingDisable) {
+		noThinkingDisable(r, r.Provider, r.Model) {
 		if nb, translated, ns, err := noDisableTranslate(out); err == nil && translated {
 			out = nb
 			notes = append(notes, ns...)
@@ -142,7 +142,22 @@ func (alwaysThinks) Match(r *special.Request) bool {
 	if r == nil {
 		return false
 	}
-	return quirk.Has(r.Provider, r.Model, quirk.NoThinkingDisable)
+	return noThinkingDisable(r, r.Provider, r.Model)
+}
+
+// noThinkingDisable 这个 (provider, model) 是不是「不支持关闭思考」。
+//
+// 表由**网关经 special.Request 交过来**（见那个字段的说明）：本模块读的是同一次
+// 请求看到的那张表，而不是 `gateway/quirk` 的包级变量。区别不在于值（是同一张
+// 表），在于**依赖是否可见**——包级调用是一条 service locator 依赖，Requires 和
+// 依赖图里都看不见它（docs/03-architecture.md §5 禁止新增这种依赖）。
+//
+// 表缺席（测试、旧调用面）按「没学到」处理：宁可少一次翻译，也不能瞎改请求。
+func noThinkingDisable(r *special.Request, provider, model string) bool {
+	if r == nil || r.Quirks == nil {
+		return false
+	}
+	return r.Quirks.Has(provider, model, quirk.NoThinkingDisable)
 }
 
 func (alwaysThinks) Apply(body []byte, r *special.Request) ([]byte, []string, error) {

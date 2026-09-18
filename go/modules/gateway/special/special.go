@@ -37,6 +37,7 @@ import (
 	modules "github.com/rzbdz/newgate/go/component"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
+	"github.com/rzbdz/newgate/go/modules/gateway/quirk"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 )
 
@@ -78,6 +79,18 @@ type Request struct {
 	// 而且**允许为 nil**（测试与旧调用面常见）——查开关点的函数都按「nil = 没关」
 	// 处理，所以插件不需要自己判空。
 	State *domain.State
+
+	// Quirks 是**网关持有的那张「上游毛病」表**（见 modules/gateway/quirk）。
+	//
+	// 为什么由 Request 带过来、而不是让插件 import 那个包直接调包级函数
+	// （2026-09-18 改）：包级 map 是 service locator——thinking 的 st-always 直接
+	// 调 quirk.Has 就依赖上了网关数据面写进去的状态，而那条依赖在 Requires、
+	// 依赖图、棘轮测试里全都看不见（docs/03-architecture.md §5 明写不许新增
+	// service locator）。现在表归 gateway 所有、经它自己的请求契约交出来，插件
+	// 拿到的就是**同一次请求**看到的那张表，与 State 是同一个套路。
+	//
+	// 允许为 nil（测试与旧调用面）：查表的函数按「没有 = 没学到」处理。
+	Quirks *quirk.Table
 }
 
 // Plugin 是模块可以挂到请求处理链的 typed capability。

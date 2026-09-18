@@ -582,5 +582,5 @@ func CheckQuirks(provName string, p domain.Provider, model string, timeout time.
 	}
 	defer resp.Body.Close()
 	raw, _ := ioutil.ReadAll(resp.Body) // error body is small
-	return quirk.Learn(provName, model, resp.StatusCode, raw)
+	return quirk.Default.Learn(provName, model, resp.StatusCode, raw)
 }

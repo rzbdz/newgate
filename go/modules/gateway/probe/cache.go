@@ -55,7 +55,7 @@ func (c *capabilityCache) apply(t Target) bool {
 		}
 	}
 	if flags := quirk.Flag(entry.Quirks); flags != 0 {
-		quirk.Mark(t.Provider, t.Model, flags)
+		quirk.Default.Mark(t.Provider, t.Model, flags)
 	}
 	return true
 }
@@ -73,7 +73,7 @@ func (c *capabilityCache) capture(t Target) {
 		}
 	}
 	var flags quirk.Flag
-	if quirk.Has(t.Provider, t.Model, quirk.NoThinkingDisable) {
+	if quirk.Default.Has(t.Provider, t.Model, quirk.NoThinkingDisable) {
 		flags |= quirk.NoThinkingDisable
 	}
 	c.mu.Lock()
