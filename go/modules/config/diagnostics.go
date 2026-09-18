@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/rzbdz/newgate/go/lib/style"
@@ -23,6 +25,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
+	"github.com/rzbdz/newgate/go/modules/config/roleprov"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 )
@@ -33,8 +36,12 @@ const (
 	rankCheckFiles   = 10
 	rankCheckChain   = 15
 	rankStatusConfig = 30
-	rankBlockBinding = 100
-	rankBlockChain   = 110
+
+	// 诊断包里的位置（见 cliapi.DumpSection）。
+	rankDumpProviders = 20
+	rankDumpBindings  = 30
+	rankBlockBinding  = 100
+	rankBlockChain    = 110
 )
 
 // reporter 同时是三种贡献者：体检、状态行、状态块。
@@ -45,6 +52,7 @@ type reporter struct{}
 
 var (
 	_ cliapi.DiagnosticProvider = reporter{}
+	_ cliapi.Dumper             = reporter{}
 	_ cliapi.StatusProvider     = reporter{}
 	_ cliapi.BlockProvider      = reporter{}
 )
@@ -228,4 +236,108 @@ func chainTail(steps []resolve.Step, skips []resolve.Skip) string {
 	}
 	return fmt.Sprintf("链上 %d 站；跳过 %d（%s）   newgate tier normal",
 		len(steps), len(skips), strings.Join(parts, " · "))
+}
+
+// ---------- 诊断包的原始素材 ----------
+
+// Dump 交出配置自己的两段原文：providers.json（脱敏）与所有 profile 的绑定。
+//
+// 为什么是**脱敏**的：诊断包是要贴进 issue / 发给别人看的，key 只报长度与前缀。
+func (reporter) Dump() []cliapi.DumpSection {
+	return []cliapi.DumpSection{dumpProviders(), dumpBindings()}
+}
+
+func dumpProviders() cliapi.DumpSection {
+	s := cliapi.DumpSection{Rank: rankDumpProviders, Title: "providers.json（密钥脱敏）"}
+	provs, err := store.LoadProviders()
+	if err != nil {
+		s.Lines = append(s.Lines, "  读不到: "+err.Error())
+		return s
+	}
+	for _, n := range sortedKeys(provs.Providers) {
+		p := provs.Providers[n]
+		k := "(空)"
+		if v := p.Key(); v != "" {
+			if len(v) > 10 {
+				k = v[:7] + "…" + strconv.Itoa(len(v)) + "字符"
+			} else {
+				k = "(过短)"
+			}
+		}
+		s.Lines = append(s.Lines, fmt.Sprintf("  %-14s %-45s protocol=%-10s key=%s",
+			n, p.BaseURL, p.Protocol, k))
+		// 两种方言分家的上游：另一个 base 也报出来，否则「claude 的流量到底发去
+		// 哪」在这一屏里是黑盒。
+		if p.AnthropicURL != "" {
+			s.Lines = append(s.Lines, fmt.Sprintf("  %-14s %-45s （anthropic 方言走这条）", "", p.AnthropicURL))
+		}
+	}
+	return s
+}
+
+func dumpBindings() cliapi.DumpSection {
+	s := cliapi.DumpSection{Rank: rankDumpBindings, Title: "所有 profile 的绑定"}
+	names, _ := store.ListProfiles()
+	st := store.LoadState()
+	for _, n := range names {
+		mark := " "
+		if n == st.DefaultProfile {
+			mark = "*"
+		}
+		s.Lines = append(s.Lines, fmt.Sprintf(" %s %s", mark, n))
+		pr, err := store.LoadProfile(n)
+		if err != nil {
+			continue
+		}
+		for _, role := range domain.Roles {
+			if b, ok := pr.Resolve(role); ok {
+				s.Lines = append(s.Lines, fmt.Sprintf("      %-8s %s/%s", role, b.Provider, b.Model))
+			}
+		}
+	}
+	return s
+}
+
+// sortedKeys 稳定顺序的 map 键。
+func sortedKeys(m map[string]domain.Provider) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// glossary 贡献帮助屏术语表里的「槽位键」一行。
+//
+// 它是**动态角色**的词汇（模块贡献的键，写法同档位），所以归本模块。界面原来
+// 为了这一行得认识 domain.ExtraRoles，还得记得先 Refresh 一次（见下面那段注释）
+// ——那是本模块该操心的时序，不该由界面代管。
+type glossary struct{}
+
+var _ cliapi.Glossarist = glossary{}
+
+func (glossary) Glossary() []cliapi.GlossaryLine {
+	// 现刷一次动态角色表。它平时只在 store.Load（装配置快照）时刷新，而
+	// `--help` 不装快照——不刷新的话这里读到的永远是空的，帮助里那行例子
+	// 就会静默消失（2026-09-18 实测：改成现取之后例子没了）。读失败不挡
+	// 帮助（失败开放），最差是那行退化成不带例子的说法。
+	_ = roleprov.Refresh()
+
+	var keys []string
+	for _, r := range domain.ExtraRoles() {
+		if r.Source == "builtin" {
+			continue // 内置别名（normal→mid）是向下兼容，不是「槽位键」的例子
+		}
+		keys = append(keys, r.Key)
+	}
+	def := "模块贡献的动态角色，写法同档位"
+	switch {
+	case len(keys) > 2:
+		keys = keys[:2]
+		fallthrough
+	case len(keys) > 0:
+		def = "模块贡献的动态角色（" + strings.Join(keys, " / ") + "），写法同档位"
+	}
+	return []cliapi.GlossaryLine{{Rank: 20, Term: "槽位键", Definition: def}}
 }

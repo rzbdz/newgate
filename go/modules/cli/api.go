@@ -27,6 +27,10 @@ type (
 	Documented         = ext.Documented
 	Handoff            = ext.Handoff
 	Unstyled           = ext.Unstyled
+	Dumper             = ext.Dumper
+	DumpSection        = ext.DumpSection
+	Glossarist         = ext.Glossarist
+	GlossaryLine       = ext.GlossaryLine
 	CLI                = ext.CLI
 	BuildInfo          = ext.BuildInfo
 )

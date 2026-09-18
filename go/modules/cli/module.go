@@ -17,7 +17,6 @@ import (
 	modules "github.com/rzbdz/newgate/go/component"
 
 	"github.com/rzbdz/newgate/go/lib/buildinfo"
-	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
 // service 是**界面**：分派、渲染、进程生命周期。
@@ -27,7 +26,6 @@ import (
 // 想贡献命令的模块必须 Need(cli)，而 cli 又要 Need 它们才能渲染。环解开的方式
 // 就是把账本下沉成叶子（见 modules/surface 的包注释）。
 type service struct {
-	agents confighookapi.AgentCatalog
 
 	// 三本账：模块通过 RegisterXxx 把自己的东西挂进来，界面在分派命令、渲染
 	// status / doctor 时循环调用它们。**界面不 import 任何模块**，所以它不认识
@@ -36,6 +34,8 @@ type service struct {
 	diagnostics modules.Registry[DiagnosticProvider]
 	statuses    modules.Registry[StatusProvider]
 	blocks      modules.Registry[BlockProvider]
+	dumps       modules.Registry[Dumper]
+	glossary    modules.Registry[Glossarist]
 }
 
 var _ CLI = (*service)(nil)
@@ -95,6 +95,22 @@ func (s *service) RegisterStatusBlocks(provider BlockProvider) (modules.Release,
 	return s.blocks.Register(provider, nil)
 }
 
+// RegisterDump 注入诊断包里的原始素材。理由同 RegisterDiagnostics。
+func (s *service) RegisterDump(dumper Dumper) (modules.Release, error) {
+	if dumper == nil {
+		return nil, fmt.Errorf("cli: 诊断素材提供者不能为 nil")
+	}
+	return s.dumps.Register(dumper, nil)
+}
+
+// RegisterGlossary 注入帮助屏术语表里属于自己的一行。理由同 RegisterDiagnostics。
+func (s *service) RegisterGlossary(g Glossarist) (modules.Release, error) {
+	if g == nil {
+		return nil, fmt.Errorf("cli: 术语提供者不能为 nil")
+	}
+	return s.glossary.Register(g, nil)
+}
+
 // Run 注入本次构建信息后进入统一命令分派；模块命令从账本里现取（不是启动时
 // 拍快照）——注入方可能比界面晚一步才注册，现取才不会漏。
 func (s *service) Run(args []string, build BuildInfo) int {
@@ -121,6 +137,26 @@ func (s *service) statusLines() []StatusLine {
 	var out []StatusLine
 	for _, provider := range s.statuses.All() {
 		out = append(out, provider.Status()...)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
+	return out
+}
+
+// glossaryLines 汇总模块贡献的术语行，按 Rank 排序。
+func (s *service) glossaryLines() []GlossaryLine {
+	var out []GlossaryLine
+	for _, g := range s.glossary.All() {
+		out = append(out, g.Glossary()...)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
+	return out
+}
+
+// dumpSections 汇总诊断包的原始素材，按 Rank 排序。
+func (s *service) dumpSections() []DumpSection {
+	var out []DumpSection
+	for _, dumper := range s.dumps.All() {
+		out = append(out, dumper.Dump()...)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Rank < out[j].Rank })
 	return out
@@ -161,22 +197,22 @@ func New() modules.Component {
 	return modules.Component{
 		Name: "cli",
 		Type: "cli",
-		Requires: []modules.Requirement{
-			// 注意这里**没有 config**：界面不消费配置端口（渲染用的数据由 config 自己
-			// 报上来）。留着一条用不到的出边会让 config 永远注入不进来——它会成环。
-			// 只剩 config-hook：包装启动搬去 runtime 之后，界面不再需要 runtime 端口
-			// （它只把 `newgate claude …` 交给账本里那条命令）。
-			modules.Need(confighookapi.AgentCatalogCapability),
-		},
+		// **没有 Requires**：界面不依赖任何模块（见 app/default_test.go 的
+		// TestCLIDependenciesOnlyShrink，它断言这条边集为空）。
+		//
+		// 它的全部能力都来自注入：命令、status 行、体检项、术语、诊断素材，四本账
+		// 在 Start 时建好，模块在 Attach 阶段（component.Inject）往上挂。一条出边
+		// 都不留是有意的——留一条「反正用得到」的边，对方的注入就会成环，那正是
+		// 这一轮之前 config/runtime/config-hook 的命令被迫留在界面里的原因。
+		//
+		// 它仍然 Provides：进程组合根靠它把这次调用交给界面。
 		Provides: []modules.Provision{
 			modules.Provide(Capability, CLI(service)),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
-			service.agents = modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
 			return nil
 		},
 		Stop: func(context.Context) error {
-			service.agents = nil
 			return nil
 		},
 	}

@@ -14,8 +14,6 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/buildinfo"
 	"github.com/rzbdz/newgate/go/lib/style"
-	"github.com/rzbdz/newgate/go/modules/config/domain"
-	"github.com/rzbdz/newgate/go/modules/config/roleprov"
 )
 
 // usageText 组装 `newgate --help`。
@@ -108,57 +106,22 @@ func usageText(service *service) string {
 	// 术语表是**界面自己的**东西：用户不知道某个词是什么意思时看的字典。它不是
 	// 命令行清单（那是模块的），所以留在这里；能推导的一律现取（agent 名、槽位键
 	// 都来自注册表），不写死。
+	// 术语表分两半：**界面自己的词汇**（profile 这类纯界面概念）写在下面，属于
+	// 模块的（agent、槽位键）由模块自己交上来（cliapi.Glossarist）。界面不再为了
+	// 那两行去认识 AgentCatalog 与 domain.ExtraRoles。
 	b.WriteString("\n" + style.Bold("术语") + "\n")
 	term := func(left, right string) {
 		b.WriteString("  " + style.Pad(style.Cyan(left), 12) + style.Dim(right) + "\n")
 	}
-	term("agent", "被接管的 CLI："+agentNames(service))
 	term("profile", "一套「档位 → provider/模型」绑定")
-	term("槽位键", slotTerm())
+	if service != nil {
+		for _, line := range service.glossaryLines() {
+			term(line.Term, line.Definition)
+		}
+	}
 	b.WriteString("\n" + style.Bold("配置") + "\n")
 	b.WriteString("  " + style.Dim("~/.config/newgate/ · providers.json · mappings/*.kv · state.json") + "\n")
 	return b.String()
-}
-
-// agentNames 已知的 agent 名，**从注册表读**。
-//
-// 术语表原来写死「claude / opencode」——客户端 id 是各客户端模块的键，CLI 不该
-// 知道任何一个（2026-09-18）。装一个新客户端，帮助文本不该需要跟着改。
-func agentNames(service *service) string {
-	if service == nil || service.agents == nil {
-		return "（未装配）"
-	}
-	names := service.agents.Names()
-	if len(names) == 0 {
-		return "（无）"
-	}
-	return strings.Join(names, " / ")
-}
-
-// slotTerm 术语表里「槽位键」那一行的例子。键名由模块贡献（见
-// domain.ExtraRole），所以例子也现取——原来写死的 omo-sisyphus / cat-deep
-// 是 opencode-omo 的键，删掉那个模块之后帮助里就会留一个不存在的键。
-func slotTerm() string {
-	// 现刷一次动态角色表。它平时只在 store.Load（装配置快照）时刷新，而
-	// `--help` 不装快照——不刷新的话这里读到的永远是空的，帮助里那行例子
-	// 就会静默消失（2026-09-18 实测：改成现取之后例子没了）。读失败不挡
-	// 帮助（失败开放），最差是那行退化成不带例子的说法。
-	_ = roleprov.Refresh()
-
-	var keys []string
-	for _, r := range domain.ExtraRoles() {
-		if r.Source == "builtin" {
-			continue // 内置别名（normal→mid）是向下兼容，不是「槽位键」的例子
-		}
-		keys = append(keys, r.Key)
-	}
-	if len(keys) == 0 {
-		return "模块贡献的动态角色，写法同档位"
-	}
-	if len(keys) > 2 {
-		keys = keys[:2]
-	}
-	return "模块贡献的动态角色（" + strings.Join(keys, " / ") + "），写法同档位"
 }
 
 func runCLI(service *service, args []string) int {

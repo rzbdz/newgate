@@ -60,7 +60,7 @@ func (allLogsCommand) Help() HelpLine {
 	return HelpLine{Section: SectionObserve, Rank: rankObserve,
 		Usage: "alllogs", Summary: "完整诊断包"}
 }
-func (c allLogsCommand) Run(_ Host, _ []string) int { return cmdAllLogs(c.s.agents, c.s) }
+func (c allLogsCommand) Run(_ Host, _ []string) int { return cmdAllLogs(c.s) }
 
 // ---------- 界面自身 ----------
 

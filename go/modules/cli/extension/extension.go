@@ -365,6 +365,54 @@ type CLI interface {
 	// RegisterStatusBlocks 注入 `newgate status` 里的成块内容（表格等），
 	// 理由见 StatusBlock。
 	RegisterStatusBlocks(BlockProvider) (modules.Release, error)
+	// RegisterDump 注入诊断包（`newgate alllogs`）里的原始素材，理由见 Dumper。
+	RegisterDump(Dumper) (modules.Release, error)
+	// RegisterGlossary 注入帮助屏术语表里属于自己的一行，理由见 Glossarist。
+	RegisterGlossary(Glossarist) (modules.Release, error)
+}
+
+// GlossaryLine 是帮助屏末尾术语表里的一行（词 + 一句话解释）。
+type GlossaryLine struct {
+	Rank int
+	Term string
+	// Definition 一句话解释；里面带的数据（agent 名、槽位键）由贡献者自己取。
+	Definition string
+}
+
+// Glossarist 让模块贡献术语表里属于自己的一行。
+//
+// **为什么需要它**（2026-09-18）：术语表里有两行是别人的词——「agent」是
+// config-hook 的（哪些客户端被接管），「槽位键」是 config 的（模块贡献的动态角色）。
+// 界面为了它们得认识 AgentCatalog 与 domain.ExtraRoles，那正是「界面认识模块」
+// 的又一个面。现在各交各的，界面只排版。
+//
+// 界面自己那几行（profile 这类**纯界面词汇**）仍然写在界面里：它们不归任何模块。
+type Glossarist interface {
+	Glossary() []GlossaryLine
+}
+
+// DumpSection 是诊断包里的一段**原始素材**：标题 + 原文行。
+//
+// 它和 Diagnostic / StatusLine 的分工：那两者是**给人扫的一句话结论**，这一段是
+// 「出了事要拿出去的原文」（配置、日志、被改写的文件）。诊断包（`newgate alllogs`）
+// 就是把这些原文按顺序拼起来。
+type DumpSection struct {
+	Rank  int
+	Title string
+	// Lines 原文，逐行原样输出（不做版式处理——它可能要贴进 issue）。
+	Lines []string
+}
+
+// Dumper 让模块把自己的原始素材交进诊断包。
+//
+// **为什么需要它**（2026-09-18）：诊断包原来整个长在界面里，于是界面为了拼出
+// 它得知道 providers.json 的结构、profile 的档位表、接管改了哪些文件、日志在哪、
+// 证据文件叫什么。全是各模块自己的知识。现在各交各的原文，界面只负责排序与拼接
+// ——与 status / doctor 是同一条规矩的第三次应用。
+//
+// 它是可选端口：没有原始素材要交的模块不实现。
+type Dumper interface {
+	Dump() []DumpSection
 }
 
 // Handoff 标记这条命令会把控制权交给**别的进程**（包装启动一个客户端）。

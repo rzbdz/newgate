@@ -56,6 +56,8 @@ func New() modules.Component {
 				func() (modules.Release, error) { return ui.RegisterDiagnostics(reporter{}) },
 				func() (modules.Release, error) { return ui.RegisterStatus(reporter{}) },
 				func() (modules.Release, error) { return ui.RegisterStatusBlocks(reporter{}) },
+				func() (modules.Release, error) { return ui.RegisterDump(reporter{}) },
+				func() (modules.Release, error) { return ui.RegisterGlossary(glossary{}) },
 			} {
 				release, err := register()
 				if err != nil {

@@ -11,6 +11,7 @@ package confighook
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/rzbdz/newgate/go/lib/style"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
@@ -79,4 +80,24 @@ func runAgents(agents AgentCatalog) int {
 	fmt.Println()
 	fmt.Println(style.Hint("只切单个 agent：newgate --set-profile <名> --agent <agent>"))
 	return 0
+}
+
+// glossary 贡献帮助屏术语表里的「agent」一行。
+//
+// 它是**客户端目录**的词汇（哪些 CLI 被接管），所以归本模块——界面不必认识
+// AgentCatalog 才写得出来（见 cliapi.Glossarist）。
+type glossary struct{ agents AgentCatalog }
+
+var _ cliapi.Glossarist = glossary{}
+
+func (g glossary) Glossary() []cliapi.GlossaryLine {
+	names := g.agents.Names()
+	list := "（未装配）"
+	switch {
+	case len(names) == 0:
+		list = "（无）"
+	default:
+		list = strings.Join(names, " / ")
+	}
+	return []cliapi.GlossaryLine{{Rank: 10, Term: "agent", Definition: "被接管的 CLI：" + list}}
 }

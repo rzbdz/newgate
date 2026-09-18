@@ -73,6 +73,7 @@ func New() modules.Component {
 			for _, register := range []func() (modules.Release, error){
 				func() (modules.Release, error) { return ui.RegisterStatus(reporter) },
 				func() (modules.Release, error) { return ui.RegisterDiagnostics(reporter) },
+				func() (modules.Release, error) { return ui.RegisterDump(reporter) },
 			} {
 				release, err := register()
 				if err != nil {
