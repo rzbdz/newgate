@@ -61,7 +61,17 @@ func (c launchCommand) Names() []string {
 //
 // **故意不逐个 agent 列一行**：agent 名是各客户端模块的键，help 里列出它们等于
 // 界面又认识了一遍客户端。用户敲 `newgate claude` 从来不是从 help 里学来的。
-func (launchCommand) Help() cliapi.HelpLine {
+//
+// 实现方式是按 agentID 返回空 Usage（usageText 约定「没有 Usage 就不占一行」）：
+// 每个 agent 一个实例是**分派键**，不是 help 条目。2026-09-18 之前这里无差别
+// 返回同一行，而 launchCommands 给每个 agent 都注册了一个实例——于是
+// `newgate --help` 里 `run <agent> [args…]` 原样重复了 N 遍（实测 2 个 agent
+// 时 3 行）。注释说着「只出现一次」，代码没有做到，这正是这个仓库最怕的那种
+// 不一致：读注释的人不会去数。
+func (c launchCommand) Help() cliapi.HelpLine {
+	if c.agentID != "" {
+		return cliapi.HelpLine{} // 空 Usage = 不占行（见 cli.usageText）
+	}
 	return cliapi.HelpLine{Section: cliapi.SectionRunOnce, Rank: 20,
 		Usage: "run <agent> [args…]", Summary: "用某个 profile 跑一次"}
 }
