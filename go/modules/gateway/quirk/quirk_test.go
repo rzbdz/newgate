@@ -4,60 +4,6 @@ import (
 	"testing"
 )
 
-// Learn 只认**实测复现过**的报错原文。这个测试逐个锁住签名表里的每一条：
-// 少一条 = 那条上游的毛病永远学不到，每次请求都重新撞一遍 400。
-func TestLearnRecognizesEverySignature(t *testing.T) {
-	// 每条都来自真实 dump，不是编的。
-	tests := []struct {
-		name   string
-		body   string
-		reason string
-	}{
-		{
-			"GLM 1210",
-			`{"error":{"message":"[1210][该模型始终思考，不支持关闭思考；请使用 low、high 或 max。]"}}`,
-			"dump/err-400-req000082、req000117（route: mid -> smt-glm/glm-5.3-flash）",
-		},
-		{
-			"kimi：only type=enabled is allowed",
-			`{"error":{"type":"<nil>","message":"invalid thinking: only type=enabled is allowed for this model (request id: 202609170742120)"}}`,
-			"dump/err-400-req000213、req000230（route: mid -> kimi/kimi-k2.7-code）——" +
-				"2026-09-17 之前这条措辞一条签名都不匹配，所以永远学不到",
-		},
-		{
-			"deepseek：cannot be disabled",
-			`{"error":{"message":"deepseek thinking options type cannot be disabled"}}`,
-			"措辞变体",
-		},
-		{
-			"does not support disabling thinking",
-			`{"error":{"message":"this model does not support disabling thinking"}}`,
-			"措辞变体",
-		},
-		{
-			"thinking cannot be turned off",
-			`{"error":{"message":"Thinking cannot be turned off for this model"}}`,
-			"措辞变体；大小写不敏感",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			Default.Reset()
-			got := Default.Learn("prov", "model-x", 400, []byte(tt.body))
-			if len(got) != 1 || got[0] != "该模型始终思考" {
-				t.Fatalf("没学到（%s）: %v", tt.reason, got)
-			}
-			if !Default.Has("prov", "model-x", NoThinkingDisable) {
-				t.Fatal("学到了却没打上 flag")
-			}
-			// 幂等：同一个毛病第二次不再重复报。
-			if again := Default.Learn("prov", "model-x", 400, []byte(tt.body)); again != nil {
-				t.Fatalf("重复学了一次: %v", again)
-			}
-		})
-	}
-}
-
 // 认不出的一律不猜：宁可让用户看到原始报错，也不能瞎给请求加字段。
 func TestLearnNeverGuesses(t *testing.T) {
 	tests := []struct {
@@ -73,41 +19,53 @@ func TestLearnNeverGuesses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			Default.Reset()
-			if got := Default.Learn("prov", "model-y", tt.status, []byte(tt.body)); got != nil {
+			table := NewTable()
+			if _, err := table.RegisterSignature(Signature{
+				Flag: NoThinkingDisable, Any: []string{"不支持关闭思考"}, Label: "该模型始终思考",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if got := table.Learn("prov", "model-y", tt.status, []byte(tt.body)); got != nil {
 				t.Fatalf("不该学到却学到了: %v", got)
 			}
-			if Default.Has("prov", "model-y", NoThinkingDisable) {
+			if table.Has("prov", "model-y", NoThinkingDisable) {
 				t.Fatal("不该打 flag 却打了")
 			}
 		})
 	}
 }
 
-// 学习是按 (provider, model) 记账的：给 A 学到的东西不能漏给 B，也不能串到 B。
-func TestLearnIsScopedToProviderAndModel(t *testing.T) {
-	Default.Reset()
-	Default.Learn("kimi", "kimi-k2.7-code", 400, []byte(`only type=enabled is allowed`))
-	if !Default.Has("kimi", "kimi-k2.7-code", NoThinkingDisable) {
-		t.Fatal("自己没学到")
+// 记账是按 (provider, model) 分的：给 A 记的东西不能漏给 B，也不能串到 B。
+//
+// 用 Mark 而不是 Learn：**签名表现在是空的**（判据由拥有补丁的模块注册，见
+// modules/thinking/signatures.go），所以这里考的是这张表的记账粒度，与签名无关。
+func TestFlagsAreScopedToProviderAndModel(t *testing.T) {
+	table := NewTable()
+	table.Mark("kimi", "kimi-k2.7-code", NoThinkingDisable)
+	if !table.Has("kimi", "kimi-k2.7-code", NoThinkingDisable) {
+		t.Fatal("自己没记上")
 	}
-	if Default.Has("kimi", "kimi-k2.7", NoThinkingDisable) || Default.Has("glm", "kimi-k2.7-code", NoThinkingDisable) {
+	if table.Has("kimi", "kimi-k2.7", NoThinkingDisable) || table.Has("glm", "kimi-k2.7-code", NoThinkingDisable) {
 		t.Fatal("串到别的 provider/model 上了")
 	}
 }
 
 // Snapshot 要能看见已经学到的 flag（CLI/诊断读它）。
+//
+// 它用 Mark 直接记，不再走 Learn：**签名表现在是空的**（判据由拥有补丁的模块注册，
+// 见 modules/thinking/signatures.go），所以 Learn 在一张新表上什么也学不到。这条测
+// 的是「记下来的东西在快照里看得见」，与签名内容无关。
 func TestSnapshotShowsLearnedFlags(t *testing.T) {
-	Default.Reset()
-	Default.Learn("kimi", "kimi-k2.7-code", 400, []byte(`only type=enabled is allowed`))
+	table := NewTable()
+	table.Mark("kimi", "kimi-k2.7-code", NoThinkingDisable)
 	found := false
-	for _, e := range Default.Snapshot() {
+	for _, e := range table.Snapshot() {
 		if e.Provider == "kimi" && e.Model == "kimi-k2.7-code" &&
 			e.Flags&NoThinkingDisable != 0 {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("快照里看不到刚学到的 flag: %v", Default.Snapshot())
+		t.Fatalf("快照里看不到刚记下的 flag: %v", table.Snapshot())
 	}
 }

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
+	"github.com/rzbdz/newgate/go/modules/gateway/quirk"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
@@ -18,6 +19,18 @@ type Plugin = special.Plugin
 // 不把数据面 handler 或内部 registry 泄漏给其他模块。
 type Gateway interface {
 	RegisterRequestHook(Plugin) (modules.Release, error)
+
+	// Quirks 是那张「上游毛病」表（见 modules/gateway/quirk）。
+	//
+	// 它暴露出来是因为**判据得由拥有补丁的模块注册**：`该模型始终思考` 这条
+	// 签名的原文是 GLM / DeepSeek / Kimi 各自的方言，补丁（disabled → enabled +
+	// reasoning_effort）住在 modules/thinking，所以签名也该由它注册进来——与
+	// `breaker.RegisterShapeDetector`、`special` 的 st-<上游>.go 是同一条规矩：
+	// **core 里不出现上游专有字符串**。
+	//
+	// 数据面在每次请求上把同一张表交给插件（special.Request.Quirks），所以注册
+	// 进来的判据对热路径立刻生效。
+	Quirks() *quirk.Table
 }
 
 // Capability 标识进程中唯一的网关控制面。

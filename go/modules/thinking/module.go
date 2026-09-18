@@ -33,6 +33,18 @@ func New() modules.Component {
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			gateway := modules.MustGet(ctx, gatewayapi.Capability)
+
+			// 判据由**拥有补丁的模块**注册（见 signatures.go）：这三条是各家上游的
+			// 方言原文，而把 disabled 翻成 enabled 的补丁住在本模块。数据面在每次
+			// 请求上把同一张表交给插件，所以注册完对热路径立刻生效。
+			for _, sig := range signatures() {
+				release, err := gateway.Quirks().RegisterSignature(sig)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
+			}
+
 			for _, treatment := range Treatments() {
 				release, err := gateway.RegisterRequestHook(treatment)
 				if err != nil {

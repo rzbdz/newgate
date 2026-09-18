@@ -18,6 +18,7 @@ import (
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
+	"github.com/rzbdz/newgate/go/modules/gateway/quirk"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
@@ -115,6 +116,9 @@ func New() modules.Component {
 		},
 	}
 }
+
+// Quirks 见 api.go 的说明（数据面用的就是这一个实例）。
+func (p *port) Quirks() *quirk.Table { return quirk.Default }
 
 // RegisterRequestHook 把插件注册限制在 gateway owner 内部，并把撤销权交还调用组件。
 func (p *port) RegisterRequestHook(hook Plugin) (modules.Release, error) {
