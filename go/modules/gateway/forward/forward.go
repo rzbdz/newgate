@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -1052,10 +1053,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				trail = append(trail, fmt.Sprintf("%s(%d)", a.Binding, resp.StatusCode))
 				continue
 			}
-			base := s.saveErrEvidence(reqID, resp.StatusCode, body, newBody, eb,
+			base, evErr := s.saveErrEvidence(reqID, resp.StatusCode, body, newBody, eb,
 				r.Header, resp.Header, routeStr)
-			s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
-			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
+			if evErr != nil {
+				s.logf("[proxy] #%d 上游 %d，证据落盘失败（目录建得起来但文件写不进去，"+
+					"查权限/磁盘；CLAUDE.md §3.1 记过这个坑）: %v", reqID, resp.StatusCode, evErr)
+			} else {
+				s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
+			}
 			if res.Shape != "" {
 				// 请求形状错误：不是客户端 schema 错，是这份 body 本身只有某家
 				// 上游挑食（典型是 DeepSeek 思考模式那两句 400），要能一眼 grep
@@ -1065,8 +1070,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				// 现场单独存档：这类 400 偶发又致命，dump 目录的 req-*/err-*
 				// 滚动清理会把它挤掉，所以另存一份到不参与滚动清理的专用目录，
 				// 并附逐条 reasoning 审计（哪几条 assistant 没有推理原文）。
-				if rdir := s.saveShapeEvidence(reqID, res.Shape, body, newBody, eb,
-					r.Header, resp.Header, routeStr); rdir != "" {
+				rdir, shErr := s.saveShapeEvidence(reqID, res.Shape, body, newBody, eb,
+					r.Header, resp.Header, routeStr)
+				if shErr != nil {
+					s.logf("[shape-400] #%d 现场**没存下来**（查权限/磁盘）: %v", reqID, shErr)
+				} else {
 					s.logf("[shape-400] #%d 现场已存档 %s/", reqID, rdir)
 				}
 			}
@@ -1242,10 +1250,21 @@ func (s *Server) dump(reqID uint64, attempt int, in, out []byte) {
 		return
 	}
 	base := filepath.Join(dir, fmt.Sprintf("req-%06d-%d", reqID, attempt))
-	_ = ioutil.WriteFile(base+".in.json", in, 0o600)
-	_ = ioutil.WriteFile(base+".out.json", out, 0o600)
+	var errs []error
+	for _, f := range []struct {
+		path string
+		data []byte
+	}{{base + ".in.json", in}, {base + ".out.json", out}} {
+		if err := os.WriteFile(f.path, f.data, 0o600); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	same := "改写后与原文长度差 " + fmt.Sprint(len(out)-len(in)) + " 字节"
-	s.logf("[proxy] #%d dump → %s.{in,out}.json  (%s)", reqID, base, same)
+	if err := errors.Join(errs...); err != nil {
+		s.logf("[proxy] #%d dump 落盘失败（查权限/磁盘）: %v", reqID, err)
+	} else {
+		s.logf("[proxy] #%d dump → %s.{in,out}.json  (%s)", reqID, base, same)
+	}
 	logx.PruneDirBy(dir, "req-", 30)
 }
 
@@ -1275,24 +1294,40 @@ func headerDump(h http.Header) string {
 
 // saveErrEvidence 上游报错时把完整证据落盘。这是排查
 // 「是不是代理改坏了请求」唯一能拿出手的东西，所以不设开关。
+//
+// **返回错误，调用方必须如实说**（2026-09-18 改）：这里原来是四个 `_ =`，而调用
+// 点的日志是无条件打的「完整证据已存」。于是写盘失败时用户看到「已存」而磁盘上
+// 一个字节都没有——CLAUDE.md §3.1 的多用户权限坑里，那个症状的原文就是
+// 「400 证据『已存』其实没写出」。**声称存了而没存比不存更坏**：排查的人会以为
+// 证据在，花时间去翻目录，然后怀疑是不是自己记错了路径。
 func (s *Server) saveErrEvidence(reqID uint64, status int, inBody, outBody, respBody []byte,
-	reqHdr http.Header, respHdr http.Header, routeStr string) string {
+	reqHdr http.Header, respHdr http.Header, routeStr string) (string, error) {
 	dir := filepath.Join(paths.Config(), "dump")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return ""
+		return "", err
 	}
 	base := filepath.Join(dir, fmt.Sprintf("err-%03d-req%06d", status, reqID))
-	_ = ioutil.WriteFile(base+".client-sent.json", redact(inBody), 0o600)
-	_ = ioutil.WriteFile(base+".we-sent.json", redact(outBody), 0o600)
-	_ = ioutil.WriteFile(base+".upstream-said.json", redact(respBody), 0o600)
 	meta := fmt.Sprintf("route: %s\nstatus: %d\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
 		routeStr, status, headerDump(reqHdr), headerDump(respHdr))
-	_ = ioutil.WriteFile(base+".meta.txt", []byte(meta), 0o600)
+	var errs []error
+	for _, f := range []struct {
+		path string
+		data []byte
+	}{
+		{base + ".client-sent.json", redact(inBody)},
+		{base + ".we-sent.json", redact(outBody)},
+		{base + ".upstream-said.json", redact(respBody)},
+		{base + ".meta.txt", []byte(meta)},
+	} {
+		if err := os.WriteFile(f.path, f.data, 0o600); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	// 只清 err- 前缀的组：dump 目录里 req-* 也住一起，各设各的上限（见 dump 处
 	// 的 PruneDirBy(dir,"req-",30)），空前缀会把对方的也一起删掉——错误证据刚
 	// 落地几秒就被 req-* 挤没了，等于没存。
 	logx.PruneDirBy(dir, "err-", 20)
-	return base
+	return base, errors.Join(errs...)
 }
 
 // saveShapeEvidence 请求形状被拒时把现场存进**专用目录**，不参与 dump 目录的
@@ -1309,23 +1344,34 @@ func (s *Server) saveErrEvidence(reqID uint64, status int, inBody, outBody, resp
 //
 // 判据名进路径前做了白名单过滤（见 shapeDirName）：检测器是别的模块注册进来
 // 的代码，名字里带 `/` 或 `..` 就能让这个函数往配置目录外写文件。
+// 与 saveErrEvidence 同理：这类现场「丢了就再也复现不了」，所以写不出去必须说
+// （2026-09-18 改，原来五个 `_ =` 加一句无条件的「现场已存档」）。
 func (s *Server) saveShapeEvidence(reqID uint64, detector string, inBody, outBody, respBody []byte,
-	reqHdr http.Header, respHdr http.Header, routeStr string) string {
+	reqHdr http.Header, respHdr http.Header, routeStr string) (string, error) {
 	dir := filepath.Join(paths.Config(), "dump", shapeDirName(detector),
 		fmt.Sprintf("req-%06d-%d", reqID, time.Now().UnixNano()))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return ""
+		return "", err
 	}
-	_ = ioutil.WriteFile(filepath.Join(dir, "client-sent.json"), redact(inBody), 0o600)
-	_ = ioutil.WriteFile(filepath.Join(dir, "we-sent.json"), redact(outBody), 0o600)
-	_ = ioutil.WriteFile(filepath.Join(dir, "upstream-said.json"), redact(respBody), 0o600)
-	_ = ioutil.WriteFile(filepath.Join(dir, "audit.txt"),
-		[]byte(special.AuditResponse(outBody)), 0o600)
 	meta := fmt.Sprintf("route: %s\nstatus: 400\ndetector: %s\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
 		routeStr, detector, headerDump(reqHdr), headerDump(respHdr))
-	_ = ioutil.WriteFile(filepath.Join(dir, "meta.txt"), []byte(meta), 0o600)
+	var errs []error
+	for _, f := range []struct {
+		name string
+		data []byte
+	}{
+		{"client-sent.json", redact(inBody)},
+		{"we-sent.json", redact(outBody)},
+		{"upstream-said.json", redact(respBody)},
+		{"audit.txt", []byte(special.AuditResponse(outBody))},
+		{"meta.txt", []byte(meta)},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, f.name), f.data, 0o600); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	pruneShapeEvidence(filepath.Dir(dir), 512<<20)
-	return dir
+	return dir, errors.Join(errs...)
 }
 
 // shapeDirName 把检测器名压成一个安全的目录名：只留字母数字和 `-_.`，其余
