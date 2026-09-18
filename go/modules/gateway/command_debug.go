@@ -39,7 +39,21 @@ func (debugCommand) Help() surface.HelpLine {
 }
 
 func (debugCommand) Run(host surface.Host, args []string) int {
-	on := truthy(surface.Arg(args, 0))
+	arg := surface.Arg(args, 0)
+	// 同 schema-repair：不带参数要报用法，不能默认成 off。这条命令的代价更大
+	// ——它会在你只想看一眼的时候把全量日志关掉，而「日志怎么没了」的排查
+	// 成本远高于多敲一个 on/off。
+	switch arg {
+	case "":
+		return host.Die(64, "用法：newgate debug on [分钟] [--forever] | off（不带参数不改任何东西）")
+	case "on", "off":
+	default:
+		// `newgate debug 30` 是「开 30 分钟」的简写，保留。
+		if _, err := durarg.Parse(arg); err != nil {
+			return host.Die(64, fmt.Sprintf("debug: 不认识的参数 %q（on / off / 分钟数，如 30）", arg))
+		}
+	}
+	on := arg != "off"
 	ttl := debugDefaultMinutes * time.Minute
 	if on {
 		for _, a := range args {
