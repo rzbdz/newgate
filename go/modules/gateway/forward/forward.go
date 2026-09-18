@@ -837,7 +837,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				InModel: inModel, Tier: tier, Model: a.Binding.Model,
 				Provider: a.Binding.Provider, BaseURL: a.Provider.Base(suffix),
 				Protocol: a.Provider.Protocol, Path: suffix, Stream: stream,
-				Agent: tgt.TaskCreate, State: st,
+				Agent: tgt.TaskCreate, State: st, Quirks: quirk.Default,
 			}
 			if res := special.RebaseToolLoop(newBody, toolOrigin.Provider, toolOrigin.Model,
 				candidate, pluginOff(st)); len(res.Notes) > 0 {
@@ -893,6 +893,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				Stream:   stream,
 				Agent:    tgt.TaskCreate,
 				State:    st,
+				Quirks:   quirk.Default,
 			}, pluginOff(st))
 			counted := map[string]bool{}
 			for _, n := range res.Notes {
@@ -1222,7 +1223,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 // 学到什么必须说，这是「不静默」的一部分：用户得知道我们从下一个请求开始
 // 会往他的请求里多加东西。
 func (s *Server) learnQuirks(reqID uint64, provider, model string, status int, body []byte) {
-	for _, what := range quirk.Learn(provider, model, status, body) {
+	for _, what := range quirk.Default.Learn(provider, model, status, body) {
 		s.logf("[proxy] #%d 学到：%s/%s %s —— 下次请求自动补上（newgate st 可关）",
 			reqID, provider, model, what)
 	}

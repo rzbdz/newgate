@@ -12,17 +12,17 @@ import (
 func TestCapabilityCacheSurvivesProcessStateReset(t *testing.T) {
 	t.Setenv("NEWGATE_HOME", t.TempDir())
 	dialect.Reset()
-	quirk.Reset()
+	quirk.Default.Reset()
 	t.Cleanup(func() {
 		dialect.Reset()
-		quirk.Reset()
+		quirk.Default.Reset()
 	})
 
 	target := Target{Provider: "relay", Model: "model"}
 	dialect.Mark(target.Provider, target.Model, dialect.CapOpenAI)
 	dialect.MarkUnsupported(target.Provider, target.Model, dialect.CapAnthropic)
 	dialect.MarkUnsupported(target.Provider, target.Model, dialect.CapCountTokens)
-	quirk.Mark(target.Provider, target.Model, quirk.NoThinkingDisable)
+	quirk.Default.Mark(target.Provider, target.Model, quirk.NoThinkingDisable)
 
 	cache := loadCapabilityCache()
 	cache.capture(target)
@@ -30,7 +30,7 @@ func TestCapabilityCacheSurvivesProcessStateReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	dialect.Reset()
-	quirk.Reset()
+	quirk.Default.Reset()
 
 	LoadCachedCapabilities()
 	if ok, known := dialect.Supports(target.Provider, target.Model, dialect.CapOpenAI); !ok || !known {
@@ -39,7 +39,7 @@ func TestCapabilityCacheSurvivesProcessStateReset(t *testing.T) {
 	if ok, known := dialect.Supports(target.Provider, target.Model, dialect.CapAnthropic); ok || !known {
 		t.Fatal("不支持的方言没有从缓存恢复")
 	}
-	if !quirk.Has(target.Provider, target.Model, quirk.NoThinkingDisable) {
+	if !quirk.Default.Has(target.Provider, target.Model, quirk.NoThinkingDisable) {
 		t.Fatal("quirk 没有从缓存恢复")
 	}
 }

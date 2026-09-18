@@ -42,16 +42,16 @@ func TestLearnRecognizesEverySignature(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			Reset()
-			got := Learn("prov", "model-x", 400, []byte(tt.body))
+			Default.Reset()
+			got := Default.Learn("prov", "model-x", 400, []byte(tt.body))
 			if len(got) != 1 || got[0] != "该模型始终思考" {
 				t.Fatalf("没学到（%s）: %v", tt.reason, got)
 			}
-			if !Has("prov", "model-x", NoThinkingDisable) {
+			if !Default.Has("prov", "model-x", NoThinkingDisable) {
 				t.Fatal("学到了却没打上 flag")
 			}
 			// 幂等：同一个毛病第二次不再重复报。
-			if again := Learn("prov", "model-x", 400, []byte(tt.body)); again != nil {
+			if again := Default.Learn("prov", "model-x", 400, []byte(tt.body)); again != nil {
 				t.Fatalf("重复学了一次: %v", again)
 			}
 		})
@@ -73,11 +73,11 @@ func TestLearnNeverGuesses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			Reset()
-			if got := Learn("prov", "model-y", tt.status, []byte(tt.body)); got != nil {
+			Default.Reset()
+			if got := Default.Learn("prov", "model-y", tt.status, []byte(tt.body)); got != nil {
 				t.Fatalf("不该学到却学到了: %v", got)
 			}
-			if Has("prov", "model-y", NoThinkingDisable) {
+			if Default.Has("prov", "model-y", NoThinkingDisable) {
 				t.Fatal("不该打 flag 却打了")
 			}
 		})
@@ -86,28 +86,28 @@ func TestLearnNeverGuesses(t *testing.T) {
 
 // 学习是按 (provider, model) 记账的：给 A 学到的东西不能漏给 B，也不能串到 B。
 func TestLearnIsScopedToProviderAndModel(t *testing.T) {
-	Reset()
-	Learn("kimi", "kimi-k2.7-code", 400, []byte(`only type=enabled is allowed`))
-	if !Has("kimi", "kimi-k2.7-code", NoThinkingDisable) {
+	Default.Reset()
+	Default.Learn("kimi", "kimi-k2.7-code", 400, []byte(`only type=enabled is allowed`))
+	if !Default.Has("kimi", "kimi-k2.7-code", NoThinkingDisable) {
 		t.Fatal("自己没学到")
 	}
-	if Has("kimi", "kimi-k2.7", NoThinkingDisable) || Has("glm", "kimi-k2.7-code", NoThinkingDisable) {
+	if Default.Has("kimi", "kimi-k2.7", NoThinkingDisable) || Default.Has("glm", "kimi-k2.7-code", NoThinkingDisable) {
 		t.Fatal("串到别的 provider/model 上了")
 	}
 }
 
 // Snapshot 要能看见已经学到的 flag（CLI/诊断读它）。
 func TestSnapshotShowsLearnedFlags(t *testing.T) {
-	Reset()
-	Learn("kimi", "kimi-k2.7-code", 400, []byte(`only type=enabled is allowed`))
+	Default.Reset()
+	Default.Learn("kimi", "kimi-k2.7-code", 400, []byte(`only type=enabled is allowed`))
 	found := false
-	for _, e := range Snapshot() {
+	for _, e := range Default.Snapshot() {
 		if e.Provider == "kimi" && e.Model == "kimi-k2.7-code" &&
 			e.Flags&NoThinkingDisable != 0 {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("快照里看不到刚学到的 flag: %v", Snapshot())
+		t.Fatalf("快照里看不到刚学到的 flag: %v", Default.Snapshot())
 	}
 }
