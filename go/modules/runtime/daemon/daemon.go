@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -112,6 +113,42 @@ func isZombie(pid int) bool {
 	return false
 }
 
+// isServe 确认这个 pid 是**守护进程本体**，而不是另一个也叫 newgate 的进程
+// （CLI 自己、别的实例）。判据是 cmdline 里的 `__serve`——只有
+// `newgate __serve` 持有监听 socket。
+//
+// 它只用在「从锁文件反推 daemon」这条**推断**路径上，所以要求比 Alive 更硬的
+// 证据；pidfile 那条路是写者自证身份，仍然只用 Alive。读不到 /proc（非 Linux）
+// 时不猜，放过。
+func isServe(pid int) bool {
+	b, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return true
+	}
+	return len(b) == 0 || strings.Contains(string(b), "__serve")
+}
+
+// LockHolder 读锁文件里的 pid（新老两个位置），读不出给 0。
+//
+// 锁是「谁在服务」这件事的**权威证据**：它由抢到监听权的进程用 O_EXCL 写下、
+// 写在它自己的生命周期里；优雅交接时由 AdoptRuntime 改写到新进程名下。
+// pidfile 只是它的缓存（见 Reconcile）。
+func LockHolder() int {
+	for _, f := range []string{paths.LockFile(), paths.LegacyLockFile()} {
+		if f == "" {
+			continue
+		}
+		b, err := ioutil.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
+			return pid
+		}
+	}
+	return 0
+}
+
 // AcquireLock 独占锁。发现死锁文件自动清理。
 func AcquireLock() error {
 	// 新老两个位置都查：老 daemon 的活锁在 $HOME，不认它就会起出
@@ -141,17 +178,162 @@ func AcquireLock() error {
 
 // Running 返回当前活着的实例信息。
 func Running() *Info {
-	i, err := ReadPid()
-	if err != nil || i == nil {
-		return nil
-	}
-	if !Alive(i.PID) {
-		return nil
-	}
+	i, _ := Reconcile()
 	return i
 }
 
+// LastHeal 报告本进程内最近一次「对账修好了 pidfile」，没有修过给空串。
+//
+// 为什么需要它：修好之后 pidfile 就对了，**再对账是一片绿**。而 `newgate doctor`
+// 里排在前面那几项（链路、代理）都会读 Running()，于是它们先把 pidfile 修好，
+// 等到「守护进程」那一项跑的时候，那处不一致已经看不见了——体检全绿，用户永远
+// 不知道自己刚才经历的是什么。这一行就是「不静默」在自愈路径上的落点。
+func LastHeal() string {
+	healMu.Lock()
+	defer healMu.Unlock()
+	return healNote
+}
+
+var (
+	healMu   sync.Mutex
+	healNote string
+)
+
+// Reconcile 回答「谁真的在跑」，顺手把 pidfile 修回真身；第二个返回值是发现的
+// 那处不一致（doctor 用来出人话，一切正常时为空）。
+//
+// **为什么不能只看 pidfile**（2026-09-18，两次现场，都是重启后必现）：pidfile
+// 会躺着一个「撞锁失败、当场退出的子进程」的 pid，而 daemon 一直在服务——
+// 见 WriteOwn 记的那条完整链条。锁文件是这件事的权威证据，所以 pidfile 站不住
+// 时用锁对账。
+//
+// 但**方向是单向的**：pidfile 指向活进程时一律信它，绝不反过来信锁。优雅交接的
+// 那一瞬间，父进程会先把 pidfile 改写到自己名下、随后才改锁（AdoptRuntime），
+// 此刻「pidfile = 新进程、锁 = 仍在排空的旧进程」——反过来信锁会把刚交出去的
+// pidfile 又改回旧进程，交接就此失败。
+//
+// 「pidfile 指向死进程」与「真的没在跑」必须分开：前者是不一致（要说出来、要
+// 修），后者是正常状态（一个字都不用说）。
+func Reconcile() (*Info, []string) {
+	i, err := ReadPid()
+	if err == nil && i != nil && Alive(i.PID) {
+		return i, nil
+	}
+	pid := LockHolder()
+	if pid <= 0 || !Alive(pid) || !isServe(pid) {
+		return nil, nil
+	}
+	healed := &Info{PID: pid, Port: portOf(i), Exe: exeOf(pid)}
+	if t := procStartTime(pid); !t.IsZero() {
+		healed.StartedAt = t.Format(time.RFC3339)
+	}
+	note := fmt.Sprintf("pidfile 指向的进程已经不在了（%s），锁文件说真正的 daemon 是 pid %d",
+		describePid(i, err), pid)
+	if werr := WritePid(healed); werr != nil {
+		note += "；pidfile 修正失败: " + werr.Error()
+	} else {
+		note += "（pidfile 已修正）"
+		healMu.Lock()
+		healNote = note
+		healMu.Unlock()
+	}
+	return healed, []string{note}
+}
+
+// describePid 把「pidfile 说了什么」讲成人话，用在上面那句不一致里。
+func describePid(i *Info, err error) string {
+	switch {
+	case err != nil || i == nil:
+		return "读不到 pidfile"
+	case i.PID <= 0:
+		return "pidfile 里没有 pid"
+	default:
+		return fmt.Sprintf("pid %d", i.PID)
+	}
+}
+
+// portOf 优先用 pidfile 里记的端口；pidfile 不可用时退回配置里的端口。
+func portOf(i *Info) int {
+	if i != nil && i.Port > 0 {
+		return i.Port
+	}
+	if st := store.LoadState(); st != nil {
+		return st.Port
+	}
+	return 0
+}
+
+func exeOf(pid int) string {
+	if p, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
+		return p
+	}
+	return ""
+}
+
+// procStartTime 反推进程的启动时刻：/proc 只给「开机后第几个 tick」
+// （stat 里去掉 pid/comm 之后的第 20 个字段），要加上 /proc/stat 的 btime
+// 才是墙钟时间。拿不到就给零值——它只进 pidfile 供人看，猜一个不如空着。
+func procStartTime(pid int) time.Time {
+	btime := int64(0)
+	if b, err := ioutil.ReadFile("/proc/stat"); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(line, "btime ") {
+				btime, _ = strconv.ParseInt(strings.TrimSpace(line[len("btime "):]), 10, 64)
+				break
+			}
+		}
+	}
+	st, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil || btime == 0 {
+		return time.Time{}
+	}
+	rest := st[bytes.LastIndexByte(st, ')')+1:]
+	fields := strings.Fields(string(rest))
+	if len(fields) < 20 {
+		return time.Time{}
+	}
+	ticks, err := strconv.ParseInt(fields[19], 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	// Linux 的 CLK_TCK 恒为 100（os.Sysconf 不在标准库，而这里只是给人看的时间戳）
+	return time.Unix(btime+ticks/100, 0)
+}
+
+// WriteOwn 由守护进程**自己**写下 pidfile：它才是拥有监听 socket 的那个进程。
+//
+// 2026-09-18 两次实测（重启后必现，两个现场签名一模一样）：pidfile 里躺着一个
+// 「撞锁失败、当场退出的子进程」的 pid（4554 与 3080，两个僵尸），而真正的
+// daemon（1556 与 2069）一直在服务、锁文件也一直写着它们。链条是：
+//
+//  1. 懒启动 → Spawn 起子进程 → **父进程抢先写 pidfile**；
+//  2. 子进程 AcquireLock 读到上个进程留下的**陈旧锁** → RemoveLock + RemovePid，
+//     把第 1 步刚写的那份 pidfile 一并删掉；
+//  3. 子进程建锁、开始服务，而**再没有任何人会写一次 pidfile**；
+//  4. 之后每个命令都读到「没在跑」→ 又懒启动一个注定撞锁的子进程 → 它的 pid
+//     被写进 pidfile（第 2 步不再发生，因为锁现在是活的）→ 死 pid 留在那儿。
+//
+// 把「写」挪到**抢到锁之后、由持有者自己写**，就只剩一个写者，而且它一定活着。
+func WriteOwn(port int) error {
+	if port <= 0 {
+		if st := store.LoadState(); st != nil {
+			port = st.Port
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		exe = ""
+	}
+	return WritePid(&Info{PID: os.Getpid(), Port: port,
+		StartedAt: time.Now().Format(time.RFC3339), Exe: exe})
+}
+
 // Spawn 把自己以 __serve 模式重新拉起，作为后台守护进程。
+//
+// **pidfile 不在这里写**（2026-09-18）：写它的人必须是那个真正抢到锁、开始服务的
+// 进程，也就是子进程自己（见 WriteOwn 记的那条完整链条——父进程代写的每一份，
+// 都可能被子进程随后的「陈旧锁清理」删掉，而再没有人补回来）。返回的 Info 仍然
+// 是子进程的 pid，调用方拿它报「代理已启动 pid N」是对的：它就是刚起来的那个。
 func Spawn(port int) (*Info, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -174,9 +356,6 @@ func Spawn(port int) (*Info, error) {
 	}
 	info := &Info{PID: cmd.Process.Pid, Port: port,
 		StartedAt: time.Now().Format(time.RFC3339), Exe: exe}
-	if err := WritePid(info); err != nil {
-		return nil, err
-	}
 	_ = cmd.Process.Release()
 	return info, nil
 }
@@ -268,13 +447,14 @@ func AdoptRuntime(i *Info) error {
 // 共享部署的兜底：daemon 可能是别的用户起的（root 起的、claude 用户来停）。
 // 同一个组只给读文件的权限，不给 kill() 的权限——信号发不出去（EPERM）时
 // 走代理自己的控制端点（POST /__newgate/stop + ControlToken）让它自己退。
+//
+// 杀谁由 Reconcile 决定，不是 pidfile 一个人说了算：pidfile 指向死进程时它会把
+// 真身（锁的持有者）认出来。否则 `newgate stop` 会在「pidfile 坏了」的现场报
+// 「本来没在跑」，顺手把活 daemon 的锁删掉——服务还在，锁没了（2026-09-18 现场）。
 func Stop() (int, error) {
-	i, err := ReadPid()
-	if err != nil {
-		RemoveLock()
-		return 0, nil // 本来就没在跑
-	}
-	if !Alive(i.PID) {
+	i, _ := Reconcile()
+	if i == nil {
+		// 两边都没有活着的 daemon：把死文件清掉，免得下次又读到。
 		RemovePid()
 		RemoveLock()
 		return 0, nil
