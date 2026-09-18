@@ -11,14 +11,15 @@ package cli
 
 import (
 	"context"
+	"fmt"
 
 	modules "github.com/rzbdz/newgate/go/component"
 
 	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
+	"github.com/rzbdz/newgate/go/modules/config/domain"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 // service 是**界面**：分派、渲染、进程生命周期。
@@ -32,25 +33,100 @@ type service struct {
 	runtime runtimeapi.Runtime
 	health  breakerapi.Breaker
 
-	ui surface.Surface
-}
-
-// BuildInfo 是链接期注入的版本信息；main 传进来，界面负责展示。
-//
-// 它留在 cli 而不是 surface：这是**界面自己的**身份，跟「模块往界面上贡献什么」
-// 无关。surface 那边只有贡献契约。
-type BuildInfo struct {
-	Version    string
-	BuildTime  string
-	CommitTime string
-}
-
-// CLI 是进程组合根最终调用的命令行入口。
-type CLI interface {
-	Run(args []string, build BuildInfo) int
+	// 三本账：模块通过 RegisterXxx 把自己的东西挂进来，界面在分派命令、渲染
+	// status / doctor 时循环调用它们。**界面不 import 任何模块**，所以它不认识
+	// 任何人——别人的东西是别人注入进来的回调。
+	commands    modules.Registry[Command]
+	diagnostics modules.Registry[DiagnosticProvider]
+	statuses    modules.Registry[StatusProvider]
 }
 
 var _ CLI = (*service)(nil)
+
+// RegisterCommand 注入一条命令；命令名撞车当场报错。
+//
+// 报错文案是中文：这条是**面向插件作者**的业务冲突（「我的命令名被谁占了」），
+// 不是框架级装配错误，跟用户可见的文案保持一致。查重在 Registry.Register 的写锁
+// 内跑，所以并发注入同一个名字也只会有一个成功——先到先得是这个功能最不该有的
+// 行为（那样「谁占了这个名字」在清单里看不出来）。
+func (s *service) RegisterCommand(command Command) (modules.Release, error) {
+	if command == nil {
+		return nil, fmt.Errorf("cli: 命令不能为 nil")
+	}
+	names := command.Names()
+	if len(names) == 0 {
+		return nil, fmt.Errorf("cli: 命令必须至少声明一个名字（Names）")
+	}
+	return s.commands.Register(command, func(existing []Command) error {
+		for _, other := range existing {
+			for _, have := range other.Names() {
+				for _, want := range names {
+					if have == want {
+						return fmt.Errorf("cli: 命令名 %q 已被占用", want)
+					}
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// RegisterDiagnostics 注入一组 doctor 输出。诊断可叠加，不查重。
+func (s *service) RegisterDiagnostics(provider DiagnosticProvider) (modules.Release, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("cli: 诊断提供者不能为 nil")
+	}
+	return s.diagnostics.Register(provider, nil)
+}
+
+// RegisterStatus 注入 `newgate status` 里的若干行。与诊断同理：可叠加、不查重。
+//
+// 这条端口的存在是为了**让界面不必认识模块**：`status` 要显示各模块自己的开关
+// 状态，而那份状态归各自模块。谁的状态谁自己报——界面只负责循环调用与排版。
+func (s *service) RegisterStatus(provider StatusProvider) (modules.Release, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("cli: 状态提供者不能为 nil")
+	}
+	return s.statuses.Register(provider, nil)
+}
+
+// Run 注入本次构建信息后进入统一命令分派；模块命令从账本里现取（不是启动时
+// 拍快照）——注入方可能比界面晚一步才注册，现取才不会漏。
+func (s *service) Run(args []string, build BuildInfo) int {
+	Version = build.Version
+	BuildTime = build.BuildTime
+	CommitTime = build.CommitTime
+	return runCLI(s, args)
+}
+
+// moduleCommand 按名字找一条注入进来的命令。Names 里的每个别名都是分派键。
+func (s *service) moduleCommand(name string) (Command, bool) {
+	for _, command := range s.commands.All() {
+		for _, candidate := range command.Names() {
+			if candidate == name {
+				return command, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// statusLines 汇总所有模块注入的 status 行。与 moduleDiagnostics 同构。
+func (s *service) statusLines(st *domain.State) []StatusLine {
+	var out []StatusLine
+	for _, provider := range s.statuses.All() {
+		out = append(out, provider.Status(st)...)
+	}
+	return out
+}
+
+func (s *service) moduleDiagnostics() []Diagnostic {
+	var out []Diagnostic
+	for _, provider := range s.diagnostics.All() {
+		out = append(out, provider.Diagnostics()...)
+	}
+	return out
+}
 
 // New 声明最终 CLI 入口，并向其他模块开放命令与诊断两个扩展点。
 //
@@ -63,8 +139,6 @@ func New() modules.Component {
 		Name: "cli",
 		Type: "cli",
 		Requires: []modules.Requirement{
-			// 账本在叶子模块里，cli 只是它的一个消费者。
-			modules.Need(surface.Capability),
 			modules.Need(configapi.Capability),
 			modules.Need(runtimeapi.Capability),
 			modules.Need(confighookapi.AgentCatalogCapability),
@@ -76,7 +150,6 @@ func New() modules.Component {
 			modules.Provide(Capability, CLI(service)),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
-			service.ui = modules.MustGet(ctx, surface.Capability)
 			service.agents = modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
 			service.runtime = modules.MustGet(ctx, runtimeapi.Capability)
 			service.health = modules.MustGet(ctx, breakerapi.Capability)
@@ -86,17 +159,7 @@ func New() modules.Component {
 			service.agents = nil
 			service.runtime = nil
 			service.health = nil
-			service.ui = nil
 			return nil
 		},
 	}
-}
-
-// Run 注入本次构建信息后进入统一命令分派；模块命令从 Registry 账本里现取
-// （不是启动时拍快照）——扩展模块可能比 CLI 晚一步才注册，现取才不会漏。
-func (s *service) Run(args []string, build BuildInfo) int {
-	Version = build.Version
-	BuildTime = build.BuildTime
-	CommitTime = build.CommitTime
-	return runCLI(s, args)
 }

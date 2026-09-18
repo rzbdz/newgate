@@ -8,9 +8,9 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/store"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 // command 是 `newgate plugin`。
@@ -25,15 +25,15 @@ import (
 type command struct{ manager Manager }
 
 var (
-	_ surface.Command        = (*command)(nil)
-	_ surface.Documented     = (*command)(nil)
-	_ surface.StatusProvider = (*command)(nil)
+	_ cliapi.Command        = (*command)(nil)
+	_ cliapi.Documented     = (*command)(nil)
+	_ cliapi.StatusProvider = (*command)(nil)
 )
 
 func (c *command) Names() []string { return []string{"plugin", "plugins"} }
 
-func (c *command) Help() surface.HelpLine {
-	return surface.HelpLine{
+func (c *command) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{
 		Section: "模块",
 		Usage:   "plugin [模块[.路径]] [on|off] [时长]",
 		Summary: "全部模块按分类列出；开关某个模块或某个开关点",
@@ -41,7 +41,7 @@ func (c *command) Help() surface.HelpLine {
 }
 
 // Run 的用法（**args 里没有 "plugin" 这个动词**，分派器已经剥掉了，见
-// surface.Command 的契约说明）：
+// cliapi.Command 的契约说明）：
 //
 //	newgate plugin                          按分类列出全部模块
 //	newgate plugin <模块>                    展开一个模块：它的开关点与当前状态
@@ -51,13 +51,13 @@ func (c *command) Help() surface.HelpLine {
 // 列表的枚举源是**组件图**（经本模块合并），不是「谁上报过」。这样没参与开关
 // 体系的模块也列得出来，标成「无法 runtime 开关（v1）」——「这个模块没有开关」
 // 和「这个模块忘了注册」绝不能长得一样。
-func (c *command) Run(host surface.Host, args []string) int {
-	sub := surface.Arg(args, 0)
+func (c *command) Run(host cliapi.Host, args []string) int {
+	sub := cliapi.Arg(args, 0)
 	switch sub {
 	case "", "ls", "list":
 		return c.list()
 	}
-	action := surface.Arg(args, 1)
+	action := cliapi.Arg(args, 1)
 	if action == "" {
 		return c.explain(host, sub)
 	}
@@ -65,7 +65,7 @@ func (c *command) Run(host surface.Host, args []string) int {
 		return host.Die(64, fmt.Sprintf(
 			"plugin: 不认识的动词 %q（用法：newgate plugin <模块>[.<路径>] on|off [时长]）", action))
 	}
-	return c.toggle(host, sub, action == "on", surface.Arg(args, 2))
+	return c.toggle(host, sub, action == "on", cliapi.Arg(args, 2))
 }
 
 // list 按分类分组列出全部模块。
@@ -133,7 +133,7 @@ func printModuleLine(st *domain.State, m Module, nameW int) {
 }
 
 // explain 展开一个模块或一个开关点。
-func (c *command) explain(host surface.Host, target string) int {
+func (c *command) explain(host cliapi.Host, target string) int {
 	st := store.LoadState()
 
 	if sw, ok := c.manager.Lookup(target); ok {
@@ -166,7 +166,7 @@ func (c *command) explain(host surface.Host, target string) int {
 	return 0
 }
 
-func explainSwitch(host surface.Host, st *domain.State, sw Switch) int {
+func explainSwitch(host cliapi.Host, st *domain.State, sw Switch) int {
 	fmt.Println(style.Title("newgate plugin "+sw.Path, string(sw.Danger)))
 	fmt.Println(style.Rule(72))
 	fmt.Println(style.Item(style.OK, sw.Title))
@@ -185,7 +185,7 @@ func explainSwitch(host surface.Host, st *domain.State, sw Switch) int {
 }
 
 // toggle 改一个或一组开关点。
-func (c *command) toggle(host surface.Host, target string, on bool, dur string) int {
+func (c *command) toggle(host cliapi.Host, target string, on bool, dur string) int {
 	switches, err := c.targetsOf(target)
 	if err != nil {
 		return host.Die(65, err.Error())

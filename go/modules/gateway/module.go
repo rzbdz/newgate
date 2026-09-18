@@ -12,8 +12,8 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
@@ -37,7 +37,7 @@ func New() modules.Component {
 		Type: "gateway",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
-			modules.Need(surface.Capability),
+			modules.Need(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
@@ -45,8 +45,8 @@ func New() modules.Component {
 		Start: func(_ context.Context, ctx modules.Context) error {
 			restore = special.InstallDefault(port.registry)
 
-			cli := modules.MustGet(ctx, surface.Capability)
-			for _, cmd := range []surface.Command{specialCommand{}, schemaRepairCommand{}, debugCommand{}} {
+			cli := modules.MustGet(ctx, cliapi.Capability)
+			for _, cmd := range []cliapi.Command{specialCommand{}, schemaRepairCommand{}, debugCommand{}} {
 				release, err := cli.RegisterCommand(cmd)
 				if err != nil {
 					return err

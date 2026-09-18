@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/rzbdz/newgate/go/lib/style"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
-	"github.com/rzbdz/newgate/go/testing/testkit"
 )
 
 // fakeDoc 是一条模块贡献的命令，用来把「模块自己声明的 help 行」也纳入宽度
@@ -25,22 +23,21 @@ func (f fakeDoc) Help() HelpLine         { return f.line }
 // usageFixture 装一个带模块贡献的 service：一条并进已有节，一条自开新节。
 // 名字故意取得长——上一版就是被一个 19 字符的模块名撑破过版面。
 //
-// 账本用**真的** surface 组件（它是叶子，装得起来），不是手写 stub：这样
-// --help 的组装路径与线上是同一份代码。
+// 账本就在 service 上，直接用真的（不手写 stub）：这样 --help 的组装路径与
+// 线上是同一份代码，包括命令名查重。
 func usageFixture(t *testing.T) *service {
 	t.Helper()
-	ui := testkit.Get(testkit.Start(t, surface.New()), surface.Capability)
-	// 名字各不相同：账本按 Names 查重（撞名当场报错，这是它的不变量之一），
-	// 用 stub 时看不出来，换成真组件立刻就暴露了。
+	s := &service{}
+	// 名字各不相同：账本按 Names 查重（撞名当场报错，这是它的不变量之一）。
 	for i, line := range []HelpLine{
 		{Section: "维护", Usage: "claudecode-deepseek-thing on|off [时长]", Summary: "一个很长的模块名，用来把左列撑开"},
 		{Section: "模块", Usage: "plugin [模块[.路径]] [on|off] [时长]", Summary: "全部模块按分类列出；开关某个模块或某个开关点"},
 	} {
-		if _, err := ui.RegisterCommand(fakeDoc{name: fmt.Sprintf("fake%d", i), line: line}); err != nil {
+		if _, err := s.RegisterCommand(fakeDoc{name: fmt.Sprintf("fake%d", i), line: line}); err != nil {
 			t.Fatalf("注册失败: %v", err)
 		}
 	}
-	return &service{ui: ui}
+	return s
 }
 
 // TestUsageNeverExceedsLayoutWidth 守两件事：CLI 自己的帮助不超宽，**模块贡献

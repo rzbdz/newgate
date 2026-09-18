@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/rzbdz/newgate/go/lib/style"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 // schemaRepairCommand 是 `newgate schema-repair on|off`。
@@ -20,22 +20,22 @@ import (
 type schemaRepairCommand struct{}
 
 var (
-	_ surface.Command    = (*schemaRepairCommand)(nil)
-	_ surface.Documented = (*schemaRepairCommand)(nil)
+	_ cliapi.Command    = (*schemaRepairCommand)(nil)
+	_ cliapi.Documented = (*schemaRepairCommand)(nil)
 )
 
 func (schemaRepairCommand) Names() []string { return []string{"schema-repair", "schema_repair"} }
 
-func (schemaRepairCommand) Help() surface.HelpLine {
-	return surface.HelpLine{
+func (schemaRepairCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{
 		Section: "维护",
 		Usage:   "schema-repair on|off",
 		Summary: "工具 schema 缺 required 时补空数组",
 	}
 }
 
-func (schemaRepairCommand) Run(host surface.Host, args []string) int {
-	arg := surface.Arg(args, 0)
+func (schemaRepairCommand) Run(host cliapi.Host, args []string) int {
+	arg := cliapi.Arg(args, 0)
 	// 必须显式给 on|off。**不带参数不能当成 off**：`truthy("")` 是 false，
 	// 于是「敲一下看看」会静默关掉修补——2026-09-18 我自己就这么关掉过一次
 	// （一个验证循环里裸跑了这条命令），而且直到 `newgate status` 打出

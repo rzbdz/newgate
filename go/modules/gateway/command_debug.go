@@ -6,9 +6,9 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/paths"
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 )
 
 const debugDefaultMinutes = 30
@@ -24,22 +24,22 @@ const debugDefaultMinutes = 30
 type debugCommand struct{}
 
 var (
-	_ surface.Command    = (*debugCommand)(nil)
-	_ surface.Documented = (*debugCommand)(nil)
+	_ cliapi.Command    = (*debugCommand)(nil)
+	_ cliapi.Documented = (*debugCommand)(nil)
 )
 
 func (debugCommand) Names() []string { return []string{"debug"} }
 
-func (debugCommand) Help() surface.HelpLine {
-	return surface.HelpLine{
+func (debugCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{
 		Section: "探测与观测",
 		Usage:   "debug on|off [分钟]",
 		Summary: "全量请求日志（默认 30 分钟自动关）",
 	}
 }
 
-func (debugCommand) Run(host surface.Host, args []string) int {
-	arg := surface.Arg(args, 0)
+func (debugCommand) Run(host cliapi.Host, args []string) int {
+	arg := cliapi.Arg(args, 0)
 	// 同 schema-repair：不带参数要报用法，不能默认成 off。这条命令的代价更大
 	// ——它会在你只想看一眼的时候把全量日志关掉，而「日志怎么没了」的排查
 	// 成本远高于多敲一个 on/off。

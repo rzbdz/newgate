@@ -1,39 +1,36 @@
-// Package surface 是「进程对用户暴露的那一层」的注册表：命令、诊断、状态行。
+// Package extension 是模块向界面注入东西时实现的那组接口，以及界面自己的端口身份。
 //
-// # 为什么它必须是一个独立的模块（2026-09-18）
+// # 为什么契约要下沉成叶子包
 //
-// 这些注册表原来长在 modules/cli 自己的 service 上。那让 cli 同时是两样东西：
-// **注册表的所有者**和**交互界面**（分派 + 渲染 + 进程生命周期）。于是依赖方向
-// 被锁死：
+// 界面（modules/cli）是个重包：它 import runtime（daemon/takeover/injection）、
+// gateway（forward/special/probe/…）和 breaker，因为它负责进程生命周期、数据面
+// 装配和一堆渲染。模块若为了拿到 `Command` 接口去 import 它，就等于把这些全拖进
+// 自己的依赖里，于是：
 //
-//	gateway / runtime / config ──Need──▶ cli        （为了注册自己的命令）
-//	cli ──Need──▶ runtime / config / breaker        （为了渲染与启动客户端）
+//   - 谁 import 了那个模块，就再也无法被 runtime / gateway 的**测试**引用
+//     —— 那两处的测试要造客户端描述符，一 import 就成环（实测：
+//     `runtime/launch` 与 `runtime/takeover` 的测试当场编译不过）；
+//   - gateway 注册不了自己的命令（`newgate st` 只能被迫写在界面里）。
 //
-// 两条边首尾相接就是**环**。后果不是「不优雅」，是具体的能力搬不动：
-// `newgate start`（runtime 的）、`newgate tier`（config 的）、`newgate probe`
-// （gateway 的）——**每一个想搬回自己模块的命令都搬不动**，因为那个模块一旦
-// Need(cli) 就与 cli 现有的 Need 成环。所以它们只能继续写在 cli 里，而 cli
-// 就继续认识它本不该认识的每一个模块。
+// 契约下沉之后，模块只 import 这个叶子包 + component + config，箭头是
+// `modules/* → cli/extension → config`，环就没有了。这与 gateway/api.go 把插件
+// 契约下沉到 gateway/special 是**同一条规矩**（docs/03-architecture.md §3）。
 //
-// 把注册表下沉成这个叶子模块之后，箭头变成：
+// # 账本在哪
 //
-//	所有模块 ──Need──▶ surface ◀──Need── cli
+// **账本（三本 Registry）在 modules/cli 自己的 service 上**，由它 Provide 出
+// Capability。模块拿到的是一组注册回调，界面在分派命令、渲染 status / doctor 时
+// 循环调用它们拿数据——界面**不 import 任何模块**，也不认识任何人。
 //
-// surface 没有任何业务依赖，所以谁都能依赖它；cli 回到「只是界面」——它依赖
-// surface 去分派与渲染，而**别人依赖 surface 而不是 cli**，环就没有了。
+// （2026-09-18 曾把账本挪进一个独立的 modules/surface 模块，那是多余的：它唯一
+// 买到的是「界面可以去依赖模块」的自由，而界面的目标恰恰是**不依赖任何人**。
+// 折回之后少一个模块、少一层概念，与「界面只提供注入点」的模型一致。）
 //
-// # 边界（这条是硬要求）
+// # 边界
 //
-// 本包只允许 import component 与 config/domain（都是轻的基础设施）。它一旦
-// 变重——尤其是一旦 import 了任何业务模块——上面那条「谁都能依赖它」立刻失效，
-// 环会原样回来。所以别把渲染、日志、HTTP 这些东西放进来：那些是 cli 的事。
-//
-// # 谁提供什么
-//
-// 本模块只拥有「贡献点」与账本，不拥有任何具体命令。命令由拥有那项能力的
-// 模块自己注册（`newgate st` 归 gateway、`newgate naked` 归 claudecode、
-// `newgate plugin` 归 plugin-manager）。cli 只负责分派与排版。
-package surface
+// 本包只允许 import component 与 config（都是轻的基础设施）。它一旦变重，
+// 上面那条「模块引得起」立刻失效。
+package extension
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
@@ -151,31 +148,39 @@ type Documented interface {
 	Help() HelpLine
 }
 
-// Surface 是这个模块对外提供的端口：模块往这里贡献，CLI 从这里取来分派与排版。
+// CLI 既是进程组合根最终调用的入口，也是模块注入自己那一份东西的端口。
 //
-// 为什么贡献必须是 Register 而不是让模块 Provide 一个「命令端口」：后者没有生命
+// 两件事共用一个接口是有意的：它们都是「界面这件事」的两面——外面把一次命令行
+// 调用交给它（Run），模块把自己的一部分挂到它上面（RegisterXxx）。分成两个端口
+// 只会让每个模块都要 Need 两次、而它们永远是同一个组件提供的。
+//
+// 为什么注入必须是 Register 而不是让模块 Provide 一个「命令端口」：后者没有生命
 // 周期。模块认领一个命令名之后没人能撤销它，也没人查重——两个模块认领同一个名字
-// 是静默先到先得（2026-09-17 实测）。走 Register 则每次贡献都拿到一个 Release，
-// 由贡献者自己在 Stop 时释放。
-type Surface interface {
-	// RegisterCommand 贡献一条命令。命令名（Names）是查重的逻辑键，撞名当场
+// 是静默先到先得（2026-09-17 实测）。走 Register 则每次注入都拿到一个 Release，
+// 由注入方自己在 Stop 时释放。
+//
+// **读侧不在这里**：命令账本、诊断、状态行都归界面自己，它直接读自己的 service，
+// 不需要经过接口。
+type CLI interface {
+	Run(args []string, build BuildInfo) int
+
+	// RegisterCommand 注入一条命令。命令名（Names）是查重的逻辑键，撞名当场
 	// 报错而不是先到先得。
 	RegisterCommand(Command) (modules.Release, error)
-	// RegisterDiagnostics 贡献一组 doctor 输出。诊断是可叠加的，没有键命名
-	// 空间，因此不查重，只记 token。
+	// RegisterDiagnostics 注入一组 doctor 输出。诊断可叠加，没有键命名空间，
+	// 因此不查重，只记 token。
 	RegisterDiagnostics(DiagnosticProvider) (modules.Release, error)
-	// RegisterStatus 贡献 `newgate status` 里的若干行，理由同 RegisterDiagnostics。
+	// RegisterStatus 注入 `newgate status` 里的若干行，理由同 RegisterDiagnostics。
 	RegisterStatus(StatusProvider) (modules.Release, error)
-
-	// Commands 当前全部命令（按注册顺序），供分派与 --help 组装。
-	Commands() []Command
-	// Lookup 按名字找一条命令。Names 里的每个别名都能命中。
-	Lookup(name string) (Command, bool)
-	// Diagnostics 收集全部模块的 doctor 输出。
-	Diagnostics() []Diagnostic
-	// Statuses 收集全部模块贡献的 status 行。
-	Statuses(*domain.State) []StatusLine
 }
 
-// Capability 是这一层的端口身份。模块用它注册自己的命令；CLI 用它取来分派。
-var Capability = modules.NewCapability[Surface]("surface")
+// BuildInfo 把链接期版本信息显式传入界面，避免模块读取可变全局构建状态。
+type BuildInfo struct {
+	Version    string
+	BuildTime  string
+	CommitTime string
+}
+
+// Capability 是界面的端口身份。模块用它注入自己的命令与状态行；进程组合根用它
+// 把这次调用交给界面。
+var Capability = modules.NewCapability[CLI]("cli")

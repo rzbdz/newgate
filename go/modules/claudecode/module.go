@@ -13,9 +13,9 @@ import (
 
 	modules "github.com/rzbdz/newgate/go/component"
 
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	gatewayapi "github.com/rzbdz/newgate/go/modules/gateway"
-	surface "github.com/rzbdz/newgate/go/modules/surface"
 	thinkingapi "github.com/rzbdz/newgate/go/modules/thinking"
 )
 
@@ -32,7 +32,7 @@ func New() modules.Component {
 			modules.Need(thinkingapi.Capability),
 			// 注册自己的命令（newgate naked）。依赖方向是**本模块 → cli**：
 			// cli 不认识任何业务模块，模块反过来认识它。
-			modules.Need(surface.Capability),
+			modules.Need(cliapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability,
@@ -71,7 +71,7 @@ func New() modules.Component {
 			releases = append(releases, release)
 
 			// 自己的命令自己贡献：cli 不认识本模块，是本模块认识 cli。
-			cli := modules.MustGet(ctx, surface.Capability)
+			cli := modules.MustGet(ctx, cliapi.Capability)
 			release, err = cli.RegisterCommand(nakedCommand{})
 			if err != nil {
 				return err

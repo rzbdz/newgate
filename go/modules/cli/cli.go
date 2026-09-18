@@ -75,7 +75,7 @@ func usageText(service *service) string {
 	contrib := map[string][]HelpLine{}
 	var extra []string
 	if service != nil {
-		for _, c := range service.ui.Commands() {
+		for _, c := range service.commands.All() {
 			doc, ok := c.(Documented)
 			if !ok {
 				continue
@@ -229,7 +229,7 @@ func run(service *service, args []string) int {
 	if _, ok := detectLaunch(service.agents, args); ok {
 		return cmdLaunch(service.runtime, service.agents, args)
 	}
-	if command, ok := service.ui.Lookup(args[0]); ok {
+	if command, ok := service.moduleCommand(args[0]); ok {
 		return command.Run(moduleCLIHost{}, args[1:])
 	}
 
