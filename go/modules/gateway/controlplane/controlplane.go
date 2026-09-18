@@ -166,18 +166,33 @@ func get(port int, path string, v interface{}) bool {
 }
 
 // Available 把 daemon 的全局熔断表冻结成一次命令内的一致快照：某条 binding 现在
-// 能不能用。daemon 不在线时不凭空判坏（ps == nil ⇒ 全部可用）——诊断退化为只看
-// 静态配置。
-func (d *Doc) Available() func(provider, model string) bool {
-	blocked := map[string]bool{}
+// 能不能用（第二个返回值是给用户看的理由）。daemon 不在线时不凭空判坏
+// （d == nil ⇒ 全部可用）——诊断退化为只看静态配置。
+//
+// **它是只读的近似，不是 daemon 里那个准入。** daemon 的 Admitter 有副作用
+// （冷却期满时发放「半开试探名额」，一个名额只放行一次真实请求），这里只按快照里
+// 的 Open 重建结论，既不发名额也不推进状态机。这个不一致是**刻意的**：
+// CLI 每敲一次 `newgate tier` 就跑一遍，绝不能烧掉正在飞的试探名额。见
+// docs/05-gateway.md。
+func (d *Doc) Available() func(provider, model string) (bool, string) {
+	blocked := map[string]string{}
 	if d != nil {
 		for _, b := range d.Breakers {
 			if b.Open {
-				blocked[b.Provider+"/"+b.Model] = true
+				reason := "熔断中"
+				if b.Reason != "" {
+					reason += "（" + b.Reason + "）"
+				}
+				blocked[b.Provider+"/"+b.Model] = reason
 			}
 		}
 	}
-	return func(provider, model string) bool { return !blocked[provider+"/"+model] }
+	return func(provider, model string) (bool, string) {
+		if reason, ok := blocked[provider+"/"+model]; ok {
+			return false, reason
+		}
+		return true, ""
+	}
 }
 
 // Rank 把 daemon 算好的排序键原样递给调用方。

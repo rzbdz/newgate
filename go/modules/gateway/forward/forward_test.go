@@ -18,10 +18,10 @@ import (
 
 	"context"
 
-	"github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
+	"github.com/rzbdz/newgate/go/modules/gateway/policy"
 )
 
 // 一段有代表性的 SSE：含 tool_call 分片、Unicode、空 data、大整数。
@@ -323,44 +323,56 @@ func TestErrorResponseByteFaithful(t *testing.T) {
 	}
 }
 
-// shapeTestDetector 是 forward 这一层的测试判据：认「点名了 reasoning_content
-// 又要求逐字回传」的 400。
+// shapeTestFilter 是 forward 这一层的测试策略：认「点名了 reasoning_content
+// 又要求逐字回传」的 400，并给它留一份现场。
 //
-// 为什么在 forward 的测试里自己写一条，而不是 import modules/deepseek 用它那条：
-// 转发路径**不认识任何上游**（这正是 2026-09-17 那次重构成立的理由——判据由
-// 上游模块注册，core 只读 Result.Shape 那个名字）。在单测里 import deepseek
-// 等于把刚拆掉的那条耦合从测试里接回去：真判据改了文案，这里会跟着红，而它
-// 红的原因跟 forward 的行为毫无关系。
+// 为什么在 forward 的测试里自己写一条，而不是 import modules/breaker 或
+// modules/deepseek：转发路径**不认识任何一位策略**（这正是 2026-09-18 倒置
+// 成立的理由——判据由知道那件事的模块注册进策略账本，core 只读 Verdict.Evidence
+// 里那几个不透明字符串）。在单测里 import deepseek 等于把刚拆掉的耦合从测试里
+// 接回去：真判据改了文案，这里会跟着红，而它红的原因跟 forward 的行为毫无关系。
 //
 // 分工是「测试跟着谁知道这件事走」：真判据的真值表在 modules/deepseek/shape_test.go，
-// 判据从模块 Start 一路接到转发路径的**接线**在 testing/system（真组件图 + 假
-// 上游）；这里只锁 forward 与健康表的契约——Shape 非空时它该做什么。
-type shapeTestDetector struct{}
+// breaker 把形状 400 翻成判决的真值表在 modules/breaker/plane_test.go，判据从
+// 模块 Start 一路接到转发路径的**接线**在 testing/system（真组件图 + 假上游）；
+// 这里只锁 forward 与账本的契约——Evidence 非空时它该做什么。
+type shapeTestFilter struct{}
 
-func (shapeTestDetector) Name() string { return "test-shape" }
+func (shapeTestFilter) Name() string { return "shape-test" }
+func (shapeTestFilter) Why() string  { return "forward 单测：认 reasoning 回传 400" }
 
-func (shapeTestDetector) Match(status int, body []byte) bool {
-	if status != 400 {
-		return false
+func (shapeTestFilter) Judge(o policy.Outcome) policy.Verdict {
+	if o.Kind != policy.RejectedStatus || o.Status != 400 {
+		return policy.Verdict{}
 	}
-	return bytes.Contains(body, []byte("reasoning_content")) &&
-		bytes.Contains(body, []byte("must be passed back"))
+	if !bytes.Contains(o.Body, []byte("reasoning_content")) ||
+		!bytes.Contains(o.Body, []byte("must be passed back")) {
+		return policy.Verdict{}
+	}
+	// 形状错误：不换站（这是链尾那一发）、不记账，但留痕。
+	return policy.Verdict{
+		Stop:     true,
+		Evidence: &policy.Evidence{Tag: "shape-400", Subject: "test-shape", Archive: true},
+	}
 }
 
-var _ breaker.ShapeDetector = shapeTestDetector{}
+func (shapeTestFilter) Observe(policy.Outcome) {}
 
-// TestShapeErrorIsCountedThenLoggedWithEvidence 锁住转发路径对「形状错误」的
-// 全部义务。健康表说是形状错误（Result.Shape 非空）之后，forward 要：
+// TestShapeErrorIsCountedThenLoggedWithEvidence 锁住转发路径对「要留痕的结局」
+// 的全部义务。策略给出 Evidence 之后，forward 要：
 //
 //  1. 原样透传上游原文（不静默，客户端看到的就是上游说的）；
-//  2. 不把它记成可用性失败——binding 必须还在链上；
-//  3. 日志里打出**是哪条判据**认的，外加一行「现场已存档」；
-//  4. 现场落进 dump/shape-400-<判据>/（专用目录，不参与 req-*/err-* 的滚动清理）。
+//  2. 日志里打出**标记**（`[shape-400]`）与**是谁认领的**；
+//  3. 外加一行「现场已存档」；
+//  4. 现场落进 dump/<标记>-<判据>/（专用目录，不参与 req-*/err-* 的滚动清理）。
 //
 // 现场动机（2026-09-17，health.json + 日志）：deepseek-flash 的这条 400 被当成
 // 可用性失败记进熔断器，连续两发就把一条本来能用的 binding 摘掉；而 probe 一直
 // 绿——探活发的是最小请求，触发不到「思考模式要求逐字回传」。摘要写得明确：
 // 「同一份 body 换哪个 provider 都一样错」的问题不该记在任何一家的账上。
+//
+// 记账那半边（形状 400 不进可用性账本）现在是 breaker 的判决，在
+// modules/breaker/plane_test.go 与 testing/system 里验；这里只验数据面的义务。
 func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
 	sandboxState(t, `{"port": 0}`)
 	metrics.Default.Reset()
@@ -377,8 +389,8 @@ func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
 	}))
 	defer up.Close()
 
-	// 单站链（IsLast）：形状错误会继续沿链试，只有链尾那一发才走「定案」分支，
-	// 也就是打专属日志、存实地证据的那条路径。多站链测不到它。
+	// 单站链（IsLast）：只有链尾那一发才走「定案」分支，也就是打专属日志、
+	// 存实地证据的那条路径。多站链测不到它。
 	testChain = func(role string) []resolve.Step {
 		return []resolve.Step{{Profile: "ds",
 			Binding:  domain.Binding{Provider: "ds-shape", Model: "deepseek-flash"},
@@ -387,13 +399,13 @@ func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
 	defer func() { testChain = nil }()
 
 	srv, logBuf := newLoggingTestServer()
-	if _, err := srv.Health.RegisterShapeDetector(shapeTestDetector{}); err != nil {
-		t.Fatalf("注册判据: %v", err)
+	if _, err := srv.Filters.Register(shapeTestFilter{}); err != nil {
+		t.Fatalf("注册策略: %v", err)
 	}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
-	// 连发 3 次——可用性账本的阈值是 2，没有判据时第二发就该摘牌了。
+	// 连发 3 次：判决恒定，所以每一发都该留下同一份现场。
 	for i := 0; i < 3; i++ {
 		resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
 			strings.NewReader(`{"model":"newgate/heavy"}`))
@@ -412,20 +424,14 @@ func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
 	if hits != 3 {
 		t.Fatalf("上游被打了 %d 次, want 3", hits)
 	}
-	if !srv.Health.Available("ds-shape", "deepseek-flash") {
-		t.Error("形状 400 把熔断器打开了——这类错误不该记进可用性账本")
-	}
-	for _, s := range srv.Health.Snapshot() {
-		if s.Provider != "ds-shape" {
-			continue
-		}
-		if s.ShapeSkips != 3 || s.Fails != 0 || s.Open {
-			t.Errorf("形状错误应当只计数: %+v", s)
-		}
+	// 不算在任何一条 binding 头上：判决没给 Attribute，计数就不该动。
+	if n := atomic.LoadUint64(&srv.failures); n != 0 {
+		t.Errorf("要留痕但不算账的结局把 failures 加了 %d 次", n)
 	}
 
-	// 判据名必须进日志：形状判据是多家上游各自的，只说「命中了形状错误」在
-	// 有两家同时报 400 时毫无用处。转发路径不认识那些字符串，名字是它唯一的线索。
+	// 标记与判据名必须进日志：形状判据是多家上游各自的，只说「命中了形状错误」
+	// 在有两家同时报 400 时毫无用处。转发路径不认识那些字符串，名字是它唯一的
+	// 线索——所以它只能原样打出来。
 	logs := logBuf.String()
 	if !strings.Contains(logs, "[shape-400]") || !strings.Contains(logs, "判据 test-shape") {
 		t.Errorf("日志没有说清是被哪条判据认下的:\n%s", logs)
@@ -434,11 +440,12 @@ func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
 		t.Errorf("证据没落盘（这类 400 偶发又致命，丢了就复现不了）:\n%s", logs)
 	}
 
-	// 证据落进专用目录，名字取自判据 → 加一条新判据自动多一个目录，转发路径不改。
+	// 证据落进专用目录，名字取自标记 + 判据 → 换一位策略自动多一个目录，
+	// 转发路径不改。
 	dir := filepath.Join(os.Getenv("NEWGATE_HOME"), "dump", "shape-400-test-shape")
 	ents, err := ioutil.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("读证据目录 %s: %v（形状 400 的现场必须单独存档）", dir, err)
+		t.Fatalf("读证据目录 %s: %v（这类现场必须单独存档）", dir, err)
 	}
 	if len(ents) == 0 {
 		t.Fatalf("证据目录 %s 是空的", dir)
@@ -450,47 +457,51 @@ func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
 	}
 }
 
-// TestShapeDirNameIsPathSafe：判据名会进文件路径，而判据是**别的模块**注册进来
-// 的代码——不设防就等于让一个注册项决定往哪写文件。
+// TestShapeDirNameIsPathSafe：标记与判据名都会进文件路径，而它们都来自**别的
+// 模块**注册进来的策略——不设防就等于让一个注册项决定往哪写文件。
 func TestShapeDirNameIsPathSafe(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"deepseek", "shape-400-deepseek"},
-		{"a.b_c-1", "shape-400-a.b_c-1"},
-		{"../escape", "shape-400-.._escape"},
-		{"a/b", "shape-400-a_b"},
-		{"", "shape-400-unknown"},
-		{"中文", "shape-400-__"},
+	tests := []struct{ tag, subject, want string }{
+		{"shape-400", "deepseek", "shape-400-deepseek"},
+		{"shape-400", "a.b_c-1", "shape-400-a.b_c-1"},
+		{"shape-400", "../escape", "shape-400-.._escape"},
+		{"../x", "deepseek", ".._x-deepseek"},
+		{"shape-400", "a/b", "shape-400-a_b"},
+		{"shape-400", "", "shape-400-unknown"},
+		{"", "deepseek", "shape-deepseek"},
+		{"shape-400", "中文", "shape-400-__"},
 	}
 	for _, tt := range tests {
-		if got := shapeDirName(tt.in); got != tt.want {
-			t.Errorf("shapeDirName(%q) = %q, want %q", tt.in, got, tt.want)
+		if got := shapeDirName(tt.tag, tt.subject); got != tt.want {
+			t.Errorf("shapeDirName(%q, %q) = %q, want %q", tt.tag, tt.subject, got, tt.want)
 		}
 	}
-	// 结果里绝不能出现分隔符：路径拼接的反面教材是「上游说了算的字符串」。
+	// 结果里绝不能出现分隔符：路径拼接的反面教材是「策略说了算的字符串」。
 	for _, name := range []string{"../x", "a/b", "a\\b"} {
-		if got := shapeDirName(name); strings.ContainsAny(got, `/\`) {
-			t.Errorf("shapeDirName(%q) = %q 仍然带路径分隔符", name, got)
+		for _, got := range []string{shapeDirName(name, "d"), shapeDirName("shape-400", name)} {
+			if strings.ContainsAny(got, `/\`) {
+				t.Errorf("shapeDirName 出来 %q 仍然带路径分隔符", got)
+			}
 		}
 	}
 }
 
-// TestOtherClientErrorDoesNotBlameTheProvider 是上一条的对照组，锁住这条政策
-// 的另一侧：**任何** 400 都不记在这家上游头上，不管我们的形状检测器认不认得它。
+// TestOtherClientErrorDoesNotBlameTheProvider 锁住**最小系统**那一侧：账本上
+// 一张纸条都没有时，数据面对 400 的全部动作就是**原样转达**——不换站、不记账、
+// 不留痕、不写证据。
 //
 // 这条测试 2026-09-17 的方向是反的（当时断言「非形状 400 连发两次必须开闸」，
 // 理由是「schema 真坏的 provider 否则永远摘不掉」）。翻转它的理由：
 //
-//   - 400 的含义就是「你这份请求不对」，而形状检测器只是几条字符串匹配，认不
-//     出来不等于问题在上游——按认不出来的 400 摘牌，等于让一个补丁的盲区决定
-//     摘谁，正好是 2026-09-17 那次 reasoning 回传 400 事故的形状；
-//   - 现在摘牌会自己回来（半开 + 退避），但代价不对称：误摘一次要等 60s 起
-//     步、最多 10 分钟才回到链上，期间用户的请求被悄悄换给了别的模型；
+//   - 400 的含义就是「你这份请求不对」，而这到底是上游的错还是请求的错，**不是
+//     数据面能下的结论**；按 400 摘牌等于让一个补丁的盲区决定摘谁，正好是
+//     2026-09-17 那次 reasoning 回传 400 事故的形状；
 //   - 「这家上游根本不通」不是被动路径能下的结论，`newgate probe` 才是权威
 //     手段：探活发的是最小合法请求，base 错/版本错的 provider 会当场被 probe
 //     摘掉，而它永远不会因为用户某一轮的对话形状被误判。
 //
-// 结论：被动路径只认「明确是上游的错」的收场，4xx 的歧义交给 fallback_on_400
-// 去表达（要不要换个上游试试），而不是交给记账。
+// 判断这条 400 算谁的账、要不要留痕，是**策略**的事（今天那一份在
+// modules/breaker/plane.go 的 Judge 里，真值表在同目录的 plane_test.go）。
+// 数据面的义务只有一条：把事实如实报出去，然后照判决执行。
 func TestOtherClientErrorDoesNotBlameTheProvider(t *testing.T) {
 	schemaErr := `{"error":{"message":"Invalid schema: missing required field 'name'"}}`
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -507,7 +518,7 @@ func TestOtherClientErrorDoesNotBlameTheProvider(t *testing.T) {
 	}
 	defer func() { testChain = nil }()
 
-	srv := newTestServer()
+	srv, logBuf := newLoggingTestServer()
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -523,23 +534,66 @@ func TestOtherClientErrorDoesNotBlameTheProvider(t *testing.T) {
 			t.Fatalf("第 %d 发应原样透传 400 与上游原文，得到 %d %q", i+1, resp.StatusCode, got)
 		}
 	}
-	if !srv.Health.Available("schema-bad", "real-model-1") {
-		t.Error("非形状 400 把这条 binding 摘掉了——400 不该记在上游头上")
+	if n := atomic.LoadUint64(&srv.failures); n != 0 {
+		t.Errorf("最小系统把 %d 发 400 记成了上游失败——没有策略就没有判决，内核默认不记账", n)
 	}
-	for _, s := range srv.Health.Snapshot() {
-		if s.Provider == "schema-bad" && (s.Fails > 0 || s.ShapeSkips > 0 || s.Open) {
-			t.Errorf("非形状 400 进账本了: %+v", s)
-		}
+	if logs := logBuf.String(); strings.Contains(logs, "现场已存档") {
+		t.Errorf("没人要现场，数据面却存了：\n%s", logs)
+	}
+}
+
+// TestMinimalSystemForwardsEveryOutcomeToNobody 断言「最小系统」是可用的：
+// 策略账本为空时，成功的转发照常发生（可用性全放行、按机制换站、不记账）。
+//
+// 这条守着 policy 的兜底方向。四个决策点的内核默认分别是「全部候选可用」
+// 「响应没开始写且还有下一站就继续」「控制面少一节」「无事可做」——任何一处
+// 写反了（比如默认不让候选进链），网关就变成了「没装熔断器就一个请求都发不出去」，
+// 而那是比熔断器坏掉严重得多的故障。
+func TestMinimalSystemForwardsEveryOutcomeToNobody(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer up.Close()
+
+	testChain = func(role string) []resolve.Step {
+		return []resolve.Step{{Profile: "test",
+			Binding:  domain.Binding{Provider: "p", Model: "real-model-1"},
+			Provider: testProvider(up.URL)}}
+	}
+	defer func() { testChain = nil }()
+
+	srv := newTestServer()
+	if !srv.Filters.Empty() {
+		t.Fatal("newTestServer 应该给一本空账（最小系统）")
+	}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(`{"model":"newgate/heavy"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	got, _ := ioutil.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || string(got) != `{"ok":true}` {
+		t.Fatalf("最小系统转发失败: %d %q", resp.StatusCode, got)
 	}
 }
 
 // TestClientCancelDuringConnectDoesNotBurnTheChain 断言：客户端在**连接阶段**
-// 就取消时，不沿链重试、不记失败、不开熔断。
+// 就取消时，不沿链重试、不记失败、**也不把这一发交给任何策略**。
 //
 // 现场是这么坏的（10.0.50.11 的日志）：一次取消被当成 smt-claude 连接失败，
 // 沿链换 smt-deepseek——可 context 已经死了，于是每个候选都瞬间失败，一次
 // ESC 把整条链上三个 provider 的熔断器全打开。之后真正的请求没候选可用，
 // 回 502，用户根本查不到源头。
+//
+// 「不交给策略」是这轮倒置之后新加的一层保险：旧实现里数据面自己判断
+// 「这不是上游的错」，于是取消**压根不会**走到记账那一步。倒置之后判断权在
+// 策略手里，万一哪个策略把 ConnectionFailed 一律算账，取消就又能烧链了——
+// 所以数据面干脆不报：对面已经没人接了，这一发没有任何人需要知道。
 func TestClientCancelDuringConnectDoesNotBurnTheChain(t *testing.T) {
 	hit := make(chan string, 8)
 	// 上游装死：收到请求就挂住。上限兜底，免得断言失败时整个测试卡死。
@@ -567,6 +621,14 @@ func TestClientCancelDuringConnectDoesNotBurnTheChain(t *testing.T) {
 	defer func() { testChain = nil }()
 
 	srv := newTestServer()
+	watcher := newScriptedFilter()
+	// 一律算账——模拟「最贪心」的策略。数据面必须连问都不问它。
+	watcher.verdict = func(policy.Outcome) policy.Verdict {
+		return policy.Verdict{Attribute: true}
+	}
+	if _, err := srv.Filters.Register(watcher); err != nil {
+		t.Fatal(err)
+	}
 	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
 	defer front.Close()
 
@@ -600,12 +662,13 @@ func TestClientCancelDuringConnectDoesNotBurnTheChain(t *testing.T) {
 		t.Fatalf("客户端都取消了还沿链重试了下一个候选（%s）", p)
 	default:
 	}
-	for _, p := range provs {
-		if !srv.Health.Available(p, "real-model-1") {
-			t.Errorf("provider %s 被一次客户端取消打开了熔断器", p)
-		}
-	}
 	if n := atomic.LoadUint64(&srv.failures); n != 0 {
 		t.Errorf("客户端取消被记成了 %d 次上游失败", n)
+	}
+	// 关键：取消压根不该出现在任何策略的输入里。
+	for _, o := range watcher.seen() {
+		t.Errorf("客户端取消被当成 %q 报给了策略（%s）——对面已经没人接了，"+
+			"这一发没有任何人需要知道，报出去就等于把「一次 ESC 烧掉整条链」的"+
+			"判断权交给了策略", o.Kind, o.Binding)
 	}
 }

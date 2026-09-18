@@ -12,17 +12,23 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 
 	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
+	"github.com/rzbdz/newgate/go/modules/gateway/policy"
 	"github.com/rzbdz/newgate/go/modules/gateway/quirk"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
-type port struct{ registry *special.Registry }
+type port struct {
+	registry *special.Registry
+	// filters 是数据面策略的账本。它**不装在 port 自己身上给外面看**——
+	// Gateway 接口只暴露 RegisterFilter，读侧只有 forward.Server（Serve 期）
+	// 和 handleStatus 用到。
+	filters *policy.Registry
+}
 
 var _ Gateway = (*port)(nil)
 
@@ -35,17 +41,15 @@ var _ Gateway = (*port)(nil)
 // Optional 而不是 Need 是必须的——网关不该因为「没装界面」起不来；而点击进界面
 // 的那条边是**排序边**，保证本模块的 Start 跑的时候界面已经就绪。
 func New() modules.Component {
-	port := &port{registry: special.NewRegistry()}
+	port := &port{registry: special.NewRegistry(), filters: policy.New()}
 	var restore func()
+	var restoreFilters func()
 	var releases []modules.Release
 	return modules.Component{
 		Name: "gateway",
 		Type: "gateway",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
-			// 数据面要把健康表交给转发服务（forward.New 的第四个参数），
-			// 守护进程主循环也归本模块（见 serve.go）。
-			modules.Need(breakerapi.Capability),
 			// ui 是**弱依赖**（见 component.Optional）：`newgate st` / `metrics` /
 			// `probe` 是本层的用户界面，装着界面就挂上去，没装就跳过——网关本身
 			// 照常工作，只是没有入口。界面不依赖本模块（它没有任何出边），所以这
@@ -68,6 +72,12 @@ func New() modules.Component {
 
 			restore = special.InstallDefault(port.registry)
 
+			// 数据面的策略账本也装成默认：起数据面的地方有两处（守护进程主循环
+			// 走包内字段，testing/system 走这个入口），不装的话后者会自己 New()
+			// 一本空账，把「贡献者真的接进数据面了吗」这类回归变成空转——那条
+			// 形状判据的测试 2026-09-17 就是这么空转掉的。
+			restoreFilters = policy.InstallDefault(port.filters)
+
 			// ui 是**弱依赖**（见 component.Optional）：没装任何 ui 时这些命令就没有
 			// 入口，但网关功能照常——本模块不依赖 ui 存在。
 			cli, ok := modules.Get(ctx, cliapi.Capability)
@@ -80,8 +90,9 @@ func New() modules.Component {
 				// 都是网关的语义（见 command_metrics.go / command_probe.go）。
 				metricsCommand{}, probeCommand{}, logsCommand{},
 				// 守护进程本体：`newgate __serve`。它以前是界面的命令，但它跑的
-				// 是数据面（见 serve.go）。
-				serveCommand{health: modules.MustGet(ctx, breakerapi.Capability)},
+				// 是数据面（见 serve.go）。策略账本原样递进去——**这一层不认识
+				// 任何一位策略**，谁插进来由各自的 Start 决定。
+				serveCommand{filters: port.filters},
 			} {
 				release, err := cli.RegisterCommand(cmd)
 				if err != nil {
@@ -108,6 +119,9 @@ func New() modules.Component {
 		},
 		Stop: func(context.Context) error {
 			err := modules.ReleaseAll(releases)
+			if restoreFilters != nil {
+				restoreFilters()
+			}
 			if restore != nil {
 				restore()
 			}
@@ -122,4 +136,14 @@ func (p *port) Quirks() *quirk.Table { return quirk.Default }
 // RegisterRequestHook 把插件注册限制在 gateway owner 内部，并把撤销权交还调用组件。
 func (p *port) RegisterRequestHook(hook Plugin) (modules.Release, error) {
 	return p.registry.Register(hook)
+}
+
+// RegisterFilter 让策略把决策逻辑插进数据面的四个决策点。
+//
+// 这是**唯一的插入口**：数据面 handler、内部 registry、以及「谁插进来了」这件事
+// 都不越过这个接口。所以 gateway 可以完全不认识 breaker，而 breaker 只要声明
+// Need(gateway) 就能把自己的状态机挂上去。形状与 RegisterRequestHook 并列，理由
+// 见 modules/gateway/policy 的包注释。
+func (p *port) RegisterFilter(f Filter) (modules.Release, error) {
+	return p.filters.Register(f)
 }

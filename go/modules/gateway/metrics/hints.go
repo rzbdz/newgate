@@ -14,6 +14,11 @@ import (
 // `newgate metrics` 是那一屏表格的**排版者**，它不该知道 "chain.failover"
 // 是什么——2026-09-18 之前那张表硬编码在 modules/cli/diag.go 里，于是改一个
 // 计数器名要同时改两处，而 CLI 那处根本不知道自己在改什么。
+//
+// **这张表只覆盖数据面自己的计数器。** 别人的计数器由别人自报：调用方先问
+// 策略账本（policy.Registry.MetricGroup），没人认领才落到这里。`breaker.*`
+// 那三行 2026-09-18 就是这么搬回 modules/breaker 的——熔断器打开意味着什么，
+// 不该由这个包解释。
 func Group(k string) string {
 	switch {
 	case strings.HasPrefix(k, "requests."):
@@ -24,8 +29,6 @@ func Group(k string) string {
 		return "超时"
 	case strings.HasPrefix(k, "client."):
 		return "客户端"
-	case strings.HasPrefix(k, "breaker."):
-		return "熔断"
 	case strings.HasPrefix(k, "special."):
 		return "插件"
 	case strings.HasPrefix(k, "count_tokens."):
@@ -36,8 +39,9 @@ func Group(k string) string {
 
 // Hint 返回计数器名字的人话注释。没列出的不硬凑——空说明比编一句好。
 //
-// `special.*` 一族由插件自己在注册时声明（special.MetricProvider）：那个名字里
-// 带插件名，只有插件知道那一笔业务上意味着什么。
+// 同 Group：只有数据面自己的计数器在这里，别人的由贡献者经 MetricNamer 自报。
+// `special.*` 一族也是自报的（special.MetricProvider）——那个名字里带插件名，
+// 只有插件知道那一笔业务上意味着什么。
 func Hint(k string) string {
 	switch {
 	case k == "requests.total":
@@ -62,12 +66,6 @@ func Hint(k string) string {
 		return "链总预算用尽"
 	case k == "client.cancel":
 		return "客户端主动取消"
-	case k == "breaker.opened":
-		return "熔断器打开，provider 暂时摘除"
-	case k == "breaker.spared":
-		return "形状错误被宽恕，熔断器不予记账"
-	case k == "breaker.skipped.shape_error":
-		return "请求形状错误（400 被某个形状判据认领，如 deepseek 的 reasoning 回传校验），跳过熔断记账"
 	case strings.HasPrefix(k, "special."):
 		if hint, ok := special.MetricHint(k); ok {
 			return hint

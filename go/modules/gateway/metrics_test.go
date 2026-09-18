@@ -3,11 +3,11 @@ package gateway
 import (
 	"testing"
 
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
+	"github.com/rzbdz/newgate/go/modules/breaker/status"
 )
 
 func TestModelScoreLineShowsEveryObservedBucket(t *testing.T) {
-	status := breakerapi.Status{
+	status := status.Status{
 		Scores:  [4]int{1200, 3400, 0, 9100},
 		Buckets: [4]int{2, 3, 0, 1},
 		Samples: 6,
@@ -21,18 +21,18 @@ func TestModelScoreLineShowsEveryObservedBucket(t *testing.T) {
 }
 
 func TestModelHealthStateSeparatesLaggyAndUnavailable(t *testing.T) {
-	laggy := breakerapi.Status{Open: true, Grade: breakerapi.ProbeLaggy}
+	laggy := status.Status{Open: true, Grade: status.ProbeLaggy}
 	if got := modelHealthState(laggy); got != "卡顿" {
 		t.Fatalf("laggy state = %q", got)
 	}
-	unavailable := breakerapi.Status{Open: true, Grade: breakerapi.ProbeUnavailable}
+	unavailable := status.Status{Open: true, Grade: status.ProbeUnavailable}
 	if got := modelHealthState(unavailable); got != "不可用" {
 		t.Fatalf("unavailable state = %q", got)
 	}
 }
 
 func TestSubMillisecondSampleIsStillScored(t *testing.T) {
-	status := breakerapi.Status{Buckets: [4]int{2}, Samples: 2}
+	status := status.Status{Buckets: [4]int{2}, Samples: 2}
 	if got := modelHealthState(status); got != "流畅" {
 		t.Fatalf("sub-millisecond sample state = %q", got)
 	}

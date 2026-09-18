@@ -20,12 +20,12 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/modules/breaker/status"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
+	"github.com/rzbdz/newgate/go/modules/gateway/policy"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
@@ -93,13 +93,13 @@ func runMetrics(host cliapi.Host) int {
 		})
 		lastGroup := ""
 		for _, k := range keys {
-			g := metrics.Group(k)
+			g := metricGroup(k)
 			label := style.Dim(g)
 			if g == lastGroup {
 				label = ""
 			}
 			lastGroup = g
-			t.Row(label, k, fmt.Sprintf("%d", counter[k]), style.Dim(metrics.Hint(k)))
+			t.Row(label, k, fmt.Sprintf("%d", counter[k]), style.Dim(metricHint(k)))
 		}
 		fmt.Print(style.Section("请求计数") + "\n")
 		fmt.Print(t.String())
@@ -185,7 +185,7 @@ func printModelHealth(ps *controlplane.Doc) {
 	}
 }
 
-func healthDisplayRank(h breakerapi.Status) int {
+func healthDisplayRank(h status.Status) int {
 	switch modelHealthState(h) {
 	case "流畅":
 		return 0
@@ -205,10 +205,10 @@ func healthDisplayRank(h breakerapi.Status) int {
 //
 // 档位名与阈值来自 breaker/status（**只有一份**，2026-09-18）：这里曾经自己
 // 抄了一份 3000/12000，与 breaker 的排序阈值各自演化。
-func modelHealthState(h breakerapi.Status) string {
+func modelHealthState(h status.Status) string {
 	if h.Open {
 		score, sampled := modelDisplayScore(h)
-		if h.Grade == breakerapi.ProbeLaggy || status.Grade(score, sampled) == status.LatencySlow {
+		if h.Grade == status.ProbeLaggy || status.Grade(score, sampled) == status.LatencySlow {
 			return "卡顿"
 		}
 		return "不可用"
@@ -217,7 +217,7 @@ func modelHealthState(h breakerapi.Status) string {
 	return status.Grade(score, sampled).String()
 }
 
-func modelScoreLine(h breakerapi.Status) string {
+func modelScoreLine(h status.Status) string {
 	const labels = "≤4K,≤32K,≤128K,>128K"
 	names := strings.Split(labels, ",")
 	var scores []string
@@ -243,7 +243,7 @@ func modelScoreLine(h breakerapi.Status) string {
 	return modelHealthState(h) + " · " + strings.Join(scores, " · ")
 }
 
-func modelDisplayScore(h breakerapi.Status) (int, bool) {
+func modelDisplayScore(h status.Status) (int, bool) {
 	for i, n := range h.Buckets {
 		if n > 0 {
 			return h.Scores[i], true
@@ -252,10 +252,37 @@ func modelDisplayScore(h breakerapi.Status) (int, bool) {
 	return h.ScoreMs, h.ScoreMs > 0
 }
 
+// metricGroup 问一个计数器归哪一组：**先问数据面的策略账本，没人认领才落到
+// 数据面自己的通用表**。
+//
+// 为什么是这个顺序：计数器的归属跟着「谁写下它」走。`breaker.opened` 是策略
+// 写下的（判决里带回来的 Metrics），所以「熔断」这个组名与那三行说明由策略
+// 自己给（见 modules/breaker/plane.go 的 MetricGroup/MetricHint）；`chain.*`
+// 是数据面自己 Inc 的，归 gateway/metrics。2026-09-18 之前 breaker 那三行硬编码
+// 在 metrics/hints.go 里——把「熔断器打开意味着什么」的解释权放在了一个不认识
+// 熔断器的包里。
+//
+// 这里问的是**本进程**装出来的那本账（policy.Default()）。CLI 的进程里组件图
+// 是照常装配的（命令是分派器在 Serve 期调的），所以 breaker 已经在账本上了。
+func metricGroup(k string) string {
+	if g := policy.Default().MetricGroup(k); g != "" {
+		return g
+	}
+	return metrics.Group(k)
+}
+
+// metricHint 同上，取计数器名字的人话说明。
+func metricHint(k string) string {
+	if h := policy.Default().MetricHint(k); h != "" {
+		return h
+	}
+	return metrics.Hint(k)
+}
+
 // metricRank 表格里的分组顺序。**顺序**是排版决定，留在 CLI；**归属**是数据面
 // 知识，归 modules/gateway/metrics（见那边的 Group）。
 func metricRank(k string) int {
-	g := metrics.Group(k)
+	g := metricGroup(k)
 	for i, name := range metricOrder {
 		if name == g {
 			return i
@@ -265,8 +292,8 @@ func metricRank(k string) int {
 }
 
 // healthFromProxy 把 daemon 的熔断表按 "provider/model" 索引成一次命令内的快照。
-func healthFromProxy(ps *controlplane.Doc) map[string]breakerapi.Status {
-	out := map[string]breakerapi.Status{}
+func healthFromProxy(ps *controlplane.Doc) map[string]status.Status {
+	out := map[string]status.Status{}
 	if ps != nil {
 		for _, s := range ps.Breakers {
 			out[s.Provider+"/"+s.Model] = s

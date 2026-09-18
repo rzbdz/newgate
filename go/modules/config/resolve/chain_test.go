@@ -235,11 +235,16 @@ func TestExcludedNotAutoSelected(t *testing.T) {
 
 // ---------- 过滤器 ----------
 
-func TestBreakerFiltersStep(t *testing.T) {
+func TestUnavailableFilterFiltersStep(t *testing.T) {
 	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{"h": list("pA/m1", "pB/m2")}}}
 	steps, skips := BuildChain("h", ps, mkProvs("pA", "pB"), Opts{
-		Active:    "a",
-		Available: func(p, _ string) bool { return p != "pA" },
+		Active: "a",
+		Available: func(p, _ string) (bool, string) {
+			if p == "pA" {
+				return false, "熔断中"
+			}
+			return true, ""
+		},
 	})
 	eq(t, names(steps), "a:pB/m2")
 	if len(skips) == 0 || !strings.Contains(skips[0].Reason, "熔断") {
@@ -376,13 +381,18 @@ func TestOverrideChainFallsBackOnMissingKey(t *testing.T) {
 	}
 }
 
-func TestOverrideChainFallsBackOnBreaker(t *testing.T) {
+func TestOverrideChainFallsBackWhenUnavailable(t *testing.T) {
 	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{"light": one("pA", "m1")}}}
 	steps, _, applied := OverrideChain("classifier_override",
 		domain.Binding{Provider: "pC", Model: "m3"},
 		"light", ps, mkProvs("pA", "pC"), Opts{
-			Active:    "a",
-			Available: func(p, _ string) bool { return p != "pC" },
+			Active: "a",
+			Available: func(p, _ string) (bool, string) {
+				if p == "pC" {
+					return false, "熔断中"
+				}
+				return true, ""
+			},
 		})
 	eq(t, names(steps), "a:pA/m1")
 	if applied {

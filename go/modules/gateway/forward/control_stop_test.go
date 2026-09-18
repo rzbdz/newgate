@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rzbdz/newgate/go/modules/breaker"
 	"time"
 )
 
@@ -26,7 +25,7 @@ func TestControlStop(t *testing.T) {
 	_ = ioutil.WriteFile(filepath.Join(dir, "state.json"),
 		[]byte(`{"default_profile":"ds","port":1,"control_token":"`+tok+`"}`), 0o600)
 
-	srv := New(0, nil, nil, breaker.NewTable())
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		srv.handleControlStop(w, r)
 	}))
@@ -93,7 +92,7 @@ func TestControlStopNoToken(t *testing.T) {
 	_ = ioutil.WriteFile(filepath.Join(dir, "state.json"),
 		[]byte(`{"default_profile":"ds","port":1}`), 0o600)
 
-	srv := New(0, nil, nil, breaker.NewTable())
+	srv := newTestServer()
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		srv.handleControlStop(w, r)
 	}))
