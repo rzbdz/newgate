@@ -1,8 +1,8 @@
 package domain
 
 import (
-	"sort"
 	"strings"
+	"sync/atomic"
 )
 
 // ExtraRole 框架之外的**动态角色键**——由模块贡献，core 不认识具体是谁。
@@ -40,22 +40,55 @@ var builtinAliases = []ExtraRole{{
 	Meta: map[string]string{"why": "四档化（2026-09-16）的向下兼容：没写 normal 的老配置等价于 mid"},
 }}
 
-var extraRoles []ExtraRole
+// extraRoles 模块贡献的动态角色键，**原子换页**。
+//
+// 它同时被两个协程摸，所以不能是一个裸的包级切片：
+//
+//	写：daemon 的配置 watcher 协程，每秒一次（store.Reload → store.Load →
+//	    roleprov.Refresh → SetExtraRoles）；config/diagnostics.go 也会调。
+//	读：请求协程（resolve.BuildChain → CandidatesFor → DefaultBindingFor →
+//	    ExtraRoleOf），凡是请求里带了动态角色键的每一发都走这条读路径。
+//
+// 2026-09-18 之前它就是一句裸赋值，`-race` 实测 12 次命中。而且后果不只是
+// 「读到旧值」：slice header 是三个机器字（指针 + len + cap），并发读写会读到
+// **撕裂的头**——新指针配旧长度，`range` 于是越界遍历，轻则把垃圾当成已知角色键
+// 解析出错误绑定，重则 panic 在请求协程里。这个仓库整个转发路径是 fail-open 的，
+// 请求协程里 panic 恰好是最坏的那种失败。
+//
+// 为什么是 atomic.Pointer 而不是 mutex：读者在转发热路径上，写者每秒才一次。
+// 这与 store.Watcher 处理整个配置快照的方式同构（`cur atomic.Value` + 原子换页）
+// ——写少读多、读侧零锁零拷贝。
+var extraRoles atomic.Pointer[[]ExtraRole]
 
-// SetExtraRoles 灌入模块贡献的动态角色键。启动时调一次（见
-// runtime/roleprov.Refresh）；传 nil 回到「只有内置别名」。
+// SetExtraRoles 灌入模块贡献的动态角色键。启动时与每次配置重载时调（见
+// store.Load）；传 nil 回到「只有内置别名」。
+//
+// 拷一份再存：调用方（roleprov.Refresh）的切片可能被它自己复用，而读者拿到
+// 的那份必须永不改写——换页之后谁都不许再碰旧切片，这是无锁读的前提。
 func SetExtraRoles(rs []ExtraRole) {
-	extraRoles = rs
+	snapshot := make([]ExtraRole, len(rs))
+	copy(snapshot, rs)
+	extraRoles.Store(&snapshot)
+}
+
+// contributedRoles 当前模块贡献的键（没有就是空）。热路径读，无锁、无拷贝
+// ——返回值是只读的，谁都不许改它（见 SetExtraRoles）。
+func contributedRoles() []ExtraRole {
+	if p := extraRoles.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // ExtraRoles 当前全部动态角色键（内置别名在前，模块的按 key 排序在后）。
 func ExtraRoles() []ExtraRole {
-	out := make([]ExtraRole, 0, len(builtinAliases)+len(extraRoles))
+	mods := contributedRoles()
+	out := make([]ExtraRole, 0, len(builtinAliases)+len(mods))
 	out = append(out, builtinAliases...)
-	mods := make([]ExtraRole, len(extraRoles))
-	copy(mods, extraRoles)
-	sort.Slice(mods, func(i, j int) bool { return mods[i].Key < mods[j].Key })
-	return append(out, mods...)
+	// 模块那份已经在 Refresh 里排过序了，这里不再排——但它是共享的只读切片，
+	// 所以**必须**拷出来，不能直接 append 给调用方。
+	out = append(out, mods...)
+	return out
 }
 
 // ExtraRoleOf 这个键是不是动态角色键。
@@ -65,7 +98,7 @@ func ExtraRoleOf(key string) (ExtraRole, bool) {
 			return r, true
 		}
 	}
-	for _, r := range extraRoles {
+	for _, r := range contributedRoles() {
 		if r.Key == key {
 			return r, true
 		}
