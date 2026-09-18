@@ -5,7 +5,6 @@ import (
 	"time"
 
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
-	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/testing/testkit"
 )
@@ -23,9 +22,7 @@ func (h *nakedHost) LiveRouting() (func(string, string) bool, func(string, strin
 	return nil, nil
 }
 
-func (h *nakedHost) PrintChain([]configapi.Step) {}
-func (h *nakedHost) PrintSkips([]configapi.Skip) {}
-func (h *nakedHost) DaemonRunning() bool         { return false }
+func (h *nakedHost) DaemonRunning() bool { return false }
 
 func (h *nakedHost) PrintThinkCache() {}
 

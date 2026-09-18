@@ -36,6 +36,7 @@ type service struct {
 	blocks      modules.Registry[BlockProvider]
 	dumps       modules.Registry[Dumper]
 	glossary    modules.Registry[Glossarist]
+	verboses    modules.Registry[Verbose]
 }
 
 var _ CLI = (*service)(nil)
@@ -109,6 +110,27 @@ func (s *service) RegisterGlossary(g Glossarist) (modules.Release, error) {
 		return nil, fmt.Errorf("cli: 术语提供者不能为 nil")
 	}
 	return s.glossary.Register(g, nil)
+}
+
+// RegisterVerbose 上报「我的详细模式开着」。理由同 RegisterDiagnostics。
+func (s *service) RegisterVerbose(v Verbose) (modules.Release, error) {
+	if v == nil {
+		return nil, fmt.Errorf("cli: 详细模式提供者不能为 nil")
+	}
+	return s.verboses.Register(v, nil)
+}
+
+// verboseOn 有任何一个模块说自己在详细模式吗。
+func (s *service) verboseOn() bool {
+	if s == nil {
+		return false
+	}
+	for _, v := range s.verboses.All() {
+		if v.Verbose() {
+			return true
+		}
+	}
+	return false
 }
 
 // Run 注入本次构建信息后进入统一命令分派；模块命令从账本里现取（不是启动时

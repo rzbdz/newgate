@@ -41,7 +41,6 @@ import (
 	"strings"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	"github.com/rzbdz/newgate/go/modules/config/resolve"
 )
 
 // Diagnostic 是模块交给 CLI 展示的一组结构化状态，
@@ -122,8 +121,6 @@ type Host interface {
 		available func(provider, model string) bool,
 		rank func(provider, model string) int,
 	)
-	PrintChain([]resolve.Step)
-	PrintSkips([]resolve.Skip)
 	NotifyProxy()
 
 	// DaemonRunning 守护进程现在在跑吗（读 pidfile）。
@@ -132,6 +129,10 @@ type Host interface {
 	// 的读写时机）。命令想问的其实是「我这一改有人立刻读吗」——不在跑就只是
 	// 落了个盘，下次起来才生效，跟用户说清楚比让他以为已经生效强。
 	DaemonRunning() bool
+
+	// 链与跳过的排版**不在 Host 上**（2026-09-18 移走）：那是配置的知识，谁要
+	// 谁去调 modules/config 的 PrintChain / PrintSkips。借界面转发一圈只会让界面
+	// import 配置——而界面不该认识任何模块。
 
 	// PrintThinkCache 打印推理缓存的命中计数。
 	//
@@ -369,6 +370,17 @@ type CLI interface {
 	RegisterDump(Dumper) (modules.Release, error)
 	// RegisterGlossary 注入帮助屏术语表里属于自己的一行，理由见 Glossarist。
 	RegisterGlossary(Glossarist) (modules.Release, error)
+	// RegisterVerbose 上报「我的详细模式开着」，理由见 Verbose。
+	RegisterVerbose(Verbose) (modules.Release, error)
+}
+
+// Verbose 报告「现在处于需要看细节的模式」——某个模块开了自己的详细开关。
+//
+// 界面拿它做一个判断：要不要对自己的输出做版式自检（见 modules/cli/layout_audit）。
+// 谁的模式谁自己报——界面原来直接读 gateway 的 state 段问「debug 开了吗」，
+// 那是界面认识别人的配置结构。
+type Verbose interface {
+	Verbose() bool
 }
 
 // GlossaryLine 是帮助屏末尾术语表里的一行（词 + 一句话解释）。

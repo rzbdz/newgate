@@ -8,6 +8,7 @@ import (
 
 	"github.com/rzbdz/newgate/go/lib/style"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
+	configapi "github.com/rzbdz/newgate/go/modules/config"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
 	"github.com/rzbdz/newgate/go/modules/config/store"
@@ -320,10 +321,10 @@ func omoExplain(host cliapi.Host, key string) int {
 		if len(steps) == 0 {
 			fmt.Println(style.Item(style.Bad, "无可用候选"))
 		} else {
-			host.PrintChain(steps)
+			configapi.PrintChain(steps)
 		}
 		if len(skips) > 0 {
-			host.PrintSkips(skips)
+			configapi.PrintSkips(skips)
 		}
 	}
 	return 0

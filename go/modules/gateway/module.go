@@ -82,6 +82,7 @@ func New() modules.Component {
 				func() (modules.Release, error) { return cli.RegisterStatus(gatewayReporter{}) },
 				func() (modules.Release, error) { return cli.RegisterDiagnostics(gatewayReporter{}) },
 				func() (modules.Release, error) { return cli.RegisterDump(gatewayReporter{}) },
+				func() (modules.Release, error) { return cli.RegisterVerbose(switchStatus{}) },
 			} {
 				release, err := register()
 				if err != nil {

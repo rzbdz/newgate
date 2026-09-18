@@ -46,6 +46,10 @@ func (s *stubCLI) RegisterGlossary(cliapi.Glossarist) (modules.Release, error) {
 	return func() error { return nil }, nil
 }
 
+func (s *stubCLI) RegisterVerbose(cliapi.Verbose) (modules.Release, error) {
+	return func() error { return nil }, nil
+}
+
 // stubHooks 让 plugin-manager 的 Start 能跑完。真实的 confighook 会做字段查重，
 // 那是它自己的测试该管的事；这里只关心 plugin-manager 自己那份账本。
 type stubHooks struct{ fields map[string]string }

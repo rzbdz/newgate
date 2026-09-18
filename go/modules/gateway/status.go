@@ -25,7 +25,10 @@ const rankStatusPatch = 40 // 排在代理（10）之后
 
 type switchStatus struct{}
 
-var _ cliapi.StatusProvider = switchStatus{}
+var (
+	_ cliapi.StatusProvider = switchStatus{}
+	_ cliapi.Verbose        = switchStatus{}
+)
 
 // Status 见类型说明。st 为 nil 时什么都不报（快照还没装上）。
 //
@@ -69,3 +72,11 @@ func (switchStatus) Status() []cliapi.StatusLine {
 	}
 	return out
 }
+
+// Verbose 上报「全量请求日志开着」。
+//
+// 界面拿它决定要不要对自己的输出做版式自检（见 cliapi.Verbose 与 modules/cli 的
+// layout_audit）：debug 开着的时候用户正在盯细节，输出对齐就是细节的一部分。
+//
+// 以前这个判断是界面直接读 gateway 的 state 段做的——界面认识别人的配置结构。
+func (switchStatus) Verbose() bool { return gatewaystate.DebugActive(store.LoadState()) }
