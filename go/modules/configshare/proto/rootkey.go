@@ -61,23 +61,45 @@ func LoadRootKey() ([]byte, error) {
 
 // ParseRootKey 解析用户给的 blob（`config trust <blob>`）。
 func ParseRootKey(text string) ([]byte, error) {
-	s := strings.TrimSpace(text)
-	if s == "" {
+	// hex 路径：两侧空白要容忍——文件末尾的换行（SaveRootKey 就写了一个）、
+	// 粘贴时带上的空格，都是正常的。
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
 		return nil, ErrNoRootKey
 	}
-	if b, err := hex.DecodeString(s); err == nil {
+	if b, err := hex.DecodeString(trimmed); err == nil {
 		if len(b) < RootKeyLen {
 			return nil, fmt.Errorf("这串有 %d 字节，至少要 %d——像是被截断了（应是一整串 %d 个十六进制字符）",
 				len(b), RootKeyLen, RootKeyLen*2)
 		}
 		return b, nil
 	}
-	// 不是 hex：也许是 32 字节原文（文件里直接放随机字节的造法）。
-	if len(s) >= RootKeyLen {
-		return []byte(s), nil
+
+	// 原文路径：**一个字节都不许 trim**。
+	//
+	// 2026-09-18 实测踩到，而且症状很阴：这里原来是把 TrimSpace 的结果拿去判
+	// 「是不是 32 字节原文」，可密钥是**随机字节**——首尾任何一个字节落在空白
+	// 集合里（ASCII 那 6 个，外加恰好构成合法 UTF-8 空白的多字节序列），长度就
+	// 从 32 掉到 31/30，于是这条路时灵时不灵。它在 CI 上真的红了、本地却复现
+	// 不了（`modules/configshare/proto` 的 TestRootKeyParsing，报「30 个字符」），
+	// 因为它是概率性的，每跑一次掷一次骰子。
+	//
+	// 更要紧的是它**不只是报错**：trim 掉的那个字节真的属于密钥时，返回的是一把
+	// **不同的密钥**——两台机器派生出的密钥不一致，症状是「解密失败」，而那句话
+	// 会把人引向怀疑网络和 tailscale。这类"静默换掉密钥"正是这条路径最该避免的。
+	//
+	// 只认一种修饰：末尾多一个换行（echo / 编辑器常见）。这不产生歧义——
+	// 33 字节只可能是「32 字节密钥 + 换行」；密钥自己以 0x0A 结尾而没有换行时
+	// 长度是 32，走的是下面那条正确的分支。
+	raw := text
+	if n := len(raw); n == RootKeyLen+1 && raw[n-1] == '\n' {
+		raw = raw[:RootKeyLen]
 	}
-	return nil, fmt.Errorf("这串既不是十六进制（%d 个字符），也不够 %d 字节原文——拷全了吗",
-		len(s), RootKeyLen)
+	if len(raw) == RootKeyLen {
+		return []byte(raw), nil
+	}
+	return nil, fmt.Errorf("这串既不是十六进制（%d 字节），也不够 %d 字节原文——拷全了吗",
+		len(trimmed), RootKeyLen)
 }
 
 // RootKeyFingerprint 是根密钥的短指纹，用来**核对两台机器拷的是不是同一把**。

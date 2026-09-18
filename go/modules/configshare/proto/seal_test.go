@@ -166,6 +166,39 @@ func TestRootKeyParsing(t *testing.T) {
 	if raw, err := ParseRootKey(string(root)); err != nil || !bytes.Equal(raw, root) {
 		t.Fatalf("该接受 32 字节原文，实际 err=%v", err)
 	}
+
+	// 上面那条**靠随机字节掷骰子**：root 每次都不一样，绝大多数时候首尾不是空白，
+	// 所以它长时间掩盖了一个真 bug——ParseRootKey 曾经把 TrimSpace 的结果拿去判
+	// 「是不是 32 字节原文」，于是首尾字节落在空白集合里时长度掉到 30/31，这条路
+	// 时灵时不灵。2026-09-18 CI 掷到了那个面，红了；本地复现不了。
+	//
+	// 下面这几条用**确定的**输入把那个面钉死，不再依赖运气。
+	// 填充字节刻意选 0x88 / 0x99 / 0xaa：既不是十六进制位（否则整串会被当成 hex
+	// 去 decode，测的就不是这条路了——第一版写 0x33，而 0x33 就是字符 '3'，
+	// 测试当场自己踩了这个坑），也不是空白，还都不是合法 UTF-8 起始字节。
+	for _, raw := range [][]byte{
+		append(append([]byte{' '}, bytes.Repeat([]byte{0x88}, RootKeyLen-2)...), '\n'),
+		append(append([]byte{'\t'}, bytes.Repeat([]byte{0x99}, RootKeyLen-2)...), ' '),
+		append(append([]byte{'\r'}, bytes.Repeat([]byte{0xaa}, RootKeyLen-2)...), 0x0b),
+	} {
+		got, err := ParseRootKey(string(raw))
+		if err != nil {
+			t.Fatalf("首尾是空白的 32 字节原文必须被接受（CI 红的根因），输入 %q: %v", raw, err)
+		}
+		// **逐字节相等**，不是「长度对就行」：trim 掉一个真属于密钥的字节会得到
+		// 一把不同的密钥，两台机器派生不一致，症状是「解密失败」——而那句话会
+		// 把人引向怀疑网络。静默换掉密钥是这条路径最该避免的失败。
+		if !bytes.Equal(got, raw) {
+			t.Fatalf("原文被改动了：\n 得到 %x\n 想要 %x", got, raw)
+		}
+	}
+
+	// 末尾多一个换行要认（echo / 编辑器常见）——且只认这一个。
+	withNL := append(bytes.Repeat([]byte{0x88}, RootKeyLen), '\n')
+	if got, err := ParseRootKey(string(withNL)); err != nil || !bytes.Equal(got, withNL[:RootKeyLen]) {
+		t.Fatalf("32 字节原文 + 末尾换行该被接受，实际 err=%v", err)
+	}
+
 	// 截断的 hex 必须说清是长度问题，而不是让用户去怀疑协议。
 	if _, err := ParseRootKey(blob[:40]); err == nil || !strings.Contains(err.Error(), "截断") {
 		t.Fatalf("截断的 blob 该给长度提示，实际: %v", err)
