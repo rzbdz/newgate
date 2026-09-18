@@ -12,6 +12,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/go/modules/config"
 
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
@@ -23,25 +24,43 @@ var _ Gateway = (*port)(nil)
 
 // New 声明网关控制面组件。对 Config 的 Need 既表达真实依赖，
 // 也确保所有配置语义先就绪，再允许插件进入请求路径。
+//
+// 它也 Need(cli)：`newgate st` 是这一层的用户界面，插件名与开关语义都是本模块的
+// 知识，所以命令由本模块自己注册（见 command_special.go 的说明）。这条边不会成环
+// ——cli 靠 modules/cli/extension 那个叶子包得到契约，不 import 任何业务模块。
 func New() modules.Component {
 	port := &port{registry: special.NewRegistry()}
 	var restore func()
+	var releases []modules.Release
 	return modules.Component{
-		Name:     "gateway",
-		Type:     "gateway",
-		Requires: []modules.Requirement{modules.Need(configapi.Capability)},
+		Name: "gateway",
+		Type: "gateway",
+		Requires: []modules.Requirement{
+			modules.Need(configapi.Capability),
+			modules.Need(cliapi.Capability),
+		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
 		},
-		Start: func(context.Context, modules.Context) error {
+		Start: func(_ context.Context, ctx modules.Context) error {
 			restore = special.InstallDefault(port.registry)
+
+			cli := modules.MustGet(ctx, cliapi.Capability)
+			for _, cmd := range []cliapi.Command{specialCommand{}, schemaRepairCommand{}} {
+				release, err := cli.RegisterCommand(cmd)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, release)
+			}
 			return nil
 		},
 		Stop: func(context.Context) error {
+			err := modules.ReleaseAll(releases)
 			if restore != nil {
 				restore()
 			}
-			return nil
+			return err
 		},
 	}
 }

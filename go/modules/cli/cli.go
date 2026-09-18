@@ -125,12 +125,10 @@ func usageText(service *service) string {
 	cmd("logs [N] [-f]", "代理日志：终端上分页，-f 持续跟随")
 	cmd("alllogs", "完整诊断包")
 	cmd("debug on|off [分钟]", "全量请求日志（默认 30 分钟自动关）")
-	cmd("st [on|off] [插件]", "special_treatment 开关与说明")
 	emit("探测与观测")
 
 	sec("维护")
 	cmd("init [--force]", "铺开默认配置")
-	cmd("schema-repair on|off", "")
 	cmd("shim …", "底层逃生口，平时用 on/off 就够了")
 	cmd("tui", "menuconfig 风格界面")
 	cmd("version", "")
@@ -235,7 +233,9 @@ func run(service *service, args []string) int {
 	case "metrics", "stat":
 		return cmdMetrics()
 	case "shim":
-		return cmdShim(service.agents, arg(args, 1), argOr(args, 2, "claude"))
+		// 不给默认 agent：客户端 id 是**各客户端模块自己的键**，cli 不该知道
+		// 任何一个（2026-09-18 之前这里写死 "claude"）。逃生口本来也该显式。
+		return cmdShim(service.agents, arg(args, 1), arg(args, 2))
 	case "agents":
 		return cmdAgents(service.agents)
 	case "init":
@@ -248,10 +248,6 @@ func run(service *service, args []string) int {
 		return cmdAllLogs(service.agents, service)
 	case "debug":
 		return cmdDebug(args)
-	case "schema-repair", "schema_repair":
-		return cmdSchemaRepair(len(args) > 1 && truthy(args[1]))
-	case "st", "special", "special-treatment", "special_treatment":
-		return cmdSpecial(args)
 	case "tui", "menuconfig":
 		return cmdTUI()
 	case "version", "--version", "-v":
@@ -312,13 +308,6 @@ func arg(ss []string, i int) string {
 		return ss[i]
 	}
 	return ""
-}
-
-func argOr(ss []string, i int, def string) string {
-	if v := arg(ss, i); v != "" {
-		return v
-	}
-	return def
 }
 
 func intArg(ss []string, i, def int) int {

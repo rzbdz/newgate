@@ -13,11 +13,9 @@ import "sync"
 // 静默先到先得）。收敛之后，「注册一张带撤销的表」这件事在每个 owner 里都要
 // 写一遍，所以把它抽到这里。
 //
-// 与 gateway/special、config/roleprov、confighook 里那三份手写账本的关系：
-// 它们**暂时保留原样**。三者都有真实的差异（special 有插件拓扑排序与
-// copy-on-write；roleprov 有 Refresh / SetExtraRoles 的读侧；confighook 是
-// 三个异质注册表共享一张 token 表），强行归并会造出更差的抽象。这里先在 cli
-// 上验证，验证过再逐个迁。
+// 与产品层里那几份手写账本的关系：它们**暂时保留原样**。那几份各有真实的差异
+// （插件拓扑排序与 copy-on-write、带 Refresh 的读侧、多个异质注册表共享一张
+// token 表），强行归并会造出更差的抽象。这里先在一处验证，验证过再逐个迁。
 //
 // 相比那三份实现，这里少一张 `tokens map[string]uint64`：那张表是为了容忍
 // 「同名重复注册」——新值覆盖旧值，旧值的 Release 变成 no-op。而我们**禁止**

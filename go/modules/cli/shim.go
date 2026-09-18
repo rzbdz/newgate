@@ -26,11 +26,19 @@ import (
 func cmdShim(agents agentapi.AgentCatalog, sub, which string) int {
 	switch sub {
 	case "install", "add", "on":
+		if which == "" {
+			return die(64, "用法：newgate shim install <agent>（已知："+
+				strings.Join(agents.Names(), ", ")+"）")
+		}
 		fmt.Println(style.Hint("直接用 newgate on " + which + " 即可，机制由 newgate 自行选择"))
 		fmt.Println()
 		return cmdTakeover(agents, which)
 
 	case "off", "remove", "rm":
+		if which == "" {
+			return die(64, "用法：newgate shim off <agent>（已知："+
+				strings.Join(agents.Names(), ", ")+"）")
+		}
 		fmt.Println(style.Hint("直接用 newgate off " + which + " 即可"))
 		fmt.Println()
 		return cmdRelease(which)

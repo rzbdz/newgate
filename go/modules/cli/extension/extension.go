@@ -65,6 +65,9 @@ type StatusProvider interface {
 
 // Host 是扩展命令可使用的最小 CLI 能力集合。
 // 它避免 Command 获得整个 service，并明确哪些交互仍由主 CLI 统一控制。
+//
+// 加一个方法要慎重：它是**所有**模块命令都能看到的面积。判断标准是「这件事
+// 只有 CLI 做得成」——而不是「这样我就不用把逻辑搬过去了」。
 type Host interface {
 	Die(code int, message string) int
 	LiveRouting() (
@@ -74,6 +77,13 @@ type Host interface {
 	PrintChain([]configapi.Step)
 	PrintSkips([]configapi.Skip)
 	NotifyProxy()
+
+	// PrintThinkCache 打印推理缓存的命中计数。
+	//
+	// 数字只能从**跑着的守护进程**取：缓存在守护进程的内存里，CLI 是另一个
+	// 进程，在命令这边读只会看到一个空缓存——那比不显示更误导人。所以取数
+	// 这件事归 CLI（它持有那个 HTTP 客户端），命令只管在合适的位置调一下。
+	PrintThinkCache()
 }
 
 // Arg 取模块命令的第 i 个参数，越界给空串。**下标从 0 起**——args 里没有命令名，

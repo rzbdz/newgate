@@ -8,18 +8,23 @@ import (
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
-// TestDefaultGraphStartsWithConfigGatewayAndConfigHook 锁住「地基先起」：
-// config / config-hook / gateway 三个提供者必须排在**所有消费者**之前。
+// TestDefaultGraphLayering 锁住「owner 先于注册者」这条层级。
 //
-// 为什么不是「排在最前三个」：2026-09-17 加了 modules/breaker —— 它没有任何
-// Requires（只认 binding 键、状态码和延迟），拓扑上是叶子，字母序又正好在
-// `config` 前面，于是合法的排到了首位。地基的定义是「先于消费者」，不是
-// 「绝对第一」，所以断言写成与消费者的相对位置。
+// 这是设计意图的声明，不是拓扑排序的复述：拓扑排序只会保证 Requires 成立，
+// 而下面这张表说的是**我们认为谁该在谁前面**。加一条依赖把层级搞反（比如让
+// config 去依赖某个客户端模块）时，这里会红。
 //
-// 只断言这三个的**集合**先于消费者，不锁它们之间的相对顺序：装配清单是构建期
-// 扫描 modules/ 按字母序生成的（app/modules_gen.go），三者互相独立、拓扑排序
-// 遇到并列时按声明位置决胜，相对顺序因此是生成顺序的副产品，不是设计意图。
-func TestDefaultGraphStartsWithConfigGatewayAndConfigHook(t *testing.T) {
+// 2026-09-18：`cli` 从「消费者」一侧挪到了「owner」一侧。它之前被列在消费者里
+// 是因为它 Require runtime/breaker；但自从各模块开始经 cli.RegisterCommand 贡献
+// 自己的命令（gateway 的 `st`、claudecode 的 `naked`、plugin-manager 的 `plugin`、
+// opencode-omo 的 `omo`），cli 就成了**命令 / 状态行 / 诊断三个扩展点的 owner**
+// ——注册者必须排在 owner 之后，所以 cli 必须早于所有想露面的模块。它 Require
+// runtime/breaker 只说明它在地基里排得靠后，不说明它是业务模块。
+//
+// 断言成「每一对 owner→注册者」的相对位置，而不是「前三个是谁」：装配清单是按
+// 字母序扫描 modules/ 生成的，拓扑并列时按声明位置决胜，绝对顺序是生成顺序的
+// 副产品，不是设计意图（2026-09-17 breaker 就因为字母序排到了首位）。
+func TestDefaultGraphLayering(t *testing.T) {
 	app, err := New(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -30,30 +35,43 @@ func TestDefaultGraphStartsWithConfigGatewayAndConfigHook(t *testing.T) {
 	for i, name := range names {
 		index[name] = i
 	}
+	at := func(name string) int {
+		i, ok := index[name]
+		if !ok {
+			t.Fatalf("component order = %v; %s 不在图里", names, name)
+		}
+		return i
+	}
 
-	foundation := []string{"config", "config-hook", "gateway"}
-	consumers := []string{
-		"cli", "runtime", "deepseek", "glm", "opencode", "opencode-omo",
-		"thinking", "claudecode", "claudecode-deepseek", "claudecode-glm", "wrapper",
+	pairs := []struct{ owner, registrant, why string }{
+		{"config", "cli", "cli 读配置"},
+		{"config", "runtime", "runtime 读配置"},
+		{"config", "gateway", "gateway 读配置"},
+		{"config", "opencode-omo", "omo 槽位读配置"},
+		{"config-hook", "cli", "cli 用 AgentCatalog"},
+		{"config-hook", "runtime", "runtime 用 AgentCatalog"},
+		{"config-hook", "claudecode", "claudecode 注册 agent 与 state 字段"},
+		{"config-hook", "plugin-manager", "plugin-manager 注册 state 字段"},
+		{"breaker", "cli", "cli 展示与注入健康表"},
+		{"breaker", "deepseek", "deepseek 记账"},
+		{"runtime", "cli", "cli 调接管/注入"},
+		{"runtime", "wrapper", "wrapper 懒启动代理"},
+		// owner → 注册者：这几条是「命令住回各模块」之后的层级。
+		{"cli", "gateway", "gateway 注册 st"},
+		{"cli", "claudecode", "claudecode 注册 naked"},
+		{"cli", "plugin-manager", "plugin-manager 注册 plugin"},
+		{"cli", "opencode-omo", "omo 注册 omo"},
+		{"gateway", "thinking", "thinking 注册请求插件"},
+		{"gateway", "deepseek", "deepseek 注册请求插件"},
+		{"gateway", "claudecode", "claudecode 注册请求插件"},
+		{"gateway", "claudecode-deepseek", "交叉语义注册请求插件"},
+		{"plugin-manager", "deepseek", "deepseek 上报开关点"},
+		{"plugin-manager", "claudecode-deepseek", "交叉语义上报开关点"},
 	}
-	last := -1
-	for _, name := range foundation {
-		at, ok := index[name]
-		if !ok {
-			t.Fatalf("component order = %v; 缺少地基 %s", names, name)
-		}
-		if at > last {
-			last = at
-		}
-	}
-	for _, name := range consumers {
-		at, ok := index[name]
-		if !ok {
-			t.Fatalf("component order = %v; 消费者 %s 不在图里", names, name)
-		}
-		if at < last {
-			t.Fatalf("component order = %v; 消费者 %s 排在地基之前（地基最晚在第 %d 位）",
-				names, name, last)
+	for _, p := range pairs {
+		if at(p.owner) > at(p.registrant) {
+			t.Fatalf("component order = %v; %s(%d) 排在 %s(%d) 之后，但它%s",
+				names, p.owner, at(p.owner), p.registrant, at(p.registrant), p.why)
 		}
 	}
 

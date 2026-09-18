@@ -41,13 +41,13 @@ Claude Code；它只认识下面六个结构概念。
 	}
 
 	consumer := component.Component{
-		Name: "gateway",
+		Name: "cache",
 		Requires: []component.Requirement{
 			component.Need(StoreCapability),
 		},
 		Start: func(ctx context.Context, graph component.Context) error {
 			store := component.MustGet(graph, StoreCapability)
-			return startGateway(ctx, store)
+			return startCache(ctx, store)
 		},
 	}
 

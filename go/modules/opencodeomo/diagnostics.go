@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	cliapi "github.com/rzbdz/newgate/go/modules/cli"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 )
 
 type diagnostics struct{}
