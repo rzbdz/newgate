@@ -36,6 +36,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/go/component"
 	"github.com/rzbdz/newgate/go/modules/config/domain"
+	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 	"github.com/rzbdz/newgate/go/modules/gateway/rewrite"
 )
 
@@ -379,11 +380,11 @@ func Plugins() []Plugin {
 // Respond 按注册顺序询问短路插件；第一个能直接替上游回答的生效。
 // 返回 (响应体, 生效插件名, ok)。
 func Respond(body []byte, request *Request, state *domain.State) ([]byte, string, bool) {
-	if state == nil || !state.SpecialEnabled() {
+	if state == nil || !gatewaystate.SpecialEnabled(state) {
 		return nil, "", false
 	}
 	for _, p := range Plugins() {
-		if state.SpecialPluginOff(p.Name()) {
+		if gatewaystate.PluginOff(state, p.Name()) {
 			continue
 		}
 		responder, is := p.(Responder)
@@ -422,11 +423,11 @@ func RespondNote(name string, state *domain.State) string {
 
 // Route 按注册顺序询问路由插件；第一个明确认领请求的决定生效。
 func Route(body []byte, request *Request, state *domain.State) (RouteDecision, bool) {
-	if state == nil || !state.SpecialEnabled() {
+	if state == nil || !gatewaystate.SpecialEnabled(state) {
 		return RouteDecision{}, false
 	}
 	for _, p := range Plugins() {
-		if state.SpecialPluginOff(p.Name()) {
+		if gatewaystate.PluginOff(state, p.Name()) {
 			continue
 		}
 		router, ok := p.(RoutePlugin)
@@ -443,12 +444,12 @@ func Route(body []byte, request *Request, state *domain.State) (RouteDecision, b
 
 // Statuses 汇总所有启用插件贡献的状态行。
 func Statuses(state *domain.State) []StatusItem {
-	if state == nil || !state.SpecialEnabled() {
+	if state == nil || !gatewaystate.SpecialEnabled(state) {
 		return nil
 	}
 	var out []StatusItem
 	for _, p := range Plugins() {
-		if state.SpecialPluginOff(p.Name()) {
+		if gatewaystate.PluginOff(state, p.Name()) {
 			continue
 		}
 		if reporter, ok := p.(StatusProvider); ok {
@@ -459,12 +460,12 @@ func Statuses(state *domain.State) []StatusItem {
 }
 
 func Bindings(state *domain.State) []domain.Binding {
-	if state == nil || !state.SpecialEnabled() {
+	if state == nil || !gatewaystate.SpecialEnabled(state) {
 		return nil
 	}
 	var out []domain.Binding
 	for _, p := range Plugins() {
-		if state.SpecialPluginOff(p.Name()) {
+		if gatewaystate.PluginOff(state, p.Name()) {
 			continue
 		}
 		if provider, ok := p.(BindingProvider); ok {

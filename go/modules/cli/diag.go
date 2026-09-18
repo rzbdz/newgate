@@ -1201,8 +1201,7 @@ func skipKind(reason string) string {
 	return "其他"
 }
 
-// statusFlags 一行列出**核心**的非默认开关（debug / schema-repair /
-// special_treatment）。默认状态不占版面。
+// statusFlags 一行列出**核心**的非默认开关。默认状态不占版面。
 //
 // 模块自己那些开关点不在这里：它们由各自的 owner 经 cli.RegisterStatus 自报
 // （见 pluginmanager 的 Status）。这条分工是**必须的**，不是风格——cli 若为了
@@ -1219,15 +1218,9 @@ func statusFlags(st *domain.State) string {
 	case st.Debug:
 		f = append(f, style.Yellow("debug=已过期"))
 	}
-	if !st.RepairEnabled() {
-		f = append(f, style.Yellow("schema-repair=off"))
-	}
-	switch {
-	case !st.SpecialEnabled():
-		f = append(f, style.Yellow("special_treatment=off"))
-	case len(st.SpecialOff) > 0:
-		f = append(f, style.Yellow("special 关了 "+strings.Join(st.SpecialOff, ",")))
-	}
+	// schema-repair / special_treatment 那三个开关**不在这里**：它们住在
+	// gateway 自己的 state 段里（见 modules/gateway/gatewaystate），由 gateway
+	// 经 cli.RegisterStatus 自报。cli 读它们就等于继续认识 gateway 的内部结构。
 	return strings.Join(f, "   ")
 }
 

@@ -414,18 +414,6 @@ type State struct {
 	// DebugUntil 自动过期时刻（RFC3339）。debug 单条能记 8KB+，
 	// 忘了关会把磁盘写满，所以默认只开一段时间。
 	DebugUntil string `json:"debug_until,omitempty"`
-
-	// SchemaRepair 给缺 required 的 tool schema 补 "required": []。
-	// 按 JSON Schema 规范这是语义无操作，所以默认开。
-	// 用指针以区分「没配」和「显式关闭」。
-	SchemaRepair *bool `json:"schema_repair,omitempty"`
-
-	// SpecialTreatment special_treatment 插件层总开关（默认开）。
-	// 插件只对认领的上游生效（gateway/special），所以开着不影响别人。
-	SpecialTreatment *bool `json:"special_treatment,omitempty"`
-	// SpecialOff 单独关掉的插件名。排查「是不是 newgate 改坏了请求」时
-	// 关掉某一个比关掉整层更精确。名字见 `newgate st`。
-	SpecialOff []string `json:"special_treatment_off,omitempty"`
 }
 
 // Normalize 补默认值。读盘后调用。
@@ -460,25 +448,6 @@ func (s *State) TakeoverWanted(agent string) bool {
 		return v
 	}
 	return true
-}
-
-func (s *State) RepairEnabled() bool {
-	return s.SchemaRepair == nil || *s.SchemaRepair
-}
-
-// SpecialEnabled special_treatment 层是否启用。默认开。
-func (s *State) SpecialEnabled() bool {
-	return s.SpecialTreatment == nil || *s.SpecialTreatment
-}
-
-// SpecialPluginOff 某个插件是否被单独关掉。
-func (s *State) SpecialPluginOff(name string) bool {
-	for _, n := range s.SpecialOff {
-		if n == name {
-			return true
-		}
-	}
-	return false
 }
 
 // DebugActive debug 是否仍在有效期内。过期即视为关闭。

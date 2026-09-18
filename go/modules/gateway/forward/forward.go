@@ -30,6 +30,7 @@ import (
 	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/controlpath"
 	"github.com/rzbdz/newgate/go/modules/gateway/dialect"
+	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 	"github.com/rzbdz/newgate/go/modules/gateway/metrics"
 	"github.com/rzbdz/newgate/go/modules/gateway/probe"
 	"github.com/rzbdz/newgate/go/modules/gateway/protocol"
@@ -839,7 +840,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				Agent: tgt.TaskCreate, State: st,
 			}
 			if res := special.RebaseToolLoop(newBody, toolOrigin.Provider, toolOrigin.Model,
-				candidate, st.SpecialPluginOff); len(res.Notes) > 0 {
+				candidate, pluginOff(st)); len(res.Notes) > 0 {
 				for _, note := range res.Notes {
 					s.logf("[proxy] #%d special_treatment %s", reqID, note)
 				}
@@ -856,7 +857,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 		// tool schema 修补：只在真有东西要补时才重写 tools 这一个值，
 		// messages / system / cache_control 仍然逐字节不动。
-		if st.RepairEnabled() {
+		if gatewaystate.RepairEnabled(st) {
 			if toolsRaw, ok := rewrite.TopLevelRaw(newBody, "tools"); ok {
 				repaired, changes, rerr := schema.Repair(toolsRaw)
 				switch {
@@ -878,7 +879,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// 与 schema 修补的分工——那边是所有严格校验器都需要的通用修补，
 		// 这边是「只有某家上游才需要」的，由插件自己 Match 认领。
 		// （分类器改走 light 链的路由决策不在这——见上面 special.Route。）
-		if st.SpecialEnabled() {
+		if gatewaystate.SpecialEnabled(st) {
 			res := special.Apply(newBody, &special.Request{
 				InModel:  inModel,
 				Tier:     tier,
@@ -892,7 +893,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				Stream:   stream,
 				Agent:    tgt.TaskCreate,
 				State:    st,
-			}, st.SpecialPluginOff)
+			}, pluginOff(st))
 			counted := map[string]bool{}
 			for _, n := range res.Notes {
 				s.logf("[proxy] #%d special_treatment %s", reqID, n)
@@ -1439,6 +1440,16 @@ func truncate(s string, n int) string {
 //
 // 上限 8：一次响应通常 1~3 个 tool call，够用；真遇到几十个并行调用的，也不
 // 至于把一行日志撑爆。
+// pluginOff 把「某个插件被单独关掉了吗」包成函数值——special 那一层的 API 收的
+// 就是这个形状（它不认识 domain.State，也不该认识）。两处调用点共用这一份，免得
+// 各写一遍闭包、哪天漏改一处。
+//
+// 开关状态住在 state.json 的 ModuleConfig["gateway"] 里，读法归 gatewaystate
+// （见那个包的说明：网关的开关词汇不该出现在共享配置的类型里）。
+func pluginOff(st *domain.State) func(string) bool {
+	return func(name string) bool { return gatewaystate.PluginOff(st, name) }
+}
+
 func keysForLog(keys []string) []string {
 	var out []string
 	texts := 0
