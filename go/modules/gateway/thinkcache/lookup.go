@@ -1,6 +1,9 @@
 package thinkcache
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // KeysForAssistantMessage 从**请求里**一条 assistant 消息算出候选 key，
 // 顺序即优先级。这是 Observer.Keys() 的镜像：一边在响应里挂 key，一边在
@@ -12,6 +15,20 @@ import "encoding/json"
 //	OpenAI    {"role":"assistant","content":"…","tool_calls":[{"id":"…"}]}
 //	Anthropic {"role":"assistant","content":[{"type":"tool_use","id":"…"},…]}
 func KeysForAssistantMessage(item []byte) []string {
+	keys, _ := keysForAssistantMessage(item)
+	return keys
+}
+
+// keysForAssistantMessage 同 KeysForAssistantMessage，但额外回答「这条消息
+// （或它的 content）解析出来了吗」。
+//
+// 为什么要区分：以前三条失败路径（整条消息解析不了、content 是字符串但解析
+// 失败、content 是块数组但解析失败）都折叠成同一个结果——空 key 列表，于是
+// 调用方看到的是**未命中**。而「未命中」这个结论会把排查引向缓存和上游，
+// 真正的原因却是客户端发来的 JSON 形态我们不认识。modules/deepseek 的
+// skipCause 存在的唯一理由就是回答「为什么没有 thinking」，它现在有第三类
+// 原因需要分辨（见 Cache.unparsable 的说明）。
+func keysForAssistantMessage(item []byte) ([]string, bool) {
 	var m struct {
 		ToolCalls []struct {
 			ID string `json:"id"`
@@ -19,9 +36,10 @@ func KeysForAssistantMessage(item []byte) []string {
 		Content json.RawMessage `json:"content"`
 	}
 	if json.Unmarshal(item, &m) != nil {
-		return nil
+		return nil, false
 	}
 
+	ok := true
 	var keys []string
 	for _, tc := range m.ToolCalls { // OpenAI 方言
 		if k := ToolKey(tc.ID); k != "" {
@@ -33,23 +51,27 @@ func KeysForAssistantMessage(item []byte) []string {
 	if len(m.Content) > 0 {
 		switch m.Content[0] {
 		case '"': // content 是字符串
-			_ = json.Unmarshal(m.Content, &text)
+			if json.Unmarshal(m.Content, &text) != nil {
+				ok = false
+			}
 		case '[': // content 是块数组（Anthropic 方言）
 			var blocks []struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
 				ID   string `json:"id"`
 			}
-			if json.Unmarshal(m.Content, &blocks) == nil {
-				for _, b := range blocks {
-					switch b.Type {
-					case "tool_use":
-						if k := ToolKey(b.ID); k != "" {
-							keys = append(keys, k)
-						}
-					case "text":
-						text += b.Text
+			if json.Unmarshal(m.Content, &blocks) != nil {
+				ok = false
+				break
+			}
+			for _, b := range blocks {
+				switch b.Type {
+				case "tool_use":
+					if k := ToolKey(b.ID); k != "" {
+						keys = append(keys, k)
 					}
+				case "text":
+					text += b.Text
 				}
 			}
 		}
@@ -57,12 +79,25 @@ func KeysForAssistantMessage(item []byte) []string {
 	if k := TextKey(text); k != "" {
 		keys = append(keys, k)
 	}
-	return keys
+	return keys, ok
 }
 
 // Lookup 按候选 key 依次查，命中即返回。
+//
+// 解析不出来的那一条会记进 Stats().Unparsable 并打一行日志：它在结果上和
+// 「未命中」一样（调用方随后补空串），但原因完全不同，而日志里只看得到
+// 「补了空串」。不记的话这个分类就永远断了——排查的人会去查缓存和上游，
+// 而该看的是客户端发来的 JSON。
 func (c *Cache) Lookup(item []byte) ([]byte, bool) {
-	for _, k := range KeysForAssistantMessage(item) {
+	keys, parsed := keysForAssistantMessage(item)
+	if !parsed {
+		c.mu.Lock()
+		c.unparsable++
+		c.mu.Unlock()
+		c.fail(fmt.Errorf("thinkcache: 请求里的 assistant 消息解析不出来，本轮按未命中处理"+
+			"（补空串）——这是客户端发来的 JSON 形态问题，不是缓存问题（前 200 字节: %.200s）", item))
+	}
+	for _, k := range keys {
 		if blob, ok := c.Get(k); ok {
 			return blob, true
 		}

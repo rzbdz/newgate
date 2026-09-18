@@ -457,6 +457,10 @@ func RestoreAll() ([]string, error) {
 		}
 		done = append(done, t)
 	}
-	ClearOmoSlots() // 槽位键随释放失效；用户手写的 overrides 留着
+	// 槽位键随释放失效；用户手写的 overrides 留着。清不掉要说出来——留着
+	// 的键下一次接管会被当成用户的选择（见 ClearOmoSlots 的说明）。
+	if err := ClearOmoSlots(); err != nil {
+		return done, fmt.Errorf("还原完成，但槽位表没清掉（下次接管会沿用旧分配）: %w", err)
+	}
 	return done, nil
 }

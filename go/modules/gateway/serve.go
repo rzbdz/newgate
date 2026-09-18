@@ -145,6 +145,11 @@ func Serve(health breakerapi.Breaker, port int) int {
 	if err := thinkcache.AttachDisk(paths.ThinkCacheFile(), 100<<20); err != nil {
 		lg.Printf("thinkcache 落盘关闭（继续纯内存）: %v", err)
 	}
+	// 冷层跑起来之后的失败（压实丢记录、刷盘失败、冷层停用）必须说出来：
+	// 用户能观察到的现象是「重启后推理找不回来了」，而那正是最难反推原因的一类。
+	thinkcache.SetErrorHandler(func(err error) {
+		lg.Printf("[thinkcache] %v", err)
+	})
 	srv := forward.New(port, lg, watcher, health)
 
 	sig := make(chan os.Signal, 2)

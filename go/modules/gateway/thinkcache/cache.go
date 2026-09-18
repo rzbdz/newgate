@@ -49,9 +49,16 @@ type Cache struct {
 	bytes    int64
 	maxBytes int64
 	ttl      time.Duration
-	disk     *DiskStore // 可选落盘冷层（nil = 纯内存）
+	disk     *DiskStore  // 可选落盘冷层（nil = 纯内存）
+	onErr    func(error) // 冷层/解析失败的出口，见 SetErrorHandler
 
 	hits, misses, puts, evictions uint64
+	// unparsable 记「请求里那条 assistant 消息 / 它的 content 解析不出来」的次数
+	// （见 KeysForAssistantMessage）。它和 misses 在当前实现里结果一样（都没
+	// 命中），但**原因和处置完全不同**：miss 是缓存里真没有（去看上游与本进程
+	// 的生命周期），unparsable 是客户端发来的 JSON 形态我们不认识（去看客户端）。
+	// 两者在日志里都只能看到「补了空串」，所以要分开计数，否则那条线索是断的。
+	unparsable uint64
 }
 
 type entry struct {
@@ -72,6 +79,41 @@ func New(maxBytes int64, ttl time.Duration) *Cache {
 		items:    make(map[string]*list.Element),
 		maxBytes: maxBytes,
 		ttl:      ttl,
+	}
+}
+
+// fail 报告一次「不改变这次请求的结果，但会改变下一次行为」的失败（冷层写不
+// 进去、请求里的消息解析不出来）。没装出口就丢弃——这一层是 best-effort 的。
+func (c *Cache) fail(err error) {
+	if c == nil || err == nil {
+		return
+	}
+	c.mu.Lock()
+	fn := c.onErr
+	c.mu.Unlock()
+	if fn != nil {
+		fn(err)
+	}
+}
+
+// SetErrorHandler 注入落盘/解析失败的出口（照 breaker.SetErrorHandler 的形状）。
+//
+// 为什么需要它：这一层是 best-effort 的，失败不影响正确性——但它决定
+// 「重启之后还能不能找回上一进程的推理内容」，而那正是用户会来问的事
+// （CLAUDE.md §3.1：冷层坏掉时重启后第一发大请求会因为思维链补不上被上游
+// 400 「must be passed back」）。2026-09-18 之前压实的每一步失败都是
+// `return` / `continue`，一次都没留下痕迹，唯一的现象是「重启后推理全没了」。
+//
+// daemon 在 AttachDisk 之后调它（serve.go）；不装就等于丢弃，与以前一致。
+func SetErrorHandler(fn func(error)) {
+	Default.mu.Lock()
+	Default.onErr = fn
+	d := Default.disk
+	Default.mu.Unlock()
+	if d != nil {
+		d.mu.Lock()
+		d.onErr = fn
+		d.mu.Unlock()
 	}
 }
 
@@ -216,6 +258,9 @@ type Stats struct {
 	Misses    uint64
 	Puts      uint64
 	Evictions uint64
+	// Unparsable 请求里解析不出来的 assistant 消息条数（见 Lookup）。与 Misses
+	// 分开报：miss 的处置是查缓存和上游，这个的处置是查客户端发来的 JSON。
+	Unparsable uint64
 }
 
 func (c *Cache) Stats() Stats {
@@ -224,6 +269,7 @@ func (c *Cache) Stats() Stats {
 	return Stats{
 		Entries: c.ll.Len(), Bytes: c.bytes, MaxBytes: c.maxBytes,
 		Hits: c.hits, Misses: c.misses, Puts: c.puts, Evictions: c.evictions,
+		Unparsable: c.unparsable,
 	}
 }
 

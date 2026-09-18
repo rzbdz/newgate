@@ -70,6 +70,12 @@ func runProbe(host cliapi.Host, only string, asJSON bool) int {
 		Concurrency: 8,
 		WaitTick:    5 * time.Second,
 	}
+	// OnNote 不受 quiet 影响：它报的不是进度（那才是 quiet 要压掉的），而是
+	// 「这次探活了什么」与「缓存没能读/写」——都是只看一次就该看见的东西，
+	// 而且在 --json 模式下 stderr 也不会污染 stdout 的结果表。
+	opts.OnNote = func(msg string) {
+		fmt.Fprintln(os.Stderr, style.Item(style.Warn, msg))
+	}
 	if !quiet {
 		opts.OnPlan = func(ts []probe.Target) {
 			fmt.Fprintf(os.Stderr, "探测 %d 个目标（并发 %d，同 (provider, model) 只打一次）\n",

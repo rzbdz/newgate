@@ -24,7 +24,10 @@ func TestCapabilityCacheSurvivesProcessStateReset(t *testing.T) {
 	dialect.MarkUnsupported(target.Provider, target.Model, dialect.CapCountTokens)
 	quirk.Default.Mark(target.Provider, target.Model, quirk.NoThinkingDisable)
 
-	cache := loadCapabilityCache()
+	cache, err := loadCapabilityCache()
+	if err != nil {
+		t.Fatalf("空环境读缓存应当无错: %v", err)
+	}
 	cache.capture(target)
 	if err := cache.save(); err != nil {
 		t.Fatal(err)
@@ -32,7 +35,9 @@ func TestCapabilityCacheSurvivesProcessStateReset(t *testing.T) {
 	dialect.Reset()
 	quirk.Default.Reset()
 
-	LoadCachedCapabilities()
+	if err := LoadCachedCapabilities(); err != nil {
+		t.Fatalf("装载缓存不应当报错: %v", err)
+	}
 	if ok, known := dialect.Supports(target.Provider, target.Model, dialect.CapOpenAI); !ok || !known {
 		t.Fatal("支持的方言没有从缓存恢复")
 	}

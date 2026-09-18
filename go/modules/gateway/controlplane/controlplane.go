@@ -47,6 +47,9 @@ type Think struct {
 	Hits      int64 `json:"hits"`
 	Misses    int64 `json:"misses"`
 	Evictions int64 `json:"evictions"`
+	// Unparsable 请求里解析不出来的 assistant 消息条数。它和 Misses 的结果一样
+	// （都补空串），但处置不同：miss 去查缓存与上游，这个去查客户端发来的 JSON。
+	Unparsable int64 `json:"unparsable"`
 }
 
 // Doc 是守护进程自报的运行时状态（`/__newgate/status` 的文档）。

@@ -190,7 +190,12 @@ func (s *Server) Start() error {
 		s.logf("[breaker] 健康表读写失败（继续使用内存状态）: %v", err)
 	})
 	s.Health.SetVerifier(s.verify)
-	probe.LoadCachedCapabilities()
+	// 探过的东西（方言能力、上游毛病）从磁盘装回来。读不出来就说一句：
+	// 否则现象是「重启之后每个上游都要重新撞一次 404/400 才学回来」，
+	// 而原因没人知道。
+	if err := probe.LoadCachedCapabilities(); err != nil {
+		s.logf("[probe] 能力缓存装载失败（本次运行将重新探测）: %v", err)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(controlpath.Status, s.handleStatus)
 	mux.HandleFunc(controlpath.Metrics, s.handleMetrics)
@@ -292,13 +297,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"handoff": true,
 		// 推理内容缓存：只报计数，绝不报内容
 		"thinkcache": map[string]interface{}{
-			"entries":   tc.Entries,
-			"bytes":     tc.Bytes,
-			"max_bytes": tc.MaxBytes,
-			"hits":      tc.Hits,
-			"misses":    tc.Misses,
-			"puts":      tc.Puts,
-			"evictions": tc.Evictions,
+			"entries":    tc.Entries,
+			"bytes":      tc.Bytes,
+			"max_bytes":  tc.MaxBytes,
+			"hits":       tc.Hits,
+			"misses":     tc.Misses,
+			"puts":       tc.Puts,
+			"evictions":  tc.Evictions,
+			"unparsable": tc.Unparsable,
 		},
 	})
 }
