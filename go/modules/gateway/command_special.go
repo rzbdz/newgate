@@ -143,7 +143,10 @@ func specialList(host cliapi.Host, st *domain.State) int {
 	fmt.Print(t.String())
 	fmt.Println(style.Hint("上游怪癖补丁：只对认领本次请求的上游生效，改动逐条写日志"))
 	fmt.Println(style.Hint("看完整说明 newgate st <插件> · 单独关 newgate st off <插件> · 整层关 newgate st off"))
-	host.PrintThinkCache()
+	// 推理缓存的计数也归本模块报（见 thinkcache_status.go）：以前它经
+	// cliapi.Host 的口子绕一圈回界面渲染，那条口子的名字（PrintThinkCache）
+	// 本身就是「界面认识了一个模块概念」的证据。
+	printThinkCache()
 	return 0
 }
 

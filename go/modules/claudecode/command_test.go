@@ -20,8 +20,6 @@ func (h *nakedHost) Die(code int, message string) int { h.died, h.msg = code, me
 
 func (h *nakedHost) DaemonRunning() bool { return false }
 
-func (h *nakedHost) PrintThinkCache() {}
-
 func (h *nakedHost) NotifyProxy() { h.notified++ }
 
 var _ cliapi.Host = (*nakedHost)(nil)

@@ -10,8 +10,7 @@ type moduleCLIHost struct{}
 
 func (moduleCLIHost) Die(code int, message string) int { return die(code, message) }
 
-func (moduleCLIHost) NotifyProxy()     { notifyProxy() }
-func (moduleCLIHost) PrintThinkCache() { printThinkCache() }
+func (moduleCLIHost) NotifyProxy() { notifyProxy() }
 
 // DaemonRunning 守护进程现在在跑吗。
 //
