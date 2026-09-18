@@ -20,7 +20,7 @@ STATIC_LD    := $(LDFLAGS) -extldflags '-static'
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 .PHONY: all build static release test test-race fmt check-fmt vet clean install \
-         verify-static e2e e2e-claude check help generate check-generate
+         verify-static e2e e2e-claude check ci help generate check-generate
 
 all: build
 
@@ -122,7 +122,34 @@ check: check-generate check-fmt vet test e2e e2e-claude
 	@echo
 	@echo "✓ 全绿：静态检查 + 单测 + 两条零 token 端到端"
 
+## ci: 在本地按 GitHub Actions 的三档跑一遍，**推之前先跑这个**。
+##
+## 与 check 的区别有两处，都是为了「让本地等于 runner」：
+##
+##   1. 把 NEWGATE_HOME 指到一个空的临时目录。这是关键——CI 的 runner 是台干净
+##      机器，没有 ~/.config/newgate；而开发机永远有，于是「测试偷偷依赖开发机
+##      配置」这类问题在本地永远看不见。2026-09-18 那次 CI 连续三次红就是它：
+##      forward 包里走 newTestServer() 的用例没有 Watch，退化成直接读盘，
+##      runner 上读不到配置 → 整包 400。
+##   2. 多跑一遍 -race（check 不含，runner 上是一个独立 job）。
+##
+## 只钉 NEWGATE_HOME 而不动 HOME：Go 的模块缓存和构建缓存在 HOME 下，改掉会让
+## 这条命令退化成每次全量重编。
+ci:
+	@dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
+	export NEWGATE_HOME="$$dir/home"; \
+	echo "── 沙箱 NEWGATE_HOME=$$NEWGATE_HOME（模拟干净 runner）"; \
+	$(MAKE) --no-print-directory check-fmt && \
+	$(MAKE) --no-print-directory vet && \
+	$(MAKE) --no-print-directory check-generate && \
+	echo "── static: 单测" && go test ./... && \
+	echo "── race: 竞态检测" && go test -race ./... && \
+	echo "── e2e: 零 token 端到端" && \
+	$(MAKE) --no-print-directory e2e && \
+	$(MAKE) --no-print-directory e2e-claude && \
+	echo && echo "✓ CI 三档本地全绿（static / race / e2e）"
+
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
 	@echo "  build / install / test / test-race / fmt / vet / clean"
-	@echo "  e2e / e2e-claude / check / generate / check-generate"
+	@echo "  e2e / e2e-claude / check / ci / generate / check-generate"
