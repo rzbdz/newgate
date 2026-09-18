@@ -20,24 +20,6 @@ import (
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 )
 
-func warnShellEnvConflict(agents agentapi.AgentCatalog, toolID string) {
-	a, ok := agents.Get(toolID)
-	if !ok {
-		return
-	}
-	var conflict []string
-	for _, k := range append([]string{a.BaseURLEnv, a.AuthEnv}, a.UnsetEnv...) {
-		if os.Getenv(k) != "" {
-			conflict = append(conflict, k)
-		}
-	}
-	if len(conflict) == 0 {
-		return
-	}
-	fmt.Println(style.Hint("shell 里已导出 " + strings.Join(conflict, ", ")))
-	fmt.Println(style.Hint("接管时在子进程内覆盖，不影响 newgate；off 之后重新生效（即回到直连）"))
-}
-
 // prettyMs 毫秒 → 人话。链预算是按 ms 配的（state.json 里 120000），
 // 打印时不该原样甩 120000ms 给用户。
 func prettyMs(ms int) string {

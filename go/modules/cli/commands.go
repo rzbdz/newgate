@@ -30,72 +30,6 @@ const (
 	rankSystem   = 60 // 界面自身（help / version）
 )
 
-// ---------- 接管 ----------
-
-type startCommand struct{ s *service }
-
-func (startCommand) Names() []string { return []string{"start"} }
-func (startCommand) Help() HelpLine {
-	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
-		Usage: "start", Summary: "起代理 + 接管所有 agent"}
-}
-func (c startCommand) Run(_ Host, args []string) int {
-	if a := arg(args, 0); a != "" {
-		return cmdTakeover(c.s.agents, a)
-	}
-	return cmdStart(c.s.agents, has(args, "--force"))
-}
-
-type stopCommand struct{ s *service }
-
-func (stopCommand) Names() []string { return []string{"stop"} }
-func (stopCommand) Help() HelpLine {
-	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
-		Usage: "stop", Summary: "停代理 + 所有 agent 恢复直连"}
-}
-func (c stopCommand) Run(_ Host, args []string) int {
-	if a := arg(args, 0); a != "" {
-		return cmdRelease(a)
-	}
-	return cmdStop()
-}
-
-type takeoverCommand struct{ s *service }
-
-func (takeoverCommand) Names() []string { return []string{"on", "takeover", "take"} }
-func (takeoverCommand) Help() HelpLine {
-	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
-		Usage: "on <agent>", Summary: "只接管一个"}
-}
-func (c takeoverCommand) Run(_ Host, args []string) int {
-	return cmdTakeover(c.s.agents, arg(args, 0))
-}
-
-type releaseCommand struct{ s *service }
-
-func (releaseCommand) Names() []string { return []string{"off", "release", "free"} }
-func (releaseCommand) Help() HelpLine {
-	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
-		Usage: "off <agent>", Summary: "只放开一个，以后 start 也不再管它"}
-}
-func (c releaseCommand) Run(_ Host, args []string) int {
-	if a := arg(args, 0); a != "" {
-		return cmdRelease(a)
-	}
-	return cmdStop()
-}
-
-type restartCommand struct{ s *service }
-
-func (restartCommand) Names() []string { return []string{"restart"} }
-func (restartCommand) Help() HelpLine {
-	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
-		Usage: "restart", Summary: "重启代理，接管现场原样保留"}
-}
-func (c restartCommand) Run(_ Host, args []string) int {
-	return cmdRestart(c.s.agents, has(args, "--force"))
-}
-
 type statusCommand struct{ s *service }
 
 func (statusCommand) Names() []string { return []string{"status"} }
@@ -119,8 +53,6 @@ func (runOnceCommand) Help() HelpLine {
 func (c runOnceCommand) Run(_ Host, args []string) int {
 	return cmdLaunch(c.s.runtime, c.s.agents, append([]string{"run"}, args...))
 }
-
-// ---------- 路由与配置 ----------
 
 // ---------- 探测与观测 ----------
 
@@ -161,20 +93,6 @@ func (allLogsCommand) Help() HelpLine {
 		Usage: "alllogs", Summary: "完整诊断包"}
 }
 func (c allLogsCommand) Run(_ Host, _ []string) int { return cmdAllLogs(c.s.agents, c.s) }
-
-// ---------- 维护 ----------
-
-type shimCommand struct{ s *service }
-
-func (shimCommand) Names() []string { return []string{"shim"} }
-func (shimCommand) Help() HelpLine {
-	return HelpLine{Section: SectionMaintenance, Rank: rankMaint,
-		Usage: "shim …", Summary: "底层逃生口，平时用 on/off 就够了"}
-}
-func (c shimCommand) Run(_ Host, args []string) int {
-	// 不给默认 agent：客户端 id 是**各客户端模块自己的键**，界面不该知道任何一个。
-	return cmdShim(c.s.agents, arg(args, 0), arg(args, 1))
-}
 
 // ---------- 界面自身 ----------
 
@@ -221,11 +139,9 @@ func (c serveCommand) Run(_ Host, args []string) int {
 // 挪到拥有它的模块即可——见文件头的说明。
 func ownCommands(s *service) []Command {
 	return []Command{
-		startCommand{s}, stopCommand{s}, takeoverCommand{s}, releaseCommand{s},
-		restartCommand{s}, statusCommand{s}, runOnceCommand{s},
+		statusCommand{s}, runOnceCommand{s},
 		breakerCommand{}, doctorCommand{s},
 		logsCommand{}, allLogsCommand{s},
-		shimCommand{s},
 		versionCommand{}, helpCommand{s}, serveCommand{s},
 	}
 }
