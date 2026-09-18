@@ -22,6 +22,9 @@ func (h *nakedHost) DaemonRunning() bool { return false }
 
 func (h *nakedHost) NotifyProxy() { h.notified++ }
 
+// Verb 空串：测试直接调 Run，没有分派器，也就没有「按哪个名字找到我」。
+func (h *nakedHost) Verb() string { return "" }
+
 var _ cliapi.Host = (*nakedHost)(nil)
 
 // nakedNow 读当前裸奔配置。

@@ -117,6 +117,19 @@ type StatusProvider interface {
 // 只有 CLI 做得成」——而不是「这样我就不用把逻辑搬过去了」。
 type Host interface {
 	Die(code int, message string) int
+
+	// Verb 是**分派器这次按哪个名字找到我**。
+	//
+	// 为什么需要它（2026-09-18 实测补上）：`Command.Run` 收到的 args 里没有动词
+	// （见 Command 的契约），于是「一条命令服务多个动词」就丢了一个信息。上一版
+	// 的绕法是给每个动词注册一个实例、各自记着自己的名字——那条路要求**注册期
+	// 就知道全部动词**，而动词是运行期长出来的（客户端模块在自己的 Start 里注册
+	// agent），于是它要么赌装配顺序、要么在 Start 里读别人的注册表。两样都不该
+	// 出现在 Start 里（见 docs/02-component-framework.md 的三段法则）。
+	//
+	// 把「你这次是按哪个名字被找到的」交回来，命令就可以**现查**它的动词表，
+	// 注册期只交一条命令。宿主没有分派概念时（测试桩、直接调用）返回空串。
+	Verb() string
 	// LiveRouting 也**不在 Host 上**（2026-09-18 移走）：它给的是守护进程自报的
 	// 熔断表快照，那是数据面/控制面的数据（modules/gateway/controlplane.Doc 的
 	// Available / Rank），不是「只有界面做得成」的事。谁要谁直接读那个叶子。
