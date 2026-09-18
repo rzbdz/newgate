@@ -45,7 +45,7 @@ go vet ./... && gofmt -l component modules cmd
 | 目录 | 管什么 | 改这里当你在做… |
 | --- | --- | --- |
 | `component` | typed capability、依赖 DAG、生命周期（含 `Inject` 注入边与 `Attach` 第二阶段） | 组件框架本身 |
-| `modules/config/{domain,resolve,roleprov,store}` | Config 组件、配置语义、动态角色、fallback 纯函数、持久化 | 档位与配置 |
+| `modules/config/{domain,resolve,roleprov,store}` | Config 组件、配置语义、动态角色、fallback 纯函数、持久化（后三个同时是**共享叶子**，谁都能直接 import，不算依赖边） | 档位与配置 |
 | `modules/gateway/{forward,special,rewrite,thinkcache}` | 网关组件及其内部实现 | 转发、扩展与思维链 |
 | `modules/breaker` | binding 健康表：可用性 + 延迟排序，**无 Requires**（叶子，被注入数据面与 CLI） | 熔断策略与恢复 |
 | `modules/confighook` | agent/config/state-field 注册端口 | 配置文件接管 |

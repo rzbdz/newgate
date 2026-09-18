@@ -58,8 +58,9 @@ func (f Flag) String() string {
 // breaker 修过一模一样的问题（见 modules/breaker/shape.go 的说明：健康表做成
 // table 实例，就是因为它要在测试里起很多份而不互相污染）。
 //
-// 现在由 gateway 持有唯一的 Default，并经它的 capability 端口交出去（见
-// gateway.Gateway.Quirks）——想要它的模块必须**声明**这条依赖。
+// 现在由 gateway 持有唯一的 Default，并**随每次请求交给插件**（见
+// modules/gateway/special 的 `Request.Quirks`）——想要它的模块读的是手里那个
+// 请求上的字段，也就是网关自己交出来的东西，而不是一个它可以绕过去的全局。
 type Table struct {
 	mu    sync.RWMutex
 	flags map[string]Flag
