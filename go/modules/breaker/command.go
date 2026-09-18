@@ -1,12 +1,43 @@
-package cli
+package breaker
+
+// 本文件是 `newgate breaker`：**现在哪些 binding 出问题了、为什么**。
+// 2026-09-18 从 modules/cli/breaker.go 整体搬来。
+//
+// 为什么搬：这张表就是本模块的健康账本本身——状态、账本、冷却到期时刻、原因、
+// 试探在不在飞，全是本模块写进去的字段。它留在界面时，界面得认识 Status 的每个
+// 字段才画得出这张表。
+//
+// 命令由本模块在 Attach 阶段注入界面（见 component.Inject）：界面不参与排序。
+// 界面**不依赖本模块**（它只读控制面文档），所以这条注入边不成环。
 
 import (
 	"fmt"
 	"time"
 
+	"github.com/rzbdz/newgate/go/lib/durarg"
 	"github.com/rzbdz/newgate/go/lib/style"
-	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
+	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
+	"github.com/rzbdz/newgate/go/modules/gateway/controlplane"
 )
+
+// 观测那一节的位置（与原来写在界面里时一致）。
+const rankBreaker = 40
+
+type breakerCommand struct{}
+
+var (
+	_ cliapi.Command    = (*breakerCommand)(nil)
+	_ cliapi.Documented = (*breakerCommand)(nil)
+)
+
+func (breakerCommand) Names() []string { return []string{"breaker", "breakers"} }
+
+func (breakerCommand) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{Section: cliapi.SectionObserve, Rank: rankBreaker,
+		Usage: "breaker", Summary: "哪些 binding 被摘牌了、为什么、多久了"}
+}
+
+func (breakerCommand) Run(host cliapi.Host, _ []string) int { return runBreaker(host) }
 
 // cmdBreaker 只回答一件事：**现在哪些 binding 出问题了、为什么**。
 //
@@ -23,16 +54,16 @@ import (
 //     第二段是这轮新加的可见面——以前「失败 1 次、闸还没开」在快照里
 //     根本不存在，而形状错误只躺在 metrics 计数器里，用户看到「明明
 //     能用却被摘了」查不到原因。
-func cmdBreaker() int {
-	info, ps := proxyState()
+func runBreaker(host cliapi.Host) int {
+	info, ps := controlplane.State()
 	if info == nil {
-		return die(69, "代理没在运行（newgate start）——熔断表在 daemon 内存里")
+		return host.Die(69, "代理没在运行（newgate start）——熔断表在 daemon 内存里")
 	}
 	if ps == nil {
-		return die(69, fmt.Sprintf("连不上代理 127.0.0.1:%d（newgate doctor）", info.Port))
+		return host.Die(69, fmt.Sprintf("连不上代理 127.0.0.1:%d（newgate doctor）", info.Port))
 	}
 
-	var open, counted []breakerapi.Status
+	var open, counted []Status
 	for _, b := range ps.Breakers {
 		switch {
 		case b.Open:
@@ -93,7 +124,7 @@ func cmdBreaker() int {
 
 // probeTable 单独排一段：probe 结论是**另一个来源**（主动探活 vs 真实流量），
 // 混在摘牌原因里会让人以为是同一件事。
-func probeTable(rows []breakerapi.Status) string {
+func probeTable(rows []Status) string {
 	t := style.NewTable("binding", "上次 probe", "延迟", "探活时间")
 	for _, b := range rows {
 		t.Row(b.Provider+"/"+b.Model, probeLabel(b), latencyLabel(b), checkedLabel(b))
@@ -101,21 +132,21 @@ func probeTable(rows []breakerapi.Status) string {
 	return t.String()
 }
 
-func probeLabel(b breakerapi.Status) string {
+func probeLabel(b Status) string {
 	if b.Checked.IsZero() || b.Grade == "" {
 		return style.Dim("未探活")
 	}
 	return string(b.Grade)
 }
 
-func latencyLabel(b breakerapi.Status) string {
+func latencyLabel(b Status) string {
 	if b.Checked.IsZero() {
 		return style.Dim("-")
 	}
 	return fmt.Sprintf("%dms", b.Latency)
 }
 
-func checkedLabel(b breakerapi.Status) string {
+func checkedLabel(b Status) string {
 	if b.Checked.IsZero() {
 		return style.Dim("-")
 	}
@@ -125,7 +156,7 @@ func checkedLabel(b breakerapi.Status) string {
 // stateLabel 把状态机的三态翻成中文。daemon 可能是旧的（优雅交接期间 CLI 与
 // daemon 版本可以不同），老快照没有 state 字段，就从 Open 推——旧语义里
 // 只有「摘了」和「没摘」两种。
-func stateLabel(b breakerapi.Status) string {
+func stateLabel(b Status) string {
 	switch b.State {
 	case "half-open":
 		if b.Trial {
@@ -143,14 +174,14 @@ func stateLabel(b breakerapi.Status) string {
 	return style.Green("正常")
 }
 
-func ruleLabel(b breakerapi.Status) string {
+func ruleLabel(b Status) string {
 	if b.Rule == "" {
 		return style.Dim("-")
 	}
 	return b.Rule
 }
 
-func shapeLabel(b breakerapi.Status) string {
+func shapeLabel(b Status) string {
 	if b.ShapeSkips == 0 {
 		return style.Dim("-")
 	}
@@ -158,7 +189,7 @@ func shapeLabel(b breakerapi.Status) string {
 }
 
 // sparedLabel 显示「差点被摘、被诊断探活救回来」的累计次数。
-func sparedLabel(b breakerapi.Status) string {
+func sparedLabel(b Status) string {
 	if b.Spared == 0 {
 		return style.Dim("-")
 	}
@@ -166,7 +197,7 @@ func sparedLabel(b breakerapi.Status) string {
 }
 
 // totalSpared 汇总整张表的救回次数，供页脚那句话用。
-func totalSpared(rows []breakerapi.Status) int {
+func totalSpared(rows []Status) int {
 	n := 0
 	for _, b := range rows {
 		n += b.Spared
@@ -192,7 +223,7 @@ func untilLabel(until time.Time, trial bool) string {
 		return style.Dim("-")
 	}
 	if d := time.Until(until); d > 0 {
-		return prettyDur(int(d.Seconds()))
+		return durarg.Format(int(d.Seconds()))
 	}
 	return style.Green("已到期")
 }

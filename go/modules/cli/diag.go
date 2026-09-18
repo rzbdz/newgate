@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -68,103 +66,6 @@ func cmdDoctor(service *service) int {
 	}
 	fmt.Printf("%s %d 项异常\n", style.Mark(style.Bad), bad)
 	return 1
-}
-
-// logTailDefault 非终端输出（管道 / 重定向）时的行数。终端上给全量，
-// 由分页器兜着——和 journalctl 一样，重定向时才需要收敛。
-const logTailDefault = 40
-
-// cmdLogs 日志。行为对齐 journalctl：
-//
-//	newgate logs          终端上给全量日志，经分页器（内容不满一屏直接给）
-//	newgate logs 200      只看最后 200 行
-//	newgate logs -n 200   同上
-//	newgate logs -f       跟随（tail -F）
-//
-// 分页只在 stdout 是终端时发生：`newgate logs > f` 或管道里必须老实打印，
-// 否则脚本会挂在等用户按键上。
-func cmdLogs(n int, follow bool) int {
-	auto := n <= 0
-	if follow {
-		// -F 而不是 -f：logx 按 16MB 轮转，换文件后 -f 会跟丢，
-		// 表现为「日志突然不动了」。
-		k := n
-		if k <= 0 {
-			k = logTailDefault
-		}
-		c := exec.Command("tail", "-n", strconv.Itoa(k), "-F", paths.LogFile())
-		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		_ = c.Run()
-		return 0
-	}
-	b, err := ioutil.ReadFile(paths.LogFile())
-	if err != nil {
-		return die(69, "读不到日志 "+paths.LogFile()+"："+err.Error())
-	}
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		fmt.Println(style.Dim("  日志是空的"))
-		return 0
-	}
-	limit := n
-	if auto {
-		limit = logTailDefault
-		if style.TTY() {
-			limit = 0 // 终端：全量交给分页器
-		}
-	}
-	if limit > 0 && len(lines) > limit {
-		lines = lines[len(lines)-limit:]
-	}
-	return pageOut(strings.Join(lines, "\n") + "\n")
-}
-
-// pageOut 经分页器输出。PAGER 优先；否则 less（-FRX：不满一屏自动退、
-// 保留颜色、不动 termcap），没有 less 就退回 more。
-//
-// 分页器只是**显示**手段，任何一步失败都退回直接打印——不能因为没装
-// 分页器就让用户看不到日志。
-func pageOut(s string) int {
-	if !style.TTY() {
-		fmt.Print(s)
-		return 0
-	}
-	pager := os.Getenv("PAGER")
-	if pager == "" {
-		switch {
-		case haveCmd("less"):
-			pager = "less -FRX"
-		case haveCmd("more"):
-			pager = "more"
-		default:
-			fmt.Print(s)
-			return 0
-		}
-	}
-	c := exec.Command("/bin/sh", "-c", pager)
-	c.Stdin = strings.NewReader(s)
-	c.Stdout, c.Stderr = os.Stdout, os.Stderr
-	if err := c.Run(); err != nil {
-		fmt.Print(s)
-	}
-	return 0
-}
-
-func haveCmd(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
-}
-
-// logCount 解析行数：`newgate logs 200` 或 `newgate logs -n 200`。
-// 都没给返回 0 = 自动（终端全量，管道取尾巴）。
-func logCount(args []string) int {
-	if v := findFlag(args, "-n", "--lines"); v != "" {
-		var k int
-		if _, err := fmt.Sscanf(v, "%d", &k); err == nil && k > 0 {
-			return k
-		}
-	}
-	return intArg(args, 1, 0)
 }
 
 // sortedKeys 稳定顺序的 map 键（诊断包里几处按名字列 provider 用）。
