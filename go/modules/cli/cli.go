@@ -126,7 +126,6 @@ func usageText(service *service) string {
 	cmd("doctor", "体检")
 	cmd("logs [N] [-f]", "代理日志：终端上分页，-f 持续跟随")
 	cmd("alllogs", "完整诊断包")
-	cmd("debug on|off [分钟]", "全量请求日志（默认 30 分钟自动关）")
 	emit("探测与观测")
 
 	sec("维护")
@@ -289,8 +288,6 @@ func run(service *service, args []string) int {
 		return cmdLogs(logCount(args), has(args, "-f") || has(args, "--follow"))
 	case "alllogs", "all-logs":
 		return cmdAllLogs(service.agents, service)
-	case "debug":
-		return cmdDebug(args)
 	case "tui", "menuconfig":
 		return cmdTUI()
 	case "version", "--version", "-v":

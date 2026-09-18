@@ -707,7 +707,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// req= 是客户端请求体字节数：跟上游日志对账（300k compact 这种大输入）时
 	// 靠它定位「同一发请求」，没有它就只剩 reqID 一个数，跨系统对不上。
 	s.logf("[proxy] #%d ← %s stream=%v req=%d字节  开始", reqID, inModel, stream0, len(body))
-	if st.DebugActive() {
+	if gatewaystate.DebugActive(st) {
 		s.logf("[proxy] #%d 客户端请求 %s %s%s\n    body(%d字节): %s",
 			reqID, r.Method, r.URL.Path, headerDump(r.Header), len(body),
 			truncate(string(redact(body)), 4000))
@@ -923,7 +923,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.dump(reqID, i, body, newBody)
-		if st.DebugActive() {
+		if gatewaystate.DebugActive(st) {
 			s.logf("[proxy] #%d 发往上游 %s\n    body(%d字节, 与原文差 %+d): %s",
 				reqID, target, len(newBody), len(newBody)-len(body),
 				truncate(string(redact(newBody)), 4000))
@@ -1095,7 +1095,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if i > 0 {
 			metrics.Default.Inc("chain.failover")
 		}
-		if st.DebugActive() {
+		if gatewaystate.DebugActive(st) {
 			s.logf("[proxy] #%d 上游响应头 %d%s", reqID, resp.StatusCode, headerDump(resp.Header))
 		}
 		s.logf("[proxy] #%d %s  %s  %d  首字节%dms  stream=%v  profile=%s%s",

@@ -1031,9 +1031,6 @@ func cmdStatus(agents agentapi.AgentCatalog, service *service) int {
 	fmt.Println(style.Field("配置", configLine(agents, st)))
 	// 插件层自报的状态项由 gateway 经 RegisterStatus 代转（见它的 status.go），
 	// cli 不必认识 special 这个包。
-	if flags := statusFlags(st); flags != "" {
-		fmt.Println(style.Field("开关", flags))
-	}
 	// 模块自报的状态行（谁的状态谁自己报，见 RegisterStatus）。
 	for _, line := range service.statusLines(st) {
 		fmt.Println(style.Field(line.Label, line.Value))
@@ -1197,29 +1194,6 @@ func skipKind(reason string) string {
 		return "引用成环"
 	}
 	return "其他"
-}
-
-// statusFlags 一行列出**核心**的非默认开关。默认状态不占版面。
-//
-// 模块自己那些开关点不在这里：它们由各自的 owner 经 cli.RegisterStatus 自报
-// （见 pluginmanager 的 Status）。这条分工是**必须的**，不是风格——cli 若为了
-// 这几行去认识那些模块，就会挡住它们注册自己的命令（成环）。
-func statusFlags(st *domain.State) string {
-	var f []string
-	switch {
-	case st.DebugActive():
-		s := style.Yellow("debug=on")
-		if st.DebugUntil != "" {
-			s += style.Dim("（到 " + st.DebugUntil + "）")
-		}
-		f = append(f, s)
-	case st.Debug:
-		f = append(f, style.Yellow("debug=已过期"))
-	}
-	// schema-repair / special_treatment 那三个开关**不在这里**：它们住在
-	// gateway 自己的 state 段里（见 modules/gateway/gatewaystate），由 gateway
-	// 经 cli.RegisterStatus 自报。cli 读它们就等于继续认识 gateway 的内部结构。
-	return strings.Join(f, "   ")
 }
 
 // sortedAgentIDs 稳定顺序的已知 agent 列表。

@@ -2,62 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/rzbdz/newgate/go/lib/style"
 	"github.com/rzbdz/newgate/go/modules/cli/tui"
-	"github.com/rzbdz/newgate/go/modules/config/paths"
-	"github.com/rzbdz/newgate/go/modules/config/store"
-	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
-
-// cmdDebug turns on full request logging.
-//
-// It expires on its own by default: a single request can log 8KB or more
-// (opencode's system prompt alone is ~97KB), so leaving it on indefinitely
-// fills the disk.
-func cmdDebug(args []string) int {
-	on := len(args) > 1 && truthy(args[1])
-	ttl := 30 * time.Minute
-	if on {
-		for _, a := range args {
-			var n int
-			if _, err := fmt.Sscanf(a, "%d", &n); err == nil && n > 0 {
-				ttl = time.Duration(n) * time.Minute
-			}
-		}
-		if has(args, "--forever") {
-			ttl = 0
-		}
-	}
-	if err := store.SetDebug(on, debugUntil(ttl)); err != nil {
-		return die(70, err.Error())
-	}
-	if !on {
-		fmt.Println(style.Item(style.Skip, "debug off"))
-		return 0
-	}
-	if ttl > 0 {
-		fmt.Println(style.Item(style.OK, fmt.Sprintf("debug on · %s 后自动关闭", prettyDur(int(ttl.Seconds())))))
-		fmt.Println(style.Hint("不设期限：newgate debug on --forever"))
-	} else {
-		fmt.Println(style.Item(style.Warn, "debug on · 不自动关闭"))
-		fmt.Println(style.Hint("记得 newgate debug off"))
-	}
-	fmt.Println(style.Hint("日志 " + paths.LogFile() + " · 16MB 轮转，保留 4 份"))
-	notifyProxy()
-	if daemon.Running() != nil {
-		fmt.Println(style.Hint("即刻生效，无需重启"))
-	}
-	return 0
-}
-
-func debugUntil(ttl time.Duration) string {
-	if ttl <= 0 {
-		return ""
-	}
-	return time.Now().Add(ttl).Format(time.RFC3339)
-}
 
 func cmdTUI() int {
 	if err := tui.Run(); err != nil {

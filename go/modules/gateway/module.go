@@ -46,7 +46,7 @@ func New() modules.Component {
 			restore = special.InstallDefault(port.registry)
 
 			cli := modules.MustGet(ctx, cliapi.Capability)
-			for _, cmd := range []cliapi.Command{specialCommand{}, schemaRepairCommand{}} {
+			for _, cmd := range []cliapi.Command{specialCommand{}, schemaRepairCommand{}, debugCommand{}} {
 				release, err := cli.RegisterCommand(cmd)
 				if err != nil {
 					return err

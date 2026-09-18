@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"github.com/rzbdz/newgate/go/modules/gateway/gatewaystate"
 	"io"
 	"os"
 	"strings"
@@ -24,7 +25,7 @@ type widthViolation struct {
 func shouldAuditLayout(agents agentapi.AgentCatalog, args []string) bool {
 	explicit := os.Getenv("NEWGATE_LAYOUT_AUDIT") != ""
 	if len(args) == 0 {
-		return explicit || store.LoadState().DebugActive()
+		return explicit || gatewaystate.DebugActive(store.LoadState())
 	}
 	switch args[0] {
 	case "__serve", "logs", "log", "alllogs", "all-logs", "tui", "menuconfig", "run":
@@ -40,7 +41,7 @@ func shouldAuditLayout(agents agentapi.AgentCatalog, args []string) bool {
 	if _, launching := detectLaunch(agents, args); launching {
 		return false
 	}
-	return explicit || store.LoadState().DebugActive()
+	return explicit || gatewaystate.DebugActive(store.LoadState())
 }
 
 func auditLayout(args []string, run func() int) int {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
+	"github.com/rzbdz/newgate/go/modules/runtime/daemon"
 )
 
 // moduleCLIHost exposes rendering and daemon notification primitives to
@@ -27,3 +28,4 @@ func (moduleCLIHost) PrintChain(steps []resolve.Step) {
 func (moduleCLIHost) PrintSkips(skips []resolve.Skip) { printSkips(skips) }
 func (moduleCLIHost) NotifyProxy()                    { notifyProxy() }
 func (moduleCLIHost) PrintThinkCache()                { printThinkCache() }
+func (moduleCLIHost) DaemonRunning() bool             { return daemon.Running() != nil }
