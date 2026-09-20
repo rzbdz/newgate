@@ -60,6 +60,13 @@ func New() modules.Component {
 		Type: "gateway",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
+			// state.json 里属于本模块的那一段由 confighook 统一登记（见下面 Start
+			// 里的 RegisterStateField）。这条**以前没有声明**，而 Start 里是
+			// MustGet——2026-09-21 由 tools/archmap 那个「import 了却没有声明边」
+			// 的探针挖出来：摘掉 confighook 时构图期因为**别人**（locale /
+			// pluginmanager）先失败，所以这个 panic 一直轮不到，测试全绿。
+			// 一旦装配里没有 confighook 而本模块在，就是 Start 期直接 panic。
+			modules.Need(confighookapi.ConfigHooksCapability),
 			// ui 是**弱依赖**（见 component.Optional）：`newgate st` / `metrics` /
 			// `probe` 是本层的用户界面，装着界面就挂上去，没装就跳过——网关本身
 			// 照常工作，只是没有入口。界面不依赖本模块（它没有任何出边），所以这

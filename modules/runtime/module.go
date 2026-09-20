@@ -40,6 +40,13 @@ func New() modules.Component {
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),
 			modules.Need(confighookapi.AgentCatalogCapability),
+			// state.json 里属于本模块的那一段由 confighook 统一登记（见下面 Start
+			// 里的 RegisterStateField）。这条**以前没有声明**，而 Start 里是
+			// MustGet——2026-09-21 由 tools/archmap 那个「import 了却没有声明边」
+			// 的探针挖出来：摘掉 confighook 时构图期因为**别人**（locale /
+			// pluginmanager）先失败，所以这个 panic 一直轮不到，测试全绿。
+			// 一旦装配里没有 confighook 而本模块在，就是 Start 期直接 panic。
+			modules.Need(confighookapi.ConfigHooksCapability),
 			// ui 是**弱依赖**（见 component.Optional）：接管的状态行与两条体检、
 			// 以及本模块那一族命令（start/stop/on/off/restart…）都归它自己贡献，
 			// 装着界面就挂上去，没装就跳过——接管照常工作，只是没有入口。

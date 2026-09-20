@@ -795,7 +795,7 @@
       "where": "modules/gateway/command_debug.go:39"
     },
     "Gateway": {
-      "where": "modules/gateway/module.go:113"
+      "where": "modules/gateway/module.go:120"
     },
     "Global settings": {
       "where": "modules/config/view.go:653"
