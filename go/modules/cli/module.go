@@ -277,7 +277,19 @@ func New() modules.Component {
 			// 申报自己为**默认入口**：组装这一次调用的是 root 的账本（built-in），
 			// 组合根在 main 里只问账本「归谁」——它不认识本模块，删掉本模块它也
 			// 照样编译（那时没有任何入口认领，进程说一句人话退出）。
-			registry := modules.MustGet(ctx, entry.Capability)
+			//
+			// 这里刻意用 Get 而不是 MustGet：MustGet 的契约是「这个端口已经由 Need
+			// 保证存在」，而界面**一条出边都不许有**（上面的 Requires 注释）。
+			// 账本缺席只有一种情况——这张图里没有 root（root 是唯一 built-in，
+			// 正常构建里它一定在，见 app/matrix_test.go）。那时按 fail-open 处理：
+			// 界面本身照常可用，只是没有任何入口认领这次调用；那是**进程级**的事实，
+			// 由 main 说一句人话退出，不该变成某个模块的启动错误。
+			//
+			// 硬依赖由 wrapper 那一侧声明（它是业务模块，没有 ui 那条限制）。
+			registry, ok := modules.Get(ctx, entry.Capability)
+			if !ok {
+				return nil
+			}
 			release, err := registry.Register(service, entry.DefaultRank)
 			if err != nil {
 				return err

@@ -50,6 +50,12 @@ func New() modules.Component {
 		Requires: []modules.Requirement{
 			modules.Need(runtimeapi.Capability),
 			modules.Need(agentapi.AgentCatalogCapability),
+			// 入口账本（root 提供）。**声明它不是为了排序**——root 没有出边，
+			// 谁先谁后没有悬念。声明它是为了让「root 是唯一的 built-in」这条主张
+			// 变成可检查的事实：有人把 root 摘掉，构图期就当场失败并点名这个端口，
+			// 而不是让进程起得来、却在第一次调用时才发现没有任何入口认领
+			// （见 app/matrix_test.go 的摘除矩阵）。
+			modules.Need(entry.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Wrapper(instance)),

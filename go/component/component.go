@@ -123,6 +123,13 @@ type Provision struct {
 	value any
 }
 
+// Name 返回这个提供者绑定的端口名。
+//
+// 与 Requirement.Name 对称，存在的理由也同一条：产品层要断言「摘掉一个模块会发生
+// 什么」这类层级不变量（见 app/matrix_test.go 的摘除矩阵），而 Provision 的字段
+// 是私有的。断言写在产品层、观测手段由内核提供，比把不变量塞进内核合适。
+func (p Provision) Name() string { return p.spec.name }
+
 // Provide 创建端口绑定；值的动态类型会在构图阶段再次校验。
 func Provide[T any](capability Capability[T], value T) Provision {
 	return Provision{spec: capability.spec, value: value}
