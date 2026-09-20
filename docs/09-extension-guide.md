@@ -174,6 +174,41 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
   `forward/` 的非测试源码，连注释里出现这个词都算红。理由：端口怎么分派是产品
   决定，数据面只该知道自己是一个 handler。
 
+## 3b2. 起一个监听要在「服务期」做（`lib/serving`）
+
+**想在服务进程里干点什么、又不能在 `Start` 里干**的模块，挂在 `lib/serving` 上：
+
+```go
+Requires: []component.Requirement{component.Optional(servingapi.Capability)},
+Start: func(_ context.Context, ctx component.Context) error {
+    ln, ok := component.Get(ctx, servingapi.Capability)
+    if !ok {
+        return nil // 没有服务期通知 = 我这条路不存在，功能照常
+    }
+    release, err := ln.OnServe("my-module", func() (func(), error) {
+        return startMyListener() // 只在**服务进程**里跑，跑一次
+    })
+    …
+},
+```
+
+为什么必须有这条边：**模块的 `Start` 在每一条 `newgate …` 命令里都会跑**（敲一条
+命令、进一个 shell、跑一次体检）。在那里 `net.Listen` 等于敲一次 `newgate status`
+就开一台服务器。而「这次进程是不是服务进程」在 `Start` 时刻**没有合法来源**：
+模块自己读 `os.Args` 是内核明文禁止的（那是入口账本的判据），而入口账本只在装配
+**之后**被组合根问一次，`Start` 在装配**之中**。
+
+所以换一个问法：不问「我是谁」，只等**拥有端口的模块**说一句「我要开始服务了」
+（今天只有 gateway 的 `Serve` 说得出口）。登记与通知因此互不认识对方。
+
+三条约定：
+
+- **fail-open**：一个回调起不来（端口被占、没权限）**不会**让服务失败——报错带上
+  名字交给调用方写日志，其余回调照跑。一个界面绑不上端口不该拖垮数据面。
+- **幂等**：`Notify` 被叫两次只生效一次；返回的 stop 逆序执行、也只生效一次。
+- **不要在这里做「顺序敏感」的初始化**：回调之间没有先后保证（按登记顺序而已），
+  需要顺序的依赖应该写成依赖图上的边（`Need`/`Optional`）。
+
 ## 3c. web 界面贡献（`lib/view`）
 
 模块把自己的控制面交给 web 界面，走的是与 `cli/extension` 同一套模式，契约在

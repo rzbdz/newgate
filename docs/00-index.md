@@ -38,6 +38,7 @@
 | Component | capability graph 中拥有生命周期的节点 |
 | Capability | 组件之间使用的 typed port |
 | Port（共享端口） | 网关监听的那个端口；`/` 归数据面，其余前缀可以挂别的服务（porthub） |
+| 服务期（serving） | 「这个进程开始服务了」这条边：想在服务进程里起监听的模块挂在它上面 |
 | Concept | 模块交给 web 界面的一个「面」：数据 + 怎么写回去（`lib/view`） |
 | Switch | 模块上报的运行期开关点（plugin-manager） |
 | Revision | 文件内容的哈希，CAS 写的基线（`config/store`） |
