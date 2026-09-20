@@ -230,7 +230,11 @@ Start: func(_ context.Context, ctx component.Context) error {
 
 - `Kind` 是渲染方式（`mapping-editor` / `code` / `toggles` / `series` / `table` /
   `log`）。前端**只认这几种**：加一个模块的面不需要改前端，除非它带来一种新的
-  **形状**（那时两边都要动，这是诚实的代价）。
+  **形状**（那时两边都要动，这是诚实的代价）。`table` 的形状是 `view.Table`：
+  几列 + 几行，**行是按列 ID 索引的 map**，不是数组——列顺序于是纯展示的事，
+  前端按窄屏重排不会把格子串位。格子里的颜色走 `Cell.Tone`（`ok`/`warn`/`bad`）
+  这个**语义**词：别在这儿塞 ANSI，转义序列是渲染层的事，内核给语义，
+  终端与网页各自把它变成自己的样子（`modules/breaker/view.go` 是完整例子）。
 - `Apply(edit, base)` 是**拥有那份文件的人**才知道的写法：改哪一段、哪些字段必须
   原样保留。界面自己不写文件——那样它就必须知道 profile 的字段、mappings 的布局、
   哪些文件带凭据不能写回，那些知识会长在界面里，一个模块一块。
