@@ -104,9 +104,9 @@ func List() []Status {
 		}
 		s := Status{
 			Agent: id, Mechanism: mechanismOf(a), Wanted: st.TakeoverWanted(id),
-			// 排除 shim 目录：不排除的话这一条**永远**为真（shim 就是我们放在
-			// PATH 前面的同名链接），判据会退化成「我们做过接管没有」。
-			Installed: agents.Installed(id, injection.Dir()),
+			// 判据是「这台机器上有没有这个工具」（扣掉我们自己的 shim，见
+			// confighook.InstalledDefault），不是「我们改过的文件还在不在」。
+			Installed: agents.Installed(id),
 		}
 		switch s.Mechanism {
 		case MechShim:

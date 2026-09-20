@@ -18,7 +18,7 @@ const (
 )
 
 // Dir 存放 shim 的目录。它会被前置到 PATH。
-func Dir() string { return filepath.Join(paths.Config(), "bin") }
+func Dir() string { return paths.ShimDir() }
 
 // Install 为某个工具建 shim：Dir()/<tool> 指向 newgate 自己。
 //

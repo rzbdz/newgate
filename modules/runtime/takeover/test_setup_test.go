@@ -20,8 +20,8 @@ func (catalog testCatalog) Get(id string) (*agentapi.Agent, bool) {
 // Facts / Installed 补齐目录端口（见 agentapi.AgentCatalog），走真实现那条判据。
 func (catalog testCatalog) Facts(string) agentapi.AgentFacts { return nil }
 
-func (catalog testCatalog) Installed(id string, skipDirs ...string) bool {
-	return agentapi.InstalledDefault(catalog[id], nil, skipDirs...)
+func (catalog testCatalog) Installed(id string) bool {
+	return agentapi.InstalledDefault(catalog[id], nil)
 }
 
 func (catalog testCatalog) Names() []string {

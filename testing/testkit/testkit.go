@@ -231,8 +231,8 @@ func (c *FakeCatalog) WithFacts(id string, f agentapi.AgentFacts) *FakeCatalog {
 
 // Installed 走真实现那条判据（confighook.InstalledDefault），不另写一份：假目录与
 // 真目录对「装没装」给出不同答案是这类判据最坏的失效方式。
-func (c *FakeCatalog) Installed(id string, skipDirs ...string) bool {
-	return agentapi.InstalledDefault(c.agents[id], c.facts[id], skipDirs...)
+func (c *FakeCatalog) Installed(id string) bool {
+	return agentapi.InstalledDefault(c.agents[id], c.facts[id])
 }
 
 // Names 按字母序返回，与真实目录一致（真实实现排过序，测试不该依赖注册顺序）。

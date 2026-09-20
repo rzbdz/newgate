@@ -210,11 +210,11 @@ func (r *registry) Facts(id string) AgentFacts {
 // 一个名字、可能不看 PATH），没交才用通用那条（在 PATH 上找 Bin 里的名字，排除
 // 调用方给的 shim 目录）。反过来先查 PATH 的话，一个装在奇怪位置的客户端会被判成
 // 没装，而它明明交了「我在」。
-func (r *registry) Installed(id string, skipDirs ...string) bool {
+func (r *registry) Installed(id string) bool {
 	r.mu.RLock()
 	facts, agent := r.facts[id], r.agents[id]
 	r.mu.RUnlock()
-	return InstalledDefault(agent, facts, skipDirs...)
+	return InstalledDefault(agent, facts)
 }
 
 // Names 返回稳定排序的客户端名，使 CLI 输出和测试结果可复现。

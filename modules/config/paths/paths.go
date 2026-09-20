@@ -38,7 +38,17 @@ func StateFile() string      { return filepath.Join(Root(), "state.json") }
 func HealthFile() string     { return filepath.Join(Root(), "health.json") }
 func ProbeCacheFile() string { return filepath.Join(Root(), "probe-capabilities.json") }
 func BackupDir() string      { return filepath.Join(Root(), "backups") }
-func LogFile() string        { return filepath.Join(Root(), "newgate.log") }
+
+// ShimDir 是 PATH shim 的目录：`newgate on <agent>` 往这里放一个与客户端同名的
+// 链接，接管就是「让 PATH 前面的这个名字指向我们」。
+//
+// 它住在这里而不是 modules/runtime/injection：**路径布局归本包**，而这份布局有两个
+// 消费者——放链接的那一位（injection）与**判断「这个工具到底装没装」的那一位**
+// （confighook 的 OnPath：查 PATH 时必须跳过这个目录，否则那条判据永远为真，因为
+// 目录里那个同名文件正是我们自己放的）。两个消费者各拼一遍路径，就是两份会漂移的
+// 知识，而漂移的症状是「接管状态又开始撒谎」。
+func ShimDir() string { return filepath.Join(Config(), "bin") }
+func LogFile() string { return filepath.Join(Root(), "newgate.log") }
 
 // ThinkCacheFile thinkcache 的落盘冷层文件：滚动 100MB，撑过 daemon 重启。
 // 内容是推理原文（= 对话内容），和 dump 一样是明文，权限 0660 随目录的

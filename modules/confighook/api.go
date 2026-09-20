@@ -8,6 +8,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/component"
 	i18n "github.com/rzbdz/newgate/lib/i18n"
+	"github.com/rzbdz/newgate/modules/config/paths"
 )
 
 // ConfigHooks 是客户端模块写入配置扩展的所有权端口。
@@ -32,11 +33,10 @@ type AgentCatalog interface {
 	Facts(id string) AgentFacts
 	// Installed 报告这个客户端在不在**这台机器**上。
 	//
-	// 有事实就问事实（那是客户端自己的判据），没有就按 Bin 在 PATH 上找——且
-	// **排除 skipDirs**（我们自己的 shim 目录，由调用方给：shim 放在哪是 runtime
-	// 的知识，本包不认识）。缺省为什么是「找 PATH」而不是「假定在」：这个判据的
-	// 用途正是回答「到底有没有」，假定在就回到了它要修的那个 bug。
-	Installed(id string, skipDirs ...string) bool
+	// 有事实就问事实（那是客户端自己的判据），没有就按 Bin 在 PATH 上找（跳过我们
+	// 自己的 shim 目录，见 InstalledDefault）。缺省为什么是「找 PATH」而不是
+	// 「假定在」：这个判据的用途正是回答「到底有没有」，假定在就回到了它要修的那个 bug。
+	Installed(id string) bool
 }
 
 // 两个 capability 是同一注册表的读写分面：写端只交给扩展模块，
@@ -110,13 +110,9 @@ type Agent struct {
 // 没注册时有一份写死的缺省（见 AgentCatalog.Installed）。与「注册型 capability
 // 必须返回 Release，consumer 在 Stop 中逆序释放」那条规矩同源。
 type AgentFacts interface {
-	// Installed 报告这台机器上有没有这个工具。
-	//
-	// skipDirs 是要**忽略**的目录（我们自己的 shim 目录）：由内核在问的时候给，
-	// 因为「shim 放在哪」是 runtime 的知识，客户端模块不认识它。实现里通常就一句
-	// `Agent().OnPath(skipDirs...)`——不忽略的话这条判据**永远**为真（shim 就是
-	// 我们放在 PATH 前面的同名链接）。
-	Installed(skipDirs ...string) bool
+	// Installed 报告这台机器上有没有这个工具。实现里通常就一句
+	// `Agent().OnPath()`——那条已经跳过了我们自己的 shim 目录。
+	Installed() bool
 	// SlotTier 报告某个槽位此刻走哪个档位；空串 = 用描述符里的缺省。
 	SlotTier(slot Slot) string
 }
@@ -141,14 +137,14 @@ func TierOf(facts AgentFacts, slot Slot) string {
 // 为什么是自由函数而不是各处自己写一遍：实现 AgentCatalog 的地方不止一处（真注册表、
 // 测试里的假目录），而「装没装」出现两种答案是这类判据最坏的失效方式——一处说装了、
 // 一处说没装，而两边看起来都对。
-func InstalledDefault(a *Agent, facts AgentFacts, skipDirs ...string) bool {
+func InstalledDefault(a *Agent, facts AgentFacts) bool {
 	if facts != nil {
-		return facts.Installed(skipDirs...)
+		return facts.Installed()
 	}
 	if a == nil {
 		return false
 	}
-	return a.OnPath(skipDirs...)
+	return a.OnPath()
 }
 
 // TakeoverReport 记录一次配置接管实际改了什么；接管不能静默成功。
@@ -199,7 +195,7 @@ func (a *Agent) BuildEnv(port int, authToken string, facts AgentFacts) map[strin
 
 // FindReal 跳过 newgate 自己的 shim 查找真实客户端，防止接管后递归启动自身。
 func (a *Agent) FindReal(skipDir string) (string, error) {
-	if p := a.realBin(skipDir); p != "" {
+	if p := a.realBin(); p != "" {
 		return p, nil
 	}
 	return "", i18n.E("cannot find {names} in PATH (skipped the shim directory {dir})",
@@ -208,28 +204,21 @@ func (a *Agent) FindReal(skipDir string) (string, error) {
 
 // OnPath 报告这家客户端的**真实**可执行文件在不在 PATH 上——**排除我们自己的 shim**。
 //
-// 「排除」是这条判据的全部要点：接管就是往 PATH 前面的目录里放一个同名的链接，
-// 所以一次天真的 PATH 查找**永远**能找到它，而那个文件正是我们放的那个。不排除的话，
-// 判据会回答「我们做过接管」而不是「这台机器上有这个工具」，而那两件事在
-// 「装过、后来卸了」或者「配置文件还在、命令没了」的时候是分开的（2026-09-21 实测：
-// `which opencode` 找不到，而 status 报 ✓ —— 因为 opencode 是 config 机制，
-// 「已接管」判的是我们改过的配置文件在不在）。
-func (a *Agent) OnPath(skipDirs ...string) bool { return a.realBin(skipDirs...) != "" }
+// 「排除」是这条判据的全部要点：接管就是往 PATH 前面的目录里放一个同名的链接，所以
+// 一次天真的 PATH 查找**永远**能找到它，而那个文件正是我们放的那个。不排除的话，
+// 判据会回答「我们做过接管」而不是「这台机器上有这个工具」——而那两件事在「装过、
+// 后来卸了」的时候是分开的（2026-09-21 实测：`which opencode` 找不到，而 status 报 ✓，
+// 因为 opencode 走 config 机制，「已接管」判的是我们改过的配置文件在不在）。
+//
+// 要排除的目录是**写死的一条**（paths.ShimDir），不是调用方传进来的参数：需要跳过的
+// 永远是同一个目录，让每个调用方各传一次只会多出「传错了/忘了传」这一种故障，而那种
+// 故障的表现正是这条判据又开始撒谎。
+func (a *Agent) OnPath() bool { return a.realBin() != "" }
 
 // realBin 是上面两条共用的那一次查找。
-func (a *Agent) realBin(skipDirs ...string) string {
-	skip := make([]string, 0, len(skipDirs))
-	for _, d := range skipDirs {
-		skip = append(skip, filepath.Clean(d))
-	}
-	skipped := func(dir string) bool {
-		for _, d := range skip {
-			if dir == d {
-				return true
-			}
-		}
-		return false
-	}
+func (a *Agent) realBin() string {
+	skipDir := filepath.Clean(paths.ShimDir())
+	skipped := func(dir string) bool { return filepath.Clean(dir) == skipDir }
 	for _, name := range a.Bin {
 		for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 			if dir == "" || skipped(filepath.Clean(dir)) {

@@ -1736,7 +1736,7 @@
       ]
     },
     "cannot find {names} in PATH (skipped the shim directory {dir})": {
-      "where": "modules/confighook/api.go:205",
+      "where": "modules/confighook/api.go:201",
       "args": [
         "dir",
         "names"
@@ -2280,7 +2280,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:632",
+      "where": "lib/view/view.go:647",
       "args": [
         "err",
         "source"
@@ -3605,17 +3605,17 @@
       ]
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:484"
+      "where": "lib/view/view.go:499"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:653",
+      "where": "lib/view/view.go:668",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:645",
+      "where": "lib/view/view.go:660",
       "args": [
         "a",
         "b",
@@ -3623,19 +3623,19 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:650",
+      "where": "lib/view/view.go:665",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:493",
+      "where": "lib/view/view.go:508",
       "args": [
         "source"
       ]
     },
     "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
-      "where": "lib/view/view.go:489",
+      "where": "lib/view/view.go:504",
       "args": [
         "source"
       ]
@@ -4000,14 +4000,14 @@
       ]
     },
     "{source} has no action called {action} — the page is probably stale, reload it": {
-      "where": "lib/view/view.go:586",
+      "where": "lib/view/view.go:601",
       "args": [
         "action",
         "source"
       ]
     },
     "{source}.{action} has nothing to run": {
-      "where": "lib/view/view.go:590",
+      "where": "lib/view/view.go:605",
       "args": [
         "action",
         "source"
