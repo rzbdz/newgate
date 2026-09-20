@@ -10,10 +10,10 @@ import (
 // Entry 是一个组件在**装配清单里的身份**：目录名 + 组件定义。
 //
 // 为什么身份是目录名而不是组件名：目录名是「装哪个 / 关哪个」的键。发行版规格书
-// 里 disable 写的就是目录名（`claudecode_deepseek`），而组件名是
-// `claudecode-deepseek`——十四个模块里有三个两者不同。按组件名去关会**静默关不掉**
-// （名字没对上，谁也不会报错），所以键从扫描来（tools/genmodules 扫的就是目录名），
-// 这里原样带着。
+// 里 disable 写的就是目录名（发行版有 `claudecode_deepseek`），而组件名不必与它相同
+// （`claudecode-deepseek`）。按组件名去关会**静默关不掉**（名字没对上，谁也不会
+// 报错），所以键从扫描来（tools/genmodules 扫的就是目录名），这里原样带着。
+// 内核这一侧今天恰好个个同名——巧合，不是规矩。
 type Entry struct {
 	Dir       string
 	Component modules.Component

@@ -25,7 +25,8 @@ import (
 // coreModules 是内核自带的组件表，按目录名排序。
 //
 // Dir 与 Component 必须成对出现：目录名是「关掉哪一个」的键（见 app.Selection），
-// 而三个模块的目录名与组件名并不相同（claudecode_deepseek → claudecode-deepseek）。
+// 组件名不必与它相同（发行版里就有：claudecode_deepseek → claudecode-deepseek）。
+// 内核这一侧今天恰好个个同名，那是巧合、不是规矩。
 func coreModules() []Entry {
 	return []Entry{
 		{Dir: "breaker", Component: mod_breaker.New()},

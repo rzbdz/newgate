@@ -1,83 +1,182 @@
+<div align="center">
+
 # newgate
 
-newgate 是 AI CLI 的本地语义模型网关。Claude Code 和 OpenCode 只需要表达
-“这次任务需要哪个能力档”，真实 provider、模型、fallback 和上游兼容处理由
-newgate 统一决定。
+### A local semantic gateway for AI coding CLIs — **the kernel**
+
+Your CLI asks for a *capability tier*. newgate decides the provider, the model,
+and what to do when it fails.
+
+`heavy` · `normal` · `mid` · `light` · `vision`
+
+[![CI](https://github.com/rzbdz/newgate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rzbdz/newgate/actions/workflows/ci.yml)
+![Go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)
+![dependencies](https://img.shields.io/badge/third--party_deps-0-brightgreen)
+![build](https://img.shields.io/badge/build-fully_offline-blue)
+
+**This repository is the kernel.** Mechanism only. Which modules ship, whose
+quirks get patched, in what order — those are a *distribution's* decisions, and
+they live in [newgate-ext](https://github.com/rzbdz/newgate-ext).
+
+</div>
+
+---
+
+## The idea
+
+Model routing is not a per-project decision, it is a per-*tier* decision. You
+say "this needs the cheap fast one", not "this needs `gemini-2.5-flash-002` on
+the second provider in my fallback list".
 
 ```text
-AI CLI -> heavy / normal / mid / light -> profile chain -> provider/model
+┌──────────────┐   heavy / normal / mid / light / vision   ┌───────────────────┐
+│  Claude Code │ ────────────────────────────────────────▶ │                   │
+│  OpenCode    │                                           │      newgate      │
+│  anything    │ ◀──────────────────────────────────────── │  (localhost:8899) │
+└──────────────┘        one dialect, one endpoint          └─────────┬─────────┘
+                                                                    │
+                    profile → candidate chain → provider/model ─────┘
+                    (fallback, first-byte timeout, quirks, cache)
 ```
 
-当前能力档：
+A **profile** binds each tier to an ordered candidate chain. Switch profiles and
+the next request uses the new chain — no client config is touched, no process is
+restarted.
 
-| Role | 含义 |
+| tier | meaning |
 | --- | --- |
-| `heavy` | 最强能力，适合困难推理 |
-| `normal` | 日常主力档 |
-| `mid` | 成本和能力折中 |
-| `light` | 快速、低成本任务 |
-| `vision` | 正交的视觉能力 |
+| `heavy` | hardest reasoning, most expensive |
+| `normal` | everyday driver |
+| `mid` | the cost/capability compromise |
+| `light` | fast and cheap (background calls, summaries) |
+| `vision` | orthogonal image capability |
 
-Profile 把 role 绑定到候选链。切换 profile 后，新请求立即使用新链，不需要修改
-每个客户端的模型配置。
+## The one rule
 
-## 当前实现
+> **Would this still belong here if someone shipped a completely different
+> distribution?**
 
-- 本地 HTTP gateway，支持 Anthropic 和 OpenAI 请求方言；
-- provider/model 路由、稀疏 profile、fallback 和首字节超时；
-- Claude Code PATH shim 和 OpenCode 配置接管；
-- DeepSeek reasoning content 保存、回填和跨 provider tool-loop 迁移；
-- 请求级 special treatment 插件，改写必有日志，失败默认 fail-open；
-- 热更新配置、探活、metrics、请求取证和零停机 daemon 交接；
-- 单文件静态 Go 二进制。
+| yes → this repo | no → the distribution |
+| --- | --- |
+| gateway, breaker, takeover, UI, config, the component framework | upstream-quirk patches (DeepSeek's tail shape, GLM's reasoning hand-back) |
+| client onboarding (Claude Code / OpenCode) | client × model cross semantics |
+| **mechanisms** every distribution needs | **trade-offs** that only mean something for one upstream or one product |
 
-## 快速开始
+The kernel does not know a single product module by name — it does not contain
+the string `deepseek` outside of a doc comment. What a distribution gets is a
+seam, and the seam is three types wide:
+
+```go
+app.Main(ctx, app.Options{
+	Version: version, BuildTime: buildTime, CommitTime: commitTime,
+	Loader: manifest.Loader{Spec: spec},   // ← whatever the distribution decided
+})
+```
+
+A distribution supplies `app.Selection` — *disable these kernel modules, add
+these of mine* — and gets back a process. `Selection.AllCore` (`"disable":
+["*"]`) means "none of the kernel's modules": the skeleton distribution is the
+framework plus one `hello` module, and `newgate` prints `hello world`.
+
+One module can never be disabled: **`modules/entry`**, the entry ledger that
+answers "who claims this `argv[0]`". That is not an exception carved out by a
+name list — it is the composition root's own dependency, and
+`app/manifest.go` derives it from the port the root itself consumes.
+
+## What's inside
+
+| module | what it owns |
+| --- | --- |
+| `component` | the typed capability graph and lifecycle kernel |
+| `app` | the composition root: manifest, graph construction, `Main` |
+| `modules/entry` | the entry ledger — who claims this invocation (never removable) |
+| `modules/gateway` | the HTTP data plane and extension execution |
+| `modules/breaker` | binding health: availability + latency ordering, as a policy plugged into the gateway's decision points |
+| `modules/config` | configuration semantics and persistence (domain, resolver, store, dynamic roles) |
+| `modules/confighook` | the runtime catalog of *which clients newgate can take over* |
+| `modules/runtime` | daemon, process launch, PATH shim, takeover |
+| `modules/cli` | the local control plane: dispatch, rendering, exit codes |
+| `modules/thinking` | model-agnostic thinking-mode policy |
+| `modules/pluginmanager` | the runtime on/off ledger and module vocabulary |
+| `modules/wrapper` | the policy behind PATH-shim takeover |
+| `lib` | stateless shared helpers |
+
+Every module directory has a root `module.go` and exports
+`func New() component.Component`. Capability contracts live in that module's
+root `api.go`, never in an `api/` subpackage — `app/layout_test.go` enforces
+both, `app/direction_test.go` keeps the composition root from importing any
+concrete module, and `app/independence_test.go` keeps distribution machinery
+out of the kernel.
+
+## Quick start
+
+The kernel builds and tests itself with **no network and no second repository**:
 
 ```bash
-cd go
-make build
+make build          # → bin/newgate — the composition root + all 10 kernel modules
+make check          # generate-check + gofmt + vet + tests + zero-token e2e
+make static         # fully static binary for the host platform (verified with ldd)
+```
+
+Drive it:
+
+```bash
 bin/newgate init
 bin/newgate start
 bin/newgate status
+newgate tier normal     # which chain would a `normal` request take?
+newgate probe           # liveness / latency of every binding
+newgate doctor          # the "why is this broken" command
 ```
 
-常用诊断：
+> The binary this repo builds is **not the product**. It is a gateway with the
+> kernel's modules and no upstream-quirk patches — good enough to develop and
+> test the mechanism against, a downgrade in production. Products come from a
+> distribution.
+
+### Tests
 
 ```bash
-newgate tier normal
-newgate probe
-newgate metrics
-newgate st
-newgate doctor
-newgate logs
+GOPROXY=off go test ./...   # unit + system, offline by construction
+go test -race ./...
+make e2e                    # real binary + a byte-exact fake upstream: zero tokens
 ```
 
-## 代码结构
+`mock/fake_upstream.py` replays real upstream behaviour byte for byte; the
+distribution's end-to-end scripts reuse that same file rather than copying it,
+because a copy drifts and a drifted copy is a green test that proves nothing.
+
+## Layout
 
 ```text
-component       typed capability graph and lifecycle kernel
-lib             stateless shared helpers
-modules/config  configuration semantics and persistence
-modules/gateway routing data plane and extension execution
-modules/runtime daemon, launch, injection, and takeover
-modules/cli     local control plane
-modules/*       client, model, and cross-components
+component/     capability graph + lifecycle
+app/           composition root (manifest, Main, ratchets)
+lib/           stateless helpers
+modules/       the 10 kernel modules — `ls modules/` and the table above agree
+cmd/newgate/   the kernel's own binary (mechanism harness, not a product)
+testing/       in-process harness for graph/system tests
+mock/          fake upstream + zero-token end-to-end
+tools/         the manifest generator (modules → app/modules_gen.go)
+docs/          the design record — start at docs/00-index.md
 ```
 
-每个模块根目录以 `module.go` 为标准入口，公开契约属于模块自己的 `api/`。
-从 [docs/00-index.md](docs/00-index.md) 开始阅读当前实现。
+## Reading order
 
-## 构建与验证
+| doc | why |
+| --- | --- |
+| [docs/00-index.md](docs/00-index.md) | the map |
+| [docs/03-architecture.md](docs/03-architecture.md) | ownership, layers, and the boundary to distributions |
+| [docs/09-extension-guide.md](docs/09-extension-guide.md) §8 | how a distribution consumes this repo |
+| [CLAUDE.md](CLAUDE.md) | the house rules a contributor (human or agent) is expected to follow |
 
-```bash
-cd go
-go test ./...
-go vet ./...
-go test -race ./...
-make static
-cd ..
-bash mock/e2e.sh
-bash mock/e2e_claude.sh
-```
+## Distributions
 
-测试默认不访问真实上游，不消耗 token。
+The flagship distribution — the one that wires this gateway to Claude Code and
+OpenCode, with the upstream quirks patched — is
+[**rzbdz/newgate-ext**](https://github.com/rzbdz/newgate-ext). Fork it, edit
+`dist.json`, drop in your own modules, and you have your own.
+
+## License
+
+No license file yet — this is pre-1.0 and still moving. Ask before you build
+something you intend to depend on.
