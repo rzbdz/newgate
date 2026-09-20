@@ -48,6 +48,9 @@ func registerView(v view.Service) (modules.Release, error) {
 func concepts() ([]view.Concept, error) {
 	var out []view.Concept
 	out = append(out, stateConcept())
+	// provider 表排在最前面：装完 newgate 第一件事就是配一家上游，而档位绑定要
+	// 先有 provider 可选。版面顺序上它也是「读一遍就能配出一家」的那张。
+	out = append(out, providersConcept())
 	for _, name := range profileNames() {
 		out = append(out, profileConcept(name))
 	}
@@ -371,6 +374,252 @@ func applyStateDefaultProfile(conceptID, file string, edit json.RawMessage, base
 		return "", err
 	}
 	return writeThrough(conceptID, file, base, append(out, '\n'))
+}
+
+// ---------- provider 表 ----------
+
+// providerFields 是这个概念管得着的键。**不在这个名单里的键原样保留**——名字里
+// 带个日期、写着备注、或者将来 core 新加的字段，都不该因为界面没露出来就消失
+// （同一个理由见 applyProfileRoles）。
+var providerFields = []string{"protocol", "base_url", "anthropic_url", "api_key", "api_key_env", "models"}
+
+// providersConcept 是 providers.json 的**结构化编辑器**。
+//
+// 为什么不能靠原文那张卡：那份文件里有 api_key，出 daemon 之前整份被脱敏（见
+// redact），而原文卡的 Apply 写回的是整份文本——写回去就是把 *** 落盘。所以
+// `config.file.providers.json` 一直是只读的，而「加一家 provider」恰恰是装完
+// newgate 之后第一个要做的事，界面不该在这件事上缺席。
+//
+// 做法是把值**留在 daemon 里**：api_key 那一格不进快照（见 view.FieldSecret），
+// 界面显示占位提示，敲了才改、不敲就不动。于是浏览器永远拿不到凭据，而新增、
+// 改名、删除、换 base 这些操作都是完整的。
+func providersConcept() view.Concept {
+	file := paths.ProvidersFile()
+	// 读**原始形态**，不走 store.LoadProviders：那一个会把 api_key_env 解析成明文
+	// 填进 APIKey，拿它的结果去写盘就是把密钥落盘（见 store.SaveProviders 的注释）。
+	// 「界面拿不到凭据」这条承诺，在这里是「连我自己的读路径都不带明文」。
+	raw, err := readProvidersRaw(file)
+	if err != nil {
+		return brokenConcept("config.providers", view.KindRecords, i18n.T("Providers", nil), err)
+	}
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	items := make([]view.Record, 0, len(names))
+	for _, name := range names {
+		items = append(items, providerRecord(name, raw[name]))
+	}
+	return view.Concept{
+		ID: "config.providers", Kind: view.KindRecords,
+		Title: i18n.T("Providers", nil),
+		Data: view.Records{
+			File:     relToRoot(file),
+			Items:    items,
+			Base:     store.Revision(file),
+			CanAdd:   true,
+			AddLabel: i18n.T("+ provider", nil),
+		},
+		Apply: func(edit json.RawMessage, base string) (string, error) {
+			return applyProviders(file, edit, base)
+		},
+	}
+}
+
+// providerRecord 把一个 provider 摆成一张小表单。
+//
+// 顺序是**从上到下读一遍就能配出一家上游**的顺序：先认人（名字、协议、地址），
+// 再给凭据，最后是它提供哪些模型。
+func providerRecord(name string, fields map[string]json.RawMessage) view.Record {
+	str := func(k string) string {
+		var s string
+		if raw, ok := fields[k]; ok {
+			_ = json.Unmarshal(raw, &s)
+		}
+		return s
+	}
+	var models []string
+	if raw, ok := fields["models"]; ok {
+		_ = json.Unmarshal(raw, &models)
+	}
+	sort.Strings(models)
+
+	// 凭据那一格的提示要说清**它现在是什么状态**，因为值本身永远不出来：
+	// 「已设置（留空 = 不改）」与「还没设」是用户唯一能看到的区别。
+	keyHint := i18n.T("not set — paste the key here", nil)
+	if str("api_key") != "" || str("api_key_env") != "" {
+		keyHint = i18n.T("set — leave empty to keep it", nil)
+	}
+	return view.Record{
+		ID: name, Label: name, Removable: true,
+		Fields: []view.Field{
+			{ID: "name", Label: i18n.T("name", nil), Kind: view.FieldText, Value: name,
+				Why: i18n.T("The name the tier bindings refer to. Renaming is a new provider: bindings that used the old name keep pointing at it.", nil)},
+			{ID: "protocol", Label: i18n.T("protocol", nil), Kind: view.FieldSelect,
+				Value: str("protocol"), Options: []string{"", "openai", "anthropic"},
+				Why: i18n.T("Which dialect this upstream speaks. Empty means openai.", nil)},
+			{ID: "base_url", Label: i18n.T("base URL", nil), Kind: view.FieldText, Value: str("base_url"),
+				Placeholder: i18n.T("https://…", nil),
+				Why:         i18n.T("Where requests go. The path is appended by newgate.", nil)},
+			{ID: "anthropic_url", Label: i18n.T("Anthropic base URL", nil), Kind: view.FieldText, Value: str("anthropic_url"),
+				Placeholder: i18n.T("only if the two dialects live on different bases", nil),
+				Why:         i18n.T("Some upstreams serve the Anthropic dialect on a different base and do not forward between them (ARK is the case this exists for).", nil)},
+			{ID: "api_key", Label: i18n.T("API key", nil), Kind: view.FieldSecret,
+				Placeholder: keyHint,
+				Why:         i18n.T("Never sent to the browser: this field arrives empty, and writing a value is the only way to change it.", nil)},
+			{ID: "api_key_env", Label: i18n.T("API key from env", nil), Kind: view.FieldText, Value: str("api_key_env"),
+				Placeholder: i18n.T("e.g. DEEPSEEK_API_KEY", nil),
+				Why:         i18n.T("Reads the key from an environment variable instead of the file. Takes precedence over the field above.", nil)},
+			{ID: "models", Label: i18n.T("models", nil), Kind: view.FieldLines, Value: strings.Join(models, "\n"),
+				Placeholder: i18n.T("one per line", nil),
+				Why:         i18n.T("Model names this provider serves, used to pick candidates for an explicit model request.", nil)},
+		},
+	}
+}
+
+// applyProviders 把界面上那份 provider 表写回 providers.json。
+//
+// 语义与开关那张表一致：界面交回来的是**它手里的全部记录**，没交的就是删掉。
+// 两处例外，都是「界面不可能知道」的东西：
+//
+//   - api_key 空串 = **别动它**（值从来没给过界面，它无从回传）。
+//   - 不在 providerFields 里的键原样保留。
+func applyProviders(file string, edit json.RawMessage, base string) (string, error) {
+	var patch struct {
+		Items []struct {
+			ID     string            `json:"id"`
+			Values map[string]string `json:"values"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(edit, &patch); err != nil {
+		return "", i18n.Ef(err, "the providers in this request are not readable: {err}", i18n.A{"err": err})
+	}
+
+	raw, err := readProvidersRaw(file)
+	if err != nil {
+		return "", err
+	}
+
+	out := map[string]map[string]json.RawMessage{}
+	for _, it := range patch.Items {
+		name := strings.TrimSpace(it.Values["name"])
+		if name == "" {
+			return "", i18n.E("a provider has no name — the tier bindings would have nothing to refer to", nil)
+		}
+		if _, dup := out[name]; dup {
+			// 两条记录写同一个名字：静默留一条的结果是用户改的那家不见了。
+			return "", i18n.E("two providers are both named \"{name}\"", i18n.A{"name": name})
+		}
+		// 从**它原来那条**起手（界面点开的是 id 那条，名字可以改），未知键与没露
+		// 出来的字段于是原样带过去。
+		next := map[string]json.RawMessage{}
+		for k, v := range raw[it.ID] {
+			next[k] = v
+		}
+		for _, k := range providerFields {
+			v, given := it.Values[k]
+			if !given {
+				continue // 界面上没有这一格：不碰
+			}
+			if k == "api_key" {
+				if v == "" {
+					continue // 空 = 别动它，见上面那段
+				}
+			}
+			if k == "models" {
+				list := splitLines(v)
+				if len(list) == 0 {
+					delete(next, k)
+					continue
+				}
+				b, err := json.Marshal(list)
+				if err != nil {
+					return "", err
+				}
+				next[k] = b
+				continue
+			}
+			if strings.TrimSpace(v) == "" {
+				delete(next, k)
+				continue
+			}
+			next[k] = mustJSON(v)
+		}
+		out[name] = next
+	}
+
+	// 顶层文档的其他键也要留着（将来加的段），所以按原文**只改 providers 那一段**。
+	// 文件不存在（全新安装还没建它）从空文档起手：那不是错误，见 readProvidersRaw。
+	b, err := os.ReadFile(file)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	doc := map[string]json.RawMessage{}
+	// 空文件（不存在 / 刚被清空）从空文档起手：`json.Unmarshal(nil, …)` 报的是
+	// 「unexpected end of JSON input」，而那不是用户能看懂的东西。
+	if len(strings.TrimSpace(string(b))) > 0 {
+		if err := json.Unmarshal(b, &doc); err != nil {
+			return "", i18n.Ef(err, "{file} is not valid JSON", i18n.A{"file": filepath.Base(file)})
+		}
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	doc["providers"] = body
+
+	text, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return writeThrough("config.providers", file, base, append(text, '\n'))
+}
+
+// readProvidersRaw 读 providers.json 的 providers 那一段，**每个 provider 保持
+// 原始 JSON**（键序、未知键都不动）。
+//
+// 文件不存在当空表：全新安装还没建它——那不是错误，界面该能照着它加第一家。
+func readProvidersRaw(file string) (map[string]map[string]json.RawMessage, error) {
+	b, err := os.ReadFile(file)
+	if os.IsNotExist(err) {
+		return map[string]map[string]json.RawMessage{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Providers map[string]map[string]json.RawMessage `json:"providers"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return nil, i18n.Ef(err, "{file} is not valid JSON", i18n.A{"file": filepath.Base(file)})
+	}
+	if doc.Providers == nil {
+		doc.Providers = map[string]map[string]json.RawMessage{}
+	}
+	return doc.Providers, nil
+}
+
+// splitLines 把「一行一项」的多行文本拆成列表：空行与首尾空格丢掉。
+func splitLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// mustJSON 把一个字符串编码成 JSON 值。字符串不会有编码错误，所以这里不返回错误
+// ——让调用点少一条永远走不到的 if。
+func mustJSON(s string) json.RawMessage {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return json.RawMessage(`""`)
+	}
+	return b
 }
 
 // ---------- 源文件 ----------

@@ -72,6 +72,12 @@ const (
 	KindSeries = "series"
 	// KindTable 只读的表格。
 	KindTable = "table"
+	// KindRecords 一组**结构化的记录**：每条几个字段，字段自己声明类型。
+	//
+	// 它和 KindToggles 的分工：toggles 是「一组同构的布尔/单选」，每条就一个值；
+	// 这里每条是一张**小表单**（provider 的 base_url、protocol、key…），条数还会
+	// 增减。两者都需要，因为把它们塞进一个形状的结果是其中一个从此别扭。
+	KindRecords = "records"
 	// KindLog 日志流。
 	KindLog = "log"
 )
@@ -118,6 +124,81 @@ const (
 	ToneOK   = "ok"
 	ToneWarn = "warn"
 	ToneBad  = "bad"
+)
+
+// Records 是 KindRecords 的数据形状：一组记录，每条几个具名字段。
+//
+// 字段的**类型**（text / select / secret / lines）由贡献者声明：它知道这个字段
+// 是一个封闭集合（协议只有两家）、还是一个自由文本、还是不该给浏览器看的凭据。
+// 前端只按这四个词渲染，不认识任何具体字段——「加一个模块的面不用改前端」在
+// 这里与别处是同一条规矩。
+type Records struct {
+	// File 是这份记录集**写的是哪一份文件**，相对配置根（空 = 它不对应任何可编辑
+	// 的文件）。界面拿它把「控件」与「原文」两半配成一对并排（见 nav.ts 的 fileOf：
+	// 所有带这个字段的形状都适用，不是给某一种 Kind 开的口子）。
+	File  string   `json:"file,omitempty"`
+	Items []Record `json:"items"`
+	// Base 是这份文件加载时的基线（内容哈希，见 store.WriteIfUnchanged）。
+	// 可写的记录集必须有它：没有基线，保存就无从判断「我手里这份是不是最新的」，
+	// 而那正是「命令行刚改了同一个文件」的唯一防线（见 Concept.Apply 的注释）。
+	// 只读的记录集留空。
+	Base string `json:"base,omitempty"`
+	// CanAdd 为 true 时界面给一个「新增一条」的按钮，AddLabel 是它的字。
+	// 为什么不是所有 Records 都能加：有的记录集合由别的东西决定（比如「这个构建
+	// 装了哪些模块」），给它一个加了没用的按钮就是骗人。
+	CanAdd   bool   `json:"can_add,omitempty"`
+	AddLabel string `json:"add_label,omitempty"`
+}
+
+// Record 是一条。
+type Record struct {
+	// ID 是这条**此刻**的身份（改名就是换一条：ID 变了）。空的 = 界面上新加的，
+	// 贡献者按「新增」处理。它同时是 Apply 回传时用来对号的东西。
+	ID     string  `json:"id"`
+	Label  string  `json:"label"`
+	Fields []Field `json:"fields"`
+	// Removable 为 true 时界面给一个删除按钮。刻意**不是**默认开：删掉一条记录
+	// 通常意味着删掉磁盘上的一段配置，那种动作该由贡献者显式说「这条可以删」，
+	// 而不是由「它是个 record」推出来。
+	Removable bool `json:"removable,omitempty"`
+}
+
+// Field 是一条记录里的一个字段。
+type Field struct {
+	// ID 是字段名（Apply 回传时的键）。机器标记，不翻译。
+	ID string `json:"id"`
+	// Label 是给人看的字段名（可以翻译）。
+	Label string `json:"label"`
+	// Kind 决定怎么渲染：text（普通文本）/ select（Options 里挑一个）/
+	// secret（凭据：**值不在快照里**，界面显示占位符，敲了才改）/
+	// lines（多行，一行一项，用于「一组名字」那种列表）。
+	Kind string `json:"kind"`
+	// Value 是当前值。**secret 字段的 Value 恒为空串**——见下面的注释。
+	Value   string   `json:"value,omitempty"`
+	Options []string `json:"options,omitempty"`
+	// Placeholder 是空值时的提示（界面画在输入框里）。
+	Placeholder string `json:"placeholder,omitempty"`
+	// Why 是一句话说明这个字段影响什么（鼠标悬停时给）。
+	Why string `json:"why,omitempty"`
+}
+
+// 字段类型的取值。
+const (
+	FieldText   = "text"
+	FieldSelect = "select"
+	// FieldSecret 是**凭据**：值不会出现在快照里，界面拿到的是一个空串加一句
+	// 占位提示。空串回传 = 「别动它」，敲了新值才是改。
+	//
+	// 为什么不是「脱敏成 *** 再让界面改」：界面手里的原文已经被换成 *** 了，
+	// 它写回来就是把 *** 落盘——那是数据丢失，比不能改严重得多（同一个理由见
+	// modules/config/view.go 里 Redacted 那段）。所以这里的做法是**值根本不出去**：
+	// 浏览器没有的东西，就不可能被原样写回来。
+	//
+	// 判据是「这东西泄露了会不会疼」，不是「它是不是密码」：api_key 是，
+	// base_url 不是。
+	FieldSecret = "secret"
+	// FieldLines 是多行文本，一行一项（「这家的模型清单」那种）。
+	FieldLines = "lines"
 )
 
 // Applier 把这个概念的一次修改落盘。

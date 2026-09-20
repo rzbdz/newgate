@@ -3292,6 +3292,106 @@
     "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
       "text": "view: {source} 登记时没有报栏目名——侧边栏那一栏就没有东西可以做标题（用 view.Title）",
       "reviewed": true
+    },
+    "+ provider": {
+      "text": "+ provider",
+      "reviewed": true
+    },
+    "API key": {
+      "text": "API key",
+      "reviewed": true
+    },
+    "API key from env": {
+      "text": "从环境变量取 key",
+      "reviewed": true
+    },
+    "Anthropic base URL": {
+      "text": "Anthropic 方言的 base",
+      "reviewed": true
+    },
+    "Model names this provider serves, used to pick candidates for an explicit model request.": {
+      "text": "这家能提供的模型名。客户端点名要某个模型时，候选就是从这些里面挑。",
+      "reviewed": true
+    },
+    "Never sent to the browser: this field arrives empty, and writing a value is the only way to change it.": {
+      "text": "这个值不会发给浏览器：界面上拿到的永远是空的，敲一个新的才是改。",
+      "reviewed": true
+    },
+    "Providers": {
+      "text": "上游（provider）",
+      "reviewed": true
+    },
+    "Reads the key from an environment variable instead of the file. Takes precedence over the field above.": {
+      "text": "从环境变量读 key，而不是写在文件里。填了它就压过上面那一格。",
+      "reviewed": true
+    },
+    "Some upstreams serve the Anthropic dialect on a different base and do not forward between them (ARK is the case this exists for).": {
+      "text": "有的上游把两种方言放在不同的 base 上，而且互相不转发（火山方舟就是这样，这个字段是为它加的）。",
+      "reviewed": true
+    },
+    "The name the tier bindings refer to. Renaming is a new provider: bindings that used the old name keep pointing at it.": {
+      "text": "档位绑定引用的就是这个名字。改名等于换了新的一家——原来绑在旧名字上的那些还指着旧的。",
+      "reviewed": true
+    },
+    "Where requests go. The path is appended by newgate.": {
+      "text": "请求发到哪。后面的路径由 newgate 拼。",
+      "reviewed": true
+    },
+    "Which dialect this upstream speaks. Empty means openai.": {
+      "text": "这家上游说的是哪种方言。留空 = openai。",
+      "reviewed": true
+    },
+    "a provider has no name — the tier bindings would have nothing to refer to": {
+      "text": "有一个 provider 没有名字——档位绑定就没有东西可以引用了",
+      "reviewed": true
+    },
+    "base URL": {
+      "text": "base URL",
+      "reviewed": true
+    },
+    "e.g. DEEPSEEK_API_KEY": {
+      "text": "例如 DEEPSEEK_API_KEY",
+      "reviewed": true
+    },
+    "https://…": {
+      "text": "https://…",
+      "reviewed": true
+    },
+    "models": {
+      "text": "模型清单",
+      "reviewed": true
+    },
+    "name": {
+      "text": "名字",
+      "reviewed": true
+    },
+    "not set — paste the key here": {
+      "text": "还没设——把 key 贴在这里",
+      "reviewed": true
+    },
+    "one per line": {
+      "text": "一行一个",
+      "reviewed": true
+    },
+    "only if the two dialects live on different bases": {
+      "text": "只有两种方言不在同一个 base 上时才填",
+      "reviewed": true
+    },
+    "protocol": {
+      "text": "协议",
+      "reviewed": true
+    },
+    "set — leave empty to keep it": {
+      "text": "已设置——留空 = 不改",
+      "reviewed": true
+    },
+    "the providers in this request are not readable: {err}": {
+      "text": "这次请求里的 provider 表读不出来：{err}",
+      "reviewed": true
+    },
+    "two providers are both named \"{name}\"": {
+      "text": "有两个 provider 都叫 \"{name}\"",
+      "reviewed": true
     }
   }
 }

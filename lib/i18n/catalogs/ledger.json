@@ -483,6 +483,9 @@
         "left"
       ]
     },
+    "+ provider": {
+      "where": "modules/config/view.go:423"
+    },
     "+{n} body key": {
       "where": "modules/gateway/forward/forward.go:1647",
       "args": [
@@ -515,6 +518,12 @@
     "A miss can only be filled with an empty string (for those turns the model cannot see its own previous reasoning); every case is logged": {
       "where": "modules/gateway/thinkcache_status.go:39"
     },
+    "API key": {
+      "where": "modules/config/view.go:469"
+    },
+    "API key from env": {
+      "where": "modules/config/view.go:472"
+    },
     "Add an empty array when a tool schema lacks required": {
       "where": "modules/gateway/command_schema.go:34"
     },
@@ -535,6 +544,9 @@
     },
     "An agent was released but the takeover is still in effect (the release did not take); rerun: newgate off <agent>": {
       "where": "modules/runtime/diagnostics.go:142"
+    },
+    "Anthropic base URL": {
+      "where": "modules/config/view.go:466"
     },
     "Availability": {
       "where": "modules/breaker/classify.go:68"
@@ -696,7 +708,7 @@
       "where": "modules/runtime/diagnostics.go:63"
     },
     "Default profile": {
-      "where": "modules/config/view.go:332"
+      "where": "modules/config/view.go:335"
     },
     "Description": {
       "where": "modules/config/commands.go:105"
@@ -774,7 +786,7 @@
       "where": "modules/gateway/module.go:108"
     },
     "Global settings": {
-      "where": "modules/config/view.go:337"
+      "where": "modules/config/view.go:340"
     },
     "Glossary": {
       "where": "modules/cli/cli.go:150"
@@ -864,6 +876,9 @@
     "Memory + the thinkcache.bin cold layer; restored automatically after a restart, counts only, never content": {
       "where": "modules/gateway/thinkcache_status.go:50"
     },
+    "Model names this provider serves, used to pick candidates for an explicit model request.": {
+      "where": "modules/config/view.go:477"
+    },
     "Module switches": {
       "where": "modules/pluginmanager/status.go:50"
     },
@@ -881,6 +896,9 @@
       "args": [
         "value"
       ]
+    },
+    "Never sent to the browser: this field arrives empty, and writing a value is the only way to change it.": {
+      "where": "modules/config/view.go:471"
     },
     "New configuration failed to load, still using the last usable configuration: {err}": {
       "where": "modules/gateway/serve.go:221",
@@ -1047,6 +1065,9 @@
         "name"
       ]
     },
+    "Providers": {
+      "where": "modules/config/view.go:403"
+    },
     "Proxy": {
       "where": "modules/gateway/diagnostics.go:123"
     },
@@ -1102,6 +1123,9 @@
     },
     "Rate limit": {
       "where": "modules/breaker/classify.go:70"
+    },
+    "Reads the key from an environment variable instead of the file. Takes precedence over the field above.": {
+      "where": "modules/config/view.go:474"
     },
     "Reason": {
       "where": "modules/breaker/command.go:97"
@@ -1191,6 +1215,9 @@
         "err"
       ]
     },
+    "Some upstreams serve the Anthropic dialect on a different base and do not forward between them (ARK is the case this exists for).": {
+      "where": "modules/config/view.go:468"
+    },
     "Spared": {
       "where": "modules/breaker/command.go:113"
     },
@@ -1244,6 +1271,9 @@
       "args": [
         "pid"
       ]
+    },
+    "The name the tier bindings refer to. Renaming is a new provider: bindings that used the old name keep pointing at it.": {
+      "where": "modules/config/view.go:459"
     },
     "The process the pidfile points at is gone ({what}), and the lock file says the real daemon is pid {pid}": {
       "where": "modules/runtime/daemon/daemon.go:248",
@@ -1339,6 +1369,9 @@
     "Waiting": {
       "where": "modules/breaker/command.go:96"
     },
+    "Where requests go. The path is appended by newgate.": {
+      "where": "modules/config/view.go:465"
+    },
     "Which agent to launch? e.g. newgate claude or newgate run claude": {
       "where": "modules/runtime/launch.go:182"
     },
@@ -1348,8 +1381,11 @@
     "Which agent to take over? e.g. newgate on claude": {
       "where": "modules/runtime/commands.go:319"
     },
+    "Which dialect this upstream speaks. Empty means openai.": {
+      "where": "modules/config/view.go:462"
+    },
     "Which profile the chain starts from when no agent-specific one is set.": {
-      "where": "modules/config/view.go:333"
+      "where": "modules/config/view.go:336"
     },
     "Who goes through newgate": {
       "where": "modules/runtime/view.go:84"
@@ -1406,6 +1442,9 @@
     },
     "a plugin rewrote the request (each rewrite is logged)": {
       "where": "modules/gateway/metrics/hints.go:81"
+    },
+    "a provider has no name — the tier bindings would have nothing to refer to": {
+      "where": "modules/config/view.go:509"
     },
     "a ref and provider/model cannot be combined: {binding}": {
       "where": "modules/config/domain/candidates.go:78",
@@ -1588,6 +1627,9 @@
     },
     "average latency": {
       "where": "modules/gateway/command_probe.go:200"
+    },
+    "base URL": {
+      "where": "modules/config/view.go:463"
     },
     "binding": {
       "where": "modules/breaker/view.go:60"
@@ -1974,6 +2016,9 @@
     "duplicate of an earlier candidate, deduplicated": {
       "where": "modules/config/resolve/chain.go:183"
     },
+    "e.g. DEEPSEEK_API_KEY": {
+      "where": "modules/config/view.go:473"
+    },
     "each (provider, model) appears once in the whole chain": {
       "where": "modules/config/commands.go:358"
     },
@@ -2142,6 +2187,9 @@
     "healthy": {
       "where": "modules/breaker/view.go:143"
     },
+    "https://…": {
+      "where": "modules/config/view.go:464"
+    },
     "in effect": {
       "where": "modules/runtime/commands.go:170"
     },
@@ -2165,7 +2213,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:383",
+      "where": "lib/view/view.go:464",
       "args": [
         "err",
         "source"
@@ -2322,6 +2370,9 @@
         "tiers"
       ]
     },
+    "models": {
+      "where": "modules/config/view.go:475"
+    },
     "module": {
       "where": "modules/pluginmanager/view.go:133"
     },
@@ -2337,6 +2388,9 @@
         "key",
         "module"
       ]
+    },
+    "name": {
+      "where": "modules/config/view.go:458"
     },
     "never probed": {
       "where": "modules/breaker/command.go:156"
@@ -2450,6 +2504,9 @@
     "not defined": {
       "where": "modules/config/commands.go:212"
     },
+    "not set — paste the key here": {
+      "where": "modules/config/view.go:451"
+    },
     "not taken over": {
       "where": "modules/runtime/commands.go:177"
     },
@@ -2471,8 +2528,14 @@
     "once the cooldown expires, one real request is let through as a trial: success closes the breaker, failure re-trips it and doubles the cooldown (capped at 10 minutes)": {
       "where": "modules/breaker/command.go:133"
     },
+    "one per line": {
+      "where": "modules/config/view.go:476"
+    },
     "only POST is accepted": {
       "where": "modules/gateway/forward/forward.go:410"
+    },
+    "only if the two dialects live on different bases": {
+      "where": "modules/config/view.go:467"
     },
     "other": {
       "where": "modules/config/commands.go:226"
@@ -2756,6 +2819,9 @@
         "role"
       ]
     },
+    "protocol": {
+      "where": "modules/config/view.go:460"
+    },
     "provider and model must both be set: {binding}": {
       "where": "modules/config/domain/candidates.go:83",
       "args": [
@@ -2994,6 +3060,9 @@
         "env"
       ]
     },
+    "set — leave empty to keep it": {
+      "where": "modules/config/view.go:453"
+    },
     "skipped (you turned it off; newgate on {agent} restores it)": {
       "where": "modules/runtime/takeover/takeover.go:177",
       "args": [
@@ -3143,7 +3212,7 @@
       "where": "modules/runtime/takeover/takeover.go:233"
     },
     "the file content in this request is not readable: {err}": {
-      "where": "modules/config/view.go:409",
+      "where": "modules/config/view.go:658",
       "args": [
         "err"
       ]
@@ -3181,6 +3250,12 @@
     "the provider was rejected as unavailable — see newgate metrics / probe": {
       "where": "modules/config/commands.go:570"
     },
+    "the providers in this request are not readable: {err}": {
+      "where": "modules/config/view.go:497",
+      "args": [
+        "err"
+      ]
+    },
     "the proxy (pid {pid}) runs as another user and has no control token — ask the user who started it to run `newgate stop` once (after that any group member can stop it)": {
       "where": "modules/runtime/daemon/daemon.go:506",
       "args": [
@@ -3200,7 +3275,7 @@
       "where": "modules/runtime/commands.go:146"
     },
     "the settings in this request are not readable: {err}": {
-      "where": "modules/config/view.go:350",
+      "where": "modules/config/view.go:353",
       "args": [
         "err"
       ]
@@ -3219,7 +3294,7 @@
       ]
     },
     "the tier bindings in this request are not readable: {err}": {
-      "where": "modules/config/view.go:227",
+      "where": "modules/config/view.go:230",
       "args": [
         "err"
       ]
@@ -3351,6 +3426,12 @@
     "turned on": {
       "where": "modules/pluginmanager/command.go:368"
     },
+    "two providers are both named \"{name}\"": {
+      "where": "modules/config/view.go:513",
+      "args": [
+        "name"
+      ]
+    },
     "type": {
       "where": "modules/pluginmanager/view.go:134"
     },
@@ -3427,17 +3508,17 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:285"
+      "where": "lib/view/view.go:366"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:404",
+      "where": "lib/view/view.go:485",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:396",
+      "where": "lib/view/view.go:477",
       "args": [
         "a",
         "b",
@@ -3445,19 +3526,19 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:401",
+      "where": "lib/view/view.go:482",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:294",
+      "where": "lib/view/view.go:375",
       "args": [
         "source"
       ]
     },
     "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
-      "where": "lib/view/view.go:290",
+      "where": "lib/view/view.go:371",
       "args": [
         "source"
       ]
@@ -3588,7 +3669,7 @@
       ]
     },
     "{file} is not valid JSON": {
-      "where": "modules/config/view.go:262",
+      "where": "modules/config/view.go:265",
       "args": [
         "file"
       ]
