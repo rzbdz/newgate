@@ -52,6 +52,7 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "gateway",
+		Desc: func() string { return i18n.T("forwarding, upstream quirk patches, and reasoning pass-through", nil) },
 		Type: "gateway",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),

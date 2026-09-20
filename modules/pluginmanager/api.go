@@ -92,8 +92,12 @@ type Switch struct {
 // Module 是 `newgate plugin` 渲染一行所需的事实：静态分类 + 该模块上报的开关点。
 // Type 来自组件图，Switches 来自注册表——两者合并的地方就是这里。
 type Module struct {
-	Name     string
-	Type     Type
+	Name string
+	Type Type
+	// Desc 是模块自己写的一句话（见 component.Component.Desc）；空 = 它没写。
+	// 这里存的是**求过值**的字符串：本结构是给界面用的快照，而快照该在生成它的
+	// 那一刻把语言定下来（与 view.Concept.Title 同一条）。
+	Desc     string
 	Switches []Switch
 }
 

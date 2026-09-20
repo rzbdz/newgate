@@ -81,7 +81,7 @@
       ]
     },
     "  declaration {index}  {desc}": {
-      "where": "component/component.go:389",
+      "where": "component/component.go:400",
       "args": [
         "desc",
         "index"
@@ -97,14 +97,14 @@
       "where": "modules/gateway/command_metrics.go:82"
     },
     "  optional dependency absent: {consumer} needs {provider} — no provider, skipped (no edge, no effect on startup)": {
-      "where": "component/component.go:425",
+      "where": "component/component.go:436",
       "args": [
         "consumer",
         "provider"
       ]
     },
     "  optional dependency hit: {consumer} needs {provider} — {count} providers, ordering edge added as usual": {
-      "where": "component/component.go:431",
+      "where": "component/component.go:442",
       "args": [
         "consumer",
         "count",
@@ -119,7 +119,7 @@
       ]
     },
     "  {path} reverts automatically in {left}": {
-      "where": "modules/pluginmanager/command.go:246",
+      "where": "modules/pluginmanager/command.go:255",
       "args": [
         "left",
         "path"
@@ -478,7 +478,7 @@
       ]
     },
     "({left} left)": {
-      "where": "modules/pluginmanager/command.go:356",
+      "where": "modules/pluginmanager/command.go:365",
       "args": [
         "left"
       ]
@@ -580,7 +580,7 @@
       ]
     },
     "Breaker": {
-      "where": "modules/breaker/module.go:66"
+      "where": "modules/breaker/module.go:69"
     },
     "CLIs taken over: {list}": {
       "where": "modules/confighook/command.go:117",
@@ -717,7 +717,7 @@
       "where": "modules/runtime/diagnostics.go:63"
     },
     "Data plane": {
-      "where": "modules/breaker/module.go:67"
+      "where": "modules/breaker/module.go:70"
     },
     "Default profile": {
       "where": "modules/config/view.go:599"
@@ -795,7 +795,7 @@
       "where": "modules/gateway/command_debug.go:39"
     },
     "Gateway": {
-      "where": "modules/gateway/module.go:108"
+      "where": "modules/gateway/module.go:109"
     },
     "Global settings": {
       "where": "modules/config/view.go:574"
@@ -1050,7 +1050,7 @@
       ]
     },
     "Plugins": {
-      "where": "modules/pluginmanager/module.go:79"
+      "where": "modules/pluginmanager/module.go:80"
     },
     "Port not responding": {
       "where": "modules/gateway/diagnostics.go:64"
@@ -1213,7 +1213,7 @@
       "where": "modules/runtime/launch.go:75"
     },
     "Runtime": {
-      "where": "modules/pluginmanager/module.go:80"
+      "where": "modules/pluginmanager/module.go:81"
     },
     "Runtime switches": {
       "where": "modules/pluginmanager/view.go:91"
@@ -1261,7 +1261,7 @@
       "where": "modules/runtime/commands.go:586"
     },
     "Switch points": {
-      "where": "modules/pluginmanager/view.go:135"
+      "where": "modules/pluginmanager/view.go:139"
     },
     "Switches that need a time limit": {
       "where": "modules/pluginmanager/view.go:111"
@@ -1395,6 +1395,9 @@
     },
     "Waiting": {
       "where": "modules/breaker/command.go:96"
+    },
+    "What it does": {
+      "where": "modules/pluginmanager/view.go:138"
     },
     "What it said": {
       "where": "modules/config/commands.go:785"
@@ -1600,8 +1603,11 @@
     "api_key missing": {
       "where": "modules/config/diagnostics.go:194"
     },
+    "argv0 dispatch: what runs when we are called by a client's name": {
+      "where": "modules/wrapper/module.go:50"
+    },
     "assembly complete: {count} components, took {took}": {
-      "where": "component/component.go:286",
+      "where": "component/component.go:297",
       "args": [
         "count",
         "took"
@@ -1685,6 +1691,9 @@
     "binding health table: trips after consecutive failures, releases one half-open trial when the cooldown expires": {
       "where": "modules/breaker/plane.go:53"
     },
+    "binding health — availability and latency — consulted at the data plane's decision points": {
+      "where": "modules/breaker/module.go:34"
+    },
     "bindings of all profiles": {
       "where": "modules/config/diagnostics.go:296"
     },
@@ -1720,10 +1729,10 @@
       "where": "modules/runtime/daemon/daemon.go:189"
     },
     "cannot be toggled at runtime (v1)": {
-      "where": "modules/pluginmanager/command.go:129"
+      "where": "modules/pluginmanager/command.go:138"
     },
     "cannot be toggled at runtime: this module reports no switch points": {
-      "where": "modules/pluginmanager/command.go:161"
+      "where": "modules/pluginmanager/command.go:170"
     },
     "cannot create {file}: {err}": {
       "where": "modules/config/view.go:84",
@@ -1883,7 +1892,7 @@
       ]
     },
     "change it: newgate plugin {path} {verb} [duration]": {
-      "where": "modules/pluginmanager/command.go:198",
+      "where": "modules/pluginmanager/command.go:207",
       "args": [
         "path",
         "verb"
@@ -1993,7 +2002,7 @@
       ]
     },
     "danger level {level}": {
-      "where": "modules/pluginmanager/command.go:174",
+      "where": "modules/pluginmanager/command.go:183",
       "args": [
         "level"
       ]
@@ -2174,6 +2183,9 @@
     "forwarded upstream to get the true value": {
       "where": "modules/gateway/metrics/hints.go:58"
     },
+    "forwarding, upstream quirk patches, and reasoning pass-through": {
+      "where": "modules/gateway/module.go:55"
+    },
     "four-tier compatibility: a profile that does not write normal behaves like mid": {
       "where": "modules/config/domain/extra.go:56"
     },
@@ -2209,25 +2221,25 @@
       "where": "modules/gateway/command_probe.go:149"
     },
     "graph: dependency cycle, components still stuck: {names}": {
-      "where": "component/component.go:489",
+      "where": "component/component.go:500",
       "args": [
         "names"
       ]
     },
     "graph: topological order {order}": {
-      "where": "component/component.go:498",
+      "where": "component/component.go:509",
       "args": [
         "order"
       ]
     },
     "graph: {count} component declarations received, in declaration order below": {
-      "where": "component/component.go:374",
+      "where": "component/component.go:385",
       "args": [
         "count"
       ]
     },
     "graph: {count} components, {edges} ordering edges (Need and Optional with a provider; an Optional nobody provides makes no edge)": {
-      "where": "component/component.go:451",
+      "where": "component/component.go:462",
       "args": [
         "count",
         "edges"
@@ -2458,7 +2470,7 @@
       "where": "modules/pluginmanager/view.go:133"
     },
     "module \"{target}\" reports no switch points, cannot be toggled at runtime (a v1 limitation)": {
-      "where": "modules/pluginmanager/command.go:277",
+      "where": "modules/pluginmanager/command.go:286",
       "args": [
         "target"
       ]
@@ -2527,13 +2539,13 @@
       "where": "modules/config/commands.go:219"
     },
     "no module named \"{target}\" (see the list with newgate plugin)": {
-      "where": "modules/pluginmanager/command.go:272",
+      "where": "modules/pluginmanager/command.go:281",
       "args": [
         "target"
       ]
     },
     "no module or switch point named \"{target}\" (see the list with newgate plugin)": {
-      "where": "modules/pluginmanager/command.go:153",
+      "where": "modules/pluginmanager/command.go:162",
       "args": [
         "target"
       ]
@@ -2556,13 +2568,13 @@
       ]
     },
     "no switch point named \"{path}\" — the page is probably stale, reload it": {
-      "where": "modules/pluginmanager/view.go:207",
+      "where": "modules/pluginmanager/view.go:215",
       "args": [
         "path"
       ]
     },
     "no switch point named \"{target}\" (see the list with newgate plugin)": {
-      "where": "modules/pluginmanager/command.go:264",
+      "where": "modules/pluginmanager/command.go:273",
       "args": [
         "target"
       ]
@@ -2601,13 +2613,13 @@
       "where": "modules/config/commands.go:782"
     },
     "now: {state}": {
-      "where": "modules/pluginmanager/command.go:187",
+      "where": "modules/pluginmanager/command.go:196",
       "args": [
         "state"
       ]
     },
     "off": {
-      "where": "modules/pluginmanager/command.go:370"
+      "where": "modules/pluginmanager/command.go:379"
     },
     "off (whole layer)": {
       "where": "modules/gateway/command_special.go:158"
@@ -2743,7 +2755,7 @@
       ]
     },
     "plugin: unknown duration \"{value}\" (supported: 30s / 2m / 2min / 1h / forever)": {
-      "where": "modules/pluginmanager/command.go:303",
+      "where": "modules/pluginmanager/command.go:312",
       "args": [
         "value"
       ]
@@ -3049,7 +3061,7 @@
       ]
     },
     "revert it: newgate plugin {target} on": {
-      "where": "modules/pluginmanager/command.go:252",
+      "where": "modules/pluginmanager/command.go:261",
       "args": [
         "target"
       ]
@@ -3159,6 +3171,9 @@
     "set — leave empty to keep it": {
       "where": "modules/config/view.go:757"
     },
+    "several services on one port, or a port of its own when there is no shared one": {
+      "where": "modules/porthub/module.go:46"
+    },
     "skipped (you turned it off; newgate on {agent} restores it)": {
       "where": "modules/runtime/takeover/takeover.go:195",
       "args": [
@@ -3217,7 +3232,7 @@
       "where": "modules/gateway/command_special.go:51"
     },
     "start {index}/{total} {name} done (took {took})": {
-      "where": "component/component.go:281",
+      "where": "component/component.go:292",
       "args": [
         "index",
         "name",
@@ -3226,7 +3241,7 @@
       ]
     },
     "start {index}/{total} {name} failed (took {took}): {err}": {
-      "where": "component/component.go:268",
+      "where": "component/component.go:279",
       "args": [
         "err",
         "index",
@@ -3239,7 +3254,7 @@
       "where": "modules/runtime/commands.go:183"
     },
     "stop {index}/{total} {name} done (took {took})": {
-      "where": "component/component.go:354",
+      "where": "component/component.go:365",
       "args": [
         "index",
         "name",
@@ -3248,7 +3263,7 @@
       ]
     },
     "stop {index}/{total} {name} failed (took {took}): {err}": {
-      "where": "component/component.go:346",
+      "where": "component/component.go:357",
       "args": [
         "err",
         "index",
@@ -3258,7 +3273,7 @@
       ]
     },
     "stop {index}/{total} {name} skipped (no Stop)": {
-      "where": "component/component.go:340",
+      "where": "component/component.go:351",
       "args": [
         "index",
         "name",
@@ -3266,10 +3281,10 @@
       ]
     },
     "stop: complete": {
-      "where": "component/component.go:358"
+      "where": "component/component.go:369"
     },
     "stop: releasing {count} components in reverse start order": {
-      "where": "component/component.go:335",
+      "where": "component/component.go:346",
       "args": [
         "count"
       ]
@@ -3284,13 +3299,16 @@
       "where": "modules/config/commands.go:726"
     },
     "switched off": {
-      "where": "modules/pluginmanager/command.go:240"
+      "where": "modules/pluginmanager/command.go:249"
     },
     "switched on": {
-      "where": "modules/pluginmanager/command.go:238"
+      "where": "modules/pluginmanager/command.go:247"
     },
     "taken over": {
       "where": "modules/runtime/view.go:135"
+    },
+    "takeover and injection: how a client's traffic gets intercepted": {
+      "where": "modules/runtime/module.go:38"
     },
     "takes effect immediately; running sessions are unaffected": {
       "where": "modules/config/commands.go:71"
@@ -3307,11 +3325,20 @@
     "the chain's attempt budget is exhausted — see state.json chain.max_attempts": {
       "where": "modules/config/commands.go:579"
     },
+    "the client catalog: what a client is, how to install it, and how it is right now": {
+      "where": "modules/confighook/module.go:57"
+    },
     "the configuration already exists, nothing to initialize (--force overwrites)": {
       "where": "modules/config/commands.go:611"
     },
     "the current shell's PATH is not in effect yet; reopen the shell or `exec $SHELL -l`": {
       "where": "modules/runtime/takeover/takeover.go:251"
+    },
+    "the edge that says this process is serving": {
+      "where": "modules/serving/module.go:28"
+    },
+    "the entry ledger: which module claims this process invocation": {
+      "where": "modules/entry/module.go:81"
     },
     "the file content in this request is not readable: {err}": {
       "where": "modules/config/view.go:999",
@@ -3334,6 +3361,9 @@
         "cmd",
         "err"
       ]
+    },
+    "the module list and the runtime switch points": {
+      "where": "modules/pluginmanager/module.go:44"
     },
     "the new process did not attach to the listening socket within 5 seconds: {err}": {
       "where": "modules/runtime/daemon/daemon.go:446",
@@ -3397,10 +3427,13 @@
       ]
     },
     "the switches in this request are not readable: {err}": {
-      "where": "modules/pluginmanager/view.go:192",
+      "where": "modules/pluginmanager/view.go:200",
       "args": [
         "err"
       ]
+    },
+    "the terminal interface: dispatch, layout and injection points, with no business knowledge": {
+      "where": "modules/cli/module.go:273"
     },
     "the tier bindings in this request are not readable: {err}": {
       "where": "modules/config/view.go:391",
@@ -3467,6 +3500,9 @@
         "err"
       ]
     },
+    "thinking-mode policy that is not tied to one model family": {
+      "where": "modules/thinking/module.go:30"
+    },
     "thinking:disabled → enabled (this model cannot turn thinking off)": {
       "where": "modules/thinking/st-always.go:106"
     },
@@ -3474,7 +3510,7 @@
       "where": "modules/thinking/st-always.go:34"
     },
     "this is a footgun: turning it on/off needs a time limit, forever is not accepted": {
-      "where": "modules/pluginmanager/command.go:191"
+      "where": "modules/pluginmanager/command.go:200"
     },
     "this model always thinks": {
       "where": "modules/thinking/signatures.go:46"
@@ -3499,6 +3535,9 @@
         "tiers"
       ]
     },
+    "tiers, providers and state.json: what they mean, and how they are read and written": {
+      "where": "modules/config/module.go:27"
+    },
     "timeout": {
       "where": "modules/gateway/metrics/hints.go:37"
     },
@@ -3506,7 +3545,7 @@
       "where": "modules/pluginmanager/command.go:121"
     },
     "toggle the whole module: newgate plugin {name} off": {
-      "where": "modules/pluginmanager/command.go:178",
+      "where": "modules/pluginmanager/command.go:187",
       "args": [
         "name"
       ]
@@ -3527,13 +3566,13 @@
       "where": "modules/gateway/forward/forward.go:1702"
     },
     "turned off": {
-      "where": "modules/pluginmanager/command.go:363"
+      "where": "modules/pluginmanager/command.go:372"
     },
     "turned off but still in effect": {
       "where": "modules/runtime/view.go:144"
     },
     "turned on": {
-      "where": "modules/pluginmanager/command.go:368"
+      "where": "modules/pluginmanager/command.go:377"
     },
     "two providers are both named \"{name}\"": {
       "where": "modules/config/view.go:817",
@@ -3614,7 +3653,7 @@
       "where": "modules/config/commands.go:805"
     },
     "v1 only covers switches a module reports itself; a module that reports none cannot be toggled at runtime": {
-      "where": "modules/pluginmanager/command.go:162"
+      "where": "modules/pluginmanager/command.go:171"
     },
     "value of the key is not a string": {
       "where": "modules/gateway/rewrite/splice.go:442"
@@ -3675,13 +3714,16 @@
       "where": "modules/config/commands.go:619"
     },
     "what turning it off does: {why}": {
-      "where": "modules/pluginmanager/command.go:171",
+      "where": "modules/pluginmanager/command.go:180",
       "args": [
         "why"
       ]
     },
     "which bindings are tripped, why, and for how long": {
       "where": "modules/breaker/command.go:41"
+    },
+    "which language this process speaks: resolve it, install the tables, honour disk overrides": {
+      "where": "modules/locale/module.go:44"
     },
     "which message catalog the interface reads — see `newgate lang`": {
       "where": "modules/locale/diagnostics.go:80"
@@ -3894,7 +3936,7 @@
       ]
     },
     "{n}": {
-      "where": "modules/pluginmanager/view.go:168",
+      "where": "modules/pluginmanager/view.go:176",
       "args": [
         "n"
       ]

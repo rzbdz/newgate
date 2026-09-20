@@ -137,7 +137,9 @@ func (s *service) Modules() []Module {
 	out := make([]Module, 0, len(catalog))
 	seen := map[string]bool{}
 	for _, c := range catalog {
-		out = append(out, Module{Name: c.Name, Type: c.Type, Switches: byName[c.Name]})
+		out = append(out, Module{
+			Name: c.Name, Type: c.Type, Desc: descOf(c), Switches: byName[c.Name],
+		})
 		seen[c.Name] = true
 	}
 	// 上报过但不在图里的：组合根还没递图，或者模块名与组件名不一致。后者是配置
@@ -151,4 +153,16 @@ func (s *service) Modules() []Module {
 		orphans = append(orphans, Module{Name: r.name, Type: TypeOthers, Switches: r.switches})
 	}
 	return append(out, orphans...)
+}
+
+// descOf 取出模块自己写的那句话；没写返回空串。
+//
+// 生成的**时机**在这里：Modules() 是给界面/CLI 取快照的那一刻调的，那时候语言层
+// 早就装好了（装配完成之后才有界面来问）。组件字面量里的 Desc 是闭包而不是字符串，
+// 正是为了把求值推到这里（见 component.Component.Desc）。
+func descOf(c modules.Component) string {
+	if c.Desc == nil {
+		return ""
+	}
+	return c.Desc()
 }

@@ -156,7 +156,18 @@ type Component struct {
 	// Type 是分类标签，必填。它跟着组件定义走，所以图一装配就能枚举出全部
 	// 组件及其分类——不需要组件配合、不需要启动。需要运行期才知道的东西
 	// 不能放这里：那是模块在 Start 时向某个 owner 注册的事，不是静态元数据。
-	Type     Type
+	Type Type
+	// Desc 是这个模块**干什么**的一句话；nil = 没写（列表里显示为空，不编）。
+	//
+	// 为什么是**闭包**而不是字符串：它要能翻译，而组件字面量是在 Load 期构造的
+	// ——那时候语言层装好没有是没有保证的（同 view.Title / Concept.Title 那条：
+	// 登记发生在 Start 里，而求值要等到界面来问）。写成字符串就等于把「构造那一刻
+	// 的语言」焊死进去。
+	//
+	// 为什么放在描述符上而不是让模块自己注册一遍：它与 Type 同类——**静态元数据**，
+	// 装配一结束就能枚举，不需要模块配合、不需要启动。需要运行期才知道的东西不能
+	// 放这里（那是模块在 Start 时向某个 owner 注册的事）。
+	Desc     func() string
 	Requires []Requirement
 	Provides []Provision
 	Start    func(context.Context, Context) error

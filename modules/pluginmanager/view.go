@@ -132,6 +132,10 @@ func moduleTable(m Manager) view.Table {
 		Columns: []view.Column{
 			{ID: "module", Label: i18n.T("module", nil)},
 			{ID: "type", Label: i18n.T("type", nil)},
+			// 描述：模块自己写的一句话（见 component.Component.Desc）。排在这里
+			// 而不是最后：它是给人读的那一列，而「开关点」是个计数——读的时候先
+			// 知道这是什么，再关心有几个开关。
+			{ID: "desc", Label: i18n.T("What it does", nil)},
 			{ID: "switches", Label: i18n.T("Switch points", nil), Align: "right"},
 		},
 		Rows: []map[string]view.Cell{},
@@ -151,7 +155,11 @@ func moduleTable(m Manager) view.Table {
 				// 分类词是机器标记（infra / gateway / …），原样显示：它是
 				// `newgate plugin` 的分组名，也是模块自己声明的 Type，翻它
 				// 等于让两个界面用两个词说同一件事。
-				"type":     {Text: string(groupOf(mod.Type))},
+				"type": {Text: string(groupOf(mod.Type))},
+				// 没写描述就**空着**，不编一句「（无描述）」：那一格的信息量本来就是
+				// 「这个模块没说自己是干什么的」，而空着正是这个意思（同 dashIfEmpty
+				// 那条的反面——那里是「这里就是没有」，这里是「作者没写」）。
+				"desc":     {Text: mod.Desc},
 				"switches": switchCountCell(len(mod.Switches)),
 			})
 		}

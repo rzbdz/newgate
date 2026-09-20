@@ -21,6 +21,7 @@ package wrapper
 
 import (
 	"context"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/component/entry"
@@ -46,6 +47,7 @@ func New() modules.Component {
 	instance := &service{}
 	return modules.Component{
 		Name: "wrapper",
+		Desc: func() string { return i18n.T("argv0 dispatch: what runs when we are called by a client's name", nil) },
 		Type: "client",
 		Requires: []modules.Requirement{
 			modules.Need(runtimeapi.Capability),

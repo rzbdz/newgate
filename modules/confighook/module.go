@@ -12,6 +12,7 @@ package confighook
 import (
 	"context"
 	"fmt"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"sort"
 	"sync"
 
@@ -52,6 +53,9 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "config-hook",
+		Desc: func() string {
+			return i18n.T("the client catalog: what a client is, how to install it, and how it is right now", nil)
+		},
 		Type: "infra",
 		Requires: []modules.Requirement{
 			// ui 是**弱依赖**（见 component.Optional）：装着界面就有 `newgate

@@ -1244,6 +1244,10 @@
       "text": "还要等",
       "reviewed": true
     },
+    "What it does": {
+      "text": "干什么的",
+      "reviewed": true
+    },
     "What it said": {
       "text": "它当时说什么",
       "reviewed": true
@@ -1444,6 +1448,10 @@
       "text": "缺 api_key",
       "reviewed": true
     },
+    "argv0 dispatch: what runs when we are called by a client's name": {
+      "text": "argv0 分发：以客户端的名字被叫起来时跑的是什么",
+      "reviewed": true
+    },
     "assembly complete: {count} components, took {took}": {
       "text": "装配完成：{count} 个组件，用时 {took}",
       "reviewed": true
@@ -1506,6 +1514,10 @@
     },
     "binding health table: trips after consecutive failures, releases one half-open trial when the cooldown expires": {
       "text": "binding 健康表：连续失败到阈值就摘牌，冷却期满放一次半开试探",
+      "reviewed": true
+    },
+    "binding health — availability and latency — consulted at the data plane's decision points": {
+      "text": "binding 健康表：可用性与延迟，插在数据面的决策点上",
       "reviewed": true
     },
     "bindings of all profiles": {
@@ -1946,6 +1958,10 @@
     },
     "forwarded upstream to get the true value": {
       "text": "转发上游取真值",
+      "reviewed": true
+    },
+    "forwarding, upstream quirk patches, and reasoning pass-through": {
+      "text": "转发、上游怪癖补丁与思维链回传",
       "reviewed": true
     },
     "four-tier compatibility: a profile that does not write normal behaves like mid": {
@@ -2768,6 +2784,10 @@
       "text": "已设置——留空 = 不改",
       "reviewed": true
     },
+    "several services on one port, or a port of its own when there is no shared one": {
+      "text": "一个端口上挂多个服务；没有共享端口就自己监听一个",
+      "reviewed": true
+    },
     "skipped (you turned it off; newgate on {agent} restores it)": {
       "text": "跳过（你 off 过它；newgate on {agent} 可恢复）",
       "reviewed": true
@@ -2876,6 +2896,10 @@
       "text": "已接管",
       "reviewed": true
     },
+    "takeover and injection: how a client's traffic gets intercepted": {
+      "text": "接管与注入：客户端的流量怎么被拦下来",
+      "reviewed": true
+    },
     "takes effect immediately; running sessions are unaffected": {
       "text": "即刻生效；已在运行的会话不受影响",
       "reviewed": true
@@ -2892,12 +2916,24 @@
       "text": "链的尝试次数已用尽，见 state.json chain.max_attempts",
       "reviewed": true
     },
+    "the client catalog: what a client is, how to install it, and how it is right now": {
+      "text": "客户端目录：客户端是什么、怎么装、此刻怎么样",
+      "reviewed": true
+    },
     "the configuration already exists, nothing to initialize (--force overwrites)": {
       "text": "配置已存在，无需初始化（--force 可覆盖）",
       "reviewed": true
     },
     "the current shell's PATH is not in effect yet; reopen the shell or `exec $SHELL -l`": {
       "text": "当前 shell 的 PATH 还没生效，重开 shell 或 `exec $SHELL -l`",
+      "reviewed": true
+    },
+    "the entry ledger: which module claims this process invocation": {
+      "text": "入口账本：这次进程调用归谁",
+      "reviewed": true
+    },
+    "the edge that says this process is serving": {
+      "text": "「这个进程开始服务了」这条边",
       "reviewed": true
     },
     "the file content in this request is not readable: {err}": {
@@ -2918,6 +2954,10 @@
     },
     "the install command failed ({cmd}): {err}": {
       "text": "安装命令失败（{cmd}）: {err}",
+      "reviewed": true
+    },
+    "the module list and the runtime switch points": {
+      "text": "模块清单与运行期开关点",
       "reviewed": true
     },
     "the new process did not attach to the listening socket within 5 seconds: {err}": {
@@ -2980,6 +3020,10 @@
       "text": "这次请求里的开关读不出来：{err}",
       "reviewed": true
     },
+    "the terminal interface: dispatch, layout and injection points, with no business knowledge": {
+      "text": "终端界面：命令分派、版式与注入点，不含任何业务知识",
+      "reviewed": true
+    },
     "the tier bindings in this request are not readable: {err}": {
       "text": "此请求里的档位绑定读不出来：{err}",
       "reviewed": true
@@ -3040,6 +3084,10 @@
       "text": "thinking 未注入（{err}）",
       "reviewed": true
     },
+    "thinking-mode policy that is not tied to one model family": {
+      "text": "与具体模型无关的思考模式策略",
+      "reviewed": true
+    },
     "thinking:disabled → enabled (this model cannot turn thinking off)": {
       "text": "thinking:disabled → enabled（该模型不支持关闭思考）",
       "reviewed": true
@@ -3074,6 +3122,10 @@
     },
     "tier {tier} has no usable candidate under profile {profile} (tiers: {tiers}); run `newgate tier {tier}` to see why each candidate was skipped": {
       "text": "档位 {tier} 在 profile {profile} 下没有可用候选（档位：{tiers}）。跑 `newgate tier {tier}` 看每个候选为什么被跳过",
+      "reviewed": true
+    },
+    "tiers, providers and state.json: what they mean, and how they are read and written": {
+      "text": "档位、provider 与 state.json：它们的语义与读写",
       "reviewed": true
     },
     "timeout": {
@@ -3258,6 +3310,10 @@
     },
     "which bindings are tripped, why, and for how long": {
       "text": "哪些 binding 被摘牌了、为什么、多久了",
+      "reviewed": true
+    },
+    "which language this process speaks: resolve it, install the tables, honour disk overrides": {
+      "text": "这次进程说哪门语言：解析、装表、认磁盘覆盖",
       "reviewed": true
     },
     "which message catalog the interface reads — see `newgate lang`": {

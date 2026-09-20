@@ -51,6 +51,7 @@ package entry
 
 import (
 	"context"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 
 	modules "github.com/rzbdz/newgate/component"
 	entryapi "github.com/rzbdz/newgate/component/entry"
@@ -77,6 +78,7 @@ func New() modules.Component {
 	table := entryapi.NewTable()
 	return modules.Component{
 		Name: "entry",
+		Desc: func() string { return i18n.T("the entry ledger: which module claims this process invocation", nil) },
 		Type: TypeBuiltin,
 		Provides: []modules.Provision{
 			modules.Provide(entryapi.Capability, entryapi.Registry(table)),

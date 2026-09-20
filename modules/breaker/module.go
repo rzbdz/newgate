@@ -30,6 +30,9 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "breaker",
+		Desc: func() string {
+			return i18n.T("binding health — availability and latency — consulted at the data plane's decision points", nil)
+		},
 		Type: "infra",
 		Requires: []modules.Requirement{
 			// 数据面是 owner，我往它的口里插自己。这条边也是启动顺序的排序边

@@ -10,6 +10,7 @@ package thinking
 
 import (
 	"context"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 
 	modules "github.com/rzbdz/newgate/component"
 	gatewayapi "github.com/rzbdz/newgate/modules/gateway"
@@ -26,6 +27,7 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name:     "thinking",
+		Desc:     func() string { return i18n.T("thinking-mode policy that is not tied to one model family", nil) },
 		Type:     "model",
 		Requires: []modules.Requirement{modules.Need(gatewayapi.Capability)},
 		Provides: []modules.Provision{

@@ -125,6 +125,15 @@ func (c *command) list() int {
 // printModuleLine 渲染列表里的一行：模块名 + 它的开关点概览。
 func printModuleLine(st *domain.State, m Module, nameW int) {
 	name := style.Pad(m.Name, nameW) + " "
+	// 描述单独一行，跟在模块名后面。
+	//
+	// 为什么不接在模块名那一行的尾巴上：那一行还要放第一个开关点，而描述是**成句
+	// 的话**（十几到几十个字），挤在一起两边都读不成——折行边界会随终端宽度跳，
+	// 开关点那半截会跑到描述后面去。描述独占一行之后，两个宽度各自独立。
+	if m.Desc != "" {
+		fmt.Println("  " + name + style.Dim(m.Desc))
+		name = style.Pad("", nameW) + " "
+	}
 	if len(m.Switches) == 0 {
 		fmt.Println("  " + name + style.Dim(i18n.T("cannot be toggled at runtime (v1)", nil)))
 		return

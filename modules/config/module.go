@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 
 	modules "github.com/rzbdz/newgate/component"
 
@@ -22,6 +23,9 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "config",
+		Desc: func() string {
+			return i18n.T("tiers, providers and state.json: what they mean, and how they are read and written", nil)
+		},
 		Type: "infra",
 		Requires: []modules.Requirement{
 			// ui 是**弱依赖**（见 component.Optional）：装着界面就把本模块自己的

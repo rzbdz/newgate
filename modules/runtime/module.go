@@ -35,6 +35,7 @@ func New() modules.Component {
 	service := &service{}
 	return modules.Component{
 		Name: "runtime",
+		Desc: func() string { return i18n.T("takeover and injection: how a client's traffic gets intercepted", nil) },
 		Type: "client",
 		Requires: []modules.Requirement{
 			modules.Need(configapi.Capability),

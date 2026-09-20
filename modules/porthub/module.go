@@ -10,6 +10,7 @@
 package porthub
 
 import (
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"net/http"
 
 	modules "github.com/rzbdz/newgate/component"
@@ -40,7 +41,10 @@ var Capability = modules.NewCapability[Service]("porthub")
 // 注册，不产生 socket、不产生 goroutine，因此在 CLI 进程里被调用也是安全的。
 func New() modules.Component {
 	return modules.Component{
-		Name:     "porthub",
+		Name: "porthub",
+		Desc: func() string {
+			return i18n.T("several services on one port, or a port of its own when there is no shared one", nil)
+		},
 		Type:     "infra",
 		Provides: []modules.Provision{modules.Provide(Capability, Service(hub.Default()))},
 	}

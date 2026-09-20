@@ -40,6 +40,9 @@ func New() modules.Component {
 	var releases []modules.Release
 	return modules.Component{
 		Name: "locale",
+		Desc: func() string {
+			return i18n.T("which language this process speaks: resolve it, install the tables, honour disk overrides", nil)
+		},
 		Type: TypeInfra,
 		Requires: []modules.Requirement{
 			modules.Optional(cliapi.Capability),

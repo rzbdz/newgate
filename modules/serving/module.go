@@ -13,6 +13,7 @@ package serving
 
 import (
 	"context"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/lib/serving"
@@ -24,6 +25,7 @@ func New() modules.Component {
 	registry := serving.NewRegistry()
 	return modules.Component{
 		Name: "serving",
+		Desc: func() string { return i18n.T("the edge that says this process is serving", nil) },
 		Type: "infra",
 		// 一条出边都没有：通知方与听方都只是可选地用它。这也是它能被摘掉的前提
 		// （见 app/matrix_test.go 的摘除矩阵）。

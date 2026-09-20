@@ -269,6 +269,9 @@ func New() modules.Component {
 	}
 	return modules.Component{
 		Name: "cli",
+		Desc: func() string {
+			return i18n.T("the terminal interface: dispatch, layout and injection points, with no business knowledge", nil)
+		},
 		Type: "cli",
 		// **没有 Requires**：界面不依赖任何模块（见 app/default_test.go 的
 		// TestCLIDependenciesOnlyShrink，它断言这条边集为空）。
