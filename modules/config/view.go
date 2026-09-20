@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -356,8 +357,8 @@ func applyProfileRoles(conceptID, file string, edit json.RawMessage, base string
 			return "", i18n.E("a profile name must not contain path separators or \"..\": {name}", i18n.A{"name": name})
 		}
 		newFile := filepath.Join(paths.Mappings(), name+".kv")
-		if _, err := os.Stat(newFile); err == nil {
-			return "", i18n.E("profile \"{name}\" already exists", i18n.A{"name": name})
+		if err := profileNameTaken(name); err != nil {
+			return "", err
 		}
 		// 新文件要求「此刻不存在」（base=""）：WriteIfUnchanged 会拦住并发下别人
 		// 刚建好的同一个名字。
@@ -483,6 +484,9 @@ func renameProfile(conceptID, oldFile, newName, base string, content []byte) (st
 	newFile := filepath.Join(paths.Mappings(), newName+filepath.Ext(oldFile))
 	if newFile == oldFile {
 		return writeThrough(conceptID, oldFile, base, content)
+	}
+	if err := profileNameTaken(newName); err != nil {
+		return "", err
 	}
 	if err := writeProfileNewFile(newFile, content); err != nil {
 		return "", profileErr("create", newFile, err)
@@ -1066,6 +1070,26 @@ func profileNames() []string {
 		return nil
 	}
 	return names
+}
+
+// profileNameTaken 说这个**名字**是不是已经有一份档位文件了（`.kv` / `.json` 都算）。
+//
+// 为什么按名字判、而不是按「我正要写的那条路径」判：两种后缀并存时 `.kv` 赢（见
+// store.LoadProfile），所以 `demo.json` 还在的情况下写出一份 `demo.kv`，等于把那份
+// json **静默压掉**——它在文件系统里好好的，但谁也不会再读到它（用户在界面上看到
+// 的只是「我新建的那个档位怎么是空的」）。按名字判把这个洞一起堵上。
+//
+// 为什么这条要放在 CAS **之前**：CAS 拦得住写入，但它的报错是「(loaded (absent),
+// on disk sha256:…)（页面打开后别人改过——重载后再试）」——而这里根本没有人改过
+// 东西，重载再试一万次还是同一个结果（2026-09-21 实测：把 aaa 改名成已存在的 bbb
+// 报的就是这句，用户会照着它去重载，然后卡住）。存在性是一个**确定的事实**，
+// 按事实说。
+func profileNameTaken(name string) error {
+	if slices.Contains(profileNames(), name) {
+		return i18n.E("a profile named {name} already exists — pick another name, or delete that one first",
+			i18n.A{"name": name})
+	}
+	return nil
 }
 
 // profileFile 是这个 profile 在磁盘上的真身（.kv 优先，与 store 的读取次序一致）。

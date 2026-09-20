@@ -339,3 +339,41 @@ func TestPreviewFollowsTheDraftInGlobalSettings(t *testing.T) {
 		t.Errorf("半成品 JSON 该 fail-open（零值），实际报错: %v", err)
 	}
 }
+
+// TestANameThatIsTakenIsRefusedAsSuch：撞名要**按事实**拒绝，不能留给 CAS 去报
+// 「别人改过」。
+//
+// 现场（2026-09-21 实测）：把 aaa 改名成已经存在的 bbb，界面上报的是
+// 「create bbb.kv 失败：… (loaded (absent), on disk sha256:…)（页面打开后别人改过
+// ——重载后再试）」。那句话在这里是错的——没有任何人改过东西，重载再试一万次还是
+// 同一个结果。用户会照着它去重载，然后卡在那里。
+//
+// 一起堵住的还有一个更隐蔽的洞：`.kv` 与 `.json` 并存时 `.kv` 赢（见
+// store.LoadProfile），所以 `other.json` 还在时写出一份 `other.kv`，等于把那份 json
+// **静默压掉**——它在磁盘上好好的，但谁也不会再读到它。所以判据按**名字**，不是按
+// 「我正要写的那条路径」。
+func TestANameThatIsTakenIsRefusedAsSuch(t *testing.T) {
+	seedDemo(t) // demo.kv
+	seedFile(t, "other.json", `{"roles":{}}`)
+
+	abs := paths.Mappings() + "/demo.kv"
+	refuse := func(body, why string) {
+		t.Helper()
+		err := edit(t, abs, body, store.Revision(abs))
+		if err == nil {
+			t.Errorf("%s：该被拒绝", why)
+			return
+		}
+		if !strings.Contains(err.Error(), "already exists") {
+			t.Errorf("%s：该按事实说「名字被占了」，而不是留给 CAS 报「别人改过」: %v", why, err)
+		}
+	}
+	refuse(`{"create":"demo"}`, "新建一份已经存在的档位")
+	refuse(`{"create":"other"}`, "新建一个被 .json 占着的名字（否则那份 json 会被静默压掉）")
+	refuse(`{"name":"other"}`, "改名改到一个已被占用的名字")
+
+	// 反过来的那条也要在：改成自己现在的名字是空操作，不该被顺手拦掉。
+	if err := edit(t, abs, `{"name":"demo"}`, store.Revision(abs)); err != nil {
+		t.Errorf("改成自己现在的名字不该报错: %v", err)
+	}
+}

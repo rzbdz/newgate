@@ -1320,6 +1320,10 @@
       "text": "档位文件名不能含路径分隔符或 \"..\"：{name}",
       "reviewed": true
     },
+    "a profile named {name} already exists — pick another name, or delete that one first": {
+      "text": "已经有一个叫 {name} 的档位了 —— 换个名字，或者先把那一份删掉",
+      "reviewed": true
+    },
     "a provider has no name — the tier bindings would have nothing to refer to": {
       "text": "有一个 provider 没有名字——档位绑定就没有东西可以引用了",
       "reviewed": true
@@ -2478,10 +2482,6 @@
     },
     "profile": {
       "text": "profile",
-      "reviewed": true
-    },
-    "profile \"{name}\" already exists": {
-      "text": "档位「{name}」已经存在了",
       "reviewed": true
     },
     "profile kv <name> [--write]": {
