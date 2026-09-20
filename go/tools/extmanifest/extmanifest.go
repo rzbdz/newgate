@@ -127,23 +127,6 @@ type Spec struct {
 	// 关掉一个被人 Need 的模块会在构图期当场失败（那是正确的反应——说明这份规格书
 	// 自相矛盾）。这和「用户摘掉一个必装模块」是同一件事，见 app/matrix_test.go。
 	Disable []string `json:"disable"`
-
-	// Core 是「这个发行版基于内核的哪一版」。
-	//
-	// **核心这一侧不读它**，读它的是发行版自己的构建脚本（build/release.sh 按它
-	// clone 内核源码），但这不等于核心可以不声明它：规格书是严格模式（未知键当场
-	// 报错，见 decode），不声明就意味着任何写了 core 的规格书都读不进来。
-	//
-	// 为什么这条「反向的钉子」值得存在：两个仓库互相钉住对方的版本，各自回答
-	// 「我这一版是配着谁的哪一版造的」。少了它，发行版的构建脚本只能把内核地址与
-	// 版本写死在脚本里——而那是发行版的事实，不是脚本的实现细节。
-	Core *CoreRef `json:"core,omitempty"`
-}
-
-// CoreRef 指向内核仓库的某一版。
-type CoreRef struct {
-	Repo     string `json:"repo"`
-	Revision string `json:"revision"`
 }
 
 // SpecFileName 是规格书在发行版仓库里的默认文件名。
