@@ -1052,6 +1052,10 @@
       "text": "请求形状",
       "reviewed": true
     },
+    "Size": {
+      "text": "大小",
+      "reviewed": true
+    },
     "Slot": {
       "text": "槽位",
       "reviewed": true
@@ -1230,6 +1234,14 @@
     },
     "Waiting": {
       "text": "还要等",
+      "reviewed": true
+    },
+    "What it said": {
+      "text": "它当时说什么",
+      "reviewed": true
+    },
+    "When": {
+      "text": "时间",
       "reviewed": true
     },
     "Where requests go. The path is appended by newgate.": {
@@ -1500,6 +1512,14 @@
       "text": "熔断器打开，provider 暂时摘除",
       "reviewed": true
     },
+    "bring one back with: newgate profile restore {name} <#>": {
+      "text": "取回某一版：newgate profile restore {name} <序号>",
+      "reviewed": true
+    },
+    "brought {name} back to {when} (what it replaced is kept as a backup)": {
+      "text": "已把 {name} 恢复到 {when}（被它顶掉的那一版也留了备份）",
+      "reviewed": true
+    },
     "cancelled by the client": {
       "text": "客户端主动取消",
       "reviewed": true
@@ -1684,8 +1704,8 @@
       "text": "control token 不符",
       "reviewed": true
     },
-    "convert a profile to KV text": {
-      "text": "profile 转 KV 文本",
+    "convert a profile to KV text, list its backups, or bring one back": {
+      "text": "把档位转成 KV 文本、列出它的备份、或取回某一版",
       "reviewed": true
     },
     "count": {
@@ -2272,6 +2292,10 @@
       "text": "未接管",
       "reviewed": true
     },
+    "nothing yet — one version is kept before every write": {
+      "text": "还没有 —— 每次写盘之前都会先留一版",
+      "reviewed": true
+    },
     "now: {state}": {
       "text": "现在：{state}",
       "reviewed": true
@@ -2484,8 +2508,8 @@
       "text": "profile",
       "reviewed": true
     },
-    "profile kv <name> [--write]": {
-      "text": "profile kv <名> [--write]",
+    "profile kv|history|restore <name>": {
+      "text": "profile kv|history|restore <name>",
       "reviewed": true
     },
     "profile {name}: {err}": {
@@ -3124,8 +3148,20 @@
       "text": "可用",
       "reviewed": true
     },
+    "usage: newgate profile history <name>": {
+      "text": "用法：newgate profile history <name>",
+      "reviewed": true
+    },
     "usage: newgate profile kv <name> [--write]": {
       "text": "用法：newgate profile kv <name> [--write]",
+      "reviewed": true
+    },
+    "usage: newgate profile kv|history|restore <name>": {
+      "text": "用法：newgate profile kv|history|restore <name>",
+      "reviewed": true
+    },
+    "usage: newgate profile restore <name> [version]": {
+      "text": "用法：newgate profile restore <name> [版本号]",
       "reviewed": true
     },
     "v1 only covers switches a module reports itself; a module that reports none cannot be toggled at runtime": {
@@ -3142,6 +3178,10 @@
     },
     "verdict": {
       "text": "结论",
+      "reviewed": true
+    },
+    "version must be 1..{max} (1 = most recent; see `newgate profile history {name}`)": {
+      "text": "版本号要在 1..{max} 之间（1 = 最近那一版；`newgate profile history {name}` 看全部）",
       "reviewed": true
     },
     "view: a contributor registered with no source name": {
@@ -3294,6 +3334,10 @@
     },
     "{name} did not claim": {
       "text": "{name} 未认领",
+      "reviewed": true
+    },
+    "{name} has no history yet — there is nothing to bring back": {
+      "text": "{name} 还没有历史 —— 没有东西可以取回来",
       "reviewed": true
     },
     "{n}": {

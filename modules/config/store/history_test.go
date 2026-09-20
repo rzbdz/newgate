@@ -182,3 +182,75 @@ func TestEverythingThatWritesGoesThroughTheSamePath(t *testing.T) {
 		}
 	}
 }
+
+// TestHistoryIsNewestFirst：`HistoryEntries` 必须**从新到旧**。
+//
+// 命令那一层的编号（`#1` = 最近那一版、不带版本号就取它）直接建立在这条上，而它
+// 是靠 `sort.Reverse(sort.StringSlice(...))` 实现的——**字典序**。今天名字是 19 位
+// 的 UnixNano，等长数字的字典序恰好等于数值序，所以它碰巧是对的；哪天名字格式一改
+// （补零、加前缀、换成别的单调量），这条会**静默**反过来，而症状是「default 取回
+// 的是最老的那一版」——一个只在人最慌的时候才被发现的方向错。所以钉住它。
+func TestHistoryIsNewestFirst(t *testing.T) {
+	dir := sandbox(t)
+	path := filepath.Join(dir, "mappings", "x.kv")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"v1", "v2", "v3"} {
+		if err := Write(path, []byte(v)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ents := HistoryEntries(path)
+	if len(ents) != 2 {
+		t.Fatalf("写三次该留两版（第一次是新建，没有上一版），实际 %d", len(ents))
+	}
+	// ents[0] 该是**较新**的那一版，也就是 v2（v3 还在盘上，没进环）。
+	if b, _ := os.ReadFile(ents[0]); string(b) != "v2" {
+		t.Errorf("第一项该是较新那版 v2，实际 %q", b)
+	}
+	if b, _ := os.ReadFile(ents[1]); string(b) != "v1" {
+		t.Errorf("第二项该是较老那版 v1，实际 %q", b)
+	}
+}
+
+// TestRestoringIsItselfUndoable：取回一版之后，**被顶掉的那一版也在环里**。
+//
+// 这条不是锦上添花：恢复的全部使用场景都是「我正在慌」，而一个不可撤销的「撤销」
+// 没人在慌的时候敢按。`cmdProfileRestore` 走的是 store.Write（与别的写同一条路），
+// 所以这条性质是**从写路径来的**，不是那条命令额外做了什么——测试盯的正是这个事实。
+func TestRestoringIsItselfUndoable(t *testing.T) {
+	dir := sandbox(t)
+	path := filepath.Join(dir, "mappings", "x.kv")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(path, []byte("v1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(path, []byte("v2")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 「取回 v1」= 把环里那一版写回去（命令做的就是这一件事）。
+	ents := HistoryEntries(path)
+	if len(ents) != 1 {
+		t.Fatalf("前提：写两次该有一版历史，实际 %d", len(ents))
+	}
+	old, _ := os.ReadFile(ents[0])
+	if err := Write(path, old); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "v1" {
+		t.Errorf("取回之后盘上该是 v1，实际 %q", got)
+	}
+
+	// 被顶掉的 v2 现在也取得到——恢复是一次普通的写。
+	ents = HistoryEntries(path)
+	if len(ents) != 2 {
+		t.Fatalf("取回本身也是一次写，环里该有两版，实际 %d", len(ents))
+	}
+	if b, _ := os.ReadFile(ents[0]); string(b) != "v2" {
+		t.Errorf("最近那一版该是被顶掉的 v2，实际 %q", b)
+	}
+}

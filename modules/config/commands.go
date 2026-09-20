@@ -12,11 +12,13 @@ package config
 // 在 Start 里注入界面，和其它模块完全一样。
 
 import (
+	"encoding/json"
 	"fmt"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -693,14 +695,20 @@ func (profileCommand) Unstyled(args []string) bool { return cliapi.Positional(ar
 
 func (profileCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
-		Usage: i18n.T("profile kv <name> [--write]", nil), Summary: i18n.T("convert a profile to KV text", nil)}
+		Usage:   i18n.T("profile kv|history|restore <name>", nil),
+		Summary: i18n.T("convert a profile to KV text, list its backups, or bring one back", nil)}
 }
 
 func (profileCommand) Run(host cliapi.Host, args []string) int {
-	if cliapi.Positional(args, 0) == "kv" {
+	switch cliapi.Positional(args, 0) {
+	case "kv":
 		return cmdProfileKV(args[1:])
+	case "history":
+		return cmdProfileHistory(args[1:])
+	case "restore":
+		return cmdProfileRestore(args[1:])
 	}
-	return host.Die(64, i18n.T("usage: newgate profile kv <name> [--write]", nil))
+	return host.Die(64, i18n.T("usage: newgate profile kv|history|restore <name>", nil))
 }
 
 type setProfileCommand struct{}
@@ -746,4 +754,121 @@ func commands() []cliapi.Command {
 		tierCommand{}, profilesCommand{}, profileCommand{}, setProfileCommand{},
 		initCommand{}, reloadCommand{},
 	}
+}
+
+// cmdProfileHistory 列出某个档位文件的历史版本（写盘之前自动留的那些）。
+//
+// # 为什么这个命令必须存在
+//
+// 备份环（见 store/history.go）从 2026-09-20 起就在写：每一次落盘之前都把当前那份
+// 抄进 `.history/`。但那批文件**只有一个地方够得着**——知道路径拼法
+// （`mappings__demo.kv/1789…bak`）、并且敢自己 cp 回来的人。对一个安全网来说，
+// 「存在但取不回来」与「不存在」是同一种结果：改坏了的那个用户照样只能凭记忆重写。
+// 所以这条命令不是锦上添花，它是那个功能**完成的另一半**（判据一直是代价不对称：
+// 多一条命令是几十行，丢一次是用户手上的配置）。
+func cmdProfileHistory(args []string) int {
+	name := cliapi.Positional(args, 0)
+	if name == "" {
+		return style.Die(64, i18n.T("usage: newgate profile history <name>", nil))
+	}
+	file, err := profileFile(name)
+	if err != nil {
+		return style.Die(65, err.Error())
+	}
+	fmt.Println(style.Title("newgate profile history", name))
+	fmt.Println(style.Rule(72))
+	ents := store.HistoryEntries(file)
+	if len(ents) == 0 {
+		fmt.Println(style.Dim(i18n.T("nothing yet — one version is kept before every write", nil)))
+		return 0
+	}
+	t := style.NewTable("#", i18n.T("When", nil), i18n.T("Size", nil), i18n.T("What it said", nil))
+	t.AlignRight(0)
+	for i, p := range ents {
+		b, _ := os.ReadFile(p)
+		t.Row(fmt.Sprintf("%d", i+1), historyStamp(p), fmt.Sprintf("%d B", len(b)), style.Dim(historyHint(file, b)))
+	}
+	fmt.Print(t.String())
+	fmt.Println(style.Hint(i18n.T("bring one back with: newgate profile restore {name} <#>",
+		i18n.A{"name": name})))
+	return 0
+}
+
+// cmdProfileRestore 把某一个历史版本放回来（不带版本号 = 最近那一版）。
+//
+// **恢复本身也走 store.Write**，于是当前那份会先被抄进历史——恢复错了可以再恢复
+// 回来。这一点很重要：一个不可撤销的「撤销」，没人在慌的时候敢按，而这条命令的
+// 全部使用场景都是「我正在慌」。
+func cmdProfileRestore(args []string) int {
+	name := cliapi.Positional(args, 0)
+	if name == "" {
+		return style.Die(64, i18n.T("usage: newgate profile restore <name> [version]", nil))
+	}
+	file, err := profileFile(name)
+	if err != nil {
+		return style.Die(65, err.Error())
+	}
+	ents := store.HistoryEntries(file)
+	if len(ents) == 0 {
+		return style.Die(65, i18n.T("{name} has no history yet — there is nothing to bring back",
+			i18n.A{"name": name}))
+	}
+	idx := 1 // 不带版本号 = 最近那一版：最常见的用法是「刚改坏了」
+	if v := cliapi.Positional(args, 1); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > len(ents) {
+			return style.Die(64, i18n.T("version must be 1..{max} (1 = most recent; see `newgate profile history {name}`)",
+				i18n.A{"max": len(ents), "name": name}))
+		}
+		idx = n
+	}
+	src := ents[idx-1]
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return style.Die(70, err.Error())
+	}
+	if err := store.Write(file, b); err != nil {
+		return style.Die(70, i18n.T("cannot write {path}: {err}",
+			i18n.A{"path": file, "err": err.Error()}))
+	}
+	fmt.Println(style.Item(style.OK, i18n.T("brought {name} back to {when} (what it replaced is kept as a backup)",
+		i18n.A{"name": name, "when": historyStamp(src)})))
+	controlplane.Notify()
+	return 0
+}
+
+// historyStamp 把 `<unixnano>.bak` 读成一个本地时间。读不出来就原样退回文件名
+// ——一个看不懂的字符串也比一个假的日期强（同 web 界面那条）。
+func historyStamp(path string) string {
+	base := filepath.Base(path)
+	var n int64
+	if _, err := fmt.Sscanf(base, "%d.bak", &n); err != nil {
+		return base
+	}
+	return time.Unix(0, n).Format("2006-01-02 15:04:05")
+}
+
+// historyHint 给一版备份写一句「它当时说了什么」——挑版本时唯一能看的东西。
+//
+// 先试描述（那是档位文件里唯一一句人话），没有就退回第一行非空内容。这一步不该
+// 失败：读不出来就返回空串，表格里那一格空着也比报错强（这是「看一眼」的命令）。
+func historyHint(file string, b []byte) string {
+	var pr *domain.Profile
+	if strings.HasSuffix(file, ".kv") {
+		pr, _ = store.ParseProfileKV(string(b))
+	} else {
+		var p domain.Profile
+		if json.Unmarshal(b, &p) == nil {
+			pr = &p
+		}
+	}
+	if pr != nil && strings.TrimSpace(pr.Description) != "" {
+		return style.Truncate(pr.Description, 48)
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		if s := strings.TrimSpace(ln); s != "" {
+			return style.Truncate(s, 48)
+		}
+	}
+	return ""
 }

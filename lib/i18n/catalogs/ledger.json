@@ -33,7 +33,7 @@
       "where": "modules/gateway/command_schema.go:56"
     },
     "   old .json → .json.bak": {
-      "where": "modules/config/commands.go:171"
+      "where": "modules/config/commands.go:173"
     },
     "   restore: newgate st on · newgate schema-repair on · newgate debug off": {
       "where": "modules/gateway/status.go:80"
@@ -150,7 +150,7 @@
       ]
     },
     "# to write it: newgate profile kv {name} --write": {
-      "where": "modules/config/commands.go:153",
+      "where": "modules/config/commands.go:155",
       "args": [
         "name"
       ]
@@ -501,7 +501,7 @@
       ]
     },
     "--set-profile <name> [--agent <agent>]": {
-      "where": "modules/config/commands.go:717"
+      "where": "modules/config/commands.go:725"
     },
     "--set-profile is not implemented (this assembly has no config module)": {
       "where": "modules/cli/cli.go:198"
@@ -564,7 +564,7 @@
       "where": "modules/config/view.go:584"
     },
     "Binding": {
-      "where": "modules/config/commands.go:55"
+      "where": "modules/config/commands.go:57"
     },
     "Binding health": {
       "where": "modules/breaker/view.go:38"
@@ -647,7 +647,7 @@
       ]
     },
     "Chain": {
-      "where": "modules/config/commands.go:449"
+      "where": "modules/config/commands.go:451"
     },
     "Check: newgate doctor    Force takeover: newgate start --force": {
       "where": "modules/runtime/commands.go:226"
@@ -696,7 +696,7 @@
       "where": "modules/gateway/serve.go:303"
     },
     "Count": {
-      "where": "modules/config/commands.go:547"
+      "where": "modules/config/commands.go:549"
     },
     "Counters": {
       "where": "modules/gateway/view.go:58"
@@ -720,7 +720,7 @@
       "where": "modules/config/view.go:577"
     },
     "Description": {
-      "where": "modules/config/commands.go:105"
+      "where": "modules/config/commands.go:107"
     },
     "Disable: newgate st off {name}": {
       "where": "modules/gateway/command_special.go:193",
@@ -771,7 +771,7 @@
       "where": "modules/config/diagnostics.go:68"
     },
     "Final": {
-      "where": "modules/config/commands.go:355"
+      "where": "modules/config/commands.go:357"
     },
     "First run, initializing the config": {
       "where": "modules/runtime/commands.go:197"
@@ -780,7 +780,7 @@
       "where": "modules/gateway/diagnostics.go:103"
     },
     "Flag": {
-      "where": "modules/config/commands.go:105"
+      "where": "modules/config/commands.go:107"
     },
     "Full description: newgate st <plugin> · disable one: newgate st off <plugin> · disable the layer: newgate st off": {
       "where": "modules/gateway/command_special.go:175"
@@ -985,7 +985,7 @@
       ]
     },
     "Note": {
-      "where": "modules/config/commands.go:547"
+      "where": "modules/config/commands.go:549"
     },
     "Of these, {n} is an assistant message in the request that could not be parsed (not a cache problem, the shape the client sends has changed)": {
       "where": "modules/gateway/thinkcache_status.go:45",
@@ -1053,7 +1053,7 @@
       ]
     },
     "Priority": {
-      "where": "modules/config/commands.go:105"
+      "where": "modules/config/commands.go:107"
     },
     "Probing and observation": {
       "where": "modules/cli/extension/extension.go:235"
@@ -1195,7 +1195,7 @@
       "where": "modules/runtime/commands.go:646"
     },
     "Role": {
-      "where": "modules/config/commands.go:447"
+      "where": "modules/config/commands.go:449"
     },
     "Routing and configuration": {
       "where": "modules/cli/extension/extension.go:233"
@@ -1217,6 +1217,9 @@
     },
     "Shape errors": {
       "where": "modules/breaker/command.go:113"
+    },
+    "Size": {
+      "where": "modules/config/commands.go:785"
     },
     "Slot": {
       "where": "modules/confighook/command.go:68"
@@ -1384,6 +1387,12 @@
     "Waiting": {
       "where": "modules/breaker/command.go:96"
     },
+    "What it said": {
+      "where": "modules/config/commands.go:785"
+    },
+    "When": {
+      "where": "modules/config/commands.go:785"
+    },
     "Where requests go. The path is appended by newgate.": {
       "where": "modules/config/view.go:747"
     },
@@ -1495,7 +1504,7 @@
       ]
     },
     "a request tries at most the first {limit} stops; the remaining {rest} stay in the chain": {
-      "where": "modules/config/commands.go:363",
+      "where": "modules/config/commands.go:365",
       "args": [
         "limit",
         "rest"
@@ -1561,13 +1570,13 @@
       "where": "modules/gateway/command_probe.go:137"
     },
     "all profiles (priority / flags / overrides)": {
-      "where": "modules/config/commands.go:676"
+      "where": "modules/config/commands.go:678"
     },
     "an earlier candidate failed and a later one succeeded": {
       "where": "modules/gateway/metrics/hints.go:70"
     },
     "an excluded profile is only used when selected explicitly; it never joins automatic ordering": {
-      "where": "modules/config/commands.go:567"
+      "where": "modules/config/commands.go:569"
     },
     "an external file is still in {dir}: {names} (it shadows newgate's shim)": {
       "where": "modules/runtime/commands.go:106",
@@ -1676,6 +1685,19 @@
     "breaker opened, provider removed for now": {
       "where": "modules/breaker/plane.go:281"
     },
+    "bring one back with: newgate profile restore {name} <#>": {
+      "where": "modules/config/commands.go:792",
+      "args": [
+        "name"
+      ]
+    },
+    "brought {name} back to {when} (what it replaced is kept as a backup)": {
+      "where": "modules/config/commands.go:834",
+      "args": [
+        "name",
+        "when"
+      ]
+    },
     "cancelled by the client": {
       "where": "modules/gateway/metrics/hints.go:76"
     },
@@ -1733,7 +1755,7 @@
       "where": "modules/gateway/forward/forward.go:370"
     },
     "cannot read mappings: {err}": {
-      "where": "modules/config/commands.go:84",
+      "where": "modules/config/commands.go:86",
       "args": [
         "err"
       ]
@@ -1779,7 +1801,7 @@
       ]
     },
     "cannot rename the old json (the kv is already written; handle it by hand): {err}": {
-      "where": "modules/config/commands.go:168",
+      "where": "modules/config/commands.go:170",
       "args": [
         "err"
       ]
@@ -1800,7 +1822,7 @@
       "where": "modules/config/store/store.go:360"
     },
     "cannot write {path}: {err}": {
-      "where": "modules/config/commands.go:162",
+      "where": "modules/config/commands.go:164",
       "args": [
         "err",
         "path"
@@ -1831,7 +1853,7 @@
       "where": "modules/gateway/metrics/hints.go:74"
     },
     "chain head {head} ({who}) · max attempts {n} · budget {budget}": {
-      "where": "modules/config/commands.go:320",
+      "where": "modules/config/commands.go:322",
       "args": [
         "budget",
         "head",
@@ -1909,8 +1931,8 @@
     "control token mismatch": {
       "where": "modules/gateway/forward/forward.go:431"
     },
-    "convert a profile to KV text": {
-      "where": "modules/config/commands.go:696"
+    "convert a profile to KV text, list its backups, or bring one back": {
+      "where": "modules/config/commands.go:699"
     },
     "count": {
       "where": "modules/gateway/command_metrics.go:85"
@@ -1925,7 +1947,7 @@
       "where": "modules/gateway/command_metrics.go:76"
     },
     "created {path}": {
-      "where": "modules/config/commands.go:612",
+      "where": "modules/config/commands.go:614",
       "args": [
         "path"
       ]
@@ -1986,7 +2008,7 @@
       "where": "modules/runtime/commands.go:173"
     },
     "default": {
-      "where": "modules/config/commands.go:298"
+      "where": "modules/config/commands.go:300"
     },
     "default profile: {from} → {to}": {
       "where": "modules/config/store/watch.go:201",
@@ -2002,7 +2024,7 @@
       "where": "modules/gateway/command_metrics.go:192"
     },
     "details: newgate tier <role>": {
-      "where": "modules/config/commands.go:346"
+      "where": "modules/config/commands.go:348"
     },
     "diagnostic probes spared {n} bindings in total: real traffic reached the threshold, but an active probe proved it still works, so the counter was cleared and it was not tripped": {
       "where": "modules/breaker/command.go:126",
@@ -2017,7 +2039,7 @@
       "where": "modules/runtime/takeover/takeover.go:114"
     },
     "disabled": {
-      "where": "modules/config/commands.go:221"
+      "where": "modules/config/commands.go:223"
     },
     "disabled individually": {
       "where": "modules/gateway/command_special.go:127"
@@ -2038,10 +2060,10 @@
       ]
     },
     "duplicate": {
-      "where": "modules/config/commands.go:225"
+      "where": "modules/config/commands.go:227"
     },
     "duplicate of an earlier candidate in the chain": {
-      "where": "modules/config/commands.go:579"
+      "where": "modules/config/commands.go:581"
     },
     "duplicate of an earlier candidate, deduplicated": {
       "where": "modules/config/resolve/chain.go:183"
@@ -2050,7 +2072,7 @@
       "where": "modules/config/view.go:755"
     },
     "each (provider, model) appears once in the whole chain": {
-      "where": "modules/config/commands.go:361"
+      "where": "modules/config/commands.go:363"
     },
     "empty = loopback only (127.0.0.1)": {
       "where": "modules/config/view.go:585"
@@ -2107,7 +2129,7 @@
       "where": "modules/config/diagnostics.go:210"
     },
     "fallback chain: who is used, what was skipped": {
-      "where": "modules/config/commands.go:660"
+      "where": "modules/config/commands.go:662"
     },
     "fast": {
       "where": "modules/breaker/status/status.go:123"
@@ -2157,7 +2179,7 @@
       "other": "global breaker table updated: {n} bindings among this round's targets are still open (slow threshold {threshold})"
     },
     "global default": {
-      "where": "modules/config/commands.go:42"
+      "where": "modules/config/commands.go:44"
     },
     "graceful handoff: socket handed to new process pid {pid}, draining in-flight requests": {
       "where": "modules/gateway/forward/forward.go:550",
@@ -2262,7 +2284,7 @@
       "where": "modules/runtime/takeover/takeover.go:129"
     },
     "keep keys in environment variables (never on disk): NEWGATE_KEY_<PROVIDER in upper case, - becomes _>": {
-      "where": "modules/config/commands.go:618"
+      "where": "modules/config/commands.go:620"
     },
     "key {key} is registered by both {first} and {second}; keeping the first": {
       "where": "modules/config/roleprov/roleprov.go:176",
@@ -2282,7 +2304,7 @@
       "where": "modules/locale/diagnostics.go:79"
     },
     "lay down the default configuration": {
-      "where": "modules/config/commands.go:594"
+      "where": "modules/config/commands.go:596"
     },
     "layer off": {
       "where": "modules/gateway/command_special.go:125"
@@ -2451,7 +2473,7 @@
       "where": "modules/runtime/injection/shim.go:174"
     },
     "next: put your upstream keys into {path}": {
-      "where": "modules/config/commands.go:616",
+      "where": "modules/config/commands.go:618",
       "args": [
         "path"
       ]
@@ -2475,7 +2497,7 @@
       ]
     },
     "no key": {
-      "where": "modules/config/commands.go:217"
+      "where": "modules/config/commands.go:219"
     },
     "no module named \"{target}\" (see the list with newgate plugin)": {
       "where": "modules/pluginmanager/command.go:272",
@@ -2500,7 +2522,7 @@
       ]
     },
     "no such role: {name} ({known})": {
-      "where": "modules/config/commands.go:292",
+      "where": "modules/config/commands.go:294",
       "args": [
         "known",
         "name"
@@ -2519,7 +2541,7 @@
       ]
     },
     "no usable candidate": {
-      "where": "modules/config/commands.go:353"
+      "where": "modules/config/commands.go:355"
     },
     "no usable candidate   newgate tier normal": {
       "where": "modules/config/diagnostics.go:220"
@@ -2537,13 +2559,16 @@
       "where": "modules/runtime/commands.go:175"
     },
     "not defined": {
-      "where": "modules/config/commands.go:215"
+      "where": "modules/config/commands.go:217"
     },
     "not set — paste the key here": {
       "where": "modules/config/view.go:733"
     },
     "not taken over": {
       "where": "modules/runtime/commands.go:177"
+    },
+    "nothing yet — one version is kept before every write": {
+      "where": "modules/config/commands.go:782"
     },
     "now: {state}": {
       "where": "modules/pluginmanager/command.go:187",
@@ -2573,10 +2598,10 @@
       "where": "modules/config/view.go:749"
     },
     "other": {
-      "where": "modules/config/commands.go:229"
+      "where": "modules/config/commands.go:231"
     },
     "over maxAttempts": {
-      "where": "modules/config/commands.go:223"
+      "where": "modules/config/commands.go:225"
     },
     "own command registration failed (assembly error): {err}": {
       "where": "modules/cli/module.go:267",
@@ -2628,10 +2653,10 @@
       "where": "modules/runtime/diagnostics.go:81"
     },
     "pinned stops at the chain head and is never replaced · excluded is only selected explicitly · ←agent that agent uses this profile alone": {
-      "where": "modules/config/commands.go:131"
+      "where": "modules/config/commands.go:133"
     },
     "pinned: the chain ends here; a failure is reported, not replaced": {
-      "where": "modules/config/commands.go:53"
+      "where": "modules/config/commands.go:55"
     },
     "plugin": {
       "where": "modules/gateway/metrics/hints.go:41"
@@ -2822,8 +2847,8 @@
     "profile": {
       "where": "modules/config/diagnostics.go:370"
     },
-    "profile kv <name> [--write]": {
-      "where": "modules/config/commands.go:696"
+    "profile kv|history|restore <name>": {
+      "where": "modules/config/commands.go:698"
     },
     "profile {name}: {err}": {
       "where": "modules/config/store/store.go:426",
@@ -2895,25 +2920,25 @@
       "where": "modules/gateway/command_metrics.go:64"
     },
     "proxy is not running · newgate start": {
-      "where": "modules/config/commands.go:71"
+      "where": "modules/config/commands.go:73"
     },
     "proxy is not running; the configuration is read on the next start": {
-      "where": "modules/config/commands.go:634"
+      "where": "modules/config/commands.go:636"
     },
     "proxy notified to re-read the configuration   pid {pid}": {
-      "where": "modules/config/commands.go:638",
+      "where": "modules/config/commands.go:640",
       "args": [
         "pid"
       ]
     },
     "raise state.json chain.max_attempts to widen the actual attempt range": {
-      "where": "modules/config/commands.go:366"
+      "where": "modules/config/commands.go:368"
     },
     "rc file": {
       "where": "modules/runtime/commands.go:154"
     },
     "re-read the configuration now (normally hot-reloaded within a second)": {
-      "where": "modules/config/commands.go:628"
+      "where": "modules/config/commands.go:630"
     },
     "reachable": {
       "where": "modules/gateway/command_probe.go:199"
@@ -2938,7 +2963,7 @@
       ]
     },
     "reference cycle": {
-      "where": "modules/config/commands.go:227"
+      "where": "modules/config/commands.go:229"
     },
     "reference cycle ({from} → {to}), skipped": {
       "where": "modules/config/resolve/chain.go:164",
@@ -3015,13 +3040,13 @@
       ]
     },
     "roles {roles}": {
-      "where": "modules/config/commands.go:264",
+      "where": "modules/config/commands.go:266",
       "args": [
         "roles"
       ]
     },
     "roles {roles}, plus {n} dynamic role keys (newgate omo ls)": {
-      "where": "modules/config/commands.go:261",
+      "where": "modules/config/commands.go:263",
       "args": [
         "n",
         "roles"
@@ -3111,7 +3136,7 @@
       ]
     },
     "skipped {n} candidate: {reasons}": {
-      "where": "modules/config/commands.go:343",
+      "where": "modules/config/commands.go:345",
       "args": [
         "n",
         "reasons"
@@ -3220,7 +3245,7 @@
       "where": "modules/confighook/command.go:82"
     },
     "switch profile; omit --agent to set the global default": {
-      "where": "modules/config/commands.go:718"
+      "where": "modules/config/commands.go:726"
     },
     "switched off": {
       "where": "modules/pluginmanager/command.go:240"
@@ -3232,7 +3257,7 @@
       "where": "modules/runtime/view.go:122"
     },
     "takes effect immediately; running sessions are unaffected": {
-      "where": "modules/config/commands.go:69"
+      "where": "modules/config/commands.go:71"
     },
     "the bind address must be an IP (or empty for loopback only), got {value}": {
       "where": "modules/config/view.go:641",
@@ -3241,13 +3266,13 @@
       ]
     },
     "the chain head is fixed; fallbacks follow the predicted TTFT of this context": {
-      "where": "modules/config/commands.go:360"
+      "where": "modules/config/commands.go:362"
     },
     "the chain's attempt budget is exhausted — see state.json chain.max_attempts": {
-      "where": "modules/config/commands.go:577"
+      "where": "modules/config/commands.go:579"
     },
     "the configuration already exists, nothing to initialize (--force overwrites)": {
-      "where": "modules/config/commands.go:609"
+      "where": "modules/config/commands.go:611"
     },
     "the current shell's PATH is not in effect yet; reopen the shell or `exec $SHELL -l`": {
       "where": "modules/runtime/takeover/takeover.go:233"
@@ -3286,10 +3311,10 @@
       "where": "modules/runtime/daemon/daemon.go:265"
     },
     "the provider has no api_key": {
-      "where": "modules/config/commands.go:571"
+      "where": "modules/config/commands.go:573"
     },
     "the provider was rejected as unavailable — see newgate metrics / probe": {
-      "where": "modules/config/commands.go:573"
+      "where": "modules/config/commands.go:575"
     },
     "the providers in this request are not readable: {err}": {
       "where": "modules/config/view.go:779",
@@ -3412,7 +3437,7 @@
       "where": "modules/thinking/signatures.go:46"
     },
     "this profile does not define this role (sparse layer, expected)": {
-      "where": "modules/config/commands.go:569"
+      "where": "modules/config/commands.go:571"
     },
     "this screen": {
       "where": "modules/cli/commands.go:88"
@@ -3421,7 +3446,7 @@
       "where": "modules/gateway/command_probe.go:148"
     },
     "tier [role]": {
-      "where": "modules/config/commands.go:660"
+      "where": "modules/config/commands.go:662"
     },
     "tier {tier} has no usable candidate under profile {profile} (tiers: {tiers}); run `newgate tier {tier}` to see why each candidate was skipped": {
       "where": "modules/gateway/forward/forward.go:926",
@@ -3477,7 +3502,7 @@
       "where": "modules/pluginmanager/view.go:134"
     },
     "unavailable": {
-      "where": "modules/config/commands.go:219"
+      "where": "modules/config/commands.go:221"
     },
     "unbound": {
       "where": "modules/config/diagnostics.go:186"
@@ -3515,7 +3540,7 @@
       ]
     },
     "unprobed": {
-      "where": "modules/config/commands.go:390"
+      "where": "modules/config/commands.go:392"
     },
     "unrated": {
       "where": "modules/breaker/status/status.go:129"
@@ -3533,8 +3558,17 @@
     "usable": {
       "where": "modules/breaker/status/status.go:125"
     },
+    "usage: newgate profile history <name>": {
+      "where": "modules/config/commands.go:772"
+    },
     "usage: newgate profile kv <name> [--write]": {
-      "where": "modules/config/commands.go:142"
+      "where": "modules/config/commands.go:144"
+    },
+    "usage: newgate profile kv|history|restore <name>": {
+      "where": "modules/config/commands.go:711"
+    },
+    "usage: newgate profile restore <name> [version]": {
+      "where": "modules/config/commands.go:805"
     },
     "v1 only covers switches a module reports itself; a module that reports none cannot be toggled at runtime": {
       "where": "modules/pluginmanager/command.go:162"
@@ -3547,6 +3581,13 @@
     },
     "verdict": {
       "where": "modules/gateway/command_probe.go:200"
+    },
+    "version must be 1..{max} (1 = most recent; see `newgate profile history {name}`)": {
+      "where": "modules/config/commands.go:820",
+      "args": [
+        "max",
+        "name"
+      ]
     },
     "view: a contributor registered with no source name": {
       "where": "lib/view/view.go:436"
@@ -3588,7 +3629,7 @@
       "where": "modules/runtime/commands.go:345"
     },
     "what is written is placeholders — replace them with your own provider, endpoint and model names": {
-      "where": "modules/config/commands.go:617"
+      "where": "modules/config/commands.go:619"
     },
     "what turning it off does: {why}": {
       "where": "modules/pluginmanager/command.go:171",
@@ -3609,7 +3650,7 @@
       "where": "modules/runtime/commands.go:126"
     },
     "you rarely need this command: configuration changes apply within a second": {
-      "where": "modules/config/commands.go:640"
+      "where": "modules/config/commands.go:642"
     },
     "{agent} is back to a direct connection; newgate start will no longer take it over (newgate on {agent} restores it)": {
       "where": "modules/runtime/commands.go:349",
@@ -3784,6 +3825,12 @@
         "name"
       ]
     },
+    "{name} has no history yet — there is nothing to bring back": {
+      "where": "modules/config/commands.go:813",
+      "args": [
+        "name"
+      ]
+    },
     "{n}": {
       "where": "modules/pluginmanager/view.go:168",
       "args": [
@@ -3791,7 +3838,7 @@
       ]
     },
     "{n} candidate skipped": {
-      "where": "modules/config/commands.go:545",
+      "where": "modules/config/commands.go:547",
       "args": [
         "n"
       ],
@@ -3861,7 +3908,7 @@
       "other": "{n} profiles have usable providers and keys"
     },
     "{n} profile · default {name}": {
-      "where": "modules/config/commands.go:101",
+      "where": "modules/config/commands.go:103",
       "args": [
         "n",
         "name"
