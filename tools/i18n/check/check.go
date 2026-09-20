@@ -296,8 +296,11 @@ func CJKFiles(root string) (map[string]int, error) {
 			return err
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "bin", "dist", "node_modules", "vendor":
+			// 走哪些目录、不走哪些，与 scan.Dir 用**同一条规则**（scan.SkipDir）：
+			// 两条判据量的必须是同一棵树，否则会出现「账本里没有它、豁免清单里却
+			// 列着它」这种自相矛盾——而发行版里 `core/` 那棵 submodule 正好是这
+			// 种错位最容易发生的地方。
+			if scan.SkipDir(root, p) {
 				return fs.SkipDir
 			}
 			return nil

@@ -31,6 +31,31 @@ type Call struct {
 	Where  string   // 相对仓库根的 `文件:行`
 }
 
+// SkipDir 判一棵源码树里哪些目录**不该走进去**。
+//
+// 两条判据共用它：本包的 AST 扫描（哪些消息）与 check.CJKFiles 的中文清点
+// （哪些文件还没迁）。两把尺子量的必须是**同一棵树**——不然会出现「账本里没有
+// 这个文件、豁免清单里却有它」这种自相矛盾，而那是排查起来最费劲的一类。
+//
+// 两类目录被跳过：
+//   - 产物与外部代码（`.git`/`bin`/`dist`/`vendor`/`node_modules`）；
+//   - **嵌套的 Go module**——发行版的 `core/` 就是内核那份 submodule，它自带
+//     go.mod，是另一个产品。扫进别人家去，会把内核的消息算进发行版的账本。
+//     判据用 go.mod 而不是目录名：`core` 只是今天的惯例，「这里是不是另一个
+//     module」才是这件事本身。
+func SkipDir(root, path string) bool {
+	switch filepath.Base(path) {
+	case ".git", "bin", "dist", "node_modules", "vendor":
+		return true
+	}
+	if path != root {
+		if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // Dir 扫一棵源码树，返回全部可翻译调用（按位置排序）。
 //
 // 只扫**非测试**源码：测试里的字面量是断言用的夹具，不是给用户看的文案。
@@ -42,20 +67,8 @@ func Dir(root string) ([]Call, error) {
 			return err
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "bin", "dist", "node_modules", "vendor":
+			if SkipDir(root, p) {
 				return fs.SkipDir
-			}
-			// 嵌套的 Go module 是**另一个产品**：发行版的 `core/` 就是内核那份
-			// submodule，它自带 go.mod。扫进别人家去，会把内核的消息算进发行版的
-			// 账本——两边共用这把尺子，量的却不是同一棵树。
-			//
-			// 判据用 go.mod，不用目录名：名字是惯例（`core` 只是今天这么叫），
-			// 「这里是不是另一个 module」才是这件事本身。
-			if p != root {
-				if _, serr := os.Stat(filepath.Join(p, "go.mod")); serr == nil {
-					return fs.SkipDir
-				}
 			}
 			return nil
 		}
