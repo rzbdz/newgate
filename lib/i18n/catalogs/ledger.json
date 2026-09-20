@@ -1739,7 +1739,7 @@
       ]
     },
     "cannot find {names} in PATH (skipped the shim directory {dir})": {
-      "where": "modules/confighook/api.go:168",
+      "where": "modules/confighook/api.go:177",
       "args": [
         "dir",
         "names"

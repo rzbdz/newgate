@@ -160,6 +160,11 @@ func (r *registry) Get(id string) (*Agent, bool) {
 	clone := *agent
 	clone.Bin = append([]string(nil), agent.Bin...)
 	clone.Slots = append([]Slot(nil), agent.Slots...)
+	// Also 是切片里的切片：不深拷贝的话，克隆体与原件的 Also 指向同一块数组
+	// （Bin / UnsetEnv 上面已经这么处理了，同一条理由）。
+	for i := range clone.Slots {
+		clone.Slots[i].Also = append([]string(nil), agent.Slots[i].Also...)
+	}
 	clone.UnsetEnv = append([]string(nil), agent.UnsetEnv...)
 	return &clone, true
 }
