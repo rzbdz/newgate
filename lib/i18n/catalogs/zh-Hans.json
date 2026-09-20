@@ -2296,6 +2296,10 @@
       "text": "未定义",
       "reviewed": true
     },
+    "not installed": {
+      "text": "未安装",
+      "reviewed": true
+    },
     "not set — paste the key here": {
       "text": "还没设——把 key 贴在这里",
       "reviewed": true
@@ -3342,6 +3346,10 @@
     },
     "{ms}ms": {
       "text": "{ms}ms",
+      "reviewed": true
+    },
+    "{names} is not on PATH — nothing to take over": {
+      "text": "{names} 不在 PATH 上 —— 没有可接管的东西",
       "reviewed": true
     },
     "{name} did not claim": {

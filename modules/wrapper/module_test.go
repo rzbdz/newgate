@@ -24,7 +24,7 @@ type launchCall struct {
 // 真实的 Launch 会 syscall.Exec 掉整个测试进程，所以这里必须换成桩。
 type fakeRuntime struct{ calls []launchCall }
 
-func (f *fakeRuntime) Launch(agent *agentapi.Agent, args []string, profile string) int {
+func (f *fakeRuntime) Launch(agent *agentapi.Agent, _ agentapi.AgentFacts, args []string, profile string) int {
 	id := ""
 	if agent != nil {
 		id = agent.ID

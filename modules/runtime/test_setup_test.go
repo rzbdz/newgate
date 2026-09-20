@@ -16,6 +16,14 @@ func (catalog testCatalog) Get(id string) (*agentapi.Agent, bool) {
 	return agent, ok
 }
 
+// Facts / Installed 补齐目录端口（见 agentapi.AgentCatalog）：这些测试只关心
+// 「有哪些 agent」，事实一律没有，装没装走缺省那条（与真实现同一份判据）。
+func (catalog testCatalog) Facts(string) agentapi.AgentFacts { return nil }
+
+func (catalog testCatalog) Installed(id string, skipDirs ...string) bool {
+	return agentapi.InstalledDefault(catalog[id], nil, skipDirs...)
+}
+
 func (catalog testCatalog) Names() []string {
 	names := make([]string, 0, len(catalog))
 	for name := range catalog {

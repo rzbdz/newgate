@@ -18,14 +18,16 @@ import (
 // 两者都是「任何一处单看都正常」的那种错，所以只能在这里钉住。CLI 那行汇总与
 // web 这张表都从 phaseOf 出发，判据错了是两个界面一起错。
 func TestTakeoverPhaseIsFourStates(t *testing.T) {
+	// 下面的案子说的都是**工具在这台机器上**时的四种状态，所以每一条都带
+	// Installed: true。没装那一种是单独的一态，见这个函数的末尾。
 	cases := []struct {
 		name string
 		s    takeover.Status
 		want takeoverPhase
 	}{
-		{"磁盘装了 = 生效", takeover.Status{Wanted: true, Active: true}, phaseActive},
-		{"要求了但没装上 = 危险的那种", takeover.Status{Wanted: true, Active: false}, phasePending},
-		{"没要求 = 直连（正常）", takeover.Status{Wanted: false, Active: false}, phaseDirect},
+		{"磁盘装了 = 生效", takeover.Status{Installed: true, Wanted: true, Active: true}, phaseActive},
+		{"要求了但没装上 = 危险的那种", takeover.Status{Installed: true, Wanted: true, Active: false}, phasePending},
+		{"没要求 = 直连（正常）", takeover.Status{Installed: true, Wanted: false, Active: false}, phaseDirect},
 
 		// 用户明确关过它、磁盘上却没放开（释放失败：多用户下常见的权限坑，
 		// 见 CLAUDE.md §3.1）。CLI 那行汇总的注释一直把这一种称作「两个对称
@@ -35,7 +37,19 @@ func TestTakeoverPhaseIsFourStates(t *testing.T) {
 		// 它**不会**被「没表过态」误触：Wanted 的缺省是 true（见 domain.State.
 		// TakeoverWanted），所以从老版本升上来的机器（那时的接管没记进 state.json）
 		// 拿到的是 wanted=true，落进 phaseActive。
-		{"明确关过但磁盘还装着 = 释放没生效", takeover.Status{Wanted: false, Active: true}, phaseStale},
+		{"明确关过但磁盘还装着 = 释放没生效", takeover.Status{Installed: true, Wanted: false, Active: true}, phaseStale},
+
+		// 第五态：这台机器上**没有这个工具**。它压过上面四种——没有工具的时候，
+		// 「接管了没有」这个问题不成立。
+		//
+		// 2026-09-21 实测到的现场：`which opencode` 什么都没有，而 status 报
+		// 「opencode ✓」。openocde 走 config 机制，那一格判的是我们改过的
+		// ~/.config/opencode/*.json 在不在——**我们做过什么**，不是**用户有没有
+		// 这个工具**。四个案子都要试一遍：不管意愿与现实怎么组合，没装就是没装。
+		{"没装（意愿+现实都在）", takeover.Status{Installed: false, Wanted: true, Active: true}, phaseAbsent},
+		{"没装（只有意愿）", takeover.Status{Installed: false, Wanted: true, Active: false}, phaseAbsent},
+		{"没装（只有现实）", takeover.Status{Installed: false, Wanted: false, Active: true}, phaseAbsent},
+		{"没装（都没有）", takeover.Status{Installed: false, Wanted: false, Active: false}, phaseAbsent},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -52,22 +66,22 @@ func TestTakeoverPhaseIsFourStates(t *testing.T) {
 // 灰的或者没颜色的「声明了但没生效」在屏幕上是看不见的——而它恰恰是那个「你
 // 以为 claude 在走 newgate，其实它直连」的现场。
 func TestDangerousPhaseIsRed(t *testing.T) {
-	pending := takeover.Status{Agent: "claude", Wanted: true, Active: false}
+	pending := takeover.Status{Agent: "claude", Installed: true, Wanted: true, Active: false}
 	_, tone := stateCell(pending)
 	if tone != view.ToneBad {
 		t.Fatalf("「声明了却没生效」该是 %q（唯一的危险故障），实际 %q", view.ToneBad, tone)
 	}
-	if _, tone := stateCell(takeover.Status{Agent: "claude", Wanted: true, Active: true}); tone != view.ToneOK {
+	if _, tone := stateCell(takeover.Status{Agent: "claude", Installed: true, Wanted: true, Active: true}); tone != view.ToneOK {
 		t.Errorf("生效中该是 %q，实际 %q", view.ToneOK, tone)
 	}
 	// 反过来的那一半（关过、却没放开）是 **warn，不是 bad**：流量仍然经过网关，
 	// 那是安全的一侧；bad 留给「静默直连」那一种。两种都红的话，红就指不出重点。
-	stale := takeover.Status{Agent: "claude", Wanted: false, Active: true}
+	stale := takeover.Status{Agent: "claude", Installed: true, Wanted: false, Active: true}
 	if text, tone := stateCell(stale); tone != view.ToneWarn {
 		t.Errorf("「关过但还接着」该是 %q，实际 %q（文案 %q）", view.ToneWarn, tone, text)
 	}
 	// 直连是正常态：**不着色**。给它上色会让一张全是「直连」的表看起来像故障。
-	if text, tone := stateCell(takeover.Status{Agent: "opencode"}); tone != "" {
+	if text, tone := stateCell(takeover.Status{Agent: "opencode", Installed: true}); tone != "" {
 		t.Errorf("直连不该着色（那是正常态），实际 tone=%q text=%q", tone, text)
 	}
 }

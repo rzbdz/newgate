@@ -23,6 +23,9 @@ import (
 type registry struct {
 	mu     sync.RWMutex
 	agents map[string]*Agent
+	// facts 是客户端模块交上来的**运行时事实**（见 AgentFacts）。它与 agents 分开
+	// 存是有意的：描述符是「这个客户端是什么」，事实是「它此刻怎么样」，后者可以不交。
+	facts  map[string]AgentFacts
 	fields map[string]string
 	tokens map[string]uint64
 	next   uint64
@@ -38,6 +41,7 @@ var (
 func New() modules.Component {
 	registry := &registry{
 		agents: make(map[string]*Agent),
+		facts:  make(map[string]AgentFacts),
 		fields: make(map[string]string),
 		tokens: make(map[string]uint64),
 	}
@@ -89,6 +93,30 @@ func (r *registry) RegisterAgent(agent *Agent) (modules.Release, error) {
 	r.agents[agent.ID] = agent
 	return r.release("agent:"+agent.ID, token, func() {
 		delete(r.agents, agent.ID)
+	}), nil
+}
+
+// RegisterAgentFacts 记下客户端模块交上来的运行时事实。
+//
+// 它要求那个 agent 已经登记过（同 BindTakeover 那条：先有描述符，再谈「它此刻
+// 怎么样」）。重复交会报错——两个实现抢同一个客户端的事实，是我们无法替用户裁决
+// 的一件事（同 RegisterStateField 的字段冲突）。
+func (r *registry) RegisterAgentFacts(agentID string, facts AgentFacts) (modules.Release, error) {
+	if facts == nil {
+		return nil, fmt.Errorf("nil facts for agent %s", agentID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.agents[agentID]; !ok {
+		return nil, fmt.Errorf("agent facts target unknown agent %s", agentID)
+	}
+	if _, exists := r.facts[agentID]; exists {
+		return nil, fmt.Errorf("agent %s already has facts registered", agentID)
+	}
+	token := r.newToken("facts:" + agentID)
+	r.facts[agentID] = facts
+	return r.release("facts:"+agentID, token, func() {
+		delete(r.facts, agentID)
 	}), nil
 }
 
@@ -167,6 +195,26 @@ func (r *registry) Get(id string) (*Agent, bool) {
 	}
 	clone.UnsetEnv = append([]string(nil), agent.UnsetEnv...)
 	return &clone, true
+}
+
+// Facts 返回客户端交上来的运行时事实；没交返回 nil。
+func (r *registry) Facts(id string) AgentFacts {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.facts[id]
+}
+
+// Installed 报告这个客户端在不在**这台机器**上。
+//
+// 判据次序是这条的全部内容：**客户端自己的事实优先**（它有它的知识：工具可能不止
+// 一个名字、可能不看 PATH），没交才用通用那条（在 PATH 上找 Bin 里的名字，排除
+// 调用方给的 shim 目录）。反过来先查 PATH 的话，一个装在奇怪位置的客户端会被判成
+// 没装，而它明明交了「我在」。
+func (r *registry) Installed(id string, skipDirs ...string) bool {
+	r.mu.RLock()
+	facts, agent := r.facts[id], r.agents[id]
+	r.mu.RUnlock()
+	return InstalledDefault(agent, facts, skipDirs...)
 }
 
 // Names 返回稳定排序的客户端名，使 CLI 输出和测试结果可复现。

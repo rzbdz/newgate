@@ -193,6 +193,7 @@ func (g *Graph) Stop() {
 // 用 Set 一次装完，之后 Get/Names 就是它。
 type FakeCatalog struct {
 	agents map[string]*agentapi.Agent
+	facts  map[string]agentapi.AgentFacts
 }
 
 // NewCatalog 建一个空目录。
@@ -208,10 +209,30 @@ func (c *FakeCatalog) Add(agents ...*agentapi.Agent) *FakeCatalog {
 	return c
 }
 
-// Get / Names 是 confighook.AgentCatalog。
+// Get / Names / Facts / Installed 是 confighook.AgentCatalog。
 func (c *FakeCatalog) Get(id string) (*agentapi.Agent, bool) {
 	a, ok := c.agents[id]
 	return a, ok
+}
+
+// Facts 说「这个 agent 交了运行时事实没有」。假目录里一律没有——测试要验的是
+// 「没交事实时走缺省」，那是**唯一**一份实现（confighook.TierOf），这里复刻一遍
+// 等于把判据抄成两份。要验有事实的那条路，用 WithFacts。
+func (c *FakeCatalog) Facts(string) agentapi.AgentFacts { return nil }
+
+// WithFacts 给某个 agent 塞一份假事实（见 confighook.AgentFacts）。
+func (c *FakeCatalog) WithFacts(id string, f agentapi.AgentFacts) *FakeCatalog {
+	if c.facts == nil {
+		c.facts = map[string]agentapi.AgentFacts{}
+	}
+	c.facts[id] = f
+	return c
+}
+
+// Installed 走真实现那条判据（confighook.InstalledDefault），不另写一份：假目录与
+// 真目录对「装没装」给出不同答案是这类判据最坏的失效方式。
+func (c *FakeCatalog) Installed(id string, skipDirs ...string) bool {
+	return agentapi.InstalledDefault(c.agents[id], c.facts[id], skipDirs...)
 }
 
 // Names 按字母序返回，与真实目录一致（真实实现排过序，测试不该依赖注册顺序）。

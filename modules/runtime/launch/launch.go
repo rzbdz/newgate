@@ -44,7 +44,7 @@ type Options struct {
 
 // Launch 注入 env 并 exec 真实 agent。成功时进程被替换、不再返回；
 // 返回的 int 是进程退出码（仅在失败路径返回）。
-func Launch(a *agentapi.Agent, args []string, o Options) int {
+func Launch(a *agentapi.Agent, facts agentapi.AgentFacts, args []string, o Options) int {
 	depth, _ := strconv.Atoi(os.Getenv("NEWGATE_DEPTH"))
 	if depth >= 2 || os.Getenv("NEWGATE_DISABLE") == "1" {
 		return execReal(a, args, nil) // 完全透传，不注入
@@ -85,7 +85,7 @@ func Launch(a *agentapi.Agent, args []string, o Options) int {
 		active = st.ActiveFor(a.ID)
 	}
 
-	inject, warns := buildInject(a, st, active, explicit)
+	inject, warns := buildInject(a, facts, st, active, explicit)
 	for _, w := range warns {
 		fmt.Fprintf(os.Stderr, "newgate: %s\n", w)
 	}
@@ -94,6 +94,9 @@ func Launch(a *agentapi.Agent, args []string, o Options) int {
 }
 
 // buildInject 算出要叠加给子进程的整组 env（NEWGATE_DEPTH 除外）。
+//
+// facts 是这个客户端交上来的**运行时事实**（见 agentapi.AgentFacts），由调用方从
+// 目录端口取来注入——本函数不认识它是怎么算出来的。nil = 槽位全走描述符里的缺省。
 // 单独成函数是为了可测：只依赖读盘快照和入参，不 exec、不碰 daemon。
 //
 // 槽位命名有两种模式（2026-09-09 定稿）：
@@ -114,8 +117,10 @@ func Launch(a *agentapi.Agent, args []string, o Options) int {
 // 不影响启动（fail-open：代理仍能按档位名路由），但它会让这次调用少注入真实
 // 模型名与窗口声明——后者不给的话 Claude Code 会按 200k 假设提前 compact，是
 // 用户能直接感觉到的行为变化。所以不能一声不响（同文件上面那条控制令牌的写法）。
-func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) (map[string]string, []string) {
-	inject := a.BuildEnv(st.Port, "newgate-local") // 槽位默认 = 档位名（动态模式）
+func buildInject(a *agentapi.Agent, facts agentapi.AgentFacts, st *domain.State, active, explicit string) (map[string]string, []string) {
+	// 槽位默认 = 档位名（动态模式）。facts 是这个客户端交上来的运行时事实
+	// （用户改过的槽位映射住在它那儿），nil = 全用描述符里的缺省。
+	inject := a.BuildEnv(st.Port, "newgate-local", facts)
 	var warns []string
 
 	if snap, err := store.Load(); err != nil {
@@ -127,7 +132,7 @@ func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) (
 		// 档位名（fail-open，docs/05-gateway.md）：代理仍能按档位路由。
 		if explicit != "" {
 			for _, s := range a.EnvSlots() {
-				if b, ok := resolve.PrimaryBinding(a.TierOf(s), snap.Profiles, snap.Providers, active); ok {
+				if b, ok := resolve.PrimaryBinding(agentapi.TierOf(facts, s), snap.Profiles, snap.Providers, active); ok {
 					inject[s.EnvVar] = b.Model
 				}
 			}

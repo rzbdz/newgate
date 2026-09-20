@@ -115,7 +115,7 @@ func runLaunch(rt Runtime, agents confighookapi.AgentCatalog, args []string) int
 		}
 	}
 
-	return rt.Launch(a, passthrough, profile)
+	return rt.Launch(a, agents.Facts(a.ID), passthrough, profile)
 }
 
 // splitLaunch 把启动 argv 切成 (agent, profile, 透传参数)。

@@ -117,6 +117,6 @@ func New() modules.Component {
 }
 
 // Launch 把端口调用翻译为 launch.Options，隔离 runtime 内部启动协议。
-func (*service) Launch(agent *confighookapi.Agent, args []string, profile string) int {
-	return launch.Launch(agent, args, launch.Options{Profile: profile})
+func (*service) Launch(agent *confighookapi.Agent, facts confighookapi.AgentFacts, args []string, profile string) int {
+	return launch.Launch(agent, facts, args, launch.Options{Profile: profile})
 }

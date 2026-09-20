@@ -62,6 +62,10 @@ func (s *stubHooks) RegisterAgent(*confighookapi.Agent) (modules.Release, error)
 	return func() error { return nil }, nil
 }
 
+func (s *stubHooks) RegisterAgentFacts(string, confighookapi.AgentFacts) (modules.Release, error) {
+	return func() error { return nil }, nil
+}
+
 func (s *stubHooks) BindTakeover(string, confighookapi.ConfigTakeover) (modules.Release, error) {
 	return func() error { return nil }, nil
 }

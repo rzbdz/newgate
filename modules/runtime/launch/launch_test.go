@@ -73,7 +73,7 @@ func TestBuildInjectWindowEnv(t *testing.T) {
 	a := testAgent()
 
 	t.Run("声明了窗口的 profile → 两个 env 都注入", func(t *testing.T) {
-		inject, _ := buildInject(a, st, "glm", "")
+		inject, _ := buildInject(a, nil, st, "glm", "")
 		if got := inject["TEST_MAX_CONTEXT_TOKENS"]; got != "1000000" {
 			t.Errorf("MAX_CONTEXT_TOKENS = %q，应为 1000000", got)
 		}
@@ -83,7 +83,7 @@ func TestBuildInjectWindowEnv(t *testing.T) {
 	})
 
 	t.Run("没声明的 profile → 不注入", func(t *testing.T) {
-		inject, _ := buildInject(a, st, "tiny", "")
+		inject, _ := buildInject(a, nil, st, "tiny", "")
 		if _, has := inject["TEST_MAX_CONTEXT_TOKENS"]; has {
 			t.Error("tiny 没配 context_window，不该注入 MAX_CONTEXT_TOKENS")
 		}
@@ -93,7 +93,7 @@ func TestBuildInjectWindowEnv(t *testing.T) {
 	})
 
 	t.Run("不存在的 profile → fail-open 不注入", func(t *testing.T) {
-		inject, _ := buildInject(a, st, "ghost", "")
+		inject, _ := buildInject(a, nil, st, "ghost", "")
 		if _, has := inject["TEST_MAX_CONTEXT_TOKENS"]; has {
 			t.Error("profile 不存在时窗口 env 不该出现")
 		}
@@ -107,7 +107,7 @@ func TestBuildInjectWindowEnv(t *testing.T) {
 				"roles":{"heavy":"smt-glm/glm-5.3"}}`), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		inject, _ := buildInject(a, st, "glm", "")
+		inject, _ := buildInject(a, nil, st, "glm", "")
 		if got := inject["TEST_MAX_CONTEXT_TOKENS"]; got != "1000000" {
 			t.Errorf("MAX_CONTEXT_TOKENS = %q，应为 1000000", got)
 		}
@@ -126,7 +126,7 @@ func TestBuildInjectModelNames(t *testing.T) {
 	a := testAgent()
 
 	t.Run("默认（动态）：槽位 = 档位名，base URL 不带 /p/", func(t *testing.T) {
-		inject, _ := buildInject(a, st, "glm", "")
+		inject, _ := buildInject(a, nil, st, "glm", "")
 		if got := inject["TEST_BASE_URL"]; got != "http://127.0.0.1:8899/a/test-client" {
 			t.Errorf("BASE_URL = %q", got)
 		}
@@ -143,7 +143,7 @@ func TestBuildInjectModelNames(t *testing.T) {
 	})
 
 	t.Run("显式 profile（钉死）：槽位 = 真实模型名，base URL 带 /p/", func(t *testing.T) {
-		inject, _ := buildInject(a, st, "glm", "glm")
+		inject, _ := buildInject(a, nil, st, "glm", "glm")
 		if got := inject["TEST_BASE_URL"]; got != "http://127.0.0.1:8899/a/test-client/p/glm" {
 			t.Errorf("BASE_URL = %q", got)
 		}
@@ -158,7 +158,7 @@ func TestBuildInjectModelNames(t *testing.T) {
 	t.Run("钉死到别的 profile：真名跟被选中的 profile 走", func(t *testing.T) {
 		// 默认链头是 glm，--profile tiny：真名必须是 tiny 的，不然界面
 		// 显示的和实际跑的对不上
-		inject, _ := buildInject(a, st, "tiny", "tiny")
+		inject, _ := buildInject(a, nil, st, "tiny", "tiny")
 		if got := inject["TEST_NORMAL_MODEL"]; got != "glm-4-plus" {
 			t.Errorf("NORMAL_MODEL = %q，应为 tiny 的 glm-4-plus", got)
 		}
@@ -177,7 +177,7 @@ func TestBuildInjectOverridesInherited(t *testing.T) {
 	a := testAgent()
 
 	t.Setenv("TEST_AUTO_COMPACT_WINDOW", "666") // 用户自己设过别的值
-	inject, _ := buildInject(a, st, "glm", "")
+	inject, _ := buildInject(a, nil, st, "glm", "")
 	if got := inject["TEST_AUTO_COMPACT_WINDOW"]; got != "500000" {
 		t.Fatalf("profile 的声明应该赢过用户环境里的旧值: %q", got)
 	}
@@ -201,7 +201,7 @@ func TestBuildInjectWarnsWhenConfigUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	inject, warns := buildInject(a, st, "glm", "glm")
+	inject, warns := buildInject(a, nil, st, "glm", "glm")
 	if len(warns) == 0 {
 		t.Fatal("配置读不出来时必须给出警告，否则用户只看到「窗口没生效」而不知道原因")
 	}

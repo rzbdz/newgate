@@ -106,7 +106,9 @@ func (s *service) Handle(p entry.Process) int {
 	}
 	// profile 传空 = 动态模式（注入档位名而不是真实模型名），这是 argv0 分发
 	// 的既定语义：用户没在命令行上钉 profile，就让代理按请求时的当前配置解析。
-	return s.runtime.Launch(agent, p.Args, "")
+	// facts 从目录端口取来交给它：槽位此刻走哪儿是**客户端模块**的知识
+	// （用户改过的映射住在那边），wrapper 只是转交，不解释。
+	return s.runtime.Launch(agent, s.agents.Facts(agent.ID), p.Args, "")
 }
 
 // Name 进日志与诊断。

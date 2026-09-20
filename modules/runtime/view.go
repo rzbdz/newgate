@@ -52,6 +52,17 @@ const (
 	// 它不如上一个危险（流量仍然经过网关，是安全的那一侧），但它同样**看不出来**：
 	// 用户以为这个工具直连了，而屏幕上一切正常。所以它是 warn 而不是 bad。
 	phaseStale
+	// phaseAbsent 这台机器上**没有这个工具**。
+	//
+	// 它比另外三种都靠前：没有工具的时候，「接管了没有」这个问题不成立——而磁盘上
+	// 那点痕迹（我们改过的配置文件、我们放的 shim）**照样在**，所以不单独判它的话，
+	// 一个早就卸掉的工具会一直显示 ✓。2026-09-21 实测到：`which opencode` 什么都没有，
+	// 而 status 报「opencode ✓」——因为 opencode 走 config 机制，那一格判的是我们改过
+	// 的 ~/.config/opencode/*.json 在不在。
+	//
+	// 判据是 `which` 那一条（见 confighook.Agent.Installed），**排除我们自己的 shim**
+	// ——不排除的话它永远为真，正好退化成它要修的那个 bug。
+	phaseAbsent
 )
 
 // phaseOf 是四种状态**唯一**的判据（CLI 的 status 行与 web 那张表都走它）。
@@ -61,6 +72,8 @@ const (
 // 没有这一条的话，从老版本升上来的机器会集体误报（那时的接管没记进 state.json）。
 func phaseOf(s takeover.Status) takeoverPhase {
 	switch {
+	case !s.Installed:
+		return phaseAbsent
 	case s.Active && !s.Wanted:
 		return phaseStale
 	case s.Active:
@@ -129,6 +142,11 @@ func stateCell(s takeover.Status) (string, string) {
 		// 所以「还接着」才是那个意外。tone 是 warn 不是 bad——流量仍然经过
 		// 网关，是安全的那一侧（见 phaseStale 的注释）。
 		return i18n.T("turned off but still in effect", nil), view.ToneWarn
+	case phaseAbsent:
+		// 不画成错：没装不是什么故障，只是这台机器上没有它。但它也**不能**画成
+		// 「直连」（那读起来像「它在，只是没接管」）。所以给一句自己的话、不给颜色
+		// ——Tone 只有 ok/warn/bad 三个值，硬套一个都是在说「这出事了」。
+		return i18n.T("not installed", nil), ""
 	default:
 		return i18n.T("direct", nil), ""
 	}

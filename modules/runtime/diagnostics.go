@@ -105,7 +105,7 @@ func checkDaemon() cliapi.Diagnostic {
 // 期望态（on/off 过什么）和现实态（磁盘上真装了什么）不一致，正是那两个对称故障
 // 的现场：接管过但没生效（工具静默直连），或者放开过但文件还指着代理。
 func (r runtimeReporter) Status() []cliapi.StatusLine {
-	var on, off []string
+	var on, off, missing []string
 	wanted, active, stale := 0, 0, 0
 	for _, s := range takeover.List() {
 		// 四态判据走 phaseOf（view.go），与 web 那张表同源：两个界面对同一份磁盘
@@ -122,6 +122,12 @@ func (r runtimeReporter) Status() []cliapi.StatusLine {
 			active++
 			stale++
 			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.Warn))
+		case phaseAbsent:
+			// **不并进 off**：off 的意思是「这个工具在，只是走直连」，而这里
+			// 这台机器上根本没有它。混在一起说，用户会以为自己需要 `newgate on`
+			// 一下（2026-09-21 之前正是这样：没装 opencode 的机器上报 ✓）。
+			missing = append(missing, s.Agent)
+			continue // 没装的东西不计入 wanted：它接不上管，也不该触发下面那句提醒
 		default:
 			off = append(off, s.Agent)
 		}
@@ -129,7 +135,7 @@ func (r runtimeReporter) Status() []cliapi.StatusLine {
 			wanted++
 		}
 	}
-	line := takeoverLine(on, off)
+	line := takeoverLine(on, off, missing)
 	// 代理在跑却有 agent 想接管没接管上：start/build 之后漏了一步，不补的话
 	// 那个工具会静默直连。
 	if _, doc := controlplane.State(); doc != nil && active < wanted {
@@ -144,19 +150,25 @@ func (r runtimeReporter) Status() []cliapi.StatusLine {
 	return []cliapi.StatusLine{{Rank: rankStatusTakeover, Label: i18n.T("Takeover", nil), Value: line}}
 }
 
-func takeoverLine(on, off []string) string {
+func takeoverLine(on, off, missing []string) string {
+	tail := ""
+	if len(off) > 0 {
+		tail += "   " + style.Dim(strings.Join(off, " ")+" off")
+	}
+	// 没装的单独一段：它既不是「接上了」也不是「走直连」，而是一句事实
+	// （见 phaseAbsent）。不显示它的话，用户会去找一个这台机器上不存在的东西
+	// 为什么没被接管。
+	if len(missing) > 0 {
+		tail += "   " + style.Dim(strings.Join(missing, " ")+" "+i18n.T("not installed", nil))
+	}
 	if len(on) == 0 {
 		line := style.Dim(i18n.T("All direct", nil))
 		if len(off) > 0 {
 			line += "   " + style.Dim("newgate start / on <agent>")
 		}
-		return line
+		return line + tail
 	}
-	line := "   " + strings.Join(on, "   ")
-	if len(off) > 0 {
-		line += "   " + style.Dim(strings.Join(off, " ")+" off")
-	}
-	return line
+	return "   " + strings.Join(on, "   ") + tail
 }
 
 // checkTakeover 被改写的目标文件。

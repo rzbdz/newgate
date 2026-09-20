@@ -126,13 +126,13 @@
       ]
     },
     " (but the shim dir is not in the current shell's PATH; reopen the shell)": {
-      "where": "modules/runtime/takeover/takeover.go:111"
+      "where": "modules/runtime/takeover/takeover.go:121"
     },
     " (pidfile corrected)": {
       "where": "modules/runtime/daemon/daemon.go:253"
     },
     " ({n} rewrites)": {
-      "where": "modules/runtime/takeover/takeover.go:250",
+      "where": "modules/runtime/takeover/takeover.go:268",
       "args": [
         "n"
       ]
@@ -457,10 +457,10 @@
       "where": "component/entry/entry.go:192"
     },
     "(none)": {
-      "where": "modules/confighook/command.go:109"
+      "where": "modules/confighook/command.go:112"
     },
     "(not assembled)": {
-      "where": "modules/confighook/command.go:106"
+      "where": "modules/confighook/command.go:109"
     },
     "(the anthropic dialect goes to this one)": {
       "where": "modules/config/diagnostics.go:289"
@@ -497,7 +497,7 @@
       "other": "+{n} body keys"
     },
     "--- {file} ({n} bytes) ---": {
-      "where": "modules/runtime/diagnostics.go:241",
+      "where": "modules/runtime/diagnostics.go:253",
       "args": [
         "file",
         "n"
@@ -531,7 +531,7 @@
       "where": "modules/gateway/command_schema.go:34"
     },
     "All direct": {
-      "where": "modules/runtime/diagnostics.go:149"
+      "where": "modules/runtime/diagnostics.go:165"
     },
     "All tools are back to direct connections; the PATH line still points at the empty shim dir, which is harmless": {
       "where": "modules/runtime/commands.go:384"
@@ -546,10 +546,10 @@
       "where": "modules/config/view.go:608"
     },
     "An agent declares takeover but it is not in effect; rerun newgate start": {
-      "where": "modules/runtime/diagnostics.go:136"
+      "where": "modules/runtime/diagnostics.go:142"
     },
     "An agent was released but the takeover is still in effect (the release did not take); rerun: newgate off <agent>": {
-      "where": "modules/runtime/diagnostics.go:142"
+      "where": "modules/runtime/diagnostics.go:148"
     },
     "Anthropic base URL": {
       "where": "modules/config/view.go:770"
@@ -561,7 +561,7 @@
       "where": "modules/locale/command.go:33"
     },
     "Backups": {
-      "where": "modules/runtime/diagnostics.go:197"
+      "where": "modules/runtime/diagnostics.go:209"
     },
     "Bind address": {
       "where": "modules/config/view.go:606"
@@ -583,7 +583,7 @@
       "where": "modules/breaker/module.go:66"
     },
     "CLIs taken over: {list}": {
-      "where": "modules/confighook/command.go:114",
+      "where": "modules/confighook/command.go:117",
       "args": [
         "list"
       ]
@@ -705,7 +705,7 @@
       "where": "modules/gateway/view.go:58"
     },
     "Created only after a config file has been taken over": {
-      "where": "modules/runtime/diagnostics.go:203"
+      "where": "modules/runtime/diagnostics.go:215"
     },
     "Currently following the system locale; this setting will take effect once LANG/LC_ALL stop overriding it": {
       "where": "modules/locale/command.go:76"
@@ -741,7 +741,7 @@
       ]
     },
     "Env var": {
-      "where": "modules/confighook/command.go:68"
+      "where": "modules/confighook/command.go:71"
     },
     "Environment": {
       "where": "modules/gateway/diagnostics.go:77"
@@ -820,7 +820,7 @@
       ]
     },
     "How": {
-      "where": "modules/runtime/view.go:102"
+      "where": "modules/runtime/view.go:115"
     },
     "In PATH": {
       "where": "modules/runtime/commands.go:126"
@@ -883,7 +883,7 @@
       "where": "modules/cli/extension/extension.go:237"
     },
     "Mechanism": {
-      "where": "modules/runtime/view.go:101"
+      "where": "modules/runtime/view.go:114"
     },
     "Memory + the thinkcache.bin cold layer; restored automatically after a restart, counts only, never content": {
       "where": "modules/gateway/thinkcache_status.go:50"
@@ -928,10 +928,10 @@
       "where": "modules/gateway/command_debug.go:88"
     },
     "No file was rewritten": {
-      "where": "modules/runtime/diagnostics.go:184"
+      "where": "modules/runtime/diagnostics.go:196"
     },
     "No original backups": {
-      "where": "modules/runtime/diagnostics.go:202"
+      "where": "modules/runtime/diagnostics.go:214"
     },
     "No outbound proxy variables": {
       "where": "modules/gateway/diagnostics.go:81"
@@ -982,7 +982,7 @@
       ]
     },
     "Not taken over: {names}": {
-      "where": "modules/runtime/diagnostics.go:190",
+      "where": "modules/runtime/diagnostics.go:202",
       "args": [
         "names"
       ]
@@ -1225,7 +1225,7 @@
       "where": "modules/config/commands.go:785"
     },
     "Slot": {
-      "where": "modules/confighook/command.go:68"
+      "where": "modules/confighook/command.go:71"
     },
     "Socket handed over seamlessly: in-flight requests drain in the old process, sessions are not interrupted; takeover state is untouched": {
       "where": "modules/runtime/commands.go:459"
@@ -1282,7 +1282,7 @@
       "where": "modules/gateway/command_debug.go:96"
     },
     "Target files after takeover (newgate-related fragments)": {
-      "where": "modules/runtime/diagnostics.go:224"
+      "where": "modules/runtime/diagnostics.go:236"
     },
     "The daemon has no control token (started before the upgrade), falling back to stop+start": {
       "where": "modules/runtime/commands.go:415"
@@ -1329,7 +1329,7 @@
       "where": "modules/runtime/commands.go:352"
     },
     "Tier": {
-      "where": "modules/confighook/command.go:68"
+      "where": "modules/confighook/command.go:71"
     },
     "Tripped ago": {
       "where": "modules/breaker/command.go:96"
@@ -1415,7 +1415,7 @@
       "where": "modules/config/view.go:600"
     },
     "Who goes through newgate": {
-      "where": "modules/runtime/view.go:84"
+      "where": "modules/runtime/view.go:97"
     },
     "Why it exists": {
       "where": "modules/gateway/command_special.go:167"
@@ -1545,7 +1545,7 @@
       ]
     },
     "agent": {
-      "where": "modules/runtime/view.go:97"
+      "where": "modules/runtime/view.go:110"
     },
     "agent {agent} falls back to the default profile": {
       "where": "modules/config/store/watch.go:212",
@@ -1729,14 +1729,14 @@
       "where": "modules/runtime/daemon/daemon.go:407"
     },
     "cannot find the real {agent}: {err} — the shim will fail to forward, install it first": {
-      "where": "modules/runtime/takeover/takeover.go:229",
+      "where": "modules/runtime/takeover/takeover.go:247",
       "args": [
         "agent",
         "err"
       ]
     },
     "cannot find {names} in PATH (skipped the shim directory {dir})": {
-      "where": "modules/confighook/api.go:177",
+      "where": "modules/confighook/api.go:205",
       "args": [
         "dir",
         "names"
@@ -1779,7 +1779,7 @@
       "where": "modules/gateway/forward/forward.go:781"
     },
     "cannot read the config, so this run injects no real model names and no window declaration (the proxy still routes by tier name): {err}": {
-      "where": "modules/runtime/launch/launch.go:122",
+      "where": "modules/runtime/launch/launch.go:127",
       "args": [
         "err"
       ]
@@ -1911,7 +1911,7 @@
       "where": "modules/config/diagnostics.go:374"
     },
     "config file rewritten → local proxy": {
-      "where": "modules/runtime/takeover/takeover.go:127"
+      "where": "modules/runtime/takeover/takeover.go:137"
     },
     "config files": {
       "where": "modules/config/diagnostics.go:375"
@@ -2014,7 +2014,7 @@
       "where": "modules/gateway/status.go:64"
     },
     "declared but not in effect": {
-      "where": "modules/runtime/view.go:126"
+      "where": "modules/runtime/view.go:139"
     },
     "declared takeover but not in effect": {
       "where": "modules/runtime/commands.go:173"
@@ -2048,7 +2048,7 @@
       "where": "modules/gateway/command_probe.go:185"
     },
     "direct": {
-      "where": "modules/runtime/takeover/takeover.go:114"
+      "where": "modules/runtime/takeover/takeover.go:124"
     },
     "disabled": {
       "where": "modules/config/commands.go:223"
@@ -2293,7 +2293,7 @@
       "where": "modules/gateway/command_probe.go:233"
     },
     "its config file was not found (not installed?)": {
-      "where": "modules/runtime/takeover/takeover.go:129"
+      "where": "modules/runtime/takeover/takeover.go:139"
     },
     "keep keys in environment variables (never on disk): NEWGATE_KEY_<PROVIDER in upper case, - becomes _>": {
       "where": "modules/config/commands.go:620"
@@ -2573,6 +2573,9 @@
     "not defined": {
       "where": "modules/config/commands.go:217"
     },
+    "not installed": {
+      "where": "modules/runtime/diagnostics.go:162"
+    },
     "not set — paste the key here": {
       "where": "modules/config/view.go:755"
     },
@@ -2824,7 +2827,7 @@
       ]
     },
     "prepended {dir} to PATH (written into {file})": {
-      "where": "modules/runtime/takeover/takeover.go:222",
+      "where": "modules/runtime/takeover/takeover.go:240",
       "args": [
         "dir",
         "file"
@@ -2962,7 +2965,7 @@
       ]
     },
     "real {agent}: {path}": {
-      "where": "modules/runtime/takeover/takeover.go:227",
+      "where": "modules/runtime/takeover/takeover.go:245",
       "args": [
         "agent",
         "path"
@@ -2988,7 +2991,7 @@
       "where": "modules/runtime/injection/shim.go:175"
     },
     "removed the PATH shim (PATH precedence goes back to the real {agent})": {
-      "where": "modules/runtime/takeover/takeover.go:280",
+      "where": "modules/runtime/takeover/takeover.go:298",
       "args": [
         "agent"
       ]
@@ -3025,7 +3028,7 @@
       "where": "modules/gateway/metrics/hints.go:56"
     },
     "restored {file}": {
-      "where": "modules/runtime/takeover/takeover.go:290",
+      "where": "modules/runtime/takeover/takeover.go:308",
       "args": [
         "file"
       ]
@@ -3098,7 +3101,7 @@
       ]
     },
     "running {file} through /bin/sh failed too: {err}": {
-      "where": "modules/runtime/launch/launch.go:211",
+      "where": "modules/runtime/launch/launch.go:216",
       "args": [
         "err",
         "file"
@@ -3136,7 +3139,7 @@
       "where": "modules/config/view.go:757"
     },
     "skipped (you turned it off; newgate on {agent} restores it)": {
-      "where": "modules/runtime/takeover/takeover.go:177",
+      "where": "modules/runtime/takeover/takeover.go:195",
       "args": [
         "agent"
       ]
@@ -3159,7 +3162,7 @@
       "where": "modules/config/diagnostics.go:372"
     },
     "slots are discovered from the config file at startup": {
-      "where": "modules/confighook/command.go:65"
+      "where": "modules/confighook/command.go:68"
     },
     "some models always think and return a 400 when told to turn thinking off (GLM code 1210)\ngive these models an explicit reasoning_effort=low and change thinking:disabled back to enabled (the fallback half of BestEffortDisableThink)": {
       "where": "modules/thinking/st-always.go:156"
@@ -3254,7 +3257,7 @@
       "where": "modules/gateway/command_probe.go:198"
     },
     "switch a single agent only: newgate --set-profile <name> --agent <agent>": {
-      "where": "modules/confighook/command.go:92"
+      "where": "modules/confighook/command.go:95"
     },
     "switch profile; omit --agent to set the global default": {
       "where": "modules/config/commands.go:726"
@@ -3266,7 +3269,7 @@
       "where": "modules/pluginmanager/command.go:238"
     },
     "taken over": {
-      "where": "modules/runtime/view.go:122"
+      "where": "modules/runtime/view.go:135"
     },
     "takes effect immediately; running sessions are unaffected": {
       "where": "modules/config/commands.go:71"
@@ -3287,7 +3290,7 @@
       "where": "modules/config/commands.go:611"
     },
     "the current shell's PATH is not in effect yet; reopen the shell or `exec $SHELL -l`": {
-      "where": "modules/runtime/takeover/takeover.go:233"
+      "where": "modules/runtime/takeover/takeover.go:251"
     },
     "the file content in this request is not readable: {err}": {
       "where": "modules/config/view.go:999",
@@ -3499,7 +3502,7 @@
       "where": "modules/pluginmanager/command.go:363"
     },
     "turned off but still in effect": {
-      "where": "modules/runtime/view.go:131"
+      "where": "modules/runtime/view.go:144"
     },
     "turned on": {
       "where": "modules/pluginmanager/command.go:368"
@@ -3529,7 +3532,7 @@
       "where": "modules/runtime/commands.go:140"
     },
     "unknown agent {agent} (known: {list})": {
-      "where": "modules/runtime/takeover/takeover.go:297",
+      "where": "modules/runtime/takeover/takeover.go:315",
       "args": [
         "agent",
         "list"
@@ -3686,7 +3689,7 @@
       "other": "{bucket} {latency}/{n} samples"
     },
     "{dialect} dialect": {
-      "where": "modules/confighook/command.go:59",
+      "where": "modules/confighook/command.go:62",
       "args": [
         "dialect"
       ]
@@ -3735,7 +3738,7 @@
       ]
     },
     "{file} (skipped: {why})": {
-      "where": "modules/runtime/takeover/takeover.go:244",
+      "where": "modules/runtime/takeover/takeover.go:262",
       "args": [
         "file",
         "why"
@@ -3756,7 +3759,7 @@
       ]
     },
     "{file} has {n} spots that missed the exact rules and landed in the middle tier; worth a review": {
-      "where": "modules/runtime/takeover/takeover.go:254",
+      "where": "modules/runtime/takeover/takeover.go:272",
       "args": [
         "file",
         "n"
@@ -3831,6 +3834,12 @@
         "ms"
       ]
     },
+    "{names} is not on PATH — nothing to take over": {
+      "where": "modules/runtime/takeover/takeover.go:149",
+      "args": [
+        "names"
+      ]
+    },
     "{name} did not claim": {
       "where": "component/entry/entry.go:183",
       "args": [
@@ -3899,7 +3908,7 @@
       "other": "{n} messages come from the config dir"
     },
     "{n} original config · newgate stop can restore it": {
-      "where": "modules/runtime/diagnostics.go:211",
+      "where": "modules/runtime/diagnostics.go:223",
       "args": [
         "n"
       ],
@@ -4021,7 +4030,7 @@
       ]
     },
     "{tier} was set in the config (the default is {def})": {
-      "where": "modules/confighook/command.go:82",
+      "where": "modules/confighook/command.go:85",
       "args": [
         "def",
         "tier"

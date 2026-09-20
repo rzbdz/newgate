@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/store"
@@ -52,8 +53,12 @@ const (
 type Status struct {
 	Agent     string
 	Mechanism Mechanism
-	Wanted    bool     // 用户意愿（state.json）
-	Active    bool     // 现实态（磁盘）
+	Wanted    bool // 用户意愿（state.json）
+	// Active 是「磁盘上有没有我们做过的那件事」——shim 机制看链接在不在，config
+	// 机制看我们改过的配置文件在不在。它是**我们做过什么**，不是**用户有没有这个
+	// 工具**；后者是 Installed，两件事分开是有意的（见 Installed 的注释）。
+	Active    bool
+	Installed bool     // 这家客户端本身在不在这台机器上（`which`，排除我们的 shim）
 	Detail    string   // 一句人话：怎么接管的，或为什么没有
 	Files     []string // config 机制涉及的文件
 }
@@ -97,7 +102,12 @@ func List() []Status {
 		if !ok {
 			continue
 		}
-		s := Status{Agent: id, Mechanism: mechanismOf(a), Wanted: st.TakeoverWanted(id)}
+		s := Status{
+			Agent: id, Mechanism: mechanismOf(a), Wanted: st.TakeoverWanted(id),
+			// 排除 shim 目录：不排除的话这一条**永远**为真（shim 就是我们放在
+			// PATH 前面的同名链接），判据会退化成「我们做过接管没有」。
+			Installed: agents.Installed(id, injection.Dir()),
+		}
 		switch s.Mechanism {
 		case MechShim:
 			for _, n := range injection.Installed() {
@@ -130,6 +140,14 @@ func List() []Status {
 			} else {
 				s.Detail = i18n.T("direct", nil)
 			}
+		}
+		if !s.Installed {
+			// 没装的时候，「怎么接管的」那句话是在描述一件没意义的事（我们改过
+			// 的文件还在，而那个工具不在了）。这句换成「我们找过什么、没找到什么」，
+			// 因为判据用的是**这个进程的 PATH**——用户在另一个 shell 里装好了、
+			// 而这个进程没看见，是可能的，说清楚才查得下去。
+			s.Detail = i18n.T("{names} is not on PATH — nothing to take over",
+				i18n.A{"names": strings.Join(a.Bin, "/")})
 		}
 		out = append(out, s)
 	}

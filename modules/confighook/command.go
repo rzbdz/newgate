@@ -50,6 +50,9 @@ func runAgents(agents AgentCatalog) int {
 
 	for _, n := range names {
 		a, _ := agents.Get(n)
+		// 这个客户端交上来的运行时事实（可能没有）。取一次、往下传：它每次问都可能
+		// 读磁盘（见发行版 claudecode 的实现），而这里一个 agent 要问它好几遍。
+		facts := agents.Facts(n)
 		profile := st.ActiveFor(a.ID)
 		if profile == "" {
 			profile = st.DefaultProfile
@@ -67,8 +70,8 @@ func runAgents(agents AgentCatalog) int {
 		}
 		t := style.NewTable(i18n.T("Slot", nil), i18n.T("Tier", nil), i18n.T("Env var", nil))
 		for _, s := range a.Slots {
-			// 这一列说的是「此刻实际走哪儿」（改过就用改的，见 Agent.TierOf）。
-			t.Row(s.Name, style.Cyan(a.TierOf(s)), s.EnvVar)
+			// 这一列说的是「此刻实际走哪儿」（改过就用改的，见 AgentFacts）。
+			t.Row(s.Name, style.Cyan(TierOf(facts, s)), s.EnvVar)
 		}
 		fmt.Print(t.String())
 		// 说明单独一行：塞进表格会把整张表撑到一百多列，反而没法对读。
@@ -78,7 +81,7 @@ func runAgents(agents AgentCatalog) int {
 		// 这行本来就是「这个槽位是干什么的」，改过没有属于同一类注脚。
 		for _, s := range a.Slots {
 			note := ""
-			if tier := a.TierOf(s); tier != s.Tier {
+			if tier := TierOf(facts, s); tier != s.Tier {
 				note = " · " + i18n.T("{tier} was set in the config (the default is {def})",
 					i18n.A{"tier": tier, "def": s.Tier})
 			}
