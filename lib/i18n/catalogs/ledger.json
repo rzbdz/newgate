@@ -457,10 +457,13 @@
       "where": "component/entry/entry.go:192"
     },
     "(none)": {
-      "where": "modules/confighook/command.go:99"
+      "where": "modules/confighook/command.go:106"
     },
     "(not assembled)": {
-      "where": "modules/confighook/command.go:96"
+      "where": "modules/confighook/command.go:103"
+    },
+    "(set in the config)": {
+      "where": "modules/confighook/command.go:75"
     },
     "(the anthropic dialect goes to this one)": {
       "where": "modules/config/diagnostics.go:289"
@@ -583,7 +586,7 @@
       "where": "modules/breaker/module.go:66"
     },
     "CLIs taken over: {list}": {
-      "where": "modules/confighook/command.go:104",
+      "where": "modules/confighook/command.go:111",
       "args": [
         "list"
       ]
@@ -1736,7 +1739,7 @@
       ]
     },
     "cannot find {names} in PATH (skipped the shim directory {dir})": {
-      "where": "modules/confighook/api.go:136",
+      "where": "modules/confighook/api.go:168",
       "args": [
         "dir",
         "names"
@@ -3254,7 +3257,7 @@
       "where": "modules/gateway/command_probe.go:198"
     },
     "switch a single agent only: newgate --set-profile <name> --agent <agent>": {
-      "where": "modules/confighook/command.go:82"
+      "where": "modules/confighook/command.go:89"
     },
     "switch profile; omit --agent to set the global default": {
       "where": "modules/config/commands.go:726"

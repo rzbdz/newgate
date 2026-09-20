@@ -127,7 +127,7 @@ func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) (
 		// 档位名（fail-open，docs/05-gateway.md）：代理仍能按档位路由。
 		if explicit != "" {
 			for _, s := range a.EnvSlots() {
-				if b, ok := resolve.PrimaryBinding(s.Tier, snap.Profiles, snap.Providers, active); ok {
+				if b, ok := resolve.PrimaryBinding(a.TierOf(s), snap.Profiles, snap.Providers, active); ok {
 					inject[s.EnvVar] = b.Model
 				}
 			}

@@ -35,7 +35,10 @@ var (
 // Slot 描述客户端的一个模型槽位如何映射到 newgate 语义档位。
 // EnvVar 为空的槽位仍可供配置接管使用，但不会参与进程环境注入。
 type Slot struct {
-	Name   string
+	Name string
+	// Tier 是这个槽位的**缺省**归属。用户可以在配置里改（见 Agent.SlotTier）
+	// ——改了之后生效的是那个，不是这个。所以读「此刻走哪儿」一律用 Agent.TierOf，
+	// 别直接读它。
 	Tier   string
 	EnvVar string
 	Desc   string
@@ -67,6 +70,35 @@ type Agent struct {
 	// 客户端接入归发行版（见发行版的 modules/claudecode），内核只提供这张表。
 	ContextWindowEnv string
 	AutoCompactEnv   string
+
+	// SlotTier 说「这个槽位**此刻**走哪个档位」，覆盖 Slot.Tier 那个缺省；
+	// 返回空串 = 没有覆盖，用缺省。nil = 这个客户端不支持改。
+	//
+	// # 为什么是一个函数，而不是让内核去读某个配置键
+	//
+	// 「槽位 → 档位」是**客户端自己的产品决定**，而那句话现在可以改。改它的地方
+	// 是客户端模块自己的配置（claudecode 的映射住在 claudecode 的键里），内核不认识
+	// 任何一家的键名——那正是「客户端接入归发行版」这条边界。内核只问一句「现在呢」，
+	// 怎么算出来是模块的事。
+	//
+	// 为什么不是每次 Start 时把 Slot.Tier 改掉重新登记：登记只发生一次，而用户改
+	// 映射发生在之后（界面上点一下）。回调每次注入时现问，改完**下一次接管就生效**，
+	// 不必重启 daemon、更不必重新登记。
+	SlotTier func(Slot) string
+}
+
+// TierOf 返回槽位此刻实际走的档位：有人覆盖就问它，否则用定义里的缺省。
+//
+// **所有读「这个槽位走哪儿」的地方都必须走这里**（注入、钉死模式下解析真实模型名、
+// 以及 `newgate config` 那张表）——直接读 Slot.Tier 的地方会安静地显示/注入缺省值，
+// 而用户明明改过（改完界面显示变了、行为没变，是最难查的一种不一致）。
+func (a *Agent) TierOf(slot Slot) string {
+	if a.SlotTier != nil {
+		if t := a.SlotTier(slot); t != "" {
+			return t
+		}
+	}
+	return slot.Tier
 }
 
 // TakeoverReport 记录一次配置接管实际改了什么；接管不能静默成功。
@@ -107,7 +139,7 @@ func (a *Agent) BuildEnv(port int, authToken string) map[string]string {
 		env[a.AuthEnv] = authToken
 	}
 	for _, slot := range a.EnvSlots() {
-		env[slot.EnvVar] = slot.Tier
+		env[slot.EnvVar] = a.TierOf(slot)
 	}
 	return env
 }

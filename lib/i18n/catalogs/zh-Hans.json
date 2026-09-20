@@ -308,6 +308,10 @@
       "text": "（未装配）",
       "reviewed": true
     },
+    "(set in the config)": {
+      "text": "（配置里改过）",
+      "reviewed": true
+    },
     "(the anthropic dialect goes to this one)": {
       "text": "（anthropic 方言走这条）",
       "reviewed": true

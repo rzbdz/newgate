@@ -67,7 +67,14 @@ func runAgents(agents AgentCatalog) int {
 		}
 		t := style.NewTable(i18n.T("Slot", nil), i18n.T("Tier", nil), i18n.T("Env var", nil))
 		for _, s := range a.Slots {
-			t.Row(s.Name, style.Cyan(s.Tier), s.EnvVar)
+			// 改过的槽位标一句：这一列说的是「此刻实际走哪儿」，而用户看这张表的
+			// 时候常常正想问「我改的那条生效了没有」。不标的话缺省值与改过的值长得
+			// 一模一样，只能靠记忆分辨。
+			tier := a.TierOf(s)
+			if tier != s.Tier {
+				tier += " " + i18n.T("(set in the config)", nil)
+			}
+			t.Row(s.Name, style.Cyan(tier), s.EnvVar)
 		}
 		fmt.Print(t.String())
 		// 说明单独一行：塞进表格会把整张表撑到一百多列，反而没法对读。
