@@ -62,6 +62,14 @@ type module struct {
 func main() {
 	check := flag.Bool("check", false,
 		"只校验生成结果是否与当前源码一致，不写文件（测试用）")
+	// -ext 只把发行版的 checkout 准备好就退出，不生成清单。
+	//
+	// 为什么需要它：清单里若有 modules-ext 下的包，**编译就需要那份 checkout**，
+	// 而 CI 的第一步（gofmt/vet）跑在 generate 之前。2026-09-20 实测：静态检查
+	// 那个 job 在 `go vet ./...` 上红——生成的清单 import 了还不存在的包。
+	// 与其让每个 job 记住「先跑一次 generate」，不如给一个说得清名字的目标。
+	extOnly := flag.Bool("ext", false,
+		"只准备发行版 checkout（按 modules-ext.json 拉取发行版代码），不写清单")
 	flag.Parse()
 
 	root, err := moduleRoot()
@@ -69,6 +77,18 @@ func main() {
 		fail(err)
 	}
 	manifest, hasManifest, err := extmanifest.Load(filepath.Dir(root))
+	if *extOnly {
+		if err != nil {
+			fail(err)
+		}
+		if !hasManifest {
+			fmt.Println("genmodules: 没有发行版声明（modules-ext.json），本构建不带外部模块")
+			return
+		}
+		fmt.Printf("genmodules: 发行版 %s @ %s 已就位（%s）\n",
+			manifest.Distribution(), shortRev(manifest.Resolved), extmanifest.Dir(filepath.Dir(root)))
+		return
+	}
 	if err != nil {
 		fail(err)
 	}
