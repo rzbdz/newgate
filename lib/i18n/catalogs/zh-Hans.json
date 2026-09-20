@@ -1568,6 +1568,10 @@
       "text": "建 {file} 失败：{err}",
       "reviewed": true
     },
+    "cannot encode the slot map: {err}": {
+      "text": "槽位映射编码失败: {err}",
+      "reviewed": true
+    },
     "cannot extract the listener fd: {err}": {
       "text": "提取监听 fd 失败: {err}",
       "reviewed": true
@@ -2784,6 +2788,10 @@
       "text": "providers.json 里填 api_key",
       "reviewed": true
     },
+    "set in the config: {tier} (the default is {def}) — takes effect the next time {agent} is taken over (newgate on {agent})": {
+      "text": "配置里改过：{tier}（缺省是 {def}）——下次接管 {agent} 时才生效（newgate on {agent}）",
+      "reviewed": true
+    },
     "set the environment variable {env} or fill in api_key": {
       "text": "设环境变量 {env} 或填 api_key",
       "reviewed": true
@@ -2926,6 +2934,10 @@
     },
     "the client catalog: what a client is, how to install it, and how it is right now": {
       "text": "客户端目录：客户端是什么、怎么装、此刻怎么样",
+      "reviewed": true
+    },
+    "the config says {tier}, which is not a tier — the default is in use": {
+      "text": "配置里写的是 {tier}，不是档位——缺省值仍然有效",
       "reviewed": true
     },
     "the configuration already exists, nothing to initialize (--force overwrites)": {
@@ -3356,6 +3368,10 @@
       "text": "{agent} 已恢复直连；newgate start 不再接管它（newgate on {agent} 恢复）",
       "reviewed": true
     },
+    "{agent} is not installed on this machine — nothing on this card takes effect yet. Install it with `newgate {agent} -y`.": {
+      "text": "这台机器上没有装 {agent} —— 这张卡上的设置暂时都不会生效。用 `newgate {agent} -y` 装上它。",
+      "reviewed": true
+    },
     "{agent} is not installed. Run `{cmd}` to install it? [y/N] ": {
       "text": "{agent} 还没装。要跑 `{cmd}` 装上它吗？[y/N] ",
       "reviewed": true
@@ -3551,6 +3567,10 @@
     },
     "{route} -> {status}{note}  upstream said: {body}": {
       "text": "{route} -> {status}{note}  上游说: {body}",
+      "reviewed": true
+    },
+    "{slot}: {tier} is not one of the values this slot takes — pick one of {known}": {
+      "text": "{slot}: {tier} 不是这个槽位收的取值——从 {known} 里挑一个",
       "reviewed": true
     },
     "{source} has no action called {action} — the page is probably stale, reload it": {

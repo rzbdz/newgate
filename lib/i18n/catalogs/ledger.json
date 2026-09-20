@@ -1743,6 +1743,9 @@
         "file"
       ]
     },
+    "cannot encode the slot map: {err}": {
+      "where": "modules/confighook/slots.go:131"
+    },
     "cannot extract the listener fd: {err}": {
       "where": "modules/runtime/daemon/daemon.go:407"
     },
@@ -3172,6 +3175,14 @@
     "set api_key in providers.json": {
       "where": "modules/config/store/store.go:439"
     },
+    "set in the config: {tier} (the default is {def}) — takes effect the next time {agent} is taken over (newgate on {agent})": {
+      "where": "modules/confighook/slots.go:161",
+      "args": [
+        "agent",
+        "def",
+        "tier"
+      ]
+    },
     "set the environment variable {env} or fill in api_key": {
       "where": "modules/config/store/store.go:441",
       "args": [
@@ -3337,6 +3348,12 @@
     },
     "the client catalog: what a client is, how to install it, and how it is right now": {
       "where": "modules/confighook/module.go:57"
+    },
+    "the config says {tier}, which is not a tier — the default is in use": {
+      "where": "modules/confighook/slots.go:153",
+      "args": [
+        "tier"
+      ]
     },
     "the configuration already exists, nothing to initialize (--force overwrites)": {
       "where": "modules/config/commands.go:611"
@@ -3765,6 +3782,12 @@
         "agent"
       ]
     },
+    "{agent} is not installed on this machine — nothing on this card takes effect yet. Install it with `newgate {agent} -y`.": {
+      "where": "modules/confighook/slots.go:180",
+      "args": [
+        "agent"
+      ]
+    },
     "{agent} is not installed. Run `{cmd}` to install it? [y/N] ": {
       "where": "modules/runtime/launch.go:250",
       "args": [
@@ -4102,6 +4125,14 @@
         "note",
         "route",
         "status"
+      ]
+    },
+    "{slot}: {tier} is not one of the values this slot takes — pick one of {known}": {
+      "where": "modules/confighook/slots.go:112",
+      "args": [
+        "known",
+        "slot",
+        "tier"
       ]
     },
     "{source} has no action called {action} — the page is probably stale, reload it": {
