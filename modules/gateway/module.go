@@ -12,6 +12,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	servingapi "github.com/rzbdz/newgate/lib/serving"
 	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/modules/config"
@@ -62,6 +63,10 @@ func New() modules.Component {
 			// 数据面（forward 整个目录）一个字都不认识它——那条由
 			// direction_test.go 钉住，跟「数据面不认识任何策略」同一把尺子。
 			modules.Optional(porthubapi.Capability),
+			// serving 同款：只有守护进程入口用它——「我要开始服务了」这句话由这个
+			// 模块说出口，想在服务进程里起来的模块（没装 porthub 时自起端口的
+			// 界面）在那上面登记。谁也不认识谁，只认识这本账。
+			modules.Optional(servingapi.Capability),
 			// web 界面同 ui：弱依赖。装了就报自己那面（计数器），没装就跳过。
 			modules.Optional(viewapi.Capability),
 		},
@@ -107,6 +112,9 @@ func New() modules.Component {
 			// 这里只**取**，怎么用是 serve.go 的事：本模块的其余部分（数据面、
 			// 命令、状态行）都不需要知道它存在。
 			hub, _ := modules.Get(ctx, porthubapi.Capability)
+			// 服务期回调那本账（同上：装了就取，没装就是 nil）。想在「这个进程开
+			// 始服务」时才起来的模块登记在它上面——数据面与界面因此都不必认识对方。
+			listeners, _ := modules.Get(ctx, servingapi.Capability)
 			for _, cmd := range []cliapi.Command{
 				specialCommand{}, schemaRepairCommand{}, debugCommand{},
 				// 观测面也归数据面自己：计数器怎么分组、探活探出了什么，
@@ -115,7 +123,7 @@ func New() modules.Component {
 				// 守护进程本体：`newgate __serve`。它以前是界面的命令，但它跑的
 				// 是数据面（见 serve.go）。策略账本原样递进去——**这一层不认识
 				// 任何一位策略**，谁插进来由各自的 Start 决定。
-				serveCommand{filters: port.filters, hub: hub},
+				serveCommand{filters: port.filters, hub: hub, listeners: listeners},
 			} {
 				release, err := cli.RegisterCommand(cmd)
 				if err != nil {

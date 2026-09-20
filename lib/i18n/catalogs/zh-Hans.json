@@ -976,6 +976,10 @@
       "text": "socket 无缝交接：在途请求由旧进程排空，会话不中断；接管状态未动",
       "reviewed": true
     },
+    "Some services did not start: {err}": {
+      "text": "有些服务没起来：{err}",
+      "reviewed": true
+    },
     "Spared": {
       "text": "救回",
       "reviewed": true
@@ -2498,6 +2502,18 @@
     },
     "send real requests to candidates and report their health": {
       "text": "给候选打真实请求，出健康报告",
+      "reviewed": true
+    },
+    "serving: a listener registered with no name": {
+      "text": "serving：有个监听登记时没写名字",
+      "reviewed": true
+    },
+    "serving: {name} could not start: {err}": {
+      "text": "serving：{name} 起不来：{err}",
+      "reviewed": true
+    },
+    "serving: {name} registered a nil starter": {
+      "text": "serving：{name} 登记了一个空回调",
       "reviewed": true
     },
     "set api_key in providers.json": {

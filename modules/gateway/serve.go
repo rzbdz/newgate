@@ -27,6 +27,7 @@ import (
 	"github.com/rzbdz/newgate/lib/buildinfo"
 	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/logx"
+	servingapi "github.com/rzbdz/newgate/lib/serving"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/config/store"
@@ -51,6 +52,12 @@ type serveCommand struct {
 	// 的地方。数据面（forward）拿到的是一个 handler，不知道它从哪来；porthub
 	// 拿到的是一个 handler，不知道它是谁——两边都不认识对方。
 	hub porthubapi.Service
+	// listeners 是「这个进程开始服务了」那本账（serving 没装就是 nil）。
+	//
+	// 它与 hub 出现在同一处、理由也一样：**守护进程入口是这个进程里唯一说得出口
+	// 「我在服务」的地方**。数据面拿到的是一个已经装好的进程，界面拿到的是一个
+	// 「可以起来了」的通知——两边都不认识对方，也不认识本模块的另一半。
+	listeners servingapi.Service
 }
 
 var (
@@ -64,7 +71,7 @@ func (serveCommand) Names() []string { return []string{"__serve"} }
 func (serveCommand) Unstyled([]string) bool { return true }
 
 func (c serveCommand) Run(_ cliapi.Host, args []string) int {
-	return Serve(c.filters, c.hub, intFlag(args, "--port", 0))
+	return Serve(c.filters, c.hub, c.listeners, intFlag(args, "--port", 0))
 }
 
 // intFlag 取 `--名字 N` 或 `--名字=N` 里的整数，没有给默认值。
@@ -98,7 +105,7 @@ func intFlag(args []string, name string, def int) int {
 //
 // 依赖方向：数据面只认识**策略账本**（policy.Registry），不认识任何一位策略。
 // 账本由 gateway 的 New 建好（Bind 期），策略在各自 Start 期注册进来。
-func Serve(filters *policy.Registry, hub porthubapi.Service, port int) int {
+func Serve(filters *policy.Registry, hub porthubapi.Service, listeners servingapi.Service, port int) int {
 	rot, rerr := logx.New(paths.LogFile(), 16<<20, 3) // 16MB × 4 份
 	var lg *log.Logger
 	if rerr != nil {
@@ -248,6 +255,25 @@ func Serve(filters *policy.Registry, hub porthubapi.Service, port int) int {
 	lg.Printf("%s", i18n.T("newgate {version} (built {built}) started, default profile={profile}, config hot-reload enabled",
 		i18n.A{"version": buildinfo.Version(), "built": buildinfo.BuildTimeDisplay(),
 			"profile": watcher.Current().State.DefaultProfile}))
+	// 「这个进程开始服务了」：想搭车的模块（装了 porthub 就挂共享端口、没装就自己
+	// 监听一个端口的 web 界面）在这一刻起来。
+	//
+	// **为什么不能放在模块的 Start 里**：Start 每一条 `newgate …` 命令都会跑一遍，
+	// 在那里起监听等于敲一次 `newgate status` 就开一台服务器。而这里是这件事唯一
+	// 说得出口的地方——这个进程真的要把端口交给内核了。
+	//
+	// 位置在 Start 之前（而不是 accept 之后）：它说的是「我要开始了」。差一拍的
+	// 代价是「绑定失败时已经起来的监听」——那由下面这个 stop 收掉，而且那种情况下
+	// 进程立刻就走（见下面的失败分支）。
+	if listeners != nil {
+		stop, err := listeners.Notify()
+		if err != nil {
+			// fail-open：一个界面起不来不该拖垮数据面（日志里点名是谁）。
+			lg.Printf("%s", i18n.T("Some services did not start: {err}", i18n.A{"err": err}))
+		}
+		defer stop()
+	}
+
 	if err := srv.Start(); err != nil {
 		// 优雅交接的排空：listener 已移交新进程，Serve 因此返回——但这
 		// 不是退出的时候。等在途请求流完（Drained），再直接退（os.Exit
