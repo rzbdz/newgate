@@ -27,10 +27,14 @@ func sandbox(t *testing.T) string {
 
 // newgateNamedProcess 起一个 /proc/<pid>/cmdline 里带 "newgate" 的进程
 // （Alive 靠这个字符串判断身份，普通 sleep 会被当成无关进程），返回 pid。
-// 必须 bash：本机的 dash 不支持 `exec -a`，sh 会当场退出——探测就变成
-// 和僵尸赛跑的玄学（见 Stop 的失败重现实录）。
+//
+// argv0 由 execve 直接设定，不经过 shell（同 newgateServeProcess 的说明）。
+// 原来是 `bash -c 'exec -a newgate-sleep sleep 30'`：那一跳不但留下一段窗口，
+// 还逼着这里必须用 bash——本机的 dash 不支持 `exec -a`，用 sh 会当场退出，
+// 探测就变成和僵尸赛跑的玄学（见 Stop 的失败重现实录）。现在没有 shell 可挑。
 func newgateNamedProcess(t *testing.T) int {
-	cmd := exec.Command("/bin/bash", "-c", "exec -a newgate-sleep sleep 30")
+	cmd := exec.Command("sleep", "30")
+	cmd.Args[0] = "newgate-sleep"
 	if err := cmd.Start(); err != nil {
 		t.Skipf("起不了测试进程: %v", err)
 	}

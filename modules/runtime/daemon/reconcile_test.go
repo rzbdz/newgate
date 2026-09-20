@@ -30,7 +30,17 @@ import (
 // newgate 进程」的证据）。
 func newgateServeProcess(t *testing.T) int {
 	t.Helper()
-	cmd := exec.Command("/bin/bash", "-c", `exec -a "newgate __serve --port 1" sleep 30`)
+	// argv0 由 execve 直接设定（`cmd.Args[0]`），**完全不经过 shell**。
+	//
+	// 这里原来是 `/bin/bash -c 'exec -a "newgate __serve --port 1" sleep 30'`：
+	// 多出来的那一跳（bash 先起来，再 exec 成 sleep）本身就是一段窗口——那段时间
+	// 里 /proc/<pid>/cmdline 是 bash 自己那行 `-c …`（恰好也含 newgate 与
+	// __serve，两个判据都以为成立），而 bash 随时可能退出。2026-09-20 发行版 CI
+	// 上这个夹具连着让两个测试飘红（TestReconcileHealsFromTheLock、
+	// TestLastHealRecordsTheRepair），都是 0.00 秒、都报「本该发现不一致」。
+	// 换成直接设 argv0 之后，子进程**存在的那一刻**cmdline 就是它，没有窗口。
+	cmd := exec.Command("sleep", "30")
+	cmd.Args[0] = "newgate __serve --port 1"
 	if err := cmd.Start(); err != nil {
 		t.Skipf("起不了测试进程: %v", err)
 	}
@@ -71,6 +81,21 @@ func waitForProcess(t *testing.T, pid int, want func(int) bool, what string) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// why 把「代理看到的现场」讲成一行，贴在断言失败的消息后面。
+//
+// 这类飘的根因全在 pidfile / lock / 进程三者的状态里，而 CI 上只留一句「本该
+// 发现不一致」时根本查不动——2026-09-20 那两次就是这么隔着日志猜的。
+func why() string {
+	pid, err := ReadPid()
+	pidDesc := "nil"
+	if pid != nil {
+		pidDesc = fmt.Sprintf("%d(alive=%v)", pid.PID, Alive(pid.PID))
+	}
+	lock := LockHolder()
+	return fmt.Sprintf("pidfile=%s err=%v; lock=%d alive=%v isServe=%v; LastHeal=%q",
+		pidDesc, err, lock, Alive(lock), isServe(lock), LastHeal())
 }
 
 // zombiePid 造一个**僵尸**：子进程退出了但没人收尸（不调 Wait）。这正是现场里
@@ -143,7 +168,7 @@ func TestReconcileHealsFromTheLock(t *testing.T) {
 
 	info, notes := Reconcile()
 	if info == nil {
-		t.Fatal("锁里有个活着的 daemon，不该报「没在跑」")
+		t.Fatal("锁里有个活着的 daemon，不该报「没在跑」：" + why())
 	}
 	if info.PID != live {
 		t.Errorf("认错了真身：got pid %d, want %d", info.PID, live)
@@ -334,7 +359,7 @@ func TestLastHealRecordsTheRepair(t *testing.T) {
 	writeLockFile(t, live)
 
 	if _, notes := Reconcile(); len(notes) == 0 {
-		t.Fatal("这一发本该发现不一致")
+		t.Fatal("这一发本该发现不一致：" + why())
 	}
 	h := LastHeal()
 	if h == "" {
