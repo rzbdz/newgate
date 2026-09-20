@@ -75,7 +75,14 @@ func isClassifier(body []byte) bool {
 
 func (background) Name() string { return "claude-bg" }
 
-func (background) Before() []string { return []string{"deepseek", "glm", "always-thinks"} }
+// Before 让「先补 thinking」的插件排在兜底翻译器（always-thinks）前面动手。
+//
+// 这里只写内核自己的插件名——2026-09-20 之前还列着 `deepseek`、`glm` 两个**发行版**
+// 的名字，那是方向反了（内核不该认识产品插件），而且 special 的排序图对未注册的
+// 名字静默忽略，所以那两条边在纯内核构建里一直是空转的。现在那条边由产品自己声明
+// （见发行版仓库 modules/deepseek / modules/claudecode_glm 的 Before），
+// `app/ordering_test.go` 钉住「内核的排序边只指向内核自己的插件」。
+func (background) Before() []string { return []string{"always-thinks"} }
 func (background) After() []string  { return nil }
 
 func (background) Why() string {
