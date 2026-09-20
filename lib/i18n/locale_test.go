@@ -532,3 +532,62 @@ func TestCatalogsFromFSRejectsMismatchedFilename(t *testing.T) {
 		t.Fatal("文件名与 meta.language 不一致时该报错")
 	}
 }
+
+// TestUseSwitchesLanguageWithoutReinstalling 锁住「运行期换语言」那条路。
+//
+// 这是 web 上那张语言卡能成立的全部理由：daemon 是长命的，用户挑完语言必须**当场**
+// 换，不能等重启。而换的时候有一件很容易做错的事——图省事再调一次 Install 会把
+// builtins 整个重建，于是发行版在装配期 Extend 进来的译文全部消失。症状是「在网页
+// 上切成中文之后，发行版那一半界面变回英文」，看起来只像「有几条没翻」。
+//
+// 所以断言打在**切走再切回来之后追加的那条还在不在**上——只切一次的话，被冲掉的
+// catalog 在这一刻还看不出差别（当前语言用的是内核那份）。
+func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
+	install(t, "zh-Hans")
+
+	const own = "a sentence only the distribution has"
+	if err := Extend(Ledger{Messages: map[string]LedgerEntry{own: {Where: "modules/hello/hello.go:1"}}},
+		[]Catalog{{Language: "zh-Hans", Messages: map[string]Entry{own: {Text: "发行版自己的一句话"}}}}); err != nil {
+		t.Fatalf("Extend: %v", err)
+	}
+	if got := T(own, nil); got != "发行版自己的一句话" {
+		t.Fatalf("追加的译文该生效: %q", got)
+	}
+
+	// 换到源语言：那句话原样出来（恒等路径）。
+	if got := Use(SourceLang); got != SourceLang {
+		t.Fatalf("Use(%q) = %q", SourceLang, got)
+	}
+	if got := T("Proxy", nil); got != "Proxy" {
+		t.Errorf("换成源语言后该原样输出: %q", got)
+	}
+
+	// 换回来：**追加的那条必须还在**。这是本测试真正的断言。
+	if got := Use("zh-Hans"); got != "zh-Hans" {
+		t.Fatalf("Use(zh-Hans) = %q", got)
+	}
+	if got := T(own, nil); got != "发行版自己的一句话" {
+		t.Errorf("换回来之后发行版的译文没了——说明这次换语言重装了目录表: %q", got)
+	}
+	if got := T("Proxy", nil); got != "代理" {
+		t.Errorf("内核那句也该回来: %q", got)
+	}
+	if got := Current(); got != "zh-Hans" {
+		t.Errorf("Current() 该跟着变: %q", got)
+	}
+}
+
+// TestUseFallsBackToTheSourceLanguage：换一门没有的语言不是错误，是回退。
+//
+// 与 Install 那条同规矩：界面上的取值来自 Available()，正常不会走到这里，但
+// 一道门不能因为「调用方不该这么调」就把整个进程卡住——语言是偏好，不是配置
+// 正确性的一部分。
+func TestUseFallsBackToTheSourceLanguage(t *testing.T) {
+	install(t, "zh-Hans")
+	if got := Use("fr-FR"); got != SourceLang {
+		t.Errorf("没翻的语言该回退到源语言，实际 %q", got)
+	}
+	if got := T("Proxy", nil); got != "Proxy" {
+		t.Errorf("回退之后该走恒等路径: %q", got)
+	}
+}

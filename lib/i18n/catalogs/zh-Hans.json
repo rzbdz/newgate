@@ -1276,6 +1276,10 @@
       "text": "这家上游说的是哪种方言。留空 = openai。",
       "reviewed": true
     },
+    "Which language this process speaks. Saved to state.json and applied at once — no restart.": {
+      "text": "这门进程说哪门语言。存进 state.json，并且**当场生效**，不用重启。",
+      "reviewed": true
+    },
     "Which profile the chain starts from when no agent-specific one is set.": {
       "text": "没有为某个 agent 单独指定时，链从哪个 profile 开始。",
       "reviewed": true
@@ -2960,8 +2964,16 @@
       "text": "安装命令失败（{cmd}）: {err}",
       "reviewed": true
     },
+    "the language in this request is not readable: {err}": {
+      "text": "这次请求里的语言读不出来：{err}",
+      "reviewed": true
+    },
     "the module list and the runtime switch points": {
       "text": "模块清单与运行期开关点",
+      "reviewed": true
+    },
+    "the module_config section is not an object: {err}": {
+      "text": "module_config 那一段不是一个对象：{err}",
       "reviewed": true
     },
     "the new process did not attach to the listening socket within 5 seconds: {err}": {
@@ -3010,6 +3022,10 @@
     },
     "the real executable was not found (forwarding will fail)": {
       "text": "找不到真实可执行文件（转发会失败）",
+      "reviewed": true
+    },
+    "the request says nothing about the language": {
+      "text": "这次请求没有说要用哪门语言",
       "reviewed": true
     },
     "the settings in this request are not readable: {err}": {

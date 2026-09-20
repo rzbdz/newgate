@@ -126,6 +126,10 @@ var (
 	widths   = map[string]int{}
 	builtins = map[string]Catalog{}
 	overlaid int // 有几个键来自**磁盘覆盖**
+	// overlayDir 是 Install 那次记下的磁盘覆盖目录。记着它是为了 Use：换语言要
+	// 重新读一遍覆盖（`$NEWGATE_HOME/locale/<tag>.json` 是**按语言**分的文件），
+	// 而调用 Use 的人（web 上那张语言卡）不该、也不知道这个目录在哪。
+	overlayDir string
 )
 
 // Install 装配这次进程要用的语言，返回实际生效的 tag。
@@ -146,6 +150,19 @@ func Install(tag string, led Ledger, catalogs []Catalog, diskDir string) (string
 		builtins[c.Language] = c
 	}
 
+	mu.Lock()
+	defer mu.Unlock()
+	ledger = led.Messages
+	overlayDir = diskDir
+	return apply(tag), nil
+}
+
+// apply 按 tag 建出当前语言的那张表。**调用方必须已经持有 mu**。
+//
+// 它只读已经装好的 builtins/ledger，所以对「换一门语言」与「第一次装配」是同一段
+// 代码——两处各写一遍的话，磁盘覆盖（overlay）与「覆盖只改已有消息」那条限制迟早
+// 只在一处生效。
+func apply(tag string) string {
 	avail := make([]string, 0, len(builtins)+1)
 	for lang := range builtins {
 		avail = append(avail, lang)
@@ -168,9 +185,9 @@ func Install(tag string, led Ledger, catalogs []Catalog, diskDir string) (string
 				next[id] = e
 			}
 		}
-		if raw, ok := readOverlay(diskDir, eff); ok {
+		if raw, ok := readOverlay(overlayDir, eff); ok {
 			for id, e := range raw.Messages {
-				if _, known := led.Messages[id]; !known {
+				if _, known := ledger[id]; !known {
 					continue // 覆盖只能改已有的消息，凭空多出来的（拼错了）不生效
 				}
 				if e.Empty() {
@@ -182,14 +199,31 @@ func Install(tag string, led Ledger, catalogs []Catalog, diskDir string) (string
 		}
 	}
 
-	mu.Lock()
-	current, table, ledger = eff, next, led.Messages
+	current, table = eff, next
 	widths = builtins[eff].Widths
 	if widths == nil {
 		widths = builtins[SourceLang].Widths
 	}
-	mu.Unlock()
-	return eff, nil
+	return eff
+}
+
+// Use 把**当前语言**换成另一门，返回实际生效的 tag。空串 tag 会退到源语言。
+//
+// 它与 Install 的分工是这套东西能支持「运行期换语言」的关键：
+//
+//	Install  装**目录表**（有哪些语言、各自翻了什么）。一次进程一次，归 modules/locale。
+//	Use      从**已经装好的那张表**里换一门。跑几次都行，不碰 builtins。
+//
+// 为什么必须有它，而不是让调用方再调一次 Install：Install 会把 builtins 清空重建，
+// 而发行版的译文是**装配期 Extend 进来的**（另一个 Go module 的目录，内核不认识）。
+// 再装一次就把它们全冲掉——症状是「在网页上切成中文之后，发行版那一半界面变回英文」，
+// 而它看起来只像「有几条没翻」，不像一条 bug。
+//
+// 它不写盘：**谁拥有这个偏好谁去写**（今天只有 `newgate lang` 与 web 上那张语言卡）。
+func Use(tag string) string {
+	mu.Lock()
+	defer mu.Unlock()
+	return apply(tag)
 }
 
 // Extend 把另一份账本与目录**并进**这次已经装好的装配。

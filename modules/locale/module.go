@@ -6,6 +6,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/lib/i18n"
+	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
@@ -46,6 +47,9 @@ func New() modules.Component {
 		Type: TypeInfra,
 		Requires: []modules.Requirement{
 			modules.Optional(cliapi.Capability),
+			// web 界面：在就把「语言」那张卡挂上去（见 view.go），不在就跳过。
+			// 与 CLI 那条同为**弱依赖**——本模块最重要的工作「装目录」谁也不依赖。
+			modules.Optional(viewapi.Capability),
 			modules.Need(confighookapi.ConfigHooksCapability),
 		},
 		Provides: []modules.Provision{modules.Provide(Capability, Service(svc))},
@@ -69,6 +73,15 @@ func New() modules.Component {
 				return err
 			}
 			svc.lang, svc.requested, svc.source = eff, i18n.Normalize(req.Tag), req.Source
+
+			// web 界面：登记那张语言卡（`newgate lang` 的等价物，见 view.go）。
+			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
+				rel, err := registerView(v)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, rel)
+			}
 
 			cli, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {

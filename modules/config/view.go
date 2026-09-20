@@ -540,24 +540,12 @@ func writeThrough(conceptID, file, base string, data []byte) (string, error) {
 
 // ---------- 全局开关 ----------
 
-type toggleItem struct {
-	ID      string   `json:"id"`
-	Label   string   `json:"label"`
-	Kind    string   `json:"kind"` // select | switch | text
-	Value   string   `json:"value,omitempty"`
-	On      bool     `json:"on,omitempty"`
-	Options []string `json:"options,omitempty"`
-	Why     string   `json:"why,omitempty"` // 一句话说明这个开关影响什么
-	// Placeholder 是空格子里的提示（比如「空 = 只听回环」）。空值时它比 why
-	// 更该被看见：用户对着一个空输入框，第一句话得告诉他空着是什么意思。
-	Placeholder string `json:"placeholder,omitempty"`
-}
-
-type stateData struct {
-	File  string       `json:"file"`
-	Base  string       `json:"base"`
-	Items []toggleItem `json:"items"`
-}
+// toggleItem / stateData 的形状住在契约包里（`lib/view` 的 Toggles / ToggleItem）：
+// 形状是 **Kind 的事**，而 Kind 定义在那里。2026-09-21 之前它们长在这里，只因为
+// 当时只有这一张卡用 KindToggles；等 modules/locale 也要产出一张语言卡，留在
+// 这里就只能被抄一遍。
+type toggleItem = view.ToggleItem
+type stateData = view.Toggles
 
 // stateConcept 是 state.json 里**归 config 的那几个字段**。
 //

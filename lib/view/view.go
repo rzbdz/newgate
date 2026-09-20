@@ -205,6 +205,53 @@ const (
 	FieldLines = "lines"
 )
 
+// Toggles 是 KindToggles 的数据形状：一组开关 / 单选 / 单行文本，每个带一句为什么。
+//
+// # 为什么这几个类型住在契约包里，而不是某个使用者的家里
+//
+// 它们 2026-09-21 之前定义在 `modules/config/view.go`（那张「全局设置」卡）。当时
+// 只有一个使用者，所以看不出问题；等到第二个模块要产出同一种 Kind（modules/locale
+// 的「语言」卡）就只有两条路：抄一遍这些字段名，或者把 config 拖进自己的依赖里。
+// 两条都是这套设计要避免的东西——**形状是 Kind 的事，Kind 定义在这里**，所以形状
+// 也定义在这里，与 KindToggles 那条注释里「前端只认这一种摆法」是同一句话。
+//
+// 前端读的就是这几个 JSON 字段（kinds/Toggles.svelte），改名要让两边一起动。
+type Toggles struct {
+	// File 是这张卡**写的是哪一份文件**，相对配置根（空 = 它不对应某一份可编辑的
+	// 文件）。与 Records.File 同义：界面拿它把「控件」与「原文」两半配成一对并排。
+	File string `json:"file,omitempty"`
+	// Base 是这份文件加载时的基线（内容哈希，见 store.WriteIfUnchanged）。
+	Base  string       `json:"base,omitempty"`
+	Items []ToggleItem `json:"items"`
+}
+
+// ToggleItem 是一个开关格。
+type ToggleItem struct {
+	// ID 是这一格的机器标记（Apply 回传时的键）。不翻译。
+	ID string `json:"id"`
+	// Label 是给人看的名字（可以翻译）。
+	Label string `json:"label"`
+	// Kind 决定怎么渲染：select（Options 里挑一个）/ switch（On）/ text（单行）。
+	Kind string `json:"kind"`
+	// Value 是 select/text 格的当前值；On 是 switch 格的状态。
+	Value string `json:"value,omitempty"`
+	On    bool   `json:"on,omitempty"`
+	// Options 是 select 格的候选（机器取值，不翻译）。
+	Options []string `json:"options,omitempty"`
+	// Why 是一句话说明这一格影响什么（鼠标悬停时给）。
+	Why string `json:"why,omitempty"`
+	// Placeholder 是空格子里的提示（比如「空 = 只听回环」）。空值时它比 why
+	// 更该被看见：用户对着一个空输入框，第一句话得告诉他空着是什么意思。
+	Placeholder string `json:"placeholder,omitempty"`
+}
+
+// ToggleKind 的取值。
+const (
+	ToggleSelect = "select"
+	ToggleSwitch = "switch"
+	ToggleText   = "text"
+)
+
 // Applier 把这个概念的一次修改落盘。
 //
 // `edit` 的形状由**这个概念自己**定义（每个概念的应用者自己解释），界面不解析
