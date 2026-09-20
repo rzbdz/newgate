@@ -308,10 +308,6 @@
       "text": "（未装配）",
       "reviewed": true
     },
-    "(set in the config)": {
-      "text": "（配置里改过）",
-      "reviewed": true
-    },
     "(the anthropic dialect goes to this one)": {
       "text": "（anthropic 方言走这条）",
       "reviewed": true
@@ -3459,6 +3455,10 @@
     },
     "{target} learned upstream quirks: {quirks}": {
       "text": "{target}: 学到上游毛病 —— {quirks}",
+      "reviewed": true
+    },
+    "{tier} was set in the config (the default is {def})": {
+      "text": "{tier} 是配置里改的（缺省是 {def}）",
       "reviewed": true
     },
     "{tool} is not a known agent, left untouched (the rest of the shim dir does not belong to newgate)": {

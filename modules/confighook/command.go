@@ -67,20 +67,23 @@ func runAgents(agents AgentCatalog) int {
 		}
 		t := style.NewTable(i18n.T("Slot", nil), i18n.T("Tier", nil), i18n.T("Env var", nil))
 		for _, s := range a.Slots {
-			// 改过的槽位标一句：这一列说的是「此刻实际走哪儿」，而用户看这张表的
-			// 时候常常正想问「我改的那条生效了没有」。不标的话缺省值与改过的值长得
-			// 一模一样，只能靠记忆分辨。
-			tier := a.TierOf(s)
-			if tier != s.Tier {
-				tier += " " + i18n.T("(set in the config)", nil)
-			}
-			t.Row(s.Name, style.Cyan(tier), s.EnvVar)
+			// 这一列说的是「此刻实际走哪儿」（改过就用改的，见 Agent.TierOf）。
+			t.Row(s.Name, style.Cyan(a.TierOf(s)), s.EnvVar)
 		}
 		fmt.Print(t.String())
 		// 说明单独一行：塞进表格会把整张表撑到一百多列，反而没法对读。
+		//
+		// 「改过没有」也在这行而不在表格里：第一版把它拼进档位那一格，结果一行的
+		// 宽度多出十来个**全角**字符，列宽是按字符数算的，整张表当场歪掉（实测）。
+		// 这行本来就是「这个槽位是干什么的」，改过没有属于同一类注脚。
 		for _, s := range a.Slots {
-			if s.Desc != "" {
-				fmt.Println(style.Hint(s.Name + "  " + s.Desc))
+			note := ""
+			if tier := a.TierOf(s); tier != s.Tier {
+				note = " · " + i18n.T("{tier} was set in the config (the default is {def})",
+					i18n.A{"tier": tier, "def": s.Tier})
+			}
+			if s.Desc != "" || note != "" {
+				fmt.Println(style.Hint(s.Name + "  " + s.Desc + note))
 			}
 		}
 	}
