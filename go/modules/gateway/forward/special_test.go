@@ -11,7 +11,6 @@ import (
 
 	"github.com/rzbdz/newgate/go/modules/config/domain"
 	"github.com/rzbdz/newgate/go/modules/config/resolve"
-	"github.com/rzbdz/newgate/go/modules/gateway/thinkcache"
 )
 
 // TestSpecialTreatmentDeepseekOnTheWire 端到端断言：转给 DeepSeek 的请求里，
@@ -143,80 +142,5 @@ func TestSpecialTreatmentSkipsNonDeepseek(t *testing.T) {
 	want := `{"model":"claude-sonnet-4","messages":[{"role":"assistant","content":"a"}]}`
 	if string(sent) != want {
 		t.Errorf("非 DeepSeek 上游的请求被动了\n want: %s\n got:  %s", want, sent)
-	}
-}
-
-// TestSpecialTreatmentOpencodeKeepsThinking 现场回归（2026-09-15）：
-// opencode 的请求（裸 /v1 + OpenAI 方言，见 modules/opencodeomo/takeover.go
-// 注入的 baseURL）不该被关掉思考——它压根不会写 thinking 这个 Anthropic
-// 字段，一旦按「客户端没要思考」处理，它条条请求都被关，用户看到的是
-// 「deepseek 不思考了」。
-//
-// 该补的照旧：思考开着，上游要的推理内容一个不能少。
-func TestSpecialTreatmentOpencodeKeepsThinking(t *testing.T) {
-	isolate(t)
-	// 上一轮上游真的给过这段推理，只是客户端序列化时丢了。
-	// 有了原文，插件才该把它逐字补回去——2026-09-18 起「没有原文就一个字节都不补」，
-	// 所以这个测试必须自己造出「有原文」这个前提，否则它断言的正是我们已经否掉的行为。
-	thinkcache.Default.Put([]string{thinkcache.ToolKey("call_oa_1")}, []byte("上一轮真实想过的内容"))
-
-	var sent []byte
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sent, _ = ioutil.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"ok":true}`)
-	}))
-	defer up.Close()
-
-	testChain = func(role string) []resolve.Step {
-		return []resolve.Step{{Profile: "test",
-			Binding:  domain.Binding{Provider: "smt-deepseek", Model: "deepseek-flash"},
-			Provider: testProvider(up.URL)}}
-	}
-	defer func() { testChain = nil }()
-
-	srv := newTestServer()
-	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
-	defer front.Close()
-
-	// opencode 第一轮过后的历史：assistant 消息带着 tool_calls，推理内容
-	// 被它序列化时丢掉了（这正是上游会 400 的形态）。
-	clientBody := `{"model":"newgate/heavy","stream":true,"messages":[` +
-		`{"role":"user","content":"读一下 main.go"},` +
-		`{"role":"assistant","content":"读完了","tool_calls":[` +
-		`{"id":"call_oa_1","type":"function","function":{"name":"Read","arguments":"{}"}}]}` +
-		`]}`
-	resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
-		strings.NewReader(clientBody))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := ioutil.ReadAll(resp.Body)
-		t.Fatalf("状态 %d: %s", resp.StatusCode, b)
-	}
-	if len(sent) == 0 {
-		t.Fatal("上游没收到请求体")
-	}
-
-	var got struct {
-		Model    string `json:"model"`
-		Thinking struct {
-			Type string `json:"type"`
-		} `json:"thinking"`
-		Messages []struct {
-			ReasoningContent string `json:"reasoning_content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(sent, &got); err != nil {
-		t.Fatalf("发出去的不是合法 JSON: %v\n%s", err, sent)
-	}
-	if got.Thinking.Type != "" {
-		t.Errorf("opencode 的请求被动了 thinking（现场 bug）: %s", sent)
-	}
-	if got.Messages[1].ReasoningContent != "上一轮真实想过的内容" {
-		t.Errorf("上一轮上游给过的推理原文没被逐字补回（got=%q）: %s",
-			got.Messages[1].ReasoningContent, sent)
 	}
 }

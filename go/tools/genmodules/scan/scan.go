@@ -44,6 +44,31 @@ func Dirs(componentsDir string) ([]string, error) {
 	return out, nil
 }
 
+// Ident 把目录名拧成一个合法的 Go 标识符（前缀保证首字符合法），
+// 例如 `simple-cli` → `mod_simple_cli`。
+//
+// 为什么由生成器拧、而不是要求目录改名：目录名**不必是** Go 标识符。内核自己的
+// modules/ 用下划线（claudecode_deepseek），而发行版仓库是另一拨人的目录，
+// `simple-cli` 这种连字符名字完全正常。别名是生成物，就该由生成器拧好。
+// 2026-09-20 实测：不拧的话生成的是 `ext_simple-cli`——一个语法错误，而它要到
+// `make generate` 之后的第一次编译才暴露。
+//
+// 与「哪些目录算组件」同址（判据只有一份）：内核与发行版各有一个生成器，
+// 两边必须用同一把尺子，否则同一个目录名会在两个仓库里拧出两个不同的标识符。
+func Ident(prefix, dir string) string {
+	var b strings.Builder
+	b.WriteString(prefix)
+	for _, r := range dir {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
 // isComponent 判断一个 module.go 是否导出 `func New() modules.Component`。
 // 只解析不编译：这一步在构建之前跑，不能依赖源码当时能通过类型检查。
 func IsComponent(path string) bool {

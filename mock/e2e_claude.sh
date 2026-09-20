@@ -1,35 +1,41 @@
 #!/usr/bin/env bash
-# 零 token 端到端：`newgate claude --profile=ds|glm` 的 ds↔glm 切换，
-# 加上 Claude Code 形态的思考模式多轮对话。
+# 零 token 端到端：**内核自己**的行为——接管注入、档位解析与转发、控制端点、
+# 优雅交接、后台分类器改道、窗口声明、运行期开关。
 #
 # 验证（对应本次特性/修复）：
 #   1. 启动时注入的 env 是**真实模型名**（claude 界面显示 deepseek-chat，
 #      而不是 heavy），且 base URL 带上 /a/claude/p/<profile>。
 #   2. 代理把真实模型名反解回档位，转发给正确的上游。
-#   3. DeepSeek 思考模式：Claude Code 会把 thinking 块剥掉，代理补回
-#      thinkcache 里那轮的真实原文（tool id 找回）；**查不到就一个字节都不补**
-#      （2026-09-18 起：上游自己没给过推理，我们凭什么替它编）。假上游按
-#      **实测口径**校验——见第 6 章，判据是**尾部形状**不是推理字段。
-#   4. count_tokens：Claude Code 周期性调用（水位条/自动压缩阈值）。上游
+#   3. count_tokens：Claude Code 周期性调用（水位条/自动压缩阈值）。上游
 #      听得懂（原生 anthropic 端点）就转发拿真值、model 按 mid 链头补上；
 #      听不懂的（聚合器 404）由 forward 层 lazy probe 学下来退回本地粗估
 #      （单测覆盖）。
-#   5. 控制端点 /__newgate/stop：多用户共享部署下，读得到配置却发不出
+#   4. 控制端点 /__newgate/stop：多用户共享部署下，读得到配置却发不出
 #      信号的用户靠它停机——错令牌 403，对令牌让 daemon 退干净。
-#   6. 优雅交接 /__newgate/upgrade（nginx 式零停机升级）：restart 把监听
+#   5. 优雅交接 /__newgate/upgrade（nginx 式零停机升级）：restart 把监听
 #      socket 移交给新进程，在途 SSE 流由旧进程流完为止——开发 newgate
 #      的会话本身就穿行在代理里，这是「能持续开发」的前提。
-#   7. 后台请求：分类器整条链改走 light、其余只禁思考。Claude Code 的非流
+#   6. 后台请求：分类器整条链改走 light、其余只禁思考。Claude Code 的非流
 #      式后台调用不带 thinking，国模却把缺省当默认思考 → 15-30 秒、成波超
 #      时。代理一律补 thinking:disabled（缺就补、带了也改写）；其中 Bash
 #      安全分类器本体（实抓特征：system 开头 "You are a security monitor…"）
 #      在**建链之前**改道 light 档——含 fallback，light 挂了沿 light 链换
 #      人，不回 mid；其他后台调用（compact 总结这类）不改道；主循环的流式
-#      请求不受影响（think1/2/3 正是流式，思考链路原样走）。
-#   8. 窗口声明：Claude Code 不认识注入的真实模型名（glm-4-plus），按
+#      请求不受影响。
+#   7. 窗口声明：Claude Code 不认识注入的真实模型名（glm-4-plus），按
 #      「未知模型」默认 200k 窗口提前 compact。profile 里声明了
 #      context_window/auto_compact_window 就在启动时注入对应的
 #      CLAUDE_CODE_* env；没声明的 profile 一个都不注入。
+#   8. 运行期开关与 special 层开关（第 19/20 章）：探针用内核自己的
+#      schema-repair，这样这一层不依赖任何发行版模块。
+#
+# # 发行版模块的行为不在这里（2026-09-20 拆开）
+#
+# 上游怪癖补丁（DeepSeek 的推理原文回填、尾部形状修补、跨上游迁移）跟着模块
+# 住在发行版仓库，由 **发行版的 mock/e2e_claude_dist.sh** 锁——它复用本目录的
+# 假上游（那是逐字节复刻真实上游行为的产物，复制一份必然漂移）。拆开之前那几
+# 章在本文件里，于是**内核的测试依赖一个发行版模块**：摘掉它内核就红。边界与
+# 理由见 docs/09-extension-guide.md §8。
 #
 # 全部在临时沙箱里跑，不碰真实 ~/.config / ~/.claude / shell rc。
 set -uo pipefail
@@ -282,75 +288,6 @@ command grep -q "must be passed back" "$SANDBOX/strict.out" \
   && ok "400 的文案是上游那句（推理字段）——文案与真实原因不一致，别按文案判" \
   || bad "400 文案不对：$(head -c 160 "$SANDBOX/strict.out")"
 
-echo; echo "== 7. 思考模式第一轮（客户端剥块场景的起点） =="
-curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
-OUT="$(E2E_SCENARIO=think1 "$BIN" claude --profile=ds 2>"$SANDBOX/t1.err")"
-echo "$OUT" | sed 's/^/    /'
-check "think1 首轮 200" "$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2)" "200"
-
-echo; echo "== 8. 第二轮：thinkcache 命中，回填那轮真实推理原文 =="
-curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
-OUT="$(E2E_SCENARIO=think2 "$BIN" claude --profile=ds 2>"$SANDBOX/t2.err")"
-echo "$OUT" | sed 's/^/    /'
-check "think2 严格上游放行（回填生效）" "$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2)" "200"
-GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
-import json,sys
-r=json.load(sys.stdin)
-m=r[0]["body"]["messages"][1] if r else {}
-print(m.get("reasoning_content","MISSING"))')
-check "reasoning_content 是缓存里的原文" "$GOT" "MOCK-THINKING-ORIGINAL"
-GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
-import json,sys
-r=json.load(sys.stdin)
-m=r[0]["body"]["messages"][1] if r else {}
-c=m.get("content")
-print(c[0].get("thinking","") if isinstance(c,list) and c else "NO_BLOCK")')
-check "thinking 块也是缓存里的原文" "$GOT" "MOCK-THINKING-ORIGINAL"
-
-echo; echo "== 9. 缓存未命中（模拟重启后的旧会话）：一个字节都不补 =="
-# 这一章锁的是 2026-09-18 定下来的那条**最基本**的逻辑：上游自己那一轮就没
-# 给过推理，那「must be passed back」要求回传的东西根本不存在，我们凭什么
-# 替它编一个。原来这里补的是 "No thinking in this round"，是错的：
-# 编出来的字会进上游、进对话历史、每轮烧 token，而信息量是零。
-#
-# 正确动作是**跳过这条消息**，并且把「为什么没有原文」分好类报进日志
-# （notool / nocache / nokey）——跳过是结果，光报个数没法反查。
-#
-# 但**尾部形状**那一手（第 4 手）在这一发上照样要动：think3 的历史正好是
-# 「裸 tool_result 收尾」，上游对那个形状报的正是这条 400。两件事互不冲突，
-# 所以这里同时断言：
-#   assistant 消息：rc 缺席、没有 thinking 块（不编）
-#   尾部 user 轮：多了一条「继续」（修形状）
-curl -sf "http://127.0.0.1:$UP_PORT/__mock/reset" -X POST >/dev/null
-OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/t3.err")"
-echo "$OUT" | sed 's/^/    /'
-check "think3 严格上游放行（尾部形状被修好）" "$(echo "$OUT" | grep '^HTTP=' | cut -d= -f2)" "200"
-GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
-import json,sys
-r=json.load(sys.stdin)
-msgs=r[0]["body"]["messages"] if r else []
-a=[m for m in msgs if m.get("role")=="assistant"]
-c=(a[0].get("content") if a else None) or []
-blk=[b.get("type") for b in c if isinstance(b,dict)]
-rc="PRESENT" if (a and "reasoning_content" in a[0]) else "ABSENT"
-lastu=[m for m in msgs if m.get("role")=="user"][-1].get("content")
-tailb=[b.get("type") for b in lastu] if isinstance(lastu,list) else [lastu]
-print("rc="+rc+" blocks="+",".join(blk)+" tail="+",".join(tailb))')
-check "不编占位符（rc 缺席、无 thinking 块），但尾部形状被修" \
-  "$GOT" "rc=ABSENT blocks=tool_use tail=tool_result,text"
-GOT=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
-import json,sys
-r=json.load(sys.stdin)
-lastu=[m for m in r[0]["body"]["messages"] if m.get("role")=="user"][-1]["content"]
-print([b.get("text") for b in lastu if isinstance(b,dict) and b.get("type")=="text"][0])')
-check "追加的就是最简那句「继续」" "$GOT" "继续"
-# 跳过的原因必须分类报出来（这条 tool_use id 从没进过 thinkcache ⇒ nocache）。
-LOGTAIL=$(tail -40 "$NEWGATE_HOME/newgate.log")
-case "$LOGTAIL" in
-  *"跳过不动"*"nocache"*) ok "日志把「没有原文可补」的原因分成 nocache 并说明跳过" ;;
-  *) bad "日志没说清跳过原因（该有 \"跳过不动\" + \"nocache\"）：$(echo "$LOGTAIL" | command grep 'assistant 消息' | tail -2)" ;;
-esac
-
 echo; echo "== 10. count_tokens：上游听得懂就转发拿真值 =="
 # Claude Code 周期性调 count_tokens 算上下文水位（OpenAI 方言上游没有这个
 # 端点）。假上游实现了它（原生 anthropic 形态）→ 代理必须转发：model 按
@@ -556,177 +493,20 @@ echo "$MOUT" | command grep -q "classifier-naked" \
 "$BIN" naked off >/dev/null 2>&1
 check "裸奔终于关掉（不留沙箱脏状态）" "$("$BIN" naked 2>&1 | command grep -c '已关闭')" "1"
 
-echo; echo "== 17. 形状 400：上游 400 原样透传 + 熔断器只计数、永不摘牌 =="
-# 这份 body 要满足两个条件，缺一条这个用例就不是它要测的东西：
-#
-#   1. **尾部形状违规、而且插件修不了**。实测判据是「最后一条 role:user 的
-#      content[] 里全是 tool_result 块」（详见第 6 章与 mock/fake_upstream.py），
-#      而 deepseek 插件对其中**修得好**的那一族（那个 user 轮就是数组末尾）
-#      会追加一句「继续」把它修掉、返回 200——那是第 9 章在锁的事。
-#      所以这里用的是**修不好**的那一族：裸 tool_result 之后**还有一条
-#      assistant**。插件故意不碰它（往用户的对话里塞一句模型看不见效果的
-#      噪音比 400 更糟），实测这一族在原样追加「继续」之后 3/3 还是 400。
-#      于是链上**每一个**候选都 400，链走到头，客户端才拿得到上游原文。
-#   2. **走 glm profile**，让 glm 那一发先吃 400：deepseek 插件的 MatchTarget
-#      看 model/provider/baseURL，glm/glm-4-plus 三处都没有「deepseek」字样，
-#      于是插件不去碰它。（这一点是冗余保险：就算 Match 判错，条件 1 也兜住了。）
-#
-# 形状判据（modules/deepseek/shape.go）认领它 → classify 判 BucketShape →
-# 账本只涨 ShapeSkips、永不进 Open。所以「客户端拿到 400」和「glm 没被摘牌」
-# 必须**同时**成立：这正是这轮重构要的那个行为。
-RESETUP
-SHAPE_BODY='{"model":"glm-4-plus","max_tokens":16,"stream":true,'\
-'"thinking":{"type":"enabled","budget_tokens":1024},'\
-'"tools":[{"name":"Bash","description":"d","input_schema":{"type":"object","properties":{}}}],'\
-'"messages":['\
-'{"role":"user","content":[{"type":"text","text":"跑一下"}]},'\
-'{"role":"assistant","content":[{"type":"tool_use","id":"toolu_shape_17","name":"Bash","input":{}}]},'\
-'{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_shape_17","content":"ok"}]},'\
-'{"role":"assistant","content":[{"type":"text","text":"好"}]}]}'
-
-# (1) 直打假上游：证明这条规则真的部署到位（不是被代理偷偷改过）。
-CODE=$(curl -s -o "$SANDBOX/shape_direct.out" -w '%{http_code}' -X POST \
-  "http://127.0.0.1:$UP_PORT/v1/messages" \
-  -H 'Content-Type: application/json' -d "$SHAPE_BODY")
-check "直打上游：400 must be passed back" \
-  "$( [ "$CODE" = "400" ] && command grep -q 'must be passed back' "$SANDBOX/shape_direct.out" && echo y || echo n)" "y"
-
-# (2) 同 body 经代理：链上每一站都 400 → 客户端必须收到上游原文（不静默）。
-RESETUP
-RES_CODE=$(curl -s -o "$SANDBOX/shape_proxy.out" -w '%{http_code}' -X POST \
-  "http://127.0.0.1:$PROXY_PORT/a/claude/p/glm/v1/messages" \
-  -H 'Content-Type: application/json' \
-  -H 'anthropic-version: 2023-06-01' -H 'x-api-key: e2e' -d "$SHAPE_BODY")
-check "经代理：客户端仍 400" "$RES_CODE" "400"
-command grep -q 'must be passed back' "$SANDBOX/shape_proxy.out" \
-  && ok "经代理：上游原文原样透传（不静默）" \
-  || bad "经代理：被吞了；body=$(head -c 200 "$SANDBOX/shape_proxy.out")"
-
-# 日志里那行 [shape-400] 是判据认领的**唯一**证据（转发路径不认识任何上游
-# 专有字符串，它只读 Result.Shape 那个名字）。
-LOG="$NEWGATE_HOME/newgate.log"
-for _ in $(seq 20); do
-  command grep -q '\[shape-400\]' "$LOG" 2>/dev/null && break; sleep 0.1
-done
-command grep -aq '\[shape-400\].*判据 deepseek' "$LOG" \
-  && ok "日志有 [shape-400] 判据 deepseek（认领留痕）" \
-  || bad "日志里没有 [shape-400] 判据 deepseek"
-
-# (3) 熔断器只计数、绝不摘牌。`newgate breaker` 把问题 binding 分两段，这条
-#     shape-400 只能出现在「只计数、没摘牌」那一段。
-BRK_OUT="$("$BIN" breaker 2>/dev/null)"
-echo "$BRK_OUT" | sed 's/^/    /'
-echo "$BRK_OUT" | command grep -q '只计数、没摘牌' \
-  && ok "breaker 表里有「只计数、没摘牌」段（shape-400 的归属）" \
-  || bad "breaker 表里找不到「只计数、没摘牌」段"
-echo "$BRK_OUT" | command grep -q 'glm/glm-4-plus' \
-  && ok "breaker 表里能找到 glm/glm-4-plus（被记账了）" \
-  || bad "breaker 表里找不到 glm/glm-4-plus"
-echo "$BRK_OUT" | command grep -qE '· 0 个被摘牌' \
-  && ok "没有任何 binding 被摘牌（形状 400 只计数）" \
-  || bad "有 binding 被摘牌了（形状 400 不该摘牌）：$(echo "$BRK_OUT" | command grep '被摘牌' | head)"
-
-# (4) metrics 端的形状计数要涨。
-"$BIN" metrics 2>/dev/null | command grep -q 'breaker.skipped.shape_error' \
-  && ok "metrics 有 breaker.skipped.shape_error" \
-  || bad "metrics 缺 breaker.skipped.shape_error"
-
-echo; echo "== 18. 补丁侧的三个契约：不编、措辞最小、原因分类 =="
-# 这一章锁 2026-09-18 定下来的三件事，全在 deepseek 插件的改写路径上。
-# 这里直打**代理**、读假上游收到的 body：这些是纯字节手术，假上游收到的
-# 就是上游会收到的字节。
-#
-# (a) **绝不编**。上游那一轮没给过推理，那「must be passed back」要求回传的
-#     东西根本不存在，我们凭什么替它编一个——编出来的字会进上游、进对话
-#     历史、每轮烧 token，信息量是零。原来补的是 "No thinking in this round"，
-#     现在是**跳过这条消息，一个字节都不加**。这条请求里那条 assistant 的
-#     tool_use id 从没进过 thinkcache ⇒ 没有原文 ⇒ 必须原样不动。
-#
-# (b) **尾部修复的措辞最小**。第 4 手往尾部追加的那句话会进上游、也会进用户
-#     下一轮的对话历史，越长越像「有人在替我说话」。用户的原话是「只用最少字，
-#     比如（"继续"）这种」。所以断言的是**逐字**等于「继续」，不是「非空且短」
-#     ——后者换个长句子照样能过。
-#
-# (c) **原因必须分类报出来**。跳过是**结果**，光报个数没法反查：是「上游本来就
-#     没给」还是「给了但我们没存住」，处置完全相反（前者只能接受，后者要去
-#     查 thinkcache 的命中率）。分三类：
-#       notool   纯文本轮，靠正文哈希找回，miss
-#       nocache  有 tool_use，但它的 id 在 thinkcache 里查不到
-#       nokey    既无 tool_use 也无正文，认不出这条消息
-#     这条请求的 tool_use id 从没被缓存过，所以必然是 nocache。
-#
-# 请求里显式写 reasoning_content「这一轮本来就有推理，插件不许碰」：插件只补
-# **缺**的字段，已经有了的一个字节都不碰（既有契约）。所以同一条请求同时给出
-# 两个样本：第一条 assistant 有原文（不许碰）、尾部那个 user 轮是裸 tool_result
-# （必须修）。
-PH_BODY='{"model":"deepseek-chat","max_tokens":16,"stream":false,'\
-'"thinking":{"type":"enabled"},'\
-'"messages":['\
-'{"role":"user","content":[{"type":"text","text":"跑一下"}]},'\
-'{"role":"assistant","reasoning_content":"这一轮本来就有推理，插件不许碰",'\
-'"content":[{"type":"text","text":"好"},{"type":"tool_use","id":"t-never-cached-e2e","name":"Bash","input":{}}]},'\
-'{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-never-cached-e2e","content":"ok"}]}]}'
-
-RESETUP
-CODE=$(curl -s -o "$SANDBOX/ph_proxy.out" -w '%{http_code}' -X POST \
-  "http://127.0.0.1:$PROXY_PORT/a/claude/p/ds/v1/messages" \
-  -H 'Content-Type: application/json' \
-  -H 'anthropic-version: 2023-06-01' -H "x-api-key: e2e" -d "$PH_BODY")
-check "经代理：思考开着、尾部裸 tool_result → 200（形状修好了）" "$CODE" "200"
-
-# 逐条把契约打成一行一行的 key=value，再一条条 check——不用 read 拆词
-# （read -r A B 是按空白切分，正文里带空格就错位），也不做子串匹配。
-PH_SUM=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
-import json,sys
-r=json.load(sys.stdin)
-if not r: print("NO_REQUEST"); raise SystemExit
-msgs=r[-1]["body"]["messages"]
-a=[m for m in msgs if m.get("role")=="assistant"][0]
-blocks=a.get("content") or []
-if not isinstance(blocks,list): print("NOT_ARRAY"); raise SystemExit
-kinds=[b.get("type") for b in blocks if isinstance(b,dict)]
-texts=[b.get("text","") for b in blocks if isinstance(b,dict) and b.get("type")=="text"]
-lu=[m for m in msgs if m.get("role")=="user"][-1].get("content")
-tail=[b.get("type") for b in lu] if isinstance(lu,list) else ["STR"]
-tailtext=[b.get("text","") for b in lu if isinstance(b,dict) and b.get("type")=="text"] if isinstance(lu,list) else []
-print("thinking_blocks=" + str(kinds.count("thinking")))
-print("reasoning_content=" + a.get("reasoning_content","<ABSENT>"))
-print("tail=" + ",".join(tail))
-print("tail_text=" + (tailtext[0] if tailtext else "<NONE>"))')
-echo "$PH_SUM" | sed 's/^/    /'
-ph_get() { echo "$PH_SUM" | command grep "^$1=" | cut -d= -f2-; }
-
-# (a) 绝不编：这条 assistant 没有原文 ⇒ 不插 thinking 块、不加 reasoning_content。
-check "没有原文 ⇒ 不插 thinking 块（不编占位符）" "$(ph_get thinking_blocks)" "0"
-check "没有原文 ⇒ 已经写着的 reasoning_content 逐字不动" \
-  "$(ph_get reasoning_content)" "这一轮本来就有推理，插件不许碰"
-# (b) 尾部形状被修好，而且追加的是**逐字**那句最简指令。
-check "尾部从裸 tool_result 变成 tool_result+text" "$(ph_get tail)" "tool_result,text"
-check "追加的指令逐字是「继续」（最少字）" "$(ph_get tail_text)" "继续"
-
-# (c) 原因分类。日志里那句必须同时说清「跳过了」和「为什么」（nocache）。
-LOGTAIL=$(tail -60 "$NEWGATE_HOME/newgate.log")
-case "$LOGTAIL" in
-  *"跳过不动"*"nocache"*) ok "日志说明跳过、且把原因分成 nocache（有 tool_use、缓存查不到）" ;;
-  *) bad "日志没说清跳过原因（该有 \"跳过不动\" + \"nocache\"）：$(echo "$LOGTAIL" | command grep 'assistant 消息' | tail -2)" ;;
-esac
-case "$LOGTAIL" in
-  *"只能补占位符"*) bad "日志里还有「占位符」字样——编占位符这条路应该已经删掉了" ;;
-  *) ok "日志里不再出现「占位符」（那条路已删）" ;;
-esac
-
 echo; echo "== 19. 运行期开关：模块自己上报、命令自己注册 =="
 # 这一层是「everything is module」的用户界面：模块在 Start 里把自己的开关点
 # 上报给 plugin-manager（RegisterSelf），命令由**各模块自己**注册进 cli
 # （gateway 的 st/schema-repair、claudecode 的 naked、plugin-manager 的 plugin）。
 #
-# 所以这里断言的顺序是刻意反的：**先**证明「谁都能被列出来」，**再**证明
-# 「关掉一个点真的改变热路径」。前者是列表的地基（枚举源必须是组件图，不是
-# 「谁上报过」——否则「这个模块没有开关」和「这个模块忘了注册」长得一模一样），
-# 后者是开关的地基（只写进 state.json 而热路径不读，等于一个好看的开关）。
+# 这里断言的是列表的地基：**枚举源必须是组件图**，不是「谁上报过」——否则
+# 「这个模块没有开关」和「这个模块忘了注册」长得一模一样，用户看到的是同一个
+# 空列表。「关掉一个点真的改变热路径」那一半由第 20 章的 schema-repair 锁。
+#
+# 2026-09-20 起这一章只看**内核自带**的模块：上游怪癖模块（deepseek 那套开关点
+# 曾经是这一层最好的例子）跟着发行版走了，它的开关点由发行版自己的 e2e 锁。
 PLUGIN_OUT="$("$BIN" plugin 2>&1)"
 case "$PLUGIN_OUT" in
-  *"plugin-manager"*"deepseek"*"claudecode-deepseek"*)
+  *"breaker"*"plugin-manager"*"gateway"*)
     ok "plugin：列出全部模块（含没参与开关体系的）" ;;
   *) bad "plugin 没列全模块：$(echo "$PLUGIN_OUT" | head -6 | tr '\n' ' ')" ;;
 esac
@@ -740,105 +520,20 @@ case "$PLUGIN_OUT" in
   *) bad "plugin 没标注「无法 runtime 开关」" ;;
 esac
 
-DETAIL="$("$BIN" plugin deepseek 2>&1)"
-case "$DETAIL" in
-  *"deepseek.tail-shape"*) ok "plugin <模块>：展开出该模块的开关点" ;;
-  *) bad "plugin deepseek 没展开开关点：$(echo "$DETAIL" | head -3 | tr '\n' ' ')" ;;
-esac
-
-# 关掉第 4 手（唯一修**根因**的那一手），再跑 think3。
-# think3 的历史正好是「裸 tool_result 收尾」——正是那一手要修的形状。开关
-# 关掉后尾部**不该**再被动过，上游收到裸 tool_result 就按实测判据回 400。
-RESETUP
-"$BIN" plugin deepseek.tail-shape off >/dev/null 2>&1
-OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/sw_off.err")"
-TAIL_OFF=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
-import json,sys
-try:
-    r=json.load(sys.stdin)
-    lastu=[m for m in r[0]["body"]["messages"] if m.get("role")=="user"][-1]["content"]
-    print(",".join(b.get("type") for b in lastu) if isinstance(lastu,list) else "STR")
-except Exception:
-    print("NOUP")' 2>/dev/null)
-check "关掉 tail-shape ⇒ 尾部不再被修（上游收到裸 tool_result）" "$TAIL_OFF" "tool_result"
-check "关掉 tail-shape ⇒ 客户端拿到上游原文 400（不静默）" \
-  "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "400"
-
-# status 要能看见这个非出厂态——否则用户关了东西没人知道。
-check "status 显示被关掉的开关点" \
-  "$("$BIN" status 2>&1 | command grep -c 'deepseek.tail-shape=off')" "1"
-
 # 开关点认不出来时必须是**报错**，不是静默当成 on/off。
 "$BIN" plugin 根本没有这个模块 off >/dev/null 2>&1
-check "plugin：不存在的目标以非零退出" "$([ $? -ne 0 ] && echo y || echo n)" "y"
-
-# 恢复：同一个点再打开，think3 必须回到被修好的样子（开关是对称的）。
-"$BIN" plugin deepseek.tail-shape on >/dev/null 2>&1
-RESETUP
-OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/sw_on.err")"
-TAIL_ON=$(curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
-import json,sys
-try:
-    r=json.load(sys.stdin)
-    lastu=[m for m in r[0]["body"]["messages"] if m.get("role")=="user"][-1]["content"]
-    print(",".join(b.get("type") for b in lastu) if isinstance(lastu,list) else "STR")
-except Exception:
-    print("NOUP")' 2>/dev/null)
-check "打开 tail-shape ⇒ 尾部又被修好（开关对称）" "$TAIL_ON" "tool_result,text"
-check "打开 tail-shape ⇒ 客户端 200" \
-  "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "200"
-
+check "plugin：不存在的目标以非零退出" "$([ $? -ne 0 ] && echo yes || echo no)" "yes"
 
 echo; echo "== 20. special_treatment（整层 / 单插件）与 schema-repair =="
-# 这三个开关不住在 plugin-manager 的账本里，而是 domain.State 上的 typed 字段
+# 这些开关不住在 plugin-manager 的账本里，而是 domain.State 上的 typed 字段
 # （special_treatment / special_treatment_off / schema_repair），所以单开一章。
 # 断言的是同一件事：**关掉之后热路径真的不做了**——只写进 state.json 而没人读，
 # 等于一个好看的开关。
 #
-# 尾部形状那一手（deepseek 插件第 4 手）是最好的探针：它一停，裸 tool_result
-# 就直接打到上游，上游按实测判据回 400，客户端拿到上游原文。
-sw_tail() {  # 读假上游收到的最后一发里，最后一条 user 的 content[] 块类型
-  curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
-import json,sys
-try:
-    r=json.load(sys.stdin)
-    lastu=[m for m in r[0]["body"]["messages"] if m.get("role")=="user"][-1]["content"]
-    print(",".join(b.get("type") for b in lastu) if isinstance(lastu,list) else "STR")
-except Exception:
-    print("NOUP")' 2>/dev/null
-}
-
-# (1) 整层关：special_treatment off ⇒ 所有上游怪癖补丁都不跑。
-"$BIN" st on >/dev/null 2>&1          # 先确保出厂态，避免受上一章残留影响
-RESETUP
-"$BIN" st off >/dev/null 2>&1
-OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/st_off.err")"
-check "st off（整层）⇒ 尾部不再被修" "$(sw_tail)" "tool_result"
-check "st off（整层）⇒ 客户端拿到上游原文 400" \
-  "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "400"
-
-# (2) 整层开回来：同一发必须又被修好。
-"$BIN" st on >/dev/null 2>&1
-RESETUP
-OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/st_on.err")"
-check "st on（整层）⇒ 尾部又被修好" "$(sw_tail)" "tool_result,text"
-check "st on（整层）⇒ 客户端 200" \
-  "$(echo "$OUT" | command grep '^HTTP=' | cut -f2 -d=)" "200"
-
-# (3) 单插件关：粒度到「这一个插件」，别的插件不受影响。
-"$BIN" st off deepseek >/dev/null 2>&1
-RESETUP
-OUT="$(E2E_SCENARIO=think3 "$BIN" claude --profile=ds 2>"$SANDBOX/st_ds.err")"
-check "st off deepseek（单插件）⇒ 尾部不再被修" "$(sw_tail)" "tool_result"
-check "st off deepseek（单插件）⇒ 客户端 400" \
-  "$(echo "$OUT" | command grep '^HTTP=' | cut -d= -f2)" "400"
-"$BIN" st on deepseek >/dev/null 2>&1
-check "st 清单里 deepseek 回到「生效」" \
-  "$("$BIN" st deepseek 2>&1 | command grep -c '生效')" "1"
-
-# (4) schema-repair：语义无操作的修补（补 "required": []），只有 OpenAI 方言
-#     的 function tool 会命中。所以这一格要打 openai 方言、带一个缺 required
-#     的 tool，然后看**上游收到的字节**里有没有那个键。
+# 探针用 schema-repair（内核 gateway 自己的一个 special 插件）：它补的是
+# "required": []，语义无操作，但**上游收到的字节里有没有那个键是看得见的**，
+# 正好当「这一层还在不在跑」的探针。2026-09-20 之前这里的探针是发行版那支
+# 尾部形状补丁（deepseek 第 4 手）——它更好用，但它跟着拥有者搬去发行版了。
 SCHEMA_BODY='{"model":"normal","max_tokens":16,"messages":[{"role":"user","content":"hi"}],'\
 '"tools":[{"type":"function","function":{"name":"t","parameters":{"type":"object","properties":{}}}}]}'
 has_required() {
@@ -851,22 +546,53 @@ try:
 except Exception:
     print("NOUP")' 2>/dev/null
 }
+post_schema() {
+  RESETUP
+  curl -s -o /dev/null -X POST "http://127.0.0.1:$PROXY_PORT/p/ds/v1/chat/completions" \
+    -H 'Content-Type: application/json' -d "$SCHEMA_BODY"
+}
+
+# (1) 单插件开关：这一格就是「只写进 state.json 而没人读」的反面。
 "$BIN" schema-repair on >/dev/null 2>&1
-RESETUP
-curl -s -o /dev/null -X POST "http://127.0.0.1:$PROXY_PORT/p/ds/v1/chat/completions" \
-  -H 'Content-Type: application/json' -d "$SCHEMA_BODY"
+post_schema
 check "schema-repair on ⇒ 上游收到补好的 required" "$(has_required)" "有"
 
 "$BIN" schema-repair off >/dev/null 2>&1
-RESETUP
-curl -s -o /dev/null -X POST "http://127.0.0.1:$PROXY_PORT/p/ds/v1/chat/completions" \
-  -H 'Content-Type: application/json' -d "$SCHEMA_BODY"
+post_schema
 check "schema-repair off ⇒ 字节原样，不补 required" "$(has_required)" "无"
+
+# (2) 整层关：special_treatment off ⇒ 这一层里所有**插件**都不跑。
+#
+# 探针得选一个真住在这层里的插件：内核自己的 claude-bg（claudecode 模块）给
+# 非流式后台调用补 thinking:disabled，上游收到没有这个字段就是「它没跑」。
+# 注意 schema-repair **不在这层里**（它是 gatewaystate 上的独立字段），所以它
+# 当不了整层开关的探针——2026-09-20 实测：st off 之后 required 照样被补。
+bg_thinking() {
+  RESETUP
+  E2E_SCENARIO=bg_other "$BIN" claude --profile=glm >/dev/null 2>&1
+  curl -s "http://127.0.0.1:$UP_PORT/__mock/requests" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+b=r[0]["body"] if r else {}
+print((b.get("thinking") or {}).get("type","MISSING"))' 2>/dev/null
+}
+"$BIN" st on >/dev/null 2>&1
+GOT_BG="$(bg_thinking)"
+check "st on（整层）⇒ special 插件在跑（后台调用被补 thinking:disabled）" "$GOT_BG" "disabled"
+
+"$BIN" st off >/dev/null 2>&1
+GOT_BG="$(bg_thinking)"
+check "st off（整层）⇒ 这一层不跑了（后台调用不再被补 thinking）" "$GOT_BG" "MISSING"
+
+# (3) 整层开回来：同一发必须又被补上（开关是对称的）。
+"$BIN" st on >/dev/null 2>&1
+GOT_BG="$(bg_thinking)"
+check "st on（整层）⇒ 插件又跑起来了（开关对称）" "$GOT_BG" "disabled"
 
 # 收尾：不留非出厂态（沙箱虽然会删，但脏状态会让调试时看到的现状骗人）。
 "$BIN" schema-repair on >/dev/null 2>&1
 "$BIN" st on >/dev/null 2>&1
-check "收尾：三个开关都回到出厂态" \
+check "收尾：开关都回到出厂态" \
   "$("$BIN" status 2>&1 | command grep -c 'special 关了\|schema repair off')" "0"
 
 

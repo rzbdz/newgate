@@ -109,7 +109,23 @@ type Harness struct {
 // 端口是向内核要的（listen :0 再关掉），所以同一台机器上并行跑多份互不冲突。
 // 拿到端口后写进 state.json，再让 forward 监听它——顺序不能反，因为 forward
 // 的端口就来自配置。
+//
+// 装的是**内核自带的那张图**。要起自己的图（发行版测自己带的那几个模块）用
+// StartWith。
 func Start(t *testing.T) *Harness {
+	t.Helper()
+	return StartWith(t, app.Loader{})
+}
+
+// StartWith 与 Start 逐字相同，只是装配清单由调用方给。
+//
+// 为什么要有它（2026-09-20）：**测试跟着拥有者走**。发行版带的那几个模块的行为
+// （DeepSeek 的尾部形状修补之类）该由发行版自己断言，而它需要「真组件图 + 真转发
+// 服务」这套设施——那套设施是内核的（真图才有的副作用：special 插件注册、健康表
+// 挂进数据面、confighook 装客户端目录）。没有这个入口，发行版只有两条路：把内核
+// 的测试设施复制一份（必然漂移），或者把自己的模块塞进内核的默认图里（内核就再也
+// 测不干净）。两条都比多一个函数贵。
+func StartWith(t *testing.T, loader modules.Loader) *Harness {
 	t.Helper()
 
 	env := testkit.Sandbox(t)
@@ -140,7 +156,7 @@ func Start(t *testing.T) *Harness {
 
 	// 3. 真组件图。这一步的副作用正是我们要测的东西：gateway 把 special 插件
 	//    注册进默认 registry、confighook 装出客户端目录、config 接上角色提供者。
-	graph, err := app.New(context.Background())
+	graph, err := app.New(context.Background(), loader)
 	if err != nil {
 		t.Fatalf("system: 装配组件图: %v", err)
 	}

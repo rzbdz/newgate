@@ -38,12 +38,12 @@ func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	if len(generated) == 0 {
 		t.Fatal("装配清单为空：生成器没有扫到任何组件")
 	}
-	// 清单 = 扫描 modules/ 得到的 + 发行版声明点名要的外部模块。前者逐个对账，
-	// 后者只保证「连得上」——它的内容由 modules-ext.json 与发行版仓库决定，
-	// 不是本仓库的目录快照（见 tools/extmanifest）。
+	// 清单**就是** modules/ 下的目录快照——内核的装配只有一个来源（2026-09-20
+	// 删掉了第二个：发行版的模块不再由内核在构建期 clone 进来）。逐个对账，
+	// 让「模块在仓库里但没被装配」这种静默漏装配在这里就红。
 	dirs := moduleDirs(t, filepath.Join(root, "modules"))
-	if len(generated) < len(dirs) {
-		t.Fatalf("装配了 %d 个组件，modules/ 下就有 %d 个目录——自带模块少装了", len(generated), len(dirs))
+	if len(generated) != len(dirs) {
+		t.Fatalf("装配了 %d 个组件，modules/ 下有 %d 个目录——数量对不上", len(generated), len(dirs))
 	}
 	for _, dir := range dirs {
 		if !strings.Contains(string(mustReadGenerated(t)), "/modules/"+dir+"\"") {

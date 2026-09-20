@@ -1,12 +1,74 @@
 package system_test
 
 import (
+	"bytes"
+	"context"
 	"net/http"
 	"strings"
 	"testing"
 
+	app "github.com/rzbdz/newgate/go/app"
+	modules "github.com/rzbdz/newgate/go/component"
+	breakerapi "github.com/rzbdz/newgate/go/modules/breaker"
 	"github.com/rzbdz/newgate/go/testing/system"
 )
+
+// 这组测试锁的是**形状判据这个机制**：一条判据注册进健康表 → 数据面认得它 →
+// 这类 400 只计数、永不摘牌 → 日志里有可查的证据。
+//
+// 判据本体是**测试自己的**（shapeProbe），不是哪家上游的方言。2026-09-20 之前
+// 这里用的是 DeepSeek 那条判据（`modules/deepseek/shape.go`），后果是**内核的
+// 测试依赖一个发行版模块**——「core 只能管 core 的逻辑」这条边界一旦破了，
+// 症状是内核再也测不干净：摘掉发行版模块，内核的测试就红。
+//
+// 现在 dialect 那侧（哪句话、哪个字段名）归发行版：它在自己的仓库里用真判据跑
+// 同一套断言（判据+假上游都在那边）。内核留在这里的是**因果链**——而这条链上
+// 每一环都是内核自己的：注册口（breaker.RegisterShapeDetector）、数据面的认领
+// （forward 只读 Result.Shape 那个名字）、账本语义（只计数不摘牌）。
+const shapeProbeDir = "shape-probe"
+
+// shapeProbe 是内核侧的合成判据：认「带 must be passed 的 400」。
+//
+// 匹配文本刻意与假上游造出来的那批 400 一致（testing/upstream/dialect.go 复刻的
+// 上游口径），但匹配规则本身是**故意宽松**的——它在这里不需要分辨方言，只需要
+// 足够独特到不会撞上对照组那一发普通的 400。
+type shapeProbe struct{}
+
+func (shapeProbe) Name() string { return "test-shape" }
+
+func (shapeProbe) Match(status int, body []byte) bool {
+	return status == http.StatusBadRequest && bytes.Contains(body, []byte("must be passed"))
+}
+
+// shapeProbeComponent 把判据注册进健康表，与任何真实模块的写法一致
+// （Need(breaker) → Start 里 RegisterShapeDetector → Stop 里逆序释放）。
+func shapeProbeComponent() modules.Component {
+	var releases []modules.Release
+	return modules.Component{
+		Name: "shape-probe",
+		Type: "example",
+		Requires: []modules.Requirement{
+			modules.Need(breakerapi.Capability),
+		},
+		Start: func(_ context.Context, ctx modules.Context) error {
+			health := modules.MustGet(ctx, breakerapi.Capability)
+			release, err := health.RegisterShapeDetector(shapeProbe{})
+			if err != nil {
+				return err
+			}
+			releases = append(releases, release)
+			return nil
+		},
+		Stop: func(context.Context) error { return modules.ReleaseAll(releases) },
+	}
+}
+
+// probeGraph 是「内核那张图 + 一条合成判据」。
+func probeGraph() app.Selection {
+	return app.Selection{Extra: []app.Entry{
+		{Dir: shapeProbeDir, Component: shapeProbeComponent()},
+	}}
+}
 
 // strictReasoningBody 造一发**会被假上游按实测口径拒掉**的请求，也就是线上那条
 // 「reasoning_content must be passed back」400 的真形态。
@@ -23,8 +85,8 @@ import (
 //
 // 必须 stream=true：非流式的 /a/claude/ 请求会被 claudecode 的 claude-bg 插件补上
 // thinking:disabled，那是另一条路（虽然实测形状校验也不吃 thinking，但主循环的真实
-// 形态本来就是流式）。deepseek 插件不认这个 provider（链上是 upstream-a），所以
-// 尾部修复不会介入——发出去的就是这里写的字节。
+// 形态本来就是流式）。这里链上是 upstream-a，没有任何模块会去修这个尾部——
+// 发出去的就是这里写的字节。
 func strictReasoningBody() string {
 	return `{"model":"normal","max_tokens":16,"stream":true,` +
 		`"tools":[{"name":"Bash","description":"run a command",` +
@@ -35,25 +97,24 @@ func strictReasoningBody() string {
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_strict_1","content":"ok"}]}]}`
 }
 
-// TestDeepSeekShapeDetectorIsWiredThroughTheRealGraph 是 2026-09-17 那次事故的
-// **集成级**回归：整张真组件图 + 真转发 + 假上游，deepseek 模块在 Start 里注册
-// 的形状判据必须真的生效。
+// TestShapeDetectorIsWiredThroughTheRealGraph 是 2026-09-17 那次事故的
+// **集成级**回归：整张真组件图 + 真转发 + 假上游，判据在 Start 里注册的形状
+// 判据必须真的生效。
 //
 // 为什么这条测试必须走整张图，而不是再写一个 forward 的单测：现场坏的是**接线**
-// ——判据住在 modules/deepseek，注册进的是 modules/breaker 的健康表，而健康表是
-// **注入**给 forward 的（forward.New 的第四个参数）。任何一处接错（模块没 Need
-// breaker、注册句柄没在 Stop 释放、装配清单漏了 deepseek、harness 自己
-// newTable() 而不是用图里那张），单测都照样绿、线上照样把 deepseek 摘掉。
-// 所以这里断言的是端到端的因果链：
+// ——判据住在一个模块里，注册进的是健康表，而健康表是**注入**给 forward 的
+// （forward.New 的第四个参数）。任何一处接错（模块没 Need breaker、注册句柄没在
+// Stop 释放、装配清单漏了那个模块、harness 自己 newTable() 而不是用图里那张），
+// 单测都照样绿、线上照样把那家上游摘掉。所以这里断言的是端到端的因果链：
 //
-//	假上游回严格 400 → 健康表里 deepseek 的判据认领 → 只计数不摘牌 → 日志说明
+//	假上游回严格 400 → 健康表里判据认领 → 只计数不摘牌 → 日志说明
 //
-// 现场（~/.config/newgate/health.json + 日志）：deepseek-flash 因这条 400 被连续
+// 现场（~/.config/newgate/health.json + 日志）：被判据认领的那家因这条 400 被连续
 // 两发数到阈值摘掉，而 `newgate probe` 一直是 fluent——探活发的是最小请求，永远
 // 触发不到「思考模式要求逐字回传」。摘牌的代价不对称：用户被悄悄换给别的模型，
 // 还要等 60s 起的冷却。
-func TestDeepSeekShapeDetectorIsWiredThroughTheRealGraph(t *testing.T) {
-	h := system.Start(t)
+func TestShapeDetectorIsWiredThroughTheRealGraph(t *testing.T) {
+	h := system.StartWith(t, probeGraph())
 
 	// 每个候选都回同一份严格 400。形状错误**会**继续沿链试（同一份 body 换个
 	// 校验更松的 provider 有可能收下），所以一发客户端请求打两次上游——
@@ -83,7 +144,7 @@ func TestDeepSeekShapeDetectorIsWiredThroughTheRealGraph(t *testing.T) {
 		t.Fatalf("日志里没有 [shape-400]——判据没被认领，或转发路径没读 Shape；\n%s",
 			h.Logs())
 	}
-	if !strings.Contains(h.Logs(), "判据 deepseek") {
+	if !strings.Contains(h.Logs(), "判据 test-shape") {
 		t.Fatalf("日志没说清是哪条判据认的（多家上游同时报 400 时这是唯一能分辨的信息）；\n%s",
 			h.Logs())
 	}
@@ -122,7 +183,7 @@ func TestDeepSeekShapeDetectorIsWiredThroughTheRealGraph(t *testing.T) {
 // 非形状 400 既不记账也不换站（换站由 chain.fallback_on_400 单独表达），所以链
 // 停在第一个候选上，客户端拿到的就是那一发的结果。
 func TestOtherClientErrorIsNotClaimedAsShape(t *testing.T) {
-	h := system.Start(t)
+	h := system.StartWith(t, probeGraph())
 
 	h.Upstream.FailNext(http.StatusBadRequest)
 	resp := h.Post("/a/claude/v1/messages", strictReasoningBody())

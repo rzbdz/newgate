@@ -28,9 +28,24 @@ import (
 // 「谁是入口」因此成了模块自己的知识，换界面在组合根上是零改动。
 type App struct{ manager *modules.Manager }
 
-// New 构建并启动默认组件图；返回成功意味着所有必需端口已经解析且组件已启动。
-func New(ctx context.Context) (*App, error) {
-	manager, err := modules.NewContext(ctx, Loader{})
+// New 构建并启动组件图；返回成功意味着所有必需端口已经解析且组件已启动。
+//
+// 不传 loader = 内核自带的那张图（Loader{}）。传 nil 也一样——调用方普遍写成
+// 「opts.Loader 为 nil 就用默认」，让这里兜住比让每个调用方各兜一遍好。
+//
+// 传自己的 loader 是**消费者组自己的图**的正门（见 Selection）：组合根不认识
+// 任何模块，它只认识「谁交给我哪些组件」。
+func New(ctx context.Context, loaders ...modules.Loader) (*App, error) {
+	live := make([]modules.Loader, 0, len(loaders))
+	for _, l := range loaders {
+		if l != nil {
+			live = append(live, l)
+		}
+	}
+	if len(live) == 0 {
+		live = append(live, Loader{})
+	}
+	manager, err := modules.NewContext(ctx, live...)
 	if err != nil {
 		return nil, err
 	}

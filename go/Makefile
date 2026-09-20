@@ -20,18 +20,13 @@ STATIC_LD    := $(LDFLAGS) -extldflags '-static'
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 .PHONY: all build static release test test-race fmt check-fmt vet clean install \
-         verify-static e2e e2e-claude check ci help generate check-generate ext
+         verify-static e2e e2e-claude check ci help generate check-generate
 
 all: build
 
 ## generate: 扫描 modules/ 重建组合根装配清单（app/modules_gen.go）
 generate:
 	@go run ./tools/genmodules
-
-## ext: 按 modules-ext.json 把发行版 checkout 准备好（构建期产物，会出网）。
-## 编译依赖外部模块时**必须先跑它**——清单 import 的那些包得先在磁盘上。
-ext:
-	@go run ./tools/genmodules -ext
 
 ## check-generate: 只校验清单是否过期，不改文件（CI/测试用）
 check-generate:
@@ -97,9 +92,10 @@ check-fmt:
 		echo "以下文件格式不对，跑 make fmt："; echo "$$out"; exit 1; \
 	fi
 
-## vet: 静态检查。依赖 ext：生成的清单 import 了 modules-ext 下的包，没有 checkout
-## 时 vet 会报「package not found」——那是个指不到真因的错，所以这里先准备好。
-vet: ext
+## vet: 静态检查。先 check-generate：清单过期时 vet 报的是 import 找不到，
+## 那是个指不到真因的错（2026-09-20 之前还得先跑 make ext 准备发行版 checkout，
+## 那条路已经删了——现在清单只有本仓库一个来源，构建完全离线）。
+vet: check-generate
 	go vet ./...
 
 install: build
@@ -159,4 +155,4 @@ ci:
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
 	@echo "  build / install / test / test-race / fmt / vet / clean"
-	@echo "  e2e / e2e-claude / check / ci / generate / check-generate / ext"
+	@echo "  e2e / e2e-claude / check / ci / generate / check-generate"

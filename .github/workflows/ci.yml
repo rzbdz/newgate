@@ -76,14 +76,6 @@ jobs:
           # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
           cache-dependency-path: go/go.mod
 
-      - name: 准备发行版模块（外部模块的 checkout）
-        # 生成的装配清单 import 了 modules-ext 下的包，所以**编译之前**那份
-        # checkout 必须先在磁盘上。以前这步藏在 `make generate` 里，而静态检查
-        # 跑在它前面——2026-09-20 实测：三个 job 里 `go vet ./...` / `go test`
-        # 报「package not found」，一个指不到真因的错（清单明明是对的）。
-        # 现在它是一条说得清名字的独立步骤，谁先谁后不用猜。
-        run: make ext
-
       - name: gofmt
         run: make check-fmt
 
@@ -93,8 +85,12 @@ jobs:
       - name: 装配清单是否过期
         run: make check-generate
 
-      - name: 单测
-        run: go test ./...
+      # GOPROXY=off 把「内核的构建与测试完全离线」变成 CI 会红的事实，而不是
+      # 一句承诺（2026-09-20 起成立：清单只扫本仓库的 modules/，发行版是另一个
+      # Go module，不再有构建期 clone）。哪天有人塞回一个构建期外部依赖，
+      # 它会在这里以「no required module provides package」现形。
+      - name: 单测（离线：内核构建不该出网）
+        run: GOPROXY=off go test ./...
 
   race:
     name: 竞态检测
@@ -115,8 +111,6 @@ jobs:
           # 都报 "Some specified paths were not resolved, unable to cache
           # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
           cache-dependency-path: go/go.mod
-      - name: 准备发行版模块（外部模块的 checkout）
-        run: make ext
 
       - run: go test -race ./...
 
@@ -143,9 +137,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq python3 curl coreutils
-
-      - name: 准备发行版模块（外部模块的 checkout）
-        run: make ext
 
       - name: 构建
         run: make build

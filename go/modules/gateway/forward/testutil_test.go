@@ -5,9 +5,29 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"testing"
 
+	"github.com/rzbdz/newgate/go/modules/config/store"
 	"github.com/rzbdz/newgate/go/modules/gateway/policy"
+	"github.com/rzbdz/newgate/go/modules/gateway/thinkcache"
 )
+
+// isolate 把配置目录指到临时目录，免得测试读到（或写坏）真实的 ~/.config/newgate。
+//
+// 2026-09-20 从 thinkcache_test.go 搬到这里：那三个用例断的是**发行版模块**
+// （DeepSeek 的逐字回填 / 跨 agent 迁移）的策略，跟着拥有者搬去发行版仓库了，
+// 而这个 helper 留下来的用例（compact_test.go）还要用。
+func isolate(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("NEWGATE_HOME", dir)
+	t.Setenv("NEWGATE_TARGET_DIR", dir)
+	t.Setenv("HOME", dir)
+	if _, err := store.Init(false); err != nil {
+		t.Fatalf("初始化临时配置失败: %v", err)
+	}
+	thinkcache.Default = thinkcache.New(32<<20, 0) // 每个测试从空缓存开始
+}
 
 // newTestServer 造一个**最小系统**的测试用 Server：策略账本上一张纸条都没有。
 //

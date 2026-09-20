@@ -22,8 +22,12 @@ import (
 // 界面之后——Start 里注册时界面的账本已经就绪；没装界面就跳过，模块功能不受影响。
 // ui 因此从「被依赖」的位置上退了出去：装不装 ui 只影响这些贡献有没有地方去。
 //
-// 表里的「plugin-manager → deepseek」那两条是**弱依赖**（开关点上报）：owner 先起，
-// 注册者后起——同上，也是一条排序边。
+// 表里的排序来自两种边：硬依赖 Need 与弱依赖 Optional。弱依赖那几条（`plugin-manager`
+// 注册 state 字段之类）同样是排序边——owner 先起、注册者后起，只是 owner 不在时
+// 注册者照样跑，只是那份贡献没有地方去。
+//
+// 这张表只覆盖**内核自带**的那张图。发行版自己的模块（以及它注册进来的贡献）由
+// 发行版自己的图测试断言——测试跟着拥有者走，见 docs/10-testing-security.md。
 func TestDefaultGraphLayering(t *testing.T) {
 	app, err := New(context.Background())
 	if err != nil {
@@ -50,14 +54,9 @@ func TestDefaultGraphLayering(t *testing.T) {
 		{"config-hook", "runtime", "runtime 用 AgentCatalog"},
 		{"config-hook", "claudecode", "claudecode 注册 agent 与 state 字段"},
 		{"config-hook", "plugin-manager", "plugin-manager 注册 state 字段"},
-		{"breaker", "deepseek", "deepseek 记账"},
 		{"runtime", "wrapper", "wrapper 懒启动代理"},
 		{"gateway", "thinking", "thinking 注册请求插件"},
-		{"gateway", "deepseek", "deepseek 注册请求插件"},
 		{"gateway", "claudecode", "claudecode 注册请求插件"},
-		{"gateway", "claudecode-deepseek", "交叉语义注册请求插件"},
-		{"plugin-manager", "deepseek", "deepseek 上报开关点"},
-		{"plugin-manager", "claudecode-deepseek", "交叉语义上报开关点"},
 	}
 	for _, p := range pairs {
 		if at(p.owner) > at(p.registrant) {
@@ -139,7 +138,7 @@ func TestGatewayReceivesModuleHooks(t *testing.T) {
 		names = append(names, plugin.Name())
 	}
 	for _, want := range []string{
-		"claude-bg", "claudecode-deepseek", "deepseek", "glm", "always-thinks",
+		"claude-bg", "always-thinks",
 	} {
 		found := false
 		for _, name := range names {
