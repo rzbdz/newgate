@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# 推上去之前，先把这份仓库自己的判据跑一遍（`make ci`：静态 / 单测 / 竞态 / 端到端）。
+#
+# 为什么要有它：CI 只在**推上去之后**才说话，而 2026-09-20 一天里撞了两次「推完才
+# 发现」——一次是 workflow 文件本身非法（GitHub 0 秒拒掉整个 run，六个提交的 CI
+# 全是红的却一条测试都没跑），一次是发行版那边 gitlink 指着没推的内核提交
+# （checkout 整体失败）。两次本地都拦得住，代价只是推之前等半分钟。
+#
+# 装上（每个 clone 一次，git 不会替你装）：
+#
+#	git config core.hooksPath .githooks
+#
+# 绕开：`git push --no-verify`。这个口子**故意留着**——一条绕不过的钩子，在它自己
+# 出毛病的时候会把人卡死（比如这台机器缺 python3，端到端根本起不来）。
+set -euo pipefail
+
+# 只有「有内容要推」的 push 才值得验：删远端分支时 local sha 全是 0。
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;;
+    *) have_content=1 ;;
+  esac
+done
+[ -n "${have_content:-}" ] || exit 0
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+echo "── pre-push：跑一遍 make ci（绕开用 --no-verify）"
+exec make ci

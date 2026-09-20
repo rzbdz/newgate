@@ -147,6 +147,18 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
     真的变了。
 - **一把梭**：`make check`（格式 + vet + 生成清单 + 单测 + 两条零 token
   端到端）。拆开：`make test` / `make test-race` / `make e2e` / `make e2e-claude`。
+- **推之前自动跑**：仓库带了一份 `.githooks/pre-push`，内容就是 `make ci`（沙箱
+  `NEWGATE_HOME` + 静态 / 单测 / 竞态 / 端到端，约半分钟）。装上——每个 clone 一次，
+  git 不会替你装：
+
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
+  为什么要它：CI 只在推上去之后才说话，而 2026-09-20 一天里撞了两次「推完才发现」
+  （workflow 文件非法 → GitHub 0 秒拒掉整个 run；发行版那边 gitlink 指着没推的提交
+  → checkout 整体失败）。绕开用 `git push --no-verify`——这个口子**故意留着**：
+  一条绕不过的钩子，在它自己出毛病的时候会把人卡死。
 - **单测不出网**（`docs/10-testing-security.md` §1）：一律用 `httptest`，出网即失败。
 - **端到端零 token**：`make e2e-claude`（假上游 + 沙箱 `NEWGATE_HOME`，不碰真实
   配置）。改网关/插件行为后跑一遍，它锁的正是真实现场复现出来的那几条。
