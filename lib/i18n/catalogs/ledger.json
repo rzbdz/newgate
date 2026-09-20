@@ -1473,7 +1473,7 @@
         "port"
       ]
     },
-    "assembly selection: disable names \"{dir}\", but neither the kernel nor your own table has this module (did you write the directory name? e.g. claudecode_deepseek, not claudecode-deepseek; use AllCore to turn everything off)": {
+    "assembly selection: disable names \"{dir}\", but neither the kernel nor your own table has this module (did you write the directory name? e.g. my_module, not my-module; use AllCore to turn everything off)": {
       "where": "app/manifest.go:113",
       "args": [
         "dir"

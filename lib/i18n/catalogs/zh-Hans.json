@@ -1279,8 +1279,8 @@
       "text": "装配选择：disable 点名了 \"{dir}\"（组件 {name}），但它提供了组合根自己要用的端口 {port}——关掉它，进程就没有任何东西能回答「这次调用归谁」了。它摘不掉这件事不是一张名单说了算，而是组合根自己的依赖说了算（见 compositionRootPorts）",
       "reviewed": true
     },
-    "assembly selection: disable names \"{dir}\", but neither the kernel nor your own table has this module (did you write the directory name? e.g. claudecode_deepseek, not claudecode-deepseek; use AllCore to turn everything off)": {
-      "text": "装配选择：disable 点名了 \"{dir}\"，但内核与自己都没有这个模块（写的是**目录名**吗？比如 claudecode_deepseek 而不是 claudecode-deepseek；要关掉全部请用 AllCore）",
+    "assembly selection: disable names \"{dir}\", but neither the kernel nor your own table has this module (did you write the directory name? e.g. my_module, not my-module; use AllCore to turn everything off)": {
+      "text": "装配选择：disable 点名了 \"{dir}\"，但内核与自己都没有这个模块（写的是**目录名**吗？比如 my_module 而不是 my-module；要关掉全部请用 AllCore）",
       "reviewed": true
     },
     "assembly selection: disable names \"{dir}\", but that is a module from Extra — Extra is the table you supplied yourself, so leave it out if you do not want it (disable only turns off kernel modules; listing it here has no effect, and you probably think it did)": {

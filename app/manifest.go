@@ -112,8 +112,8 @@ func (s Selection) Load() ([]modules.Component, error) {
 			}
 			return nil, i18n.E("assembly selection: disable names \"{dir}\", but neither the "+
 				"kernel nor your own table has this module (did you write the directory "+
-				"name? e.g. claudecode_deepseek, not claudecode-deepseek; use AllCore to "+
-				"turn everything off)", i18n.A{"dir": dir})
+				"name? e.g. my_module, not my-module; use AllCore to turn everything off)",
+				i18n.A{"dir": dir})
 		}
 		if port, serves := servesCompositionRoot(e.Component); serves {
 			return nil, i18n.E("assembly selection: disable names \"{dir}\" (component "+
