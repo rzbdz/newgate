@@ -81,7 +81,7 @@
       ]
     },
     "  declaration {index}  {desc}": {
-      "where": "component/component.go:400",
+      "where": "component/component.go:389",
       "args": [
         "desc",
         "index"
@@ -97,14 +97,14 @@
       "where": "modules/gateway/command_metrics.go:82"
     },
     "  optional dependency absent: {consumer} needs {provider} — no provider, skipped (no edge, no effect on startup)": {
-      "where": "component/component.go:436",
+      "where": "component/component.go:425",
       "args": [
         "consumer",
         "provider"
       ]
     },
     "  optional dependency hit: {consumer} needs {provider} — {count} providers, ordering edge added as usual": {
-      "where": "component/component.go:442",
+      "where": "component/component.go:431",
       "args": [
         "consumer",
         "count",
@@ -1448,7 +1448,7 @@
       "where": "modules/config/diagnostics.go:194"
     },
     "assembly complete: {count} components, took {took}": {
-      "where": "component/component.go:297",
+      "where": "component/component.go:286",
       "args": [
         "count",
         "took"
@@ -1498,20 +1498,20 @@
       "where": "app/manifest.go:157"
     },
     "assembly: graph build failed: {err}": {
-      "where": "component/component.go:264",
+      "where": "component/plan.go:52",
       "args": [
         "err"
       ]
     },
     "assembly: loader {index} failed: {err}": {
-      "where": "component/component.go:254",
+      "where": "component/plan.go:42",
       "args": [
         "err",
         "index"
       ]
     },
     "assembly: loader {index} handed over {count} components": {
-      "where": "component/component.go:258",
+      "where": "component/plan.go:46",
       "args": [
         "count",
         "index"
@@ -2019,25 +2019,25 @@
       "where": "modules/gateway/command_probe.go:149"
     },
     "graph: dependency cycle, components still stuck: {names}": {
-      "where": "component/component.go:500",
+      "where": "component/component.go:489",
       "args": [
         "names"
       ]
     },
     "graph: topological order {order}": {
-      "where": "component/component.go:509",
+      "where": "component/component.go:498",
       "args": [
         "order"
       ]
     },
     "graph: {count} component declarations received, in declaration order below": {
-      "where": "component/component.go:385",
+      "where": "component/component.go:374",
       "args": [
         "count"
       ]
     },
     "graph: {count} components, {edges} ordering edges (Need and Optional with a provider; an Optional nobody provides makes no edge)": {
-      "where": "component/component.go:462",
+      "where": "component/component.go:451",
       "args": [
         "count",
         "edges"
@@ -2954,7 +2954,7 @@
       "where": "modules/gateway/command_special.go:50"
     },
     "start {index}/{total} {name} done (took {took})": {
-      "where": "component/component.go:292",
+      "where": "component/component.go:281",
       "args": [
         "index",
         "name",
@@ -2963,7 +2963,7 @@
       ]
     },
     "start {index}/{total} {name} failed (took {took}): {err}": {
-      "where": "component/component.go:279",
+      "where": "component/component.go:268",
       "args": [
         "err",
         "index",
@@ -2976,7 +2976,7 @@
       "where": "modules/runtime/commands.go:183"
     },
     "stop {index}/{total} {name} done (took {took})": {
-      "where": "component/component.go:365",
+      "where": "component/component.go:354",
       "args": [
         "index",
         "name",
@@ -2985,7 +2985,7 @@
       ]
     },
     "stop {index}/{total} {name} failed (took {took}): {err}": {
-      "where": "component/component.go:357",
+      "where": "component/component.go:346",
       "args": [
         "err",
         "index",
@@ -2995,7 +2995,7 @@
       ]
     },
     "stop {index}/{total} {name} skipped (no Stop)": {
-      "where": "component/component.go:351",
+      "where": "component/component.go:340",
       "args": [
         "index",
         "name",
@@ -3003,10 +3003,10 @@
       ]
     },
     "stop: complete": {
-      "where": "component/component.go:369"
+      "where": "component/component.go:358"
     },
     "stop: releasing {count} components in reverse start order": {
-      "where": "component/component.go:346",
+      "where": "component/component.go:335",
       "args": [
         "count"
       ]

@@ -247,26 +247,15 @@ func New(loaders ...Loader) (*Manager, error) {
 // 什么顺序、每个起了多久。这是「模块为什么这么加载」的唯一一手材料——它只在
 // 装配期存在，事后从 Manager 里问不出来。
 func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
-	var components []Component
-	for i, loader := range loaders {
-		loaded, err := loader.Load()
-		if err != nil {
-			tracef("%s", i18n.T("assembly: loader {index} failed: {err}",
-				i18n.A{"index": i + 1, "err": err}))
-			return nil, err
-		}
-		tracef("%s", i18n.T("assembly: loader {index} handed over {count} components",
-			i18n.A{"index": i + 1, "count": len(loaded)}))
-		components = append(components, loaded...)
-	}
-	ordered, values, err := resolve(components)
+	// 收集、校验、排序只有一份实现（见 plan.go 的说明）：启动是**图纸 + 生命周期**，
+	// 不是另一条路径。分开写过一次，两边就会开始漂移。
+	plan, err := Resolve(loaders...)
 	if err != nil {
-		tracef("%s", i18n.T("assembly: graph build failed: {err}", i18n.A{"err": err}))
 		return nil, err
 	}
 	manager := &Manager{
-		components: ordered,
-		context:    Context{values: values},
+		components: plan.components,
+		context:    Context{values: plan.values},
 	}
 	assembledAt := time.Now()
 	for i, component := range manager.components {
