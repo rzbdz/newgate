@@ -64,12 +64,17 @@ func New() modules.Component {
 
 			// web 界面那一份**先**注册：它不依赖 cli，只装 dashboard 的装配里也要
 			// 有——下面那段一旦 return，这里就永远不会跑（与 gateway 同一条）。
+			// 探一条 binding 那条缝由网关提供（见 gateway.ProbeBinding）：发起探活
+			// 需要的东西（base、key、方言）只有它有。Need(gateway) 是本模块既有的
+			// 依赖，所以这里一定有。
+			prober := modules.MustGet(ctx, gatewayapi.Capability)
+
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
 				viewRelease, err := v.Register("breaker",
 					viewapi.Title(func() string { return i18n.T("Breaker", nil) }).
 						In(func() string { return i18n.T("Data plane", nil) }),
 					func() ([]viewapi.Concept, error) {
-						return healthConcepts(table)
+						return healthConcepts(table, prober)
 					})
 				if err != nil {
 					return err

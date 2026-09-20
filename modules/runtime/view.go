@@ -114,16 +114,16 @@ func takeoverTable(rows []takeover.Status) view.Table {
 			{ID: "mechanism", Label: i18n.T("Mechanism", nil)},
 			{ID: "detail", Label: i18n.T("How", nil)},
 		},
-		Rows: []map[string]view.Cell{},
+		Rows: []view.Row{},
 	}
 	for _, s := range rows {
 		text, tone := stateCell(s)
-		table.Rows = append(table.Rows, map[string]view.Cell{
+		table.Rows = append(table.Rows, view.Row{Cells: map[string]view.Cell{
 			"agent":     {Text: s.Agent},
 			"state":     {Text: text, Tone: tone},
 			"mechanism": dashIfEmpty(string(s.Mechanism)),
 			"detail":    dashIfEmpty(s.Detail),
-		})
+		}})
 	}
 	return table
 }

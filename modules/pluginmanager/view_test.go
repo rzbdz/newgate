@@ -218,15 +218,15 @@ func TestViewReportsModulesWithNoSwitchesAtAll(t *testing.T) {
 		t.Errorf("清单该有 %d 行（每个模块一行），实际 %d", len(m.Modules()), len(data.Rows))
 	}
 	for _, row := range data.Rows {
-		if row["module"].Text == "" || row["type"].Text == "" {
-			t.Errorf("每一行都该有模块名与分类: %+v", row)
+		if row.Cells["module"].Text == "" || row.Cells["type"].Text == "" {
+			t.Errorf("每一行都该有模块名与分类: %+v", row.Cells)
 		}
 		// 没有开关点的模块显示横杠，不是 0：「一个都没有」与「0 个」不是一回事，
 		// 后者不是可能的状态（登记了就是至少一个）。
-		if row["switches"].Text == "" {
-			t.Errorf("开关点那格是空的: %+v", row)
+		if row.Cells["switches"].Text == "" {
+			t.Errorf("开关点那格是空的: %+v", row.Cells)
 		}
-		for id := range row {
+		for id := range row.Cells {
 			if !columns[id] {
 				t.Errorf("格子 %q 没有对应的列——前端取不到，这一格是空白", id)
 			}

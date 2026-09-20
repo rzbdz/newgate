@@ -108,7 +108,7 @@ func TestTakeoverTableShape(t *testing.T) {
 		t.Fatalf("两个 agent 该有两行，实际 %d", len(table.Rows))
 	}
 	for _, row := range table.Rows {
-		for id, cell := range row {
+		for id, cell := range row.Cells {
 			if !columns[id] {
 				t.Errorf("格子 %q 没有对应的列——前端取不到，这一格是空白", id)
 			}

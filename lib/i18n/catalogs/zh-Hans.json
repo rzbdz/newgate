@@ -1144,6 +1144,10 @@
       "text": "接管后的目标文件（newgate 相关片段）",
       "reviewed": true
     },
+    "Test": {
+      "text": "测试",
+      "reviewed": true
+    },
     "The daemon has no control token (started before the upgrade), falling back to stop+start": {
       "text": "daemon 没有控制令牌（升级前启动的），退回 stop+start",
       "reviewed": true
@@ -2784,6 +2788,10 @@
       "text": "route: {route}\nstatus: {status}\n\n--- 客户端请求头 ---{reqHeaders}\n\n--- 上游响应头 ---{respHeaders}\n",
       "reviewed": true
     },
+    "row {row} of {concept} has no action called {action} — the page is probably stale, reload it": {
+      "text": "概念 {concept} 的第 {row} 行没有叫 {action} 的动作——页面大概是旧的，重新加载一下",
+      "reviewed": true
+    },
     "running {file} through /bin/sh failed too: {err}": {
       "text": "经 /bin/sh 执行 {file} 也失败: {err}",
       "reviewed": true
@@ -2902,6 +2910,10 @@
     },
     "status": {
       "text": "状态",
+      "reviewed": true
+    },
+    "status {status}": {
+      "text": "状态 {status}",
       "reviewed": true
     },
     "stop {index}/{total} {name} done (took {took})": {
@@ -3428,6 +3440,14 @@
       "text": "{concept} 上没有叫 {action} 的动作——页面多半已经旧了，重载一次",
       "reviewed": true
     },
+    "{concept} has no row called {row} — the page is probably stale, reload it": {
+      "text": "{concept} 里没有叫 {row} 的行——页面大概是旧的，重新加载一下",
+      "reviewed": true
+    },
+    "{concept} is not a table, so it has no rows to act on": {
+      "text": "{concept} 不是一张表，没有行可以操作",
+      "reviewed": true
+    },
     "{concept}.{action} has nothing to run": {
       "text": "{concept}.{action} 没有可跑的东西",
       "reviewed": true
@@ -3524,6 +3544,10 @@
       "text": "{name} 还没有历史 —— 没有东西可以取回来",
       "reviewed": true
     },
+    "{note}": {
+      "text": "{note}",
+      "reviewed": true
+    },
     "{n}": {
       "text": "{n}",
       "reviewed": true
@@ -3617,6 +3641,10 @@
       "text": "{route} -> {status}{note}  上游说: {body}",
       "reviewed": true
     },
+    "{row}.{action} has nothing to run": {
+      "text": "{row}.{action} 没有可以执行的动作",
+      "reviewed": true
+    },
     "{slot}: {tier} is not one of the values this slot takes — pick one of {known}": {
       "text": "{slot}: {tier} 不是这个槽位收的取值——从 {known} 里挑一个",
       "reviewed": true
@@ -3631,6 +3659,10 @@
     },
     "{stops} stop in the chain; {skipped} skipped ({reasons})   newgate tier normal": {
       "text": "链上 {stops} 站；跳过 {skipped}（{reasons}）   newgate tier normal",
+      "reviewed": true
+    },
+    "{target} is not answering: {err}": {
+      "text": "{target} 没有回应：{err}",
       "reviewed": true
     },
     "{target} learned upstream quirks: {quirks}": {

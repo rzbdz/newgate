@@ -10,6 +10,8 @@ package gateway
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	modules "github.com/rzbdz/newgate/component"
 	entryapi "github.com/rzbdz/newgate/component/entry"
@@ -21,8 +23,10 @@ import (
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
 	porthubapi "github.com/rzbdz/newgate/modules/porthub"
 
+	"github.com/rzbdz/newgate/modules/config/store"
 	"github.com/rzbdz/newgate/modules/gateway/gatewaystate"
 	"github.com/rzbdz/newgate/modules/gateway/policy"
+	"github.com/rzbdz/newgate/modules/gateway/probe"
 	"github.com/rzbdz/newgate/modules/gateway/quirk"
 	"github.com/rzbdz/newgate/modules/gateway/special"
 )
@@ -195,6 +199,50 @@ func New() modules.Component {
 
 // Quirks 见 api.go 的说明（数据面用的就是这一个实例）。
 func (p *port) Quirks() *quirk.Table { return quirk.Default }
+
+// ProbeBinding 打一发最小请求，然后把结论灌进策略层（见 api.go 的说明）。
+//
+// 走到策略层那一步复用 `p.filters.ObserveProbes`——**与 `newgate probe` 那条路
+// 的终点是同一个函数**（命令行那边走 HTTP 到控制面再进来）。两处各写一遍「记一条
+// 探活结论」的话，网页上点出来的结果与终端里敲出来的就会慢慢分家，而那种分家
+// 看得见的表现是「网页上说通了、终端说没通」——没人能从界面上分辨谁对。
+func (p *port) ProbeBinding(provider, model string) (ProbeOutcome, error) {
+	slow := store.LoadState().Timeouts.ClassifierFirstByte()
+	var out ProbeOutcome
+	_, err := probe.Run(probe.Options{
+		OnlyTarget:  &probe.Target{Provider: provider, Model: model},
+		Timeout:     slow,
+		SlowAfter:   slow,
+		Concurrency: 1,
+		OnDone: func(_ probe.Target, status int, lat, _ time.Duration, err error) {
+			out.Status, out.Latency = status, lat
+			out.OK = err == nil && status == 200
+			if err != nil {
+				out.Err = err.Error()
+			}
+		},
+	})
+	if err != nil {
+		return ProbeOutcome{}, err
+	}
+	// 阈值取的是**分类器首字节**那一档：探活发的是 4-token 的极小请求，超过这个
+	// 阈值仍未完成就说明它进不了交互 fallback 链——与命令行那条同一条判据
+	// （见 policy.ProbeObservation.SlowAfter 的注释）。
+	// 策略层的回话**交回给调用方**，不在这里打日志：这一次探活是**有人点的**，
+	// 而那句话（「这条的闸开了」）正是点的人要看的反馈。打在日志里等于让反馈
+	// 跑到一个他没在看的地方。
+	var notes []string
+	for _, ack := range p.filters.ObserveProbes([]policy.ProbeObservation{{
+		Provider: provider, Model: model, Status: out.Status,
+		Latency: out.Latency, ContextBytes: 1, Error: out.Err, SlowAfter: slow,
+	}}) {
+		if ack.Note != "" {
+			notes = append(notes, ack.Note)
+		}
+	}
+	out.Note = strings.Join(notes, " · ")
+	return out, nil
+}
 
 // RegisterRequestHook 把插件注册限制在 gateway owner 内部，并把撤销权交还调用组件。
 func (p *port) RegisterRequestHook(hook Plugin) (modules.Release, error) {

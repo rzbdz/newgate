@@ -87,16 +87,16 @@ func gatewayConcepts() ([]view.Concept, error) {
 // 贡献者不同（见 web-dashboard 的按源刷新）。
 func specialConcept() view.Concept {
 	st := store.LoadState()
-	rows := []map[string]view.Cell{}
+	rows := []view.Row{}
 	for _, p := range special.Plugins() {
 		mark, word := specialState(st, p.Name())
-		rows = append(rows, map[string]view.Cell{
+		rows = append(rows, view.Row{Cells: map[string]view.Cell{
 			"state":  {Text: word, Tone: specialTone(mark)},
 			"plugin": {Text: p.Name()},
 			// 只取 Why 的第一行：完整说明常常好几行，铺进表里会把表淹掉——CLI 那边
 			// 是同一条取舍（`newgate st <插件>` 才是读全文的地方）。
 			"why": {Text: strings.SplitN(p.Why(), "\n", 2)[0]},
-		})
+		}})
 	}
 	return view.Concept{
 		ID: "gateway.special", Kind: view.KindTable,

@@ -570,7 +570,7 @@
       "where": "modules/config/commands.go:57"
     },
     "Binding health": {
-      "where": "modules/breaker/view.go:38"
+      "where": "modules/breaker/view.go:39"
     },
     "Both profile {first} and {second} were given, and they disagree": {
       "where": "modules/runtime/launch.go:167",
@@ -580,7 +580,7 @@
       ]
     },
     "Breaker": {
-      "where": "modules/breaker/module.go:69"
+      "where": "modules/breaker/module.go:74"
     },
     "CLIs taken over: {list}": {
       "where": "modules/confighook/command.go:117",
@@ -717,7 +717,7 @@
       "where": "modules/runtime/diagnostics.go:63"
     },
     "Data plane": {
-      "where": "modules/breaker/module.go:70"
+      "where": "modules/breaker/module.go:75"
     },
     "Default profile": {
       "where": "modules/config/view.go:663"
@@ -795,7 +795,7 @@
       "where": "modules/gateway/command_debug.go:39"
     },
     "Gateway": {
-      "where": "modules/gateway/module.go:109"
+      "where": "modules/gateway/module.go:113"
     },
     "Global settings": {
       "where": "modules/config/view.go:638"
@@ -1293,6 +1293,9 @@
     "Target files after takeover (newgate-related fragments)": {
       "where": "modules/runtime/diagnostics.go:236"
     },
+    "Test": {
+      "where": "modules/breaker/view.go:117"
+    },
     "The daemon has no control token (started before the upgrade), falling back to stop+start": {
       "where": "modules/runtime/commands.go:415"
     },
@@ -1698,7 +1701,7 @@
       "where": "modules/config/view.go:831"
     },
     "binding": {
-      "where": "modules/breaker/view.go:60"
+      "where": "modules/breaker/view.go:61"
     },
     "binding health table: trips after consecutive failures, releases one half-open trial when the cooldown expires": {
       "where": "modules/breaker/plane.go:53"
@@ -1871,13 +1874,13 @@
       ]
     },
     "capability cache could not be read; every target is probed again this round: {err}": {
-      "where": "modules/gateway/probe/probe.go:110",
+      "where": "modules/gateway/probe/probe.go:121",
       "args": [
         "err"
       ]
     },
     "capability cache could not be saved; the next probe spends tokens again: {err}": {
-      "where": "modules/gateway/probe/probe.go:262",
+      "where": "modules/gateway/probe/probe.go:278",
       "args": [
         "err"
       ]
@@ -2159,7 +2162,7 @@
       "where": "modules/pluginmanager/command.go:120"
     },
     "expired": {
-      "where": "modules/breaker/view.go:182"
+      "where": "modules/breaker/view.go:247"
     },
     "extends cycle: {name} points back to itself": {
       "where": "modules/config/store/store.go:148",
@@ -2211,7 +2214,7 @@
       "where": "modules/gateway/metrics/hints.go:58"
     },
     "forwarding, upstream quirk patches, and reasoning pass-through": {
-      "where": "modules/gateway/module.go:55"
+      "where": "modules/gateway/module.go:59"
     },
     "four-tier compatibility: a profile that does not write normal behaves like mid": {
       "where": "modules/config/domain/extra.go:56"
@@ -2282,10 +2285,10 @@
       ]
     },
     "half-open · awaiting trial": {
-      "where": "modules/breaker/view.go:139"
+      "where": "modules/breaker/view.go:204"
     },
     "half-open · trial in flight": {
-      "where": "modules/breaker/view.go:137"
+      "where": "modules/breaker/view.go:202"
     },
     "handoff needs a TCP listener, got {type}": {
       "where": "modules/runtime/daemon/daemon.go:400",
@@ -2297,7 +2300,7 @@
       "where": "modules/cli/commands.go:51"
     },
     "healthy": {
-      "where": "modules/breaker/view.go:143"
+      "where": "modules/breaker/view.go:208"
     },
     "https://…": {
       "where": "modules/config/view.go:832"
@@ -2331,7 +2334,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:781",
+      "where": "lib/view/view.go:868",
       "args": [
         "err",
         "source"
@@ -2464,7 +2467,7 @@
       "where": "modules/gateway/command_probe.go:150"
     },
     "minimal request took {lat}, over the interactive threshold {threshold}": {
-      "where": "modules/gateway/probe/probe.go:226",
+      "where": "modules/gateway/probe/probe.go:242",
       "args": [
         "lat",
         "threshold"
@@ -2616,7 +2619,7 @@
       "where": "modules/config/store/kv.go:145"
     },
     "no view contributed a concept called {concept} — the page is probably stale, reload it": {
-      "where": "lib/view/view.go:740",
+      "where": "lib/view/view.go:772",
       "args": [
         "concept"
       ]
@@ -2625,7 +2628,7 @@
       "where": "modules/runtime/commands.go:134"
     },
     "not bound": {
-      "where": "modules/gateway/probe/probe.go:150"
+      "where": "modules/gateway/probe/probe.go:166"
     },
     "not declared but still installed": {
       "where": "modules/runtime/commands.go:175"
@@ -2933,7 +2936,7 @@
       ]
     },
     "profile {profile} does not exist (available: {names})": {
-      "where": "modules/gateway/probe/probe.go:130",
+      "where": "modules/gateway/probe/probe.go:141",
       "args": [
         "names",
         "profile"
@@ -2976,7 +2979,7 @@
       "where": "modules/config/resolve/chain.go:245"
     },
     "provider undefined": {
-      "where": "modules/gateway/probe/probe.go:155"
+      "where": "modules/gateway/probe/probe.go:171"
     },
     "provider {provider} has no key → {hint}": {
       "where": "modules/config/store/store.go:482",
@@ -3167,6 +3170,14 @@
         "status"
       ]
     },
+    "row {row} of {concept} has no action called {action} — the page is probably stale, reload it": {
+      "where": "lib/view/view.go:819",
+      "args": [
+        "action",
+        "concept",
+        "row"
+      ]
+    },
     "running {file} through /bin/sh failed too: {err}": {
       "where": "modules/runtime/launch/launch.go:216",
       "args": [
@@ -3309,6 +3320,12 @@
     },
     "status": {
       "where": "modules/runtime/commands.go:183"
+    },
+    "status {status}": {
+      "where": "modules/breaker/view.go:129",
+      "args": [
+        "status"
+      ]
     },
     "stop {index}/{total} {name} done (took {took})": {
       "where": "component/component.go:365",
@@ -3632,10 +3649,10 @@
       "where": "modules/gateway/command_probe.go:150"
     },
     "trial in flight": {
-      "where": "modules/breaker/view.go:174"
+      "where": "modules/breaker/view.go:239"
     },
     "tripped": {
-      "where": "modules/breaker/view.go:141"
+      "where": "modules/breaker/view.go:206"
     },
     "troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)": {
       "where": "modules/gateway/forward/forward.go:1702"
@@ -3747,17 +3764,17 @@
       ]
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:586"
+      "where": "lib/view/view.go:618"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:802",
+      "where": "lib/view/view.go:889",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:794",
+      "where": "lib/view/view.go:881",
       "args": [
         "a",
         "b",
@@ -3765,19 +3782,19 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:799",
+      "where": "lib/view/view.go:886",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:595",
+      "where": "lib/view/view.go:627",
       "args": [
         "source"
       ]
     },
     "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
-      "where": "lib/view/view.go:591",
+      "where": "lib/view/view.go:623",
       "args": [
         "source"
       ]
@@ -3853,14 +3870,27 @@
       "other": "{bucket} {latency}/{n} samples"
     },
     "{concept} has no action called {action} — the page is probably stale, reload it": {
-      "where": "lib/view/view.go:736",
+      "where": "lib/view/view.go:768",
       "args": [
         "action",
         "concept"
       ]
     },
+    "{concept} has no row called {row} — the page is probably stale, reload it": {
+      "where": "lib/view/view.go:823",
+      "args": [
+        "concept",
+        "row"
+      ]
+    },
+    "{concept} is not a table, so it has no rows to act on": {
+      "where": "lib/view/view.go:802",
+      "args": [
+        "concept"
+      ]
+    },
     "{concept}.{action} has nothing to run": {
-      "where": "lib/view/view.go:731",
+      "where": "lib/view/view.go:763",
       "args": [
         "action",
         "concept"
@@ -4007,7 +4037,7 @@
       ]
     },
     "{ms}ms": {
-      "where": "modules/breaker/view.go:111",
+      "where": "modules/breaker/view.go:176",
       "args": [
         "ms"
       ]
@@ -4028,6 +4058,12 @@
       "where": "modules/config/commands.go:813",
       "args": [
         "name"
+      ]
+    },
+    "{note}": {
+      "where": "modules/breaker/view.go:142",
+      "args": [
+        "note"
       ]
     },
     "{n}": {
@@ -4075,7 +4111,7 @@
       "other": "{n} entries · {used} / {max} · hits {hits} · misses {misses} · evictions {evictions}"
     },
     "{n} failure": {
-      "where": "modules/breaker/view.go:93",
+      "where": "modules/breaker/view.go:158",
       "other": "{n} failures"
     },
     "{n} message comes from the config dir": {
@@ -4115,7 +4151,7 @@
       "other": "{n} profiles · default {name}"
     },
     "{n} shape error": {
-      "where": "modules/breaker/view.go:95",
+      "where": "modules/breaker/view.go:160",
       "other": "{n} shape errors"
     },
     "{n} shim": {
@@ -4126,7 +4162,7 @@
       "other": "{n} shims"
     },
     "{n} spared": {
-      "where": "modules/breaker/view.go:98",
+      "where": "modules/breaker/view.go:163",
       "other": "{n} spared"
     },
     "{n} stop in the chain": {
@@ -4183,6 +4219,13 @@
         "status"
       ]
     },
+    "{row}.{action} has nothing to run": {
+      "where": "lib/view/view.go:814",
+      "args": [
+        "action",
+        "row"
+      ]
+    },
     "{slot}: {tier} is not one of the values this slot takes — pick one of {known}": {
       "where": "modules/confighook/slots.go:112",
       "args": [
@@ -4192,14 +4235,14 @@
       ]
     },
     "{source} has no action called {action} — the page is probably stale, reload it": {
-      "where": "lib/view/view.go:688",
+      "where": "lib/view/view.go:720",
       "args": [
         "action",
         "source"
       ]
     },
     "{source}.{action} has nothing to run": {
-      "where": "lib/view/view.go:692",
+      "where": "lib/view/view.go:724",
       "args": [
         "action",
         "source"
@@ -4214,8 +4257,15 @@
       ],
       "other": "{stops} stops in the chain; {skipped} skipped ({reasons})   newgate tier normal"
     },
+    "{target} is not answering: {err}": {
+      "where": "modules/breaker/view.go:131",
+      "args": [
+        "err",
+        "target"
+      ]
+    },
     "{target} learned upstream quirks: {quirks}": {
-      "where": "modules/gateway/probe/probe.go:237",
+      "where": "modules/gateway/probe/probe.go:253",
       "args": [
         "quirks",
         "target"

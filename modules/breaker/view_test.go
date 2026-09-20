@@ -23,7 +23,7 @@ func TestHealthTableCellsMatchColumns(t *testing.T) {
 	trip(t, b, "relay", "slow")                            // 摘牌：State=open
 	b.Report("relay", "fresh", Input{Kind: KindConnError}) // 只计数：Fails=1
 
-	concepts, err := healthConcepts(b)
+	concepts, err := healthConcepts(b, nil)
 	if err != nil {
 		t.Fatalf("贡献健康表出错: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestHealthTableCellsMatchColumns(t *testing.T) {
 		t.Fatalf("两个 binding 该有两行，实际 %d 行", len(table.Rows))
 	}
 	for _, row := range table.Rows {
-		for id, cell := range row {
+		for id, cell := range row.Cells {
 			if !columns[id] {
 				t.Errorf("格子 %q 没有对应的列——前端取不到，这一格是空白", id)
 			}
@@ -83,16 +83,16 @@ func TestHealthTableReportsHealthyBindingsToo(t *testing.T) {
 	b, _ := clocked()
 	trip(t, b, "relay", "slow")
 
-	concepts, _ := healthConcepts(b)
+	concepts, _ := healthConcepts(b, nil)
 	table := concepts[0].Data.(view.Table)
 	if len(table.Rows) != 1 {
 		t.Fatalf("只报出事的那些了？实际 %d 行", len(table.Rows))
 	}
-	if got := table.Rows[0]["binding"].Text; got != "relay/slow" {
+	if got := table.Rows[0].Cells["binding"].Text; got != "relay/slow" {
 		t.Fatalf("binding 那一格该是 provider/model，实际 %q", got)
 	}
 	// 摘了就该是红的（bad），而不是「有值但没颜色」。
-	if tone := table.Rows[0]["state"].Tone; tone != view.ToneBad {
+	if tone := table.Rows[0].Cells["state"].Tone; tone != view.ToneBad {
 		t.Fatalf("摘牌的 state 该是 %q，实际 %q", view.ToneBad, tone)
 	}
 }
@@ -102,7 +102,7 @@ func TestHealthTableReportsHealthyBindingsToo(t *testing.T) {
 // 界面上必须是两种样子。
 func TestHealthTableIsEmptyWhenNothingIsKnown(t *testing.T) {
 	b, _ := clocked()
-	concepts, err := healthConcepts(b)
+	concepts, err := healthConcepts(b, nil)
 	if err != nil {
 		t.Fatalf("没有 binding 时不该出错: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestHealthTableIsEmptyWhenNothingIsKnown(t *testing.T) {
 // 不动的页面上，「还要等 42s」过一分钟就成了假话。
 func TestHealthCardIsLive(t *testing.T) {
 	b, _ := clocked()
-	concepts, err := healthConcepts(b)
+	concepts, err := healthConcepts(b, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,11 +160,11 @@ func TestPollingTheCardDoesNotAdvanceTheBreaker(t *testing.T) {
 
 	state := func() view.Cell {
 		t.Helper()
-		concepts, err := healthConcepts(b)
+		concepts, err := healthConcepts(b, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return concepts[0].Data.(view.Table).Rows[0]["state"]
+		return concepts[0].Data.(view.Table).Rows[0].Cells["state"]
 	}
 
 	// 冷却期满。此刻表里显示的是**由时钟推导**出来的半开（state(now) 那条判据），

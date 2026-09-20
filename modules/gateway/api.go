@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"time"
+
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/modules/gateway/policy"
 	"github.com/rzbdz/newgate/modules/gateway/quirk"
@@ -60,6 +62,18 @@ type Gateway interface {
 	// （全部候选可用、只按机制换站、不记账、不落盘）。
 	RegisterFilter(Filter) (modules.Release, error)
 
+	// ProbeBinding 对**一条** binding 真打一发最小请求，并把结论走与 `newgate probe`
+	// 同一条路灌进策略层（健康表据此更新摘帽、延迟与冷却），返回给人看的结论。
+	//
+	// 为什么它在控制面端口上、而不是让别的模块自己去调 probe：发起一次探活需要的
+	// 东西（provider 的 base、key、方言、超时阈值）只有本模块有，而「探完怎么记」
+	// 那条路（policy 的 ObserveProbes）也只有数据面这一侧够得着。
+	//
+	// 它与 `newgate probe` 的差别只有一处：那条命令在**进程外**，所以它把结论
+	// POST 回控制面；这一条在进程内，直接灌。两条最终落到同一个函数上——这正是
+	// 「网页上点一下」与「终端里敲一下」不会各说各话的原因。
+	ProbeBinding(provider, model string) (ProbeOutcome, error)
+
 	// Quirks 是那张「上游毛病」表（见 modules/gateway/quirk）。
 	//
 	// 它暴露出来是因为**判据得由拥有补丁的模块注册**：`该模型始终思考` 这条
@@ -70,6 +84,20 @@ type Gateway interface {
 	// 数据面在每次请求上把同一张表交给插件（special.Request.Quirks），所以注册
 	// 进来的判据对热路径立刻生效。
 	Quirks() *quirk.Table
+}
+
+// ProbeOutcome 是一次单点探活给人看的结论。
+//
+// 它**不是** probe.Result 的别名：那一位带的东西（profile / role / 方言能力 /
+// token 计数缓存）是「一次全量探活」的账，而单点复验要回答的只有一句「这条现在
+// 通不通、多快」。少一层转发，看的人就少猜一层。
+type ProbeOutcome struct {
+	OK      bool
+	Status  int
+	Latency time.Duration
+	Err     string
+	// Note 是策略层对这条结论的回话（「这一条被救回来了」这类）。空 = 没什么可说。
+	Note string
 }
 
 // Capability 标识进程中唯一的网关控制面。

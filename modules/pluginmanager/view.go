@@ -138,7 +138,7 @@ func moduleTable(m Manager) view.Table {
 			{ID: "desc", Label: i18n.T("What it does", nil)},
 			{ID: "switches", Label: i18n.T("Switch points", nil), Align: "right"},
 		},
-		Rows: []map[string]view.Cell{},
+		Rows: []view.Row{},
 	}
 	all := m.Modules()
 	for _, typ := range DisplayOrder() {
@@ -150,7 +150,7 @@ func moduleTable(m Manager) view.Table {
 		}
 		sort.Slice(group, func(i, j int) bool { return group[i].Name < group[j].Name })
 		for _, mod := range group {
-			t.Rows = append(t.Rows, map[string]view.Cell{
+			t.Rows = append(t.Rows, view.Row{Cells: map[string]view.Cell{
 				"module": {Text: mod.Name},
 				// 分类词是机器标记（infra / gateway / …），原样显示：它是
 				// `newgate plugin` 的分组名，也是模块自己声明的 Type，翻它
@@ -161,7 +161,7 @@ func moduleTable(m Manager) view.Table {
 				// 那条的反面——那里是「这里就是没有」，这里是「作者没写」）。
 				"desc":     {Text: mod.Desc},
 				"switches": switchCountCell(len(mod.Switches)),
-			})
+			}})
 		}
 	}
 	return t

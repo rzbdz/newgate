@@ -82,20 +82,35 @@ const (
 	KindLog = "log"
 )
 
-// Table 是 KindTable 的数据形状：几列 + 几行，**只读**。
+// Table 是 KindTable 的数据形状：几列 + 几行。
 //
 // 形状定在这里、而不是各模块自己拼一个 map 的原因与 Kind 那组常量一样：前端
 // 只认这一种摆法。谁的表都长这样，前端就只有一个渲染器。
+type Table struct {
+	Columns []Column `json:"columns"`
+	Rows    []Row    `json:"rows"`
+}
+
+// Row 是表里的一行。
 //
-// 为什么行是「按列名索引的 map」而不是数组：列的顺序是**展示**的事（前端可以
+// 为什么格子是「按列名索引的 map」而不是数组：列的顺序是**展示**的事（前端可以
 // 按窄屏重排、将来可以给用户拖动），而格子和列的对应关系是**数据**的事。用
 // 数组下标把它们绑死，前端一动列顺序，所有格子就串位了——那种错还会看起来很
 // 正常（每一格都有值，只是值不对）。
-type Table struct {
-	Columns []Column `json:"columns"`
-	// Rows 的每一项是「列 ID → 格子」。缺的列渲染成空白，不是错误：一张表的
-	// 行本来就可以有稀疏的字段（比如「只计数没摘牌」的行没有冷却时刻）。
-	Rows []map[string]Cell `json:"rows"`
+type Row struct {
+	// ID 是**这一行**的机器标记：动作回传、以及前端做 key 都用它。
+	// 空 = 这一行没有动作（那就没人需要它稳定）。
+	ID string `json:"id,omitempty"`
+	// Cells 是「列 ID → 格子」。缺的列渲染成空白，不是错误：一张表的行本来就
+	// 可以有稀疏的字段（比如「只计数没摘牌」的行没有冷却时刻）。
+	Cells map[string]Cell `json:"cells"`
+	// Actions 是这一行上的按钮（形状见 Action）。
+	//
+	// 与 Concept.Actions 是同一条规矩的第三处：**谁的知识谁自己报**。这里多一层
+	// 理由——表里的行是**数据长出来的**（今天哪些 binding 在健康表里，取决于跑过
+	// 哪些请求），所以「这一行能做什么」在构造行的时候才定得下来。贡献者给每一行
+	// 各构造一份闭包（它捕获的是那一行），界面只把拿到的按钮画出来。
+	Actions []Action `json:"actions,omitempty"`
 }
 
 // Column 是表头的一列。
@@ -482,6 +497,23 @@ type Action struct {
 	Run func() (focus string, err error)
 }
 
+// MarshalJSON 让动作能跟着**数据**一起端出去（表里那些行就带着动作）。
+//
+// 为什么需要它：Action 有一个**函数字段**（Run），默认的编码会直接拒绝
+// （`json: unsupported type: func()`）。而这套东西里「概念的数据」是原样序列化的
+// （BFF 拿到的就是 `any`，它不认识任何 Kind，也就无从替表里的行挑出该端什么）。
+//
+// 端出去的是界面要的那两个字段；Label 在**序列化这一刻**求值——那正是快照那一刻，
+// 与 SectionInfo / Concept 的标题同一个时机、同一门语言。Run 端不出去，它在进程里
+// 等着被调用（见 Registry.RunRowAction）。
+func (a Action) MarshalJSON() ([]byte, error) {
+	label := ""
+	if a.Label != nil {
+		label = a.Label()
+	}
+	return json.Marshal(ActionInfo{ID: a.ID, Label: label})
+}
+
 // Does 给这一栏挂一个动作（可以链多个）。
 //
 //	v.Register("config", view.Title(...).Does(view.Action{ID: "new-profile", …}), concepts)
@@ -735,6 +767,61 @@ func (r *Registry) RunConceptAction(conceptID, actionID string) (string, error) 
 			}
 			return "", i18n.E("{concept} has no action called {action} — the page is probably stale, reload it",
 				i18n.A{"concept": conceptID, "action": actionID})
+		}
+	}
+	return "", i18n.E("no view contributed a concept called {concept} — the page is probably stale, reload it",
+		i18n.A{"concept": conceptID})
+}
+
+// RunRowAction 跑表格里**某一行**上的一个动作（见 Row.Actions）。
+//
+// 与 RunConceptAction 同一套：先问一遍贡献者把那张卡重新造出来（表里的行是**数据
+// 长出来的**，账本手里没有它们），再在那一行里找那个动作。
+//
+// 两步定位——概念 ID 然后是行 ID——不是啰嗦：一张表里可以有好几张卡（概念），而
+// 同一张表里每一行又是一条独立的 binding。少了行这一层，「测试」就不知道该打谁。
+func (r *Registry) RunRowAction(conceptID, rowID, actionID string) (string, error) {
+	r.mu.RLock()
+	reads := make([]Contributor, 0, len(r.sources))
+	for _, s := range r.sources {
+		reads = append(reads, s.read)
+	}
+	r.mu.RUnlock()
+
+	for _, read := range reads {
+		cs, err := read()
+		if err != nil {
+			continue
+		}
+		for _, c := range cs {
+			if c.ID != conceptID {
+				continue
+			}
+			tbl, ok := c.Data.(Table)
+			if !ok {
+				return "", i18n.E("{concept} is not a table, so it has no rows to act on",
+					i18n.A{"concept": conceptID})
+			}
+			for _, row := range tbl.Rows {
+				if row.ID != rowID {
+					continue
+				}
+				for _, a := range row.Actions {
+					if a.ID != actionID {
+						continue
+					}
+					if a.Run == nil {
+						return "", i18n.E("{row}.{action} has nothing to run",
+							i18n.A{"row": rowID, "action": actionID})
+					}
+					return a.Run()
+				}
+				return "", i18n.E("row {row} of {concept} has no action called {action} — "+
+					"the page is probably stale, reload it",
+					i18n.A{"row": rowID, "concept": conceptID, "action": actionID})
+			}
+			return "", i18n.E("{concept} has no row called {row} — the page is probably stale, reload it",
+				i18n.A{"concept": conceptID, "row": rowID})
 		}
 	}
 	return "", i18n.E("no view contributed a concept called {concept} — the page is probably stale, reload it",

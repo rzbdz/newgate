@@ -194,8 +194,8 @@ func TestTheSpecialTableListsEveryPluginAndItsState(t *testing.T) {
 	stateOf := func(tb view.Table, name string) view.Cell {
 		t.Helper()
 		for _, r := range tb.Rows {
-			if r["plugin"].Text == name {
-				return r["state"]
+			if r.Cells["plugin"].Text == name {
+				return r.Cells["state"]
 			}
 		}
 		t.Fatalf("表里没有插件 %q", name)
@@ -213,11 +213,11 @@ func TestTheSpecialTableListsEveryPluginAndItsState(t *testing.T) {
 			t.Errorf("默认状态下 %q 该是生效(ok)，实际 %q/%q", p.Name(), got.Text, got.Tone)
 		}
 		for _, r := range tb.Rows {
-			if r["plugin"].Text != p.Name() {
+			if r.Cells["plugin"].Text != p.Name() {
 				continue
 			}
 			// Why 只给第一行：完整说明有好几行，铺进表里会把表淹掉。
-			if w := r["why"].Text; w == "" || strings.Contains(w, "\n") {
+			if w := r.Cells["why"].Text; w == "" || strings.Contains(w, "\n") {
 				t.Errorf("%q 的 why 该是单行非空，实际 %q", p.Name(), w)
 			}
 		}

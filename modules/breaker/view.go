@@ -19,6 +19,7 @@ import (
 	"github.com/rzbdz/newgate/lib/durarg"
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/view"
+	gatewayapi "github.com/rzbdz/newgate/modules/gateway"
 )
 
 // healthConcepts 是健康表这一刻的样子。
@@ -30,13 +31,13 @@ import (
 // 只报出事的，因为终端里一行行滚过去，没问题的行是噪音；而一张能停在屏幕上的
 // 表不是——「哪些是好的」与「哪些坏了」是同一个问题的两半，而且好坏是相对的
 // （一条能用的 binding 卡顿到什么程度，只有跟别的比才知道）。
-func healthConcepts(table Breaker) ([]view.Concept, error) {
+func healthConcepts(table Breaker, g gatewayapi.Gateway) ([]view.Concept, error) {
 	rows := table.Snapshot()
 	return []view.Concept{{
 		ID:    "breaker.health",
 		Kind:  view.KindTable,
 		Title: i18n.T("Binding health", nil),
-		Data:  healthTable(rows),
+		Data:  healthTable(rows, g),
 		// Live：这张表的内容**完全由流量决定**（谁在失败、要等多久再试），
 		// 而读它就是内存里一个快照。停在打开页面那一刻的表，说的是一件
 		// 可能早就过去了的事——`untilText` 那几个相对时间尤其如此。
@@ -52,11 +53,11 @@ func healthConcepts(table Breaker) ([]view.Concept, error) {
 //   - **Checked**（探活时刻）与「Waiting」在同一张表里问的是两件不同的事，而
 //     「多久以前」这种相对时间在网页上会过期（页面开着不动，数字就不对了）。
 //     延迟与评级是绝对值，留下了。
-func healthTable(rows []Status) view.Table {
+func healthTable(rows []Status, g gatewayapi.Gateway) view.Table {
 	// Rows 显式初始化成空切片，不是 nil：nil 切片序列化成 `null`，而这一格的
 	// 契约是「一个列表」。前端的 `?? []` 兜得住 null，但下一个消费者未必这么
 	// 小心——一个空表在协议里该是 `[]`，不该是「这个字段没有」。
-	t := view.Table{Rows: []map[string]view.Cell{}, Columns: []view.Column{
+	t := view.Table{Rows: []view.Row{}, Columns: []view.Column{
 		{ID: "binding", Label: i18n.T("binding", nil)},
 		{ID: "state", Label: i18n.T("State", nil)},
 		{ID: "rule", Label: i18n.T("Ledger", nil)},
@@ -68,17 +69,81 @@ func healthTable(rows []Status) view.Table {
 	for _, b := range rows {
 		state, stateTone := stateText(b)
 		until, untilTone := untilText(b)
-		t.Rows = append(t.Rows, map[string]view.Cell{
-			"binding": {Text: b.Provider + "/" + b.Model},
-			"state":   {Text: state, Tone: stateTone},
-			"rule":    {Text: ruleText(b)},
-			"fails":   failsCell(b),
-			"until":   {Text: until, Tone: untilTone},
-			"probe":   {Text: probeText(b)},
-			"latency": latencyCell(b),
+		t.Rows = append(t.Rows, view.Row{
+			// 行的身份就是 binding 键（`provider/model`）：它同时是这张表的第一列
+			// 内容、也是探活要打的那个目标。
+			ID: b.Provider + "/" + b.Model,
+			Cells: map[string]view.Cell{
+				"binding": {Text: b.Provider + "/" + b.Model},
+				"state":   {Text: state, Tone: stateTone},
+				"rule":    {Text: ruleText(b)},
+				"fails":   failsCell(b),
+				"until":   {Text: until, Tone: untilTone},
+				"probe":   {Text: probeText(b)},
+				"latency": latencyCell(b),
+			},
+			Actions: probeActions(g, b),
 		})
 	}
 	return t
+}
+
+// probeActions 是这一行上的按钮：**对这条 binding 真打一发最小请求**。
+//
+// # 为什么它值得有
+//
+// 这张表的每一列都是**被动流量**攒出来的：谁在失败、延迟多少、冷却到什么时候。
+// 而「它现在到底通不通」这个问题，被动流量答不了——一条被摘牌的 binding 恰恰
+// 没有流量，所以它在表上一直显示着几分钟前的那次失败，直到冷却期满才有新的证据。
+// 终端里的答案是 `newgate probe`，而它打的是**全部**候选（一轮多花好几发）。
+// 这一颗按钮把那个动作缩到一行上，也让「我刚换了个 key / 刚改了 base」这类时刻
+// 有一个立刻能验的地方。
+//
+// # 为什么它自己不算结论
+//
+// 探完的结论**走与命令行同一条路**灌进策略层（见 gateway.ProbeBinding），所以
+// 摘帽、延迟、冷却这几件事由同一份状态机更新——界面不会自己算一个「看起来对」
+// 的结果贴在表上。表是 Live 的，刷新之后那几列就是新的。
+func probeActions(g gatewayapi.Gateway, b Status) []view.Action {
+	if g == nil {
+		// 没装 gateway（摘除矩阵里真会摘掉它）时**不挂按钮**：一个按下去必然
+		// 失败的按钮比没有按钮更糟。
+		return nil
+	}
+	provider, model := b.Provider, b.Model
+	return []view.Action{{
+		ID: "probe",
+		// 图标 + 一个词：这一列很窄，而「打个请求看看」这件事用图标最快认出来。
+		Label: func() string { return "⚡ " + i18n.T("Test", nil) },
+		Run: func() (string, error) {
+			out, err := g.ProbeBinding(provider, model)
+			if err != nil {
+				return "", err
+			}
+			if !out.OK {
+				// **不静默**：探不通就是探不通，把上游那句话原样带出来。这一格
+				// 存在的意义正是「现在到底通不通」，而「什么都没发生」是它最坏的
+				// 答案——用户会以为按钮没生效。
+				msg := out.Err
+				if msg == "" {
+					msg = i18n.T("status {status}", i18n.A{"status": out.Status})
+				}
+				return "", i18n.E("{target} is not answering: {err}",
+					i18n.A{"target": provider + "/" + model, "err": msg})
+			}
+			// 通了，但策略层可能有话说。它**只有一种**情况会说话：这一发虽然回了
+			// 200，却慢过阈值，于是当场把闸打开了（见 RecordProbe 的四档）。那不是
+			// 好消息，所以走错误那条路把它顶到横幅上——「通了」和「被我摘了」同时
+			// 成立，只报前一半等于骗人。
+			//
+			// 表上那几列刷新之后也是这个结论，但两处说的是不同的话：表说「现在什么
+			// 状态」，这句说「刚刚发生了什么」。
+			if out.Note != "" {
+				return "", i18n.E("{note}", i18n.A{"note": out.Note})
+			}
+			return "", nil
+		},
+	}}
 }
 
 // failsCell 把「连续失败」与两个只计数不算失败的数摆在一格里。

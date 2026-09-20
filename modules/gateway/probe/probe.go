@@ -68,6 +68,17 @@ type Options struct {
 	SlowAfter   time.Duration
 	Concurrency int
 
+	// OnlyTarget 只打**这一条** binding（provider/model），空 = 按 Only/全部 profile 走。
+	//
+	// 与 Only 的区别是「按什么找」：Only 是一个 profile 名（那下面是整条链的
+	// 几个候选），而这个是某一条具体的 binding。它的用例是「这一条现在到底通不通」
+	// ——健康表上的一行、一次手动的单点复验。走 profile 那条路给不出这个答案：
+	// 同一个 provider/model 可能挂在好几个 profile 下，而用户问的是那一条。
+	//
+	// 设了它就**不看 profile**：目标已经点名了，再去遍历配置只会让「点一下这条」
+	// 顺带打一串别的。
+	OnlyTarget *Target
+
 	// OnPlan 在开始探测前调用一次，告知总共要打几个目标。
 	OnPlan func(targets []Target)
 	// OnDone 每个目标一完成就立刻调用（完成顺序，非固定顺序）。
@@ -139,6 +150,11 @@ func Run(o Options) ([]Result, error) {
 	var results []Result
 	uniqSet := map[Target]bool{}
 	var uniq []Target
+	if o.OnlyTarget != nil {
+		// 点名了一条：不遍历 profile（理由见 Options.OnlyTarget）。
+		names = nil
+		uniq = append(uniq, *o.OnlyTarget)
+	}
 	for _, n := range names {
 		pr, err := store.LoadProfile(n)
 		if err != nil {
