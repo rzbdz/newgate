@@ -132,19 +132,20 @@ type alwaysThinks struct{}
 
 func (alwaysThinks) Name() string { return "always-thinks" }
 
-// After 让兜底翻译器排在**先动手的那些插件**后面执行。
+// Before/After 都是空的：本插件在**内核**这一侧没有任何排序约束。
 //
-// 这里只写内核自己的插件名（今天只有 claude-bg）——2026-09-20 之前这里还列着
-// `claudecode-deepseek`、`deepseek`、`glm` 三个名字，那是**方向反了**：它们住在
-// 发行版里，是产品插件，内核不认识、也不该认识。而且这种写法不会报错——
-// special 的排序图对未注册的名字**静默忽略**（见 modules/gateway/special 的
-// addEdge），所以在纯内核构建里那三条边一直是空转的，写错了也没人发现。
+// 它该排在那几个「先动手」的插件后面（claude-bg 改道后台请求、deepseek/glm 按模型
+// 补形状），但那些插件**住在发行版里**——2026-09-20 之前这里列着它们的名字，那是
+// 方向反了：内核不认识产品插件，也不该认识。而且这种写法不会报错——special 的排序图
+// 对未注册的名字**静默忽略**（见 modules/gateway/special 的 addEdge），所以在纯内核
+// 构建里那几条边一直是空转的，写错了也没人发现。
 //
-// 正确的方向是让**拥有者**声明：产品插件在自己的 Before() 里说「我排在
-// always-thinks 前面」（见发行版仓库 modules/deepseek 与 modules/claudecode_glm）。
-// `app/ordering_test.go` 把「内核的排序边只指向内核自己的插件」钉住了。
+// 正确的方向是让**拥有者**声明：产品插件在自己的 Before() 里说「我排在 always-thinks
+// 前面」（见发行版仓库 modules/claudecode、modules/deepseek、modules/claudecode_glm）。
+// `app/ordering_test.go` 把「内核的排序边只指向内核自己的插件」钉住了——这条测试
+// 在 claudecode 搬走的那一刻就红过一次，正好证明它管用。
 func (alwaysThinks) Before() []string { return nil }
-func (alwaysThinks) After() []string  { return []string{"claude-bg"} }
+func (alwaysThinks) After() []string  { return nil }
 
 func (alwaysThinks) Why() string {
 	return "有些模型始终思考，收到「关闭思考」就 400（GLM code 1210）\n" +

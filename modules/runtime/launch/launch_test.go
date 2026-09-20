@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rzbdz/newgate/modules/claudecode"
 	"github.com/rzbdz/newgate/modules/config/domain"
+	agentapi "github.com/rzbdz/newgate/modules/confighook"
 )
 
 // sandboxStore 在 NEWGATE_HOME 沙箱里铺一份最小配置：一个 provider、
@@ -44,34 +44,57 @@ func sandboxStore(t *testing.T) {
 // profile 里声明了 context_window/auto_compact_window 才有 env（2026-09
 // 实测二进制 2.1.265 的解析链：MAX_CONTEXT_TOKENS 只对未知模型生效，
 // AUTO_COMPACT_WINDOW 优先级最高、window=min(两者)）。
+// testAgent 是内核测试用的**合成**客户端定义：真实的 claude 定义住在发行版里
+// （客户端接入是产品取舍，2026-09-20 搬走）。窗口 env 的**名字**如今也来自定义
+// （agentapi.Agent.ContextWindowEnv / AutoCompactEnv）——内核不认识任何一家的变量名，
+// 所以这里用合成的名字，测的是「配置里声明了就按定义的名字注入」这条机制。
+func testAgent() *agentapi.Agent {
+	return &agentapi.Agent{
+		ID:               "test-client",
+		Bin:              []string{"test-client"},
+		Dialect:          "anthropic",
+		BaseURLEnv:       "TEST_BASE_URL",
+		AuthEnv:          "TEST_API_KEY",
+		ContextWindowEnv: "TEST_MAX_CONTEXT_TOKENS",
+		AutoCompactEnv:   "TEST_AUTO_COMPACT_WINDOW",
+		// 三个槽位与档位一一对应：这样断言读起来就是「槽位拿到自己那一档」，
+		// 不需要知道任何一家客户端的槽位命名（claude 的 opus/fable/haiku 是它的知识）。
+		Slots: []agentapi.Slot{
+			{Name: "heavy", Tier: "heavy", EnvVar: "TEST_HEAVY_MODEL"},
+			{Name: "normal", Tier: "normal", EnvVar: "TEST_NORMAL_MODEL"},
+			{Name: "light", Tier: "light", EnvVar: "TEST_LIGHT_MODEL"},
+		},
+	}
+}
+
 func TestBuildInjectWindowEnv(t *testing.T) {
 	sandboxStore(t)
 	st := &domain.State{Port: 8899}
-	a := claudecode.Agent()
+	a := testAgent()
 
 	t.Run("声明了窗口的 profile → 两个 env 都注入", func(t *testing.T) {
 		inject, _ := buildInject(a, st, "glm", "")
-		if got := inject["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; got != "1000000" {
+		if got := inject["TEST_MAX_CONTEXT_TOKENS"]; got != "1000000" {
 			t.Errorf("MAX_CONTEXT_TOKENS = %q，应为 1000000", got)
 		}
-		if got := inject["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; got != "500000" {
+		if got := inject["TEST_AUTO_COMPACT_WINDOW"]; got != "500000" {
 			t.Errorf("AUTO_COMPACT_WINDOW = %q，应为 500000", got)
 		}
 	})
 
 	t.Run("没声明的 profile → 不注入", func(t *testing.T) {
 		inject, _ := buildInject(a, st, "tiny", "")
-		if _, has := inject["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; has {
+		if _, has := inject["TEST_MAX_CONTEXT_TOKENS"]; has {
 			t.Error("tiny 没配 context_window，不该注入 MAX_CONTEXT_TOKENS")
 		}
-		if _, has := inject["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; has {
+		if _, has := inject["TEST_AUTO_COMPACT_WINDOW"]; has {
 			t.Error("tiny 没配 auto_compact_window，不该注入 AUTO_COMPACT_WINDOW")
 		}
 	})
 
 	t.Run("不存在的 profile → fail-open 不注入", func(t *testing.T) {
 		inject, _ := buildInject(a, st, "ghost", "")
-		if _, has := inject["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; has {
+		if _, has := inject["TEST_MAX_CONTEXT_TOKENS"]; has {
 			t.Error("profile 不存在时窗口 env 不该出现")
 		}
 	})
@@ -85,10 +108,10 @@ func TestBuildInjectWindowEnv(t *testing.T) {
 			t.Fatal(err)
 		}
 		inject, _ := buildInject(a, st, "glm", "")
-		if got := inject["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; got != "1000000" {
+		if got := inject["TEST_MAX_CONTEXT_TOKENS"]; got != "1000000" {
 			t.Errorf("MAX_CONTEXT_TOKENS = %q，应为 1000000", got)
 		}
-		if _, has := inject["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; has {
+		if _, has := inject["TEST_AUTO_COMPACT_WINDOW"]; has {
 			t.Error("没配 auto_compact_window 就不该注入")
 		}
 	})
@@ -100,35 +123,35 @@ func TestBuildInjectWindowEnv(t *testing.T) {
 func TestBuildInjectModelNames(t *testing.T) {
 	sandboxStore(t)
 	st := &domain.State{Port: 8899}
-	a := claudecode.Agent()
+	a := testAgent()
 
 	t.Run("默认（动态）：槽位 = 档位名，base URL 不带 /p/", func(t *testing.T) {
 		inject, _ := buildInject(a, st, "glm", "")
-		if got := inject["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:8899/a/claude" {
+		if got := inject["TEST_BASE_URL"]; got != "http://127.0.0.1:8899/a/test-client" {
 			t.Errorf("BASE_URL = %q", got)
 		}
 		// 四档化（2026-09-16）：opus 槽 = 主力档 normal，fable 槽才是 heavy
-		if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "normal" {
-			t.Errorf("动态模式槽位应是档位名，OPUS_MODEL = %q", got)
+		if got := inject["TEST_NORMAL_MODEL"]; got != "normal" {
+			t.Errorf("动态模式槽位应是档位名，NORMAL_MODEL = %q", got)
 		}
-		if got := inject["ANTHROPIC_DEFAULT_FABLE_MODEL"]; got != "heavy" {
-			t.Errorf("FABLE_MODEL = %q，应为 heavy", got)
+		if got := inject["TEST_HEAVY_MODEL"]; got != "heavy" {
+			t.Errorf("HEAVY_MODEL = %q，应为 heavy", got)
 		}
-		if got := inject["ANTHROPIC_DEFAULT_HAIKU_MODEL"]; got != "light" {
-			t.Errorf("HAIKU_MODEL = %q，应为 light", got)
+		if got := inject["TEST_LIGHT_MODEL"]; got != "light" {
+			t.Errorf("LIGHT_MODEL = %q，应为 light", got)
 		}
 	})
 
 	t.Run("显式 profile（钉死）：槽位 = 真实模型名，base URL 带 /p/", func(t *testing.T) {
 		inject, _ := buildInject(a, st, "glm", "glm")
-		if got := inject["ANTHROPIC_BASE_URL"]; got != "http://127.0.0.1:8899/a/claude/p/glm" {
+		if got := inject["TEST_BASE_URL"]; got != "http://127.0.0.1:8899/a/test-client/p/glm" {
 			t.Errorf("BASE_URL = %q", got)
 		}
-		if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "glm-5.3" {
-			t.Errorf("钉死模式应是真实名，OPUS_MODEL = %q", got)
+		if got := inject["TEST_NORMAL_MODEL"]; got != "glm-5.3" {
+			t.Errorf("钉死模式应是真实名，NORMAL_MODEL = %q", got)
 		}
-		if got := inject["ANTHROPIC_DEFAULT_HAIKU_MODEL"]; got != "glm-4.5-air" {
-			t.Errorf("HAIKU_MODEL = %q，应为 glm-4.5-air", got)
+		if got := inject["TEST_LIGHT_MODEL"]; got != "glm-4.5-air" {
+			t.Errorf("LIGHT_MODEL = %q，应为 glm-4.5-air", got)
 		}
 	})
 
@@ -136,10 +159,10 @@ func TestBuildInjectModelNames(t *testing.T) {
 		// 默认链头是 glm，--profile tiny：真名必须是 tiny 的，不然界面
 		// 显示的和实际跑的对不上
 		inject, _ := buildInject(a, st, "tiny", "tiny")
-		if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "glm-4-plus" {
-			t.Errorf("OPUS_MODEL = %q，应为 tiny 的 glm-4-plus", got)
+		if got := inject["TEST_NORMAL_MODEL"]; got != "glm-4-plus" {
+			t.Errorf("NORMAL_MODEL = %q，应为 tiny 的 glm-4-plus", got)
 		}
-		if _, has := inject["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; has {
+		if _, has := inject["TEST_MAX_CONTEXT_TOKENS"]; has {
 			t.Error("窗口应该跟被选中的 profile（tiny，没声明）走")
 		}
 	})
@@ -151,11 +174,11 @@ func TestBuildInjectModelNames(t *testing.T) {
 func TestBuildInjectOverridesInherited(t *testing.T) {
 	sandboxStore(t)
 	st := &domain.State{Port: 8899}
-	a := claudecode.Agent()
+	a := testAgent()
 
-	t.Setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "666") // 用户自己设过别的值
+	t.Setenv("TEST_AUTO_COMPACT_WINDOW", "666") // 用户自己设过别的值
 	inject, _ := buildInject(a, st, "glm", "")
-	if got := inject["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; got != "500000" {
+	if got := inject["TEST_AUTO_COMPACT_WINDOW"]; got != "500000" {
 		t.Fatalf("profile 的声明应该赢过用户环境里的旧值: %q", got)
 	}
 }
@@ -170,7 +193,7 @@ func TestBuildInjectOverridesInherited(t *testing.T) {
 func TestBuildInjectWarnsWhenConfigUnreadable(t *testing.T) {
 	sandboxStore(t)
 	st := &domain.State{Port: 8899}
-	a := claudecode.Agent()
+	a := testAgent()
 
 	// 把 providers.json 弄坏：Load 在第一步就失败。
 	p := filepath.Join(os.Getenv("NEWGATE_HOME"), "providers.json")
@@ -183,10 +206,10 @@ func TestBuildInjectWarnsWhenConfigUnreadable(t *testing.T) {
 		t.Fatal("配置读不出来时必须给出警告，否则用户只看到「窗口没生效」而不知道原因")
 	}
 	// fail-open：槽位仍然注入了（档位名），只是不是真实模型名。
-	if got := inject["ANTHROPIC_DEFAULT_OPUS_MODEL"]; got != "normal" {
+	if got := inject["TEST_NORMAL_MODEL"]; got != "normal" {
 		t.Errorf("读不到配置时槽位应保持档位名 normal，实际 %q", got)
 	}
-	if _, has := inject["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; has {
+	if _, has := inject["TEST_MAX_CONTEXT_TOKENS"]; has {
 		t.Error("读不到配置时不该有窗口声明")
 	}
 }

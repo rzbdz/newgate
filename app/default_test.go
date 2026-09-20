@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
 	modules "github.com/rzbdz/newgate/component"
@@ -50,13 +49,10 @@ func TestDefaultGraphLayering(t *testing.T) {
 	pairs := []struct{ owner, registrant, why string }{
 		{"config", "runtime", "runtime 读配置"},
 		{"config", "gateway", "gateway 读配置"},
-		{"config", "opencode-omo", "omo 槽位读配置"},
 		{"config-hook", "runtime", "runtime 用 AgentCatalog"},
-		{"config-hook", "claudecode", "claudecode 注册 agent 与 state 字段"},
 		{"config-hook", "plugin-manager", "plugin-manager 注册 state 字段"},
 		{"runtime", "wrapper", "wrapper 懒启动代理"},
 		{"gateway", "thinking", "thinking 注册请求插件"},
-		{"gateway", "claudecode", "claudecode 注册请求插件"},
 	}
 	for _, p := range pairs {
 		if at(p.owner) > at(p.registrant) {
@@ -65,17 +61,15 @@ func TestDefaultGraphLayering(t *testing.T) {
 		}
 	}
 
-	// 客户端目录与它带来的接管配置：**经端口问，而不是经组合根的门面**。
-	// 组合根不认识任何模块（见 direction_test.go），所以它没有 Get/Names 之类的
-	// 便利方法——那类方法每加一个都是一条「app → 那个模块」的依赖边，而且只为
-	// 测试方便存在。
-	catalog := modules.MustGet(app.Context(), agentapi.AgentCatalogCapability)
-	if got, want := catalog.Names(), []string{"claude", "opencode"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("agents = %v, want %v", got, want)
-	}
-	opencode, ok := catalog.Get("opencode")
-	if !ok || opencode.Config == nil {
-		t.Fatal("opencode takeover was not injected by opencode-omo")
+	// 客户端目录：**经端口问，而不是经组合根的门面**。组合根不认识任何模块
+	// （见 direction_test.go），所以它没有 Get/Names 之类的便利方法——那类方法每加
+	// 一个都是一条「app → 那个模块」的依赖边，而且只为测试方便存在。
+	//
+	// 这里**只断言端口在**，不断言里面有谁：客户端接入（claude / opencode）是产品
+	// 取舍，2026-09-20 起住在发行版里，内核这张图里一个客户端都没有——空目录是它的
+	// 正常状态。谁被支持由发行版的测试断言（那边有 claude/opencode/omo）。
+	if _, ok := modules.Get(app.Context(), agentapi.AgentCatalogCapability); !ok {
+		t.Fatal("图里没有客户端目录端口——接管机制就没有登记处了")
 	}
 }
 
@@ -137,8 +131,11 @@ func TestGatewayReceivesModuleHooks(t *testing.T) {
 	for _, plugin := range special.Plugins() {
 		names = append(names, plugin.Name())
 	}
+	// 内核自己的插件：always-thinks（thinking 模块的兜底翻译器）。
+	// claude-bg 以前也在这张清单里——它跟着 claudecode 搬去发行版了（客户端接入
+	// 是产品取舍），发行版那边有一条同样的断言守着它。
 	for _, want := range []string{
-		"claude-bg", "always-thinks",
+		"always-thinks",
 	} {
 		found := false
 		for _, name := range names {

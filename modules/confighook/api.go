@@ -53,6 +53,19 @@ type Agent struct {
 	UnsetEnv   []string
 	Notes      string
 	Config     ConfigTakeover
+
+	// ContextWindowEnv / AutoCompactEnv 是「窗口声明」两个环境变量的**名字**：
+	// 前者走客户端对「未知模型」的窗口假设，后者是它自己的 compact 触发点。
+	//
+	// 名字是**客户端的知识**（Claude Code 叫 CLAUDE_CODE_MAX_CONTEXT_TOKENS），
+	// 所以由 agent 定义填，内核只负责「配置里声明了就注进去」。
+	// 空 = 这个客户端不认识这两种变量（比如 opencode），那就不注入。
+	//
+	// 2026-09-20 之前这两个名字硬编码在 modules/runtime/launch 里——那是内核在
+	// 认识某一家客户端的内部变量名，方向反了。搬到定义上是同一个动作的延续：
+	// 客户端接入归发行版（见发行版的 modules/claudecode），内核只提供这张表。
+	ContextWindowEnv string
+	AutoCompactEnv   string
 }
 
 // TakeoverReport 记录一次配置接管实际改了什么；接管不能静默成功。

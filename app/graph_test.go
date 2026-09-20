@@ -4,8 +4,7 @@ import (
 	"context"
 	"testing"
 
-	modules "github.com/rzbdz/newgate/component"
-	agentapi "github.com/rzbdz/newgate/modules/confighook"
+	"github.com/rzbdz/newgate/modules/gateway/special"
 	"github.com/rzbdz/newgate/testing/testkit"
 )
 
@@ -46,10 +45,21 @@ func TestGraphCanBeRebuiltAfterStop(t *testing.T) {
 	if got := second.ComponentNames(); len(got) != len(firstNames) {
 		t.Fatalf("两次装配的组件数不同：%v vs %v", firstNames, got)
 	}
-	// 客户端目录也必须干净：第二次仍应只有 claude 和 opencode，不该翻倍。
-	catalog := modules.MustGet(second.Context(), agentapi.AgentCatalogCapability)
-	if got := catalog.Names(); len(got) != 2 {
-		t.Fatalf("第二次装配的客户端目录 = %v，期望恰好 [claude opencode]", got)
+	// 进程级注册也必须干净。2026-09-20 之前这里数的是客户端目录（claude/opencode
+	// 由客户端模块注册）——那些模块搬去发行版了，内核这一侧剩下的是**请求插件注册表**：
+	// 第二次装配之后它仍应只有内核自己那些插件，一个都不许翻倍。
+	plugins := special.Plugins()
+	seen := map[string]int{}
+	for _, plugin := range plugins {
+		seen[plugin.Name()]++
+	}
+	for name, n := range seen {
+		if n != 1 {
+			t.Fatalf("插件 %s 注册了 %d 次（两次装配之间没撤干净）：%v", name, n, seen)
+		}
+	}
+	if len(plugins) == 0 {
+		t.Fatal("内核一个请求插件都没有——这条判据退化了（它本来靠插件数当残留的探针）")
 	}
 }
 

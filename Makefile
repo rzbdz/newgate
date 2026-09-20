@@ -112,18 +112,19 @@ install-static: static
 clean:
 	rm -rf $(OUT) $(DIST)
 
-# 零 token 端到端：假上游 + 假 opencode 客户端
+## e2e: 零 token 端到端（内核的**机制面**）
+##
+## 内容是：真二进制起来当代理 → curl 打数据面（档位解析、上游严格性）→ 控制端点
+## （停机、优雅交接）→ 运行期开关与 schema-repair。**产品面**（真客户端接管、后台
+## 分类器改道、窗口注入、DeepSeek 尾部形状）跟着那些模块住在发行版里，由发行版的
+## mock/ 脚本锁——那边跑的是同一份内核机制，只是经过了产品的装配。
 e2e: build
-	@bash mock/e2e.sh
-
-## e2e-claude: 零 token 端到端（Claude Code 侧，覆盖面最广的一份）
-e2e-claude: build
 	@bash mock/e2e_claude.sh
 
 ## check: 换版本之前跑这个。全绿才有资格谈上线。
-check: check-generate check-fmt vet test e2e e2e-claude
+check: check-generate check-fmt vet test e2e
 	@echo
-	@echo "✓ 全绿：静态检查 + 单测 + 两条零 token 端到端"
+	@echo "✓ 全绿：静态检查 + 单测 + 零 token 端到端（机制面）"
 
 ## ci: 在本地按 GitHub Actions 的三档跑一遍，**推之前先跑这个**。
 ##
@@ -149,10 +150,9 @@ ci:
 	echo "── race: 竞态检测" && go test -race ./... && \
 	echo "── e2e: 零 token 端到端" && \
 	$(MAKE) --no-print-directory e2e && \
-	$(MAKE) --no-print-directory e2e-claude && \
 	echo && echo "✓ CI 三档本地全绿（static / race / e2e）"
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
 	@echo "  build / install / test / test-race / fmt / vet / clean"
-	@echo "  e2e / e2e-claude / check / ci / generate / check-generate"
+	@echo "  e2e / check / ci / generate / check-generate"

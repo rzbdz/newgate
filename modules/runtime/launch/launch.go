@@ -103,9 +103,10 @@ func Launch(a *agentapi.Agent, args []string, o Options) int {
 //     模型名**。本次调用已被用户钉在这个 profile 上，显示的就是这次
 //     真用的——钉死才配得上真名。
 //
-// 窗口声明两条模式都注入：CLAUDE_CODE_MAX_CONTEXT_TOKENS 走客户端的
-// 「未知模型」分支（档位名和真实名对它都是未知，效果相同），
-// AUTO_COMPACT_WINDOW 无条件优先级最高——窗口修复不依赖命名模式。
+// 窗口声明两条模式都注入：窗口 env 走客户端的「未知模型」分支（档位名和真实名
+// 对它都是未知，效果相同），compact env 无条件优先级最高——窗口修复不依赖命名模式。
+// **两个变量的名字来自 agent 定义**（`ContextWindowEnv` / `AutoCompactEnv`）：
+// 那是客户端的知识，内核不认识任何一家的变量名（2026-09-20 之前这里是写死的）。
 // 返回的第二项是「本该注入但没注入成」的话，由调用方打到 stderr。读配置失败
 // 不影响启动（fail-open：代理仍能按档位名路由），但它会让这次调用少注入真实
 // 模型名与窗口声明——后者不给的话 Claude Code 会按 200k 假设提前 compact，是
@@ -136,11 +137,11 @@ func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) (
 			if p.Name != active {
 				continue
 			}
-			if p.ContextWindow > 0 {
-				inject["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = strconv.Itoa(p.ContextWindow)
+			if p.ContextWindow > 0 && a.ContextWindowEnv != "" {
+				inject[a.ContextWindowEnv] = strconv.Itoa(p.ContextWindow)
 			}
-			if p.AutoCompactWindow > 0 {
-				inject["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = strconv.Itoa(p.AutoCompactWindow)
+			if p.AutoCompactWindow > 0 && a.AutoCompactEnv != "" {
+				inject[a.AutoCompactEnv] = strconv.Itoa(p.AutoCompactWindow)
 			}
 			break
 		}

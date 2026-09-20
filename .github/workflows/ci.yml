@@ -139,7 +139,6 @@ jobs:
         run: make build
 
       - name: opencode 侧端到端
-        run: bash mock/e2e.sh
 
       - name: Claude Code 侧端到端
         run: bash mock/e2e_claude.sh

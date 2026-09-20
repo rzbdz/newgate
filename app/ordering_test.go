@@ -116,7 +116,10 @@ func TestOrderingEdgesStayInsideTheKernel(t *testing.T) {
 		edges[name+".After"] = shape.after
 	}
 
-	if plugins < 3 || len(defined) == 0 {
+	// 下界是 1 而不是 3：内核这一侧现在只剩 always-thinks 一个请求插件（客户端那些
+	// 跟着 claudecode 搬去发行版了）。这条判据的存在意义是「扫到的东西还像插件」，
+	// 不是数量——真掉到 0 才是判据坏了。
+	if plugins < 1 || len(defined) == 0 {
 		t.Fatalf("扫到 %d 个插件、%d 个名字——判据退化了（插件形状变了？目录挪了？）",
 			plugins, len(defined))
 	}

@@ -11,14 +11,11 @@ package app
 import (
 	modules "github.com/rzbdz/newgate/component"
 	mod_breaker "github.com/rzbdz/newgate/modules/breaker"
-	mod_claudecode "github.com/rzbdz/newgate/modules/claudecode"
 	mod_cli "github.com/rzbdz/newgate/modules/cli"
 	mod_config "github.com/rzbdz/newgate/modules/config"
 	mod_confighook "github.com/rzbdz/newgate/modules/confighook"
 	mod_entry "github.com/rzbdz/newgate/modules/entry"
 	mod_gateway "github.com/rzbdz/newgate/modules/gateway"
-	mod_opencode "github.com/rzbdz/newgate/modules/opencode"
-	mod_opencodeomo "github.com/rzbdz/newgate/modules/opencodeomo"
 	mod_pluginmanager "github.com/rzbdz/newgate/modules/pluginmanager"
 	mod_runtime "github.com/rzbdz/newgate/modules/runtime"
 	mod_thinking "github.com/rzbdz/newgate/modules/thinking"
@@ -32,14 +29,11 @@ import (
 func coreModules() []Entry {
 	return []Entry{
 		{Dir: "breaker", Component: mod_breaker.New()},
-		{Dir: "claudecode", Component: mod_claudecode.New()},
 		{Dir: "cli", Component: mod_cli.New()},
 		{Dir: "config", Component: mod_config.New()},
 		{Dir: "confighook", Component: mod_confighook.New()},
 		{Dir: "entry", Component: mod_entry.New()},
 		{Dir: "gateway", Component: mod_gateway.New()},
-		{Dir: "opencode", Component: mod_opencode.New()},
-		{Dir: "opencodeomo", Component: mod_opencodeomo.New()},
 		{Dir: "pluginmanager", Component: mod_pluginmanager.New()},
 		{Dir: "runtime", Component: mod_runtime.New()},
 		{Dir: "thinking", Component: mod_thinking.New()},
@@ -50,7 +44,7 @@ func coreModules() []Entry {
 // generatedComponents 是内核自己那张图要装的组件。
 // 顺序不是依赖声明——真实启动顺序由 capability 依赖图在构图期计算。
 func generatedComponents() []modules.Component {
-	out := make([]modules.Component, 0, 13)
+	out := make([]modules.Component, 0, 10)
 	for _, e := range coreModules() {
 		out = append(out, e.Component)
 	}
