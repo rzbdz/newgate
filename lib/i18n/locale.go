@@ -192,6 +192,64 @@ func Install(tag string, led Ledger, catalogs []Catalog, diskDir string) (string
 	return eff, nil
 }
 
+// Extend 把另一份账本与目录**并进**这次已经装好的装配。
+//
+// 为什么需要它：Install 干的是「解析语言 + 重建整张表」，一次装配只该发生一次
+// （那是 modules/locale 的活）。而发行版是**另一个 Go module**，它自己的模块有
+// 自己的界面文案——那些 id 既不在内核的账本里，也不在内核的目录里。让发行版再
+// 调一次 Install 会把内核那份整份冲掉；所以：安装归安装，追加归追加。
+//
+// 调用时机：modules/locale 的 Start 之后。发行版模块写 `Need(localeapi.Capability)`
+// 就拿到了这条顺序边。语言此刻已经定下来，这里只补消息，**不再解析一遍**——不然
+// 两个地方各有一套「谁压过谁」的优先级，迟早对不上。
+//
+// **同 id 不覆盖**：内核已经说过的消息，追加改不动它。要让发行版改内核的措辞，
+// 正路是改内核，或者走磁盘覆盖（`~/.config/newgate/locale/<tag>.json` 的语义本来
+// 就是「盖掉同名键」）。这条保住了「谁拥有这条消息，谁定它的译文」。
+//
+// 账本一起并：`newgate lang` 的覆盖率、`Missing` 的缺口都要把发行版那些消息算进去，
+// 否则发行版的一半界面在仪表盘上根本不存在。
+//
+// `meta.widths` 不并：版式尺寸是**语言**的属性，归内核目录（同一门语言在内核与
+// 发行版里该是同一套列宽）。
+func Extend(led Ledger, catalogs []Catalog) error {
+	mu.Lock()
+	defer mu.Unlock()
+	for _, c := range catalogs {
+		if c.Language == "" {
+			return fmt.Errorf("the appended catalog has no meta.language")
+		}
+		b, known := builtins[c.Language]
+		if !known {
+			b = Catalog{Language: c.Language, Source: SourceLang}
+		}
+		if b.Messages == nil {
+			b.Messages = map[string]Entry{}
+		}
+		for id, e := range c.Messages {
+			if e.Empty() {
+				continue
+			}
+			if _, exists := b.Messages[id]; exists {
+				continue // 内核已经说过的话，追加不改
+			}
+			b.Messages[id] = e
+			// 源语言那条路径是**恒等**的（不查表，代码里写的就是最终文本）。
+			// 往表里写一条等于把它变成「查表的结果」——那性质就没了。
+			if c.Language == current && current != SourceLang {
+				table[id] = e
+			}
+		}
+		builtins[c.Language] = b
+	}
+	for id, e := range led.Messages {
+		if _, exists := ledger[id]; !exists {
+			ledger[id] = e
+		}
+	}
+	return nil
+}
+
 // T 查一条消息并填上具名占位符。
 //
 // 源语言（或没翻到）时**直接用传进来的那句话**——这不是「回退」，是恒等：

@@ -56,7 +56,7 @@ func CatalogsFromFS(fsys fs.FS, dir string) ([]Catalog, error) {
 		// 文件名与 meta.language 必须一致：不一致时「我改了 zh-Hans.json 怎么没
 		// 生效」会变成一次无解的排查（改的是文件 A，生效的是文件 B）。
 		if want := strings.TrimSuffix(name, ".json"); want != c.Language {
-			return nil, fmt.Errorf("%s/%s: meta.language 是 %q，与文件名不一致",
+			return nil, fmt.Errorf("%s/%s: meta.language is %q, which disagrees with the file name",
 				dir, name, c.Language)
 		}
 		out = append(out, c)
@@ -68,7 +68,7 @@ func CatalogsFromFS(fsys fs.FS, dir string) ([]Catalog, error) {
 func ledgerFromFS(fsys fs.FS, dir string) (Ledger, error) {
 	raw, err := fs.ReadFile(fsys, dir+"/"+LedgerName)
 	if err != nil {
-		return Ledger{}, fmt.Errorf("读不到账本 %s/%s: %w", dir, LedgerName, err)
+		return Ledger{}, fmt.Errorf("cannot read the ledger %s/%s: %w", dir, LedgerName, err)
 	}
 	led, err := ParseLedger(raw)
 	if err != nil {

@@ -74,10 +74,10 @@ func ParseCatalog(raw []byte) (Catalog, error) {
 	dec.DisallowUnknownFields()
 	var f fileJSON
 	if err := dec.Decode(&f); err != nil {
-		return Catalog{}, fmt.Errorf("译文文件解不出来: %w", err)
+		return Catalog{}, fmt.Errorf("the translation file does not parse: %w", err)
 	}
 	if f.Meta.Language == "" {
-		return Catalog{}, fmt.Errorf("译文文件没有 meta.language")
+		return Catalog{}, fmt.Errorf("the translation file has no meta.language")
 	}
 	out := Catalog{
 		Language: f.Meta.Language,
@@ -88,7 +88,7 @@ func ParseCatalog(raw []byte) (Catalog, error) {
 	for id, rawEntry := range f.Messages {
 		e, err := parseEntry(rawEntry)
 		if err != nil {
-			return Catalog{}, fmt.Errorf("消息 %q: %w", id, err)
+			return Catalog{}, fmt.Errorf("message %q: %w", id, err)
 		}
 		out.Messages[id] = e
 	}
@@ -98,7 +98,7 @@ func ParseCatalog(raw []byte) (Catalog, error) {
 func parseEntry(raw json.RawMessage) (Entry, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
-		return Entry{}, fmt.Errorf("空条目")
+		return Entry{}, fmt.Errorf("empty entry")
 	}
 	if trimmed[0] == '"' {
 		var s string
@@ -114,7 +114,7 @@ func parseEntry(raw json.RawMessage) (Entry, error) {
 		return Entry{}, err
 	}
 	if ej.Text == "" && ej.One == "" && ej.Other == "" {
-		return Entry{}, fmt.Errorf("条目里既没有 text 也没有 one/other")
+		return Entry{}, fmt.Errorf("the entry has neither text nor one/other")
 	}
 	return Entry{
 		Text: ej.Text, One: ej.One, Other: ej.Other,
@@ -132,7 +132,7 @@ func MarshalCatalog(c Catalog) ([]byte, error) {
 	for id, e := range c.Messages {
 		raw, err := marshalEntry(e)
 		if err != nil {
-			return nil, fmt.Errorf("消息 %q: %w", id, err)
+			return nil, fmt.Errorf("message %q: %w", id, err)
 		}
 		f.Messages[id] = raw
 	}
@@ -155,7 +155,7 @@ func ParseLedger(raw []byte) (Ledger, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&f); err != nil {
-		return Ledger{}, fmt.Errorf("账本解不出来: %w", err)
+		return Ledger{}, fmt.Errorf("the ledger does not parse: %w", err)
 	}
 	out := Ledger{Messages: make(map[string]LedgerEntry, len(f.Messages))}
 	for id, e := range f.Messages {
@@ -210,7 +210,7 @@ func readOverlay(dir, tag string) (Catalog, bool) {
 	}
 	c, err := ParseCatalog(raw)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "newgate: 忽略解不出来的语言覆盖 %s: %v\n", OverlayPath(dir, tag), err)
+		fmt.Fprintf(os.Stderr, "newgate: ignoring the language overlay %s (it does not parse): %v\n", OverlayPath(dir, tag), err)
 		return Catalog{}, false
 	}
 	c.Builtin = false

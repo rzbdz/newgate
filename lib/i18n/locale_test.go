@@ -325,6 +325,67 @@ func TestErrorCarriesIdentityNotProse(t *testing.T) {
 	}
 }
 
+// TestExtendAddsNewMessagesOnly 锁住「发行版带自己的文案」那条路。
+//
+// 两件事一起锁：(a) 追加的**新** id 立刻生效；(b) 内核已经说过的 id 追加改不动——
+// 措辞的归属权在说话的那一层，改内核的措辞要走内核或磁盘覆盖，不是靠后到的模块
+// 悄悄盖掉。
+func TestExtendAddsNewMessagesOnly(t *testing.T) {
+	install(t, "zh-Hans")
+	if got := T("Proxy", nil); got != "代理" {
+		t.Fatalf("装完就该是中文: %q", got)
+	}
+
+	const own = "hello from the distribution"
+	err := Extend(Ledger{Messages: map[string]LedgerEntry{
+		own: {Where: "modules/hello/hello.go:1"},
+	}}, []Catalog{{Language: "zh-Hans", Messages: map[string]Entry{
+		own:     {Text: "发行版自己的一句话"},
+		"Proxy": {Text: "内核已经说过的，不该被改掉"},
+	}}})
+	if err != nil {
+		t.Fatalf("Extend: %v", err)
+	}
+
+	if got := T(own, nil); got != "发行版自己的一句话" {
+		t.Errorf("追加的译文没生效: %q", got)
+	}
+	if got := T("Proxy", nil); got != "代理" {
+		t.Errorf("追加盖掉了内核已有的消息: %q", got)
+	}
+	// 覆盖率要把追加的算进去：否则发行版那一半界面在 `newgate lang` 上不存在。
+	var zh Info
+	for _, in := range Available() {
+		if in.Language == "zh-Hans" {
+			zh = in
+		}
+	}
+	if zh.Total != len(testLedger().Messages)+1 {
+		t.Errorf("追加后账本 = %d 条，想要 %d 条", zh.Total, len(testLedger().Messages)+1)
+	}
+	for _, id := range Missing("zh-Hans") {
+		if id == own {
+			t.Error("追加的这条已经翻了，不该还算缺")
+		}
+	}
+
+	// 源语言下追加不改变恒等路径：那句英文原样出来，一个字节都不动。
+	install(t, SourceLang)
+	if err := Extend(Ledger{}, []Catalog{{Language: SourceLang, Messages: map[string]Entry{
+		own: {Text: "不该在这条路径上出现"},
+	}}}); err != nil {
+		t.Fatalf("Extend: %v", err)
+	}
+	if got := T(own, nil); got != own {
+		t.Errorf("源语言路径被追加改变了: %q", got)
+	}
+
+	// 没写 meta.language 的目录是坏目录：静默丢掉它等于发行版的界面永远说英文。
+	if err := Extend(Ledger{}, []Catalog{{Messages: map[string]Entry{own: {Text: "x"}}}}); err == nil {
+		t.Error("没写 meta.language 的目录该报错")
+	}
+}
+
 func TestCatalogRoundTripKeepsEverything(t *testing.T) {
 	in := Catalog{
 		Language: "zh-Hans",

@@ -15,6 +15,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -44,6 +45,17 @@ func Dir(root string) ([]Call, error) {
 			switch d.Name() {
 			case ".git", "bin", "dist", "node_modules", "vendor":
 				return fs.SkipDir
+			}
+			// 嵌套的 Go module 是**另一个产品**：发行版的 `core/` 就是内核那份
+			// submodule，它自带 go.mod。扫进别人家去，会把内核的消息算进发行版的
+			// 账本——两边共用这把尺子，量的却不是同一棵树。
+			//
+			// 判据用 go.mod，不用目录名：名字是惯例（`core` 只是今天这么叫），
+			// 「这里是不是另一个 module」才是这件事本身。
+			if p != root {
+				if _, serr := os.Stat(filepath.Join(p, "go.mod")); serr == nil {
+					return fs.SkipDir
+				}
 			}
 			return nil
 		}
