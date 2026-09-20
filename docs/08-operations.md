@@ -88,7 +88,11 @@ build/build.sh dist/      # 本机平台；NEWGATE_PLATFORMS 可出平台矩阵
 
 替换运行中二进制应先写新文件再 rename，避免 `Text file busy`。升级后比较
 `/proc/<pid>/exe` 与目标二进制摘要，确认 daemon 已换成新版本——另外核一下
-`newgate plugin` 的模块数（19 个模块 / 4 个可运行期开关点），少了就是装错了。
+`newgate plugin` 的模块数（发行版 `dist.json` 那一份今天是 **23 个模块 / 4 个
+可运行期开关点**；内核自带的那份是 **13 个模块 / 0 个开关点**），少了就是装错了。
+这个数跟着**发行版的规格书**走（装一个模块就加一），所以对不上时先看
+`git -C core log --oneline -3` 里有没有「bump the kernel」——那份提交改了 gitlink，
+模块表也就跟着变了。
 
 ## 5. 沙箱
 

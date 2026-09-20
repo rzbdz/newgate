@@ -200,8 +200,11 @@ mv -f /root/.local/bin/.newgate.new /root/.local/bin/newgate   # 换名覆盖
 /root/.local/bin/newgate restart         # 优先走优雅交接（socket fd 移交）
 ```
 
-**换完核一下模块数**：`newgate plugin | head -1` 应当是 **19 个模块 · 4 个可运行期
+**换完核一下模块数**：`newgate plugin | head -1` 应当是 **23 个模块 · 4 个可运行期
 开关点**。少了就是装错了（内核自带的二进制只有 13 个模块、0 个开关点）。
+
+这个数跟着**发行版的规格书**走（装一个模块就加一），所以对不上时先看发行版仓库里
+有没有一条「bump the kernel」的提交——那份提交挪了 gitlink，模块表也就跟着变了。
 
 - **为什么不是 `cp` 直接覆盖**：Text file busy——运行中的进程占着 inode。
   `mv`（rename）换目录项，老进程继续用旧 inode 排空在途请求。
