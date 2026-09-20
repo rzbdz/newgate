@@ -4,6 +4,7 @@
 // 子命令分两类，别混：
 //
 //	不出网、不花钱（CI 里跑）      extract / check / status / missing
+//	改了措辞不想重翻           rename
 //	要调 LLM（**只在开发者本地跑**）  sync
 //
 // 用户定的规矩：翻译不进任何自动化流程。CI 只跑前一类——账本是否过期、占位符是否
@@ -42,6 +43,8 @@ func main() {
 		err = cmdAudit(args)
 	case "missing":
 		err = cmdMissing(args)
+	case "rename":
+		err = cmdRename(args)
 	case "sync":
 		err = cmdSync(args)
 	case "translate":
@@ -66,6 +69,7 @@ func usage() {
   status                每种语言的覆盖率与机翻计数
   audit [-seed]         看/写「还没迁移的文件」清单（-seed 按现状播种）
   missing [-lang zh-Hans]  列出缺哪些译文
+  rename <旧> <新>      把译文从旧措辞搬到新措辞上（改了措辞但意思没变时用，不花 LLM）
   sync [-lang zh-Hans]  把缺的译文补齐（调本机网关跑 LLM，**开发者本地跑**）
   translate             同 sync，别名
 `)
