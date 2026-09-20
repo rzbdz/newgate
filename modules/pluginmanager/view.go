@@ -69,13 +69,22 @@ func viewConcepts(m Manager) ([]view.Concept, error) {
 			writable = append(writable, it)
 		}
 	}
+	// 模块清单**先**放进来，而且不受下面那个「一个开关点都没有就别报」的早退
+	// 影响：它回答的是另一个问题（这个构建由哪些模块组成），而骨架发行版恰恰
+	// 一个开关点都没有——那种构建最需要这张清单（「装了没有」是升级后第一个
+	// 要确认的事，见 docs/08-operations.md）。
+	out := []view.Concept{{
+		ID: "plugin-manager.modules", Kind: view.KindTable,
+		Title: i18n.T("Modules in this build", nil),
+		Data:  moduleTable(m),
+	}}
+
 	if len(writable) == 0 && len(footguns) == 0 {
-		// 一个开关点都没上报（比如骨架发行版）：不报概念，而不是报一张空卡片。
-		// 空卡片在界面上看起来像「有东西没加载出来」。
-		return nil, nil
+		// 一个开关点都没上报（比如骨架发行版）：开关那两张卡片不报，而不是报
+		// 空卡片。空卡片在界面上看起来像「有东西没加载出来」。
+		return out, nil
 	}
 
-	var out []view.Concept
 	if len(writable) > 0 {
 		out = append(out, view.Concept{
 			ID: "plugin-manager.switches", Kind: view.KindToggles,
@@ -100,6 +109,56 @@ func viewConcepts(m Manager) ([]view.Concept, error) {
 		})
 	}
 	return out, nil
+}
+
+// moduleTable 是**这个构建由哪些模块组成**。
+//
+// 顺序与 `newgate plugin` 一字不差：分类按 DisplayOrder（那是有意义的——地基、
+// 数据面、界面、客户端、模型、桥），组内按名字（启动顺序对读的人没有意义，
+// 拿它排会让人每次都要重新找一遍）。两个界面用同一个顺序，是因为它们是同一个
+// 问题的两个入口：在浏览器里看到 arch-diagram 排在「其它」，就该和终端里一致。
+//
+// 「装了什么」在排障时是第一个要确认的事（升级后模块数不对 = 装错了产物，
+// 见 docs/08-operations.md），所以这张表报的是**全部**模块，不管它有没有开关点。
+func moduleTable(m Manager) view.Table {
+	t := view.Table{
+		Columns: []view.Column{
+			{ID: "module", Label: i18n.T("module", nil)},
+			{ID: "type", Label: i18n.T("type", nil)},
+			{ID: "switches", Label: i18n.T("Switch points", nil), Align: "right"},
+		},
+		Rows: []map[string]view.Cell{},
+	}
+	all := m.Modules()
+	for _, typ := range DisplayOrder() {
+		var group []Module
+		for _, mod := range all {
+			if groupOf(mod.Type) == typ {
+				group = append(group, mod)
+			}
+		}
+		sort.Slice(group, func(i, j int) bool { return group[i].Name < group[j].Name })
+		for _, mod := range group {
+			t.Rows = append(t.Rows, map[string]view.Cell{
+				"module": {Text: mod.Name},
+				// 分类词是机器标记（infra / gateway / …），原样显示：它是
+				// `newgate plugin` 的分组名，也是模块自己声明的 Type，翻它
+				// 等于让两个界面用两个词说同一件事。
+				"type":     {Text: string(groupOf(mod.Type))},
+				"switches": switchCountCell(len(mod.Switches)),
+			})
+		}
+	}
+	return t
+}
+
+func switchCountCell(n int) view.Cell {
+	if n == 0 {
+		// 「一个都没有」与「0 个」不是一回事：前者是「这个模块不支持运行期开关」，
+		// 后者不是一个可能的状态（登记了就是至少一个）。用横杠，别用 0。
+		return view.Cell{Text: "-"}
+	}
+	return view.Cell{Text: i18n.T("{n}", i18n.A{"n": n})}
 }
 
 // switchOn 是**当前生效**的状态：出厂开着的（kill switch）看 Off 表，出厂关着的

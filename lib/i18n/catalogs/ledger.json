@@ -855,6 +855,9 @@
     "Modules": {
       "where": "modules/cli/extension/extension.go:239"
     },
+    "Modules in this build": {
+      "where": "modules/pluginmanager/view.go:78"
+    },
     "Most likely cause: an outbound proxy is hijacking loopback requests. Run newgate doctor": {
       "where": "modules/runtime/commands.go:248"
     },
@@ -1147,7 +1150,7 @@
       "where": "modules/runtime/launch.go:72"
     },
     "Runtime switches": {
-      "where": "modules/pluginmanager/view.go:82"
+      "where": "modules/pluginmanager/view.go:91"
     },
     "Saved to state.json: {tag}": {
       "where": "modules/locale/command.go:61",
@@ -1185,8 +1188,11 @@
     "Stop the proxy + every agent back to a direct connection": {
       "where": "modules/runtime/commands.go:586"
     },
+    "Switch points": {
+      "where": "modules/pluginmanager/view.go:128"
+    },
     "Switches that need a time limit": {
-      "where": "modules/pluginmanager/view.go:98"
+      "where": "modules/pluginmanager/view.go:107"
     },
     "TCP connection": {
       "where": "modules/gateway/probe/net.go:78"
@@ -2286,6 +2292,9 @@
         "tiers"
       ]
     },
+    "module": {
+      "where": "modules/pluginmanager/view.go:126"
+    },
     "module \"{target}\" reports no switch points, cannot be toggled at runtime (a v1 limitation)": {
       "where": "modules/pluginmanager/command.go:277",
       "args": [
@@ -2379,7 +2388,7 @@
       ]
     },
     "no switch point named \"{path}\" — the page is probably stale, reload it": {
-      "where": "modules/pluginmanager/view.go:141",
+      "where": "modules/pluginmanager/view.go:200",
       "args": [
         "path"
       ]
@@ -3168,7 +3177,7 @@
       ]
     },
     "the switches in this request are not readable: {err}": {
-      "where": "modules/pluginmanager/view.go:126",
+      "where": "modules/pluginmanager/view.go:185",
       "args": [
         "err"
       ]
@@ -3302,6 +3311,9 @@
     },
     "turned on": {
       "where": "modules/pluginmanager/command.go:368"
+    },
+    "type": {
+      "where": "modules/pluginmanager/view.go:127"
     },
     "unavailable": {
       "where": "modules/config/commands.go:216"
@@ -3602,6 +3614,12 @@
         "name"
       ]
     },
+    "{n}": {
+      "where": "modules/pluginmanager/view.go:161",
+      "args": [
+        "n"
+      ]
+    },
     "{n} candidate skipped": {
       "where": "modules/config/commands.go:542",
       "args": [
@@ -3783,7 +3801,7 @@
       ]
     },
     "{why} — footguns need a time limit; use: newgate plugin {path} on 5m": {
-      "where": "modules/pluginmanager/view.go:93",
+      "where": "modules/pluginmanager/view.go:102",
       "args": [
         "path",
         "why"

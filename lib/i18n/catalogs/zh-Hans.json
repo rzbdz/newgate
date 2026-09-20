@@ -700,6 +700,10 @@
       "text": "模块",
       "reviewed": true
     },
+    "Modules in this build": {
+      "text": "这个构建里的模块",
+      "reviewed": true
+    },
     "Most likely cause: an outbound proxy is hijacking loopback requests. Run newgate doctor": {
       "text": "最常见原因：出站代理把 loopback 请求劫走了。跑 newgate doctor。",
       "reviewed": true
@@ -1002,6 +1006,10 @@
     },
     "Stop the proxy + every agent back to a direct connection": {
       "text": "停代理 + 所有 agent 恢复直连",
+      "reviewed": true
+    },
+    "Switch points": {
+      "text": "开关点",
       "reviewed": true
     },
     "Switches that need a time limit": {
@@ -1992,6 +2000,10 @@
       "text": "模型 {model} 既不是已知档位（{tiers}），也不在任何 profile 的绑定里。跑 `newgate tier` 看可用绑定",
       "reviewed": true
     },
+    "module": {
+      "text": "模块",
+      "reviewed": true
+    },
     "module \"{target}\" reports no switch points, cannot be toggled at runtime (a v1 limitation)": {
       "text": "模块 \"{target}\" 没有上报任何开关点，无法 runtime 开关（v1 的局限）",
       "reviewed": true
@@ -2860,6 +2872,10 @@
       "text": "已开",
       "reviewed": true
     },
+    "type": {
+      "text": "分类",
+      "reviewed": true
+    },
     "unavailable": {
       "text": "不可用",
       "reviewed": true
@@ -3078,6 +3094,10 @@
     },
     "{name} did not claim": {
       "text": "{name} 未认领",
+      "reviewed": true
+    },
+    "{n}": {
+      "text": "{n}",
       "reviewed": true
     },
     "{n} candidate skipped": {

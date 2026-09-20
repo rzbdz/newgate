@@ -92,8 +92,9 @@ func TestViewReportsTheEffectiveState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		writable := switchConcept(t, concepts)
 		out := map[string]bool{}
-		for _, item := range concepts[0].Data.(switchesData).Items {
+		for _, item := range writable.Data.(switchesData).Items {
 			out[item.ID] = item.Value
 		}
 		return out
@@ -128,7 +129,7 @@ func TestViewApplyWritesWithABaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := concepts[0]
+	c := switchConcept(t, concepts)
 	base := c.Data.(switchesData).Base
 
 	rev, err := c.Apply(json.RawMessage(`{"demo.kill":false}`), base)
@@ -163,11 +164,89 @@ func TestViewApplyRejectsAnUnknownSwitch(t *testing.T) {
 	m := start(t)
 	register(t, m, "demo", sw("demo.kill", "safe", true))
 	concepts, _ := viewConcepts(m)
-	_, err := concepts[0].Apply(json.RawMessage(`{"demo.gone":true}`), store.Revision(paths.StateFile()))
+	_, err := switchConcept(t, concepts).Apply(
+		json.RawMessage(`{"demo.gone":true}`), store.Revision(paths.StateFile()))
 	if err == nil {
 		t.Fatal("不认识的开关点该报错")
 	}
 	if !strings.Contains(err.Error(), "demo.gone") {
 		t.Errorf("报错要点名是哪一个: %v", err)
 	}
+}
+
+// TestViewReportsModulesWithNoSwitchesAtAll 是**骨架发行版**那条：一个开关点
+// 都没上报时，开关那两张卡片刻意不报（空卡片看起来像「没加载出来」），但模块
+// 清单必须照报——它回答的是另一个问题（这个构建由哪些模块组成），而那种构建
+// 恰恰最需要它：升级完先确认的就是「装的模块对不对」（见 docs/08-operations.md）。
+//
+// 这条也是那个早退分支的棘轮：清单是后来插进去的，很容易被放在 `return` 之后。
+func TestViewReportsModulesWithNoSwitchesAtAll(t *testing.T) {
+	m := start(t)
+
+	concepts, err := viewConcepts(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var table view.Concept
+	for _, c := range concepts {
+		if c.ID == "plugin-manager.modules" {
+			table = c
+		}
+		if c.ID == "plugin-manager.switches" || c.ID == "plugin-manager.footguns" {
+			t.Errorf("一个开关点都没有，不该报 %s（空卡片像「没加载出来」）", c.ID)
+		}
+	}
+	if table.ID == "" {
+		t.Fatal("没有开关点时，模块清单也不报了——骨架发行版就什么都看不见了")
+	}
+	if table.Kind != view.KindTable {
+		t.Errorf("模块清单该是 table，实际 %q", table.Kind)
+	}
+	if table.Apply != nil {
+		t.Error("模块清单是可写的？装什么模块由产物决定，改不了")
+	}
+
+	data := table.Data.(view.Table)
+	if len(data.Columns) == 0 {
+		t.Fatal("模块清单没有列")
+	}
+	columns := map[string]bool{}
+	for _, col := range data.Columns {
+		columns[col.ID] = true
+	}
+	if len(data.Rows) != len(m.Modules()) {
+		t.Errorf("清单该有 %d 行（每个模块一行），实际 %d", len(m.Modules()), len(data.Rows))
+	}
+	for _, row := range data.Rows {
+		if row["module"].Text == "" || row["type"].Text == "" {
+			t.Errorf("每一行都该有模块名与分类: %+v", row)
+		}
+		// 没有开关点的模块显示横杠，不是 0：「一个都没有」与「0 个」不是一回事，
+		// 后者不是可能的状态（登记了就是至少一个）。
+		if row["switches"].Text == "" {
+			t.Errorf("开关点那格是空的: %+v", row)
+		}
+		for id := range row {
+			if !columns[id] {
+				t.Errorf("格子 %q 没有对应的列——前端取不到，这一格是空白", id)
+			}
+		}
+	}
+}
+
+// switchConcept 按 **ID** 取可写的那张开关卡片，**不按下标**。
+//
+// 下标曾经能用，因为那张卡片恰好是第一个产出的。加了模块清单之后它就不是了，
+// 于是按下标的写法取到一张 table，以一个看不懂的类型断言失败告终。ID 才是概念
+// 的稳定身份（见 lib/view 的 Concept.ID）——产出顺序是账本的实现细节，测试不该
+// 依赖它。
+func switchConcept(t *testing.T, concepts []view.Concept) view.Concept {
+	t.Helper()
+	for _, c := range concepts {
+		if c.ID == "plugin-manager.switches" {
+			return c
+		}
+	}
+	t.Fatal("可写的那张开关卡片不见了")
+	return view.Concept{}
 }
