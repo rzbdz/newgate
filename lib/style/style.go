@@ -174,6 +174,37 @@ func stripANSI(s string) string {
 // VisibleWidth 剥掉颜色后的显示宽度。
 func VisibleWidth(s string) int { return Width(stripANSI(s)) }
 
+// widestRun 取一段文本里最长的**不可断片段**的显示宽度。
+//
+// 断点判据：空白与宽字符（CJK）都天然可断——中文按字折行是对的；而一段连续的
+// 窄字符（`special.claude-bg.route_light`、`ANTHROPIC_BASE_URL`）是一个**整体**，
+// 从中间折断得到的是**两个不存在的名字**：既 grep 不到，也拷不走。
+//
+// 表格收窄时拿它当列的下限（见 Table.String）：散文按词折行没问题（词短），
+// 标识符不能被折。
+func widestRun(s string) int {
+	best, cur := 0, 0
+	flush := func() {
+		if cur > best {
+			best = cur
+		}
+		cur = 0
+	}
+	for _, r := range stripANSI(s) {
+		w := runeWidth(r)
+		if r == ' ' || r == '\t' || w > 1 {
+			flush()
+			if w > best {
+				best = w
+			}
+			continue
+		}
+		cur += w
+	}
+	flush()
+	return best
+}
+
 // Pad 把 s 补齐到 w 列（超出则原样返回，绝不截断内容）。
 func Pad(s string, w int) string {
 	if n := w - VisibleWidth(s); n > 0 {
@@ -449,10 +480,17 @@ func (t *Table) String() string {
 		}
 	}
 	widths := make([]int, n)
+	floors := make([]int, n)
 	measure := func(cells []string) {
 		for i, c := range cells {
-			if i < n && VisibleWidth(c) > widths[i] {
-				widths[i] = VisibleWidth(c)
+			if i >= n {
+				continue
+			}
+			if vw := VisibleWidth(c); vw > widths[i] {
+				widths[i] = vw
+			}
+			if wr := widestRun(c); wr > floors[i] {
+				floors[i] = wr
 			}
 		}
 	}
@@ -460,16 +498,44 @@ func (t *Table) String() string {
 	for _, r := range t.rows {
 		measure(r)
 	}
-	// 表格总宽不得超过 75 列。优先收缩最宽的列，每列至少保留 4 列；
-	// 超出的单元格在本列内换行，不截断内容。
+	// 表格总宽不得超过 75 列。优先收缩最宽的列，但**不缩到这一列最长的
+	// 不可断片段以下**（每列至少 4 列）：散文按词折行没问题，机器标识符折断
+	// 出来的是**两个不存在的名字**——既 grep 不到，也拷不走。
+	//
+	// 2026-09-20 加这条下限：英文表头（`description` 比「说明」宽一倍）把中文
+	// 时代那点余量吃掉之后，`newgate metrics` 里的
+	// `special.claude-bg.route_light` 真的被折成了两行（发行版的 e2e 抓到的）。
+	// 那之前"优先收最宽的列"看着很公平，只是它不认识「这一列折不得」。
 	available := MaxColumns - VisibleWidth(t.indent) - 2*(n-1)
 	if available < n {
 		available = n
 	}
+	const minW = 4
+	for i := range floors {
+		if floors[i] < minW {
+			floors[i] = minW
+		}
+	}
+	//
+	// 两轮：先只收**有余量**的列（收不到不可断片段以下）——正常的表格里散文那一列
+	// 有的是余量，一轮就够；实在收不动了（整行都是长标识符）才回到老规则，宁可
+	// 折断一个名字也不能超宽：超过 75 列之后终端自己的自动折行会把表格撕开，
+	// 那比折断一个名字更难读。
 	for sum(widths) > available {
 		widest, room := -1, 0
 		for i, w := range widths {
-			const minW = 4
+			if w-floors[i] > room {
+				widest, room = i, w-floors[i]
+			}
+		}
+		if widest < 0 {
+			break
+		}
+		widths[widest]--
+	}
+	for sum(widths) > available {
+		widest, room := -1, 0
+		for i, w := range widths {
 			if w-minW > room {
 				widest, room = i, w-minW
 			}

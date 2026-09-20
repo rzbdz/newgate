@@ -127,6 +127,33 @@ func TestTableNeverExceedsMaxColumns(t *testing.T) {
 	}
 }
 
+// TestTableNeverBreaksAnIdentifier 锁住列宽的下限：表格整体超宽时，收缩的是
+// **散文**那一列；机器标识符（没有空格的连续窄字符）不能被折断。
+//
+// 2026-09-20 之前没有这条下限，收缩规则是「每轮削最宽的那一列」——看着很公平，
+// 只是它不认识「这一列折不得」。英文表头（`description` 比「说明」宽一倍）把中文
+// 时代那点余量吃掉之后，`newgate metrics` 的 `special.claude-bg.route_light`
+// 被折成了两行（发行版 e2e 抓到的）。那两行是**两个不存在的计数器名**。
+func TestTableNeverBreaksAnIdentifier(t *testing.T) {
+	const id = "special.claude-bg.route_light"
+	tbl := NewTable("group", "counter", "count", "description")
+	tbl.Row("plugin", id, "4",
+		"Bash classifier: the whole chain is rerouted to light, and the rest of this sentence exists only to push the table past the limit")
+	out := tbl.String()
+	if !strings.Contains(out, id) {
+		t.Errorf("标识符被折断了——它在输出里不再是一个整体：\n%s", out)
+	}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if got := VisibleWidth(line); got > MaxColumns {
+			t.Errorf("表格宽度 = %d，超过 %d：%q", got, MaxColumns, line)
+		}
+	}
+	// 反面：散文列**该**折（下限只护不可断片段，不护整句）。
+	if !strings.Contains(out, "classifier:") {
+		t.Errorf("散文没有折行的余地？输出：\n%s", out)
+	}
+}
+
 func TestRuleClampsToMaxColumns(t *testing.T) {
 	if got := VisibleWidth(Rule(200)); got != MaxColumns {
 		t.Fatalf("Rule 宽度 = %d，想要 %d", got, MaxColumns)

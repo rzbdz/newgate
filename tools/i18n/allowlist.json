@@ -9,6 +9,7 @@
     "tools/i18n/audit.go": "开发工具：同上",
     "tools/i18n/check/check.go": "开发工具：同上——而且它是棘轮自己的声音，用被它检查的目录来说话是循环",
     "tools/i18n/main.go": "开发工具：同上",
+    "tools/i18n/rename.go": "开发工具：同上",
     "tools/i18n/scan/scan.go": "开发工具：同上",
     "tools/i18n/translate.go": "开发工具：同上"
   }
