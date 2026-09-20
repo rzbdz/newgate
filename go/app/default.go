@@ -4,22 +4,29 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/go/component"
-
-	cliapi "github.com/rzbdz/newgate/go/modules/cli"
-	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
-	pluginmanagerapi "github.com/rzbdz/newgate/go/modules/pluginmanager"
-	wrapperapi "github.com/rzbdz/newgate/go/modules/wrapper"
 )
 
 // App 是进程级组合根的所有权对象。
-// 它持有 Manager 而不是复制服务，全进程的启动、查询和停止因而共享同一张图。
+//
+// # 它认识谁
+//
+// **一个模块都不认识。** 这是它的定义，不是风格：组合根要与「摘掉一个模块」这个
+// 操作可交换——用户把任意一个非 built-in 模块从清单里去掉，本包必须照样编译、
+// 照样装配、照样能跑（少掉的只是那个模块提供的东西）。只要这里出现一行
+// `modules/<某个业务模块>` 的 import，那条可交换性就没了，而且症状很隐蔽：
+// **编译期**才炸，而摘模块的人多半是在配置层动手的。
+//
+// 判据是机械的，写在 app/direction_test.go：
+//
+//	command grep -rn '"github.com/rzbdz/newgate/go/modules' app/*.go
+//	→ 只许出现 modules_gen.go 那一行（构建期生成的装配清单）
+//
+// # 它怎么把这次调用交出去
+//
+// 它不认识 cli，也不认识 wrapper：两者（以及将来的 web-daemon）都在自己的 Start
+// 里往 **root**（唯一的 built-in，见 go/root）的入口账本申报，这里只问账本一次。
+// 「谁是入口」因此成了模块自己的知识，换界面在组合根上是零改动。
 type App struct{ manager *modules.Manager }
-
-// Agent 和 Slot 保留旧调用面的类型名，但事实定义仍由 confighook/api 拥有。
-type Agent = agentapi.Agent
-
-// Slot 是 confighook/api.Slot 的兼容别名，不在 builtin 重复定义槽位语义。
-type Slot = agentapi.Slot
 
 // New 构建并启动默认组件图；返回成功意味着所有必需端口已经解析且组件已启动。
 func New(ctx context.Context) (*App, error) {
@@ -27,13 +34,6 @@ func New(ctx context.Context) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 组合根把图交给开关账本。为什么必须有这一步：plugin-manager 是「系统里有
-	// 哪几块」的权威，但组件看不到装配自己的那张图（Manager 不注入给组件），
-	// 所以只有组合根能递。普通模块要贡献事实走 RegisterSelf，不走这里。
-	//
-	// 只读快照，不持有 Manager——app 仍然是唯一的所有权对象。
-	modules.MustGet(manager.Context(), pluginmanagerapi.Capability).
-		SetCatalog(manager.Components())
 	return &App{manager: manager}, nil
 }
 
@@ -43,30 +43,8 @@ func (a *App) Context() modules.Context { return a.manager.Context() }
 // ComponentNames 返回实际拓扑启动顺序，用于测试和运行时诊断。
 func (a *App) ComponentNames() []string { return a.manager.ComponentNames() }
 
-// Components 返回按启动顺序的组件定义（含 Type），供 newgate plugin 按分类枚举
-// 全部模块。用图而不是让模块自报，是为了让「没参与开关体系的模块」也列得出来。
+// Components 返回按启动顺序的组件定义（含 Type）。
 func (a *App) Components() []modules.Component { return a.manager.Components() }
 
 // Stop 将整个应用生命周期交还 Manager 逆序收束。
 func (a *App) Stop(ctx context.Context) error { return a.manager.Stop(ctx) }
-
-func (a *App) catalog() agentapi.AgentCatalog {
-	return modules.MustGet(a.manager.Context(), agentapi.AgentCatalogCapability)
-}
-
-// Get 从只读 AgentCatalog 查询客户端描述符。
-func (a *App) Get(id string) (*agentapi.Agent, bool) { return a.catalog().Get(id) }
-
-// Names 返回当前组件图注册的客户端名称。
-func (a *App) Names() []string { return a.catalog().Names() }
-
-// CLI 返回组件图中唯一的命令行入口。
-func (a *App) CLI() cliapi.CLI {
-	return modules.MustGet(a.manager.Context(), cliapi.Capability)
-}
-
-// Wrapper 返回 shim 接管入口。main 用它做 argv0 分发：被当成某个 client 调用
-// 时走它，否则走 CLI。
-func (a *App) Wrapper() wrapperapi.Wrapper {
-	return modules.MustGet(a.manager.Context(), wrapperapi.Capability)
-}

@@ -85,3 +85,10 @@ func pad(s string, width int) string {
 	}
 	return s + strings.Repeat(" ", width-len(s))
 }
+
+// Tracef 让**组合根**也能往装配日志里写一行（内核自己的 tracef 是包内的）。
+//
+// 组合根要用它的场合只有一个、但很关键：**入口解析**——「这次进程调用 route 给
+// 谁」必须和装配过程落在同一份日志里，否则排查「我敲的明明是 newgate，为什么起的
+// 是别的壳」要同时翻两个地方。它不引入新目的地：出口还是 SetTrace 那一个。
+func Tracef(format string, args ...any) { tracef(format, args...) }

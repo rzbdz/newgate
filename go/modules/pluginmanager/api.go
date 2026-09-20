@@ -114,14 +114,15 @@ type Manager interface {
 
 	// Modules 返回全部模块（组件图 ∪ 注册表），按启动顺序。这是 CLI 的唯一数据源。
 	Modules() []Module
-
-	// SetCatalog 由**组合根**（app.New）调用，把组件图交给账本。
-	//
-	// 为什么需要它：plugin-manager 是「系统里有哪几块」的权威，但组件看不到装配
-	// 自己的那张图（Manager 不注入给组件）。所以由 app 显式递进来。只有组合根
-	// 该调它——普通模块要贡献事实走 RegisterSelf。
-	SetCatalog([]modules.Component)
 }
+
+// **名单是怎么进来的**（2026-09-20 改）：本模块实现 component.CatalogAware，
+// 装配完成后由内核递一次组件名单——不再由组合根点名叫 SetCatalog。
+//
+// 为什么改：`app.New` 里那一行 `MustGet(pluginmanagerapi.Capability).SetCatalog(…)`
+// 是一条**组合根到具体模块**的依赖边，而且是它让「plugin-manager 可以摘掉」这句
+// 话不成立（摘掉它，组合根编译不过）。名单本来就在内核手里（Manager.components），
+// 所以现在由内核按接口找想要它的人：谁想要谁实现 CatalogAware，组合根一行不改。
 
 // Capability 是 plugin-manager 的端口身份。
 var Capability = modules.NewCapability[Manager]("plugin-manager")

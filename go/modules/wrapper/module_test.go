@@ -1,14 +1,15 @@
 package wrapper_test
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	"github.com/rzbdz/newgate/go/component/entry"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 	wrapperapi "github.com/rzbdz/newgate/go/modules/wrapper"
+	"github.com/rzbdz/newgate/go/root"
 	"github.com/rzbdz/newgate/go/testing/testkit"
 )
 
@@ -39,7 +40,7 @@ var _ runtimeapi.Runtime = (*fakeRuntime)(nil)
 // 这正是 testkit 存在的理由：被测模块不必知道依赖从哪来，只要图上有人提供
 // 那两个端口就能启动。这里用桩替掉 runtime（真 Launch 会 exec 掉进程），
 // 但 wrapper 模块本身是**真的**——它的 Requires/Provides/Start 全走真实路径。
-func harness(t *testing.T, agents ...*agentapi.Agent) (wrapperapi.Wrapper, *fakeRuntime) {
+func harness(t *testing.T, agents ...*agentapi.Agent) (entry.Registry, *fakeRuntime) {
 	t.Helper()
 	runtime := &fakeRuntime{}
 	catalog := testkit.NewCatalog().Add(agents...)
@@ -54,16 +55,23 @@ func harness(t *testing.T, agents ...*agentapi.Agent) (wrapperapi.Wrapper, *fake
 			Type:     "test",
 			Provides: []modules.Provision{modules.Provide(agentapi.AgentCatalogCapability, catalog.AsCatalog())},
 		},
+		// 入口账本的提供者是**唯一那个 built-in**（root，见 go/root）：本模块在
+		// 自己的 Start 里往它申报，所以测试图里必须有它——缺了就该当场 panic，
+		// 那正是「申报口没了」的现场。
+		root.New(),
 		wrapperapi.New(),
 	)
 	// 依赖顺序：wrapper 必须在两个提供者之后启动，否则 Start 里的 MustGet 会 panic。
 	graph.Before("stub-runtime", "wrapper")
 	graph.Before("stub-catalog", "wrapper")
-	return testkit.Get(graph, wrapperapi.Capability), runtime
+	// 交出去的是**入口账本**而不是 Wrapper 接口：本模块暴露给进程的那一面现在是
+	// 「我申报过一次入口」，而测试要走的就是这条路（问账本 → 拿到认领者 → 调它），
+	// 不是绕过账本直接点模块——那样测出来的行为线上根本不会发生。
+	return testkit.Get(graph, entry.Capability), runtime
 }
 
 func TestDispatchClaimsAgentInvocations(t *testing.T) {
-	wrapper, runtime := harness(t,
+	registry, runtime := harness(t,
 		&agentapi.Agent{ID: "claude"},
 		&agentapi.Agent{ID: "opencode"},
 	)
@@ -128,15 +136,25 @@ func TestDispatchClaimsAgentInvocations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			before := len(runtime.calls)
-			_, claimed := wrapper.Dispatch(context.Background(), tt.argv)
+			// argv0 归一是**组合根那一趟**（entry.MakeProcess）做的，所以这里走
+			// 真管道而不是手构造 Process：绝对路径、.exe 后缀这些形态的归一
+			// 才算被测到。
+			p := entry.MakeProcess(tt.argv, nil, "", "", "")
+			handler, why, claimed := registry.Resolve(p)
 			if claimed != tt.claimed {
-				t.Fatalf("Dispatch(%v) claimed = %v, want %v", tt.argv, claimed, tt.claimed)
+				t.Fatalf("Resolve(%v) claimed = %v, want %v（%s）", tt.argv, claimed, tt.claimed, why)
 			}
 			if !tt.claimed {
 				if len(runtime.calls) != before {
 					t.Fatalf("未被认领却调了 Launch: %v", runtime.calls[before:])
 				}
 				return
+			}
+			if handler.Name() != "wrapper" {
+				t.Fatalf("认领者 = %q, want wrapper", handler.Name())
+			}
+			if code := handler.Handle(p); code != 0 {
+				t.Fatalf("Handle 退出码 = %d, want 0", code)
 			}
 			if len(runtime.calls) != before+1 {
 				t.Fatalf("认领了但 Launch 调用次数 = %d, want %d", len(runtime.calls)-before, 1)
@@ -161,8 +179,13 @@ func TestDispatchClaimsAgentInvocations(t *testing.T) {
 // 真实启动是 syscall.Exec(real, [real]+args, env)，多带一个 argv0 会让
 // claude 把 `claude` 当成要打开的目录。
 func TestDispatchStripsArgv0(t *testing.T) {
-	wrapper, runtime := harness(t, &agentapi.Agent{ID: "claude"})
-	wrapper.Dispatch(context.Background(), []string{"claude", "a", "b"})
+	registry, runtime := harness(t, &agentapi.Agent{ID: "claude"})
+	p := entry.MakeProcess([]string{"claude", "a", "b"}, nil, "", "", "")
+	handler, why, ok := registry.Resolve(p)
+	if !ok {
+		t.Fatalf("没有任何入口认领 %v（%s）", p.Argv0, why)
+	}
+	handler.Handle(p)
 	if len(runtime.calls) != 1 {
 		t.Fatalf("Launch 调用次数 = %d, want 1", len(runtime.calls))
 	}

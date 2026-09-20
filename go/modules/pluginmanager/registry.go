@@ -99,7 +99,11 @@ func (s *service) Lookup(path string) (Switch, bool) {
 	return Switch{}, false
 }
 
-// SetCatalog 由组合根调用，见 Manager 的注释。
+// SetCatalog 由内核在装配完成后调用一次（component.CatalogAware），见 Manager
+// 接口旁那段「名单是怎么进来的」。**只有内核该调它**——普通模块要贡献事实走
+// RegisterSelf。
+//
+// 职责边界：本方法只装载名单，不注册任何东西（注册归各模块自己的 Start）。
 func (s *service) SetCatalog(components []modules.Component) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

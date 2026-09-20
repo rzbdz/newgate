@@ -13,10 +13,10 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	modules "github.com/rzbdz/newgate/go/component"
-
-	"github.com/rzbdz/newgate/go/lib/buildinfo"
+	"github.com/rzbdz/newgate/go/component/entry"
 )
 
 // service 是**界面**：分派与排版。
@@ -135,14 +135,32 @@ func (s *service) verboseOn() bool {
 	return false
 }
 
-// Run 注入本次构建信息后进入统一命令分派；模块命令从账本里现取（不是启动时
-// 拍快照）——注入方可能比界面晚一步才注册，现取才不会漏。
-func (s *service) Run(args []string, build BuildInfo) int {
-	// 构建信息是**进程级事实**，注入到共享叶子；界面自己只用它，守护进程也要用
-	// （启动日志那行 `newgate <版本> … 启动`）。
-	buildinfo.Set(build.Version, build.BuildTime, build.CommitTime)
+// Run 进入统一命令分派；模块命令从账本里现取（不是启动时拍快照）——注入方可能
+// 比界面晚一步才注册，现取才不会漏。
+//
+// **argv0 的语法归界面**（`newgate-<preset>` ≡ `newgate --preset <preset>`，见
+// docs/08-operations.md）：preset 名从 basename 第一个 `-` 之后取，不切分（preset
+// 名可含 `-`）。「这次调用归不归界面管」才是 entry 的事，不在这里。
+func (s *service) Run(p entry.Process) int {
+	args := p.Args
+	if strings.HasPrefix(p.Argv0, "newgate-") {
+		args = append([]string{"--preset", strings.TrimPrefix(p.Argv0, "newgate-")}, args...)
+	}
 	return runCLI(s, args)
 }
+
+// Claims 是入口申报的判据。
+//
+// 界面**永远认领**（返回 true）：它是「谁都不要就是它」的那一个，所以申报时用
+// entry.DefaultRank——排在所有有条件的入口之后被问。这也是为什么 argv0 分发不
+// 在这里判断：`newgate` 与 `newgate-ds` 都归界面，判断属于界面内部的语法。
+func (s *service) Claims(entry.Process) bool { return true }
+
+// Handle 是入口调用的落点，等价于旧的「组合根拿到 CLI 再调 Run」。
+func (s *service) Handle(p entry.Process) int { return s.Run(p) }
+
+// Name 进日志与诊断（组合根那句 `[entry] resolve: …`）。
+func (s *service) Name() string { return "cli" }
 
 // moduleCommand 按名字找一条注入进来的命令。Names 里的每个别名都是分派键。
 func (s *service) moduleCommand(name string) (Command, bool) {
@@ -225,8 +243,15 @@ func (s *service) moduleDiagnostics() []Diagnostic {
 // 但 Stop 仍然保持空实现，理由是另一条、与顺序无关的：界面的七本账里装的都是
 // 别人的回调，撤它们是各自模块 Stop 的事（各自留着自己的 Release）。界面自己
 // 没有要释放的资源——它不是一个 server。
+// 本模块是入口申报者之一（默认入口），编译期把两个接口都钉住。
+var (
+	_ CLI           = (*service)(nil)
+	_ entry.Handler = (*service)(nil)
+)
+
 func New() modules.Component {
 	service := &service{}
+	var self modules.Release
 	// 界面自己的命令也走同一个账本（见 commands.go）：查重、分派、help 组装
 	// 只有一条路，run() 于是只剩编排。
 	if err := service.registerOwnCommands(); err != nil {
@@ -249,10 +274,22 @@ func New() modules.Component {
 			modules.Provide(Capability, CLI(service)),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
+			// 申报自己为**默认入口**：组装这一次调用的是 root 的账本（built-in），
+			// 组合根在 main 里只问账本「归谁」——它不认识本模块，删掉本模块它也
+			// 照样编译（那时没有任何入口认领，进程说一句人话退出）。
+			registry := modules.MustGet(ctx, entry.Capability)
+			release, err := registry.Register(service, entry.DefaultRank)
+			if err != nil {
+				return err
+			}
+			self = release
 			return nil
 		},
 		Stop: func(context.Context) error {
-			return nil
+			if self == nil {
+				return nil
+			}
+			return self()
 		},
 	}
 }

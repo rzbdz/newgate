@@ -283,6 +283,9 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 	}
 	tracef("装配完成：%d 个组件，用时 %s", len(manager.components),
 		time.Since(assembledAt).Round(time.Millisecond))
+	// 名单的交付在**所有 Start 返回之后**：谁想知道图里有谁，此刻才拿得到完整答案。
+	// 这一步只读、不启动——见 CatalogAware 与 docs/02 的三段法则。
+	manager.deliverCatalog()
 	return manager, nil
 }
 
@@ -513,4 +516,29 @@ func validateSpec(known map[string]capabilitySpec, spec capabilitySpec) error {
 	}
 	known[spec.name] = spec
 	return nil
+}
+
+// CatalogAware 由想知道「这张图里有哪些组件」的组件实现。
+//
+// 为什么在内核里而不是让组合根去问某个具体模块：那份成员名单**内核本来就拥有**
+// （m.components），而组合根不该认识任何模块。装配完成后由 Manager 递一次，
+// 谁想看一眼谁就实现这个接口——没实现就是不需要，不算错。
+//
+// 与 Start 的边界：它跑在**所有 Start 之后**，所以它读到的是一份完整的名单；
+// 它**只读**，不得用它来注册东西（注册归各自 Start，见 docs/02 的三段法则）。
+type CatalogAware interface{ SetCatalog([]Component) }
+
+// deliverCatalog 把完整组件名单交给实现了 CatalogAware 的组件。
+//
+// 只 type-assert 已经 Provide 出去的值：那是「组件愿意对外暴露的那一面」，也是
+// 唯一一条**不需要组合根认识任何模块**的通道——组合根不点名谁需要它，内核按
+// 接口找。谁想要名单谁就实现这个接口，没实现就是不需要。
+func (m *Manager) deliverCatalog() {
+	for _, values := range m.context.values {
+		for _, value := range values {
+			if aware, ok := value.(CatalogAware); ok {
+				aware.SetCatalog(m.Components())
+			}
+		}
+	}
 }

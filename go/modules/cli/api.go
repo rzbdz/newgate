@@ -33,14 +33,13 @@ type (
 	Verbose            = ext.Verbose
 	GlossaryLine       = ext.GlossaryLine
 	CLI                = ext.CLI
-	BuildInfo          = ext.BuildInfo
 )
 
 // Capability 是界面的端口身份（定义连同 CLI 接口在 extension 包）。
 //
-// 一个 capability 同时服务两件事：进程组合根用它把这次调用交给界面（Run），
-// 模块用它把命令/诊断/状态行注入进来（RegisterXxx）。它们永远是同一个组件提供的，
-// 分成两个端口只会让每个模块都 Need 两次。
+// 一个 capability 同时服务两件事：模块用它把命令/诊断/状态行注入进来
+// （RegisterXxx），诊断路径用它读界面的账本。**入口不再经它**：界面在 Start 里
+// 往 root 的入口账本申报（见 module.go 的 Start），组合根问账本而不是问本包。
 var Capability = ext.Capability
 
 // 帮助屏的槽位词表转发（定义在 extension，理由见那边：它是**呈现概念**，

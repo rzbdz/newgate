@@ -6,6 +6,7 @@ import (
 	"time"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	"github.com/rzbdz/newgate/go/component/entry"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
 	confighookapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/testing/testkit"
@@ -18,7 +19,7 @@ type stubCLI struct {
 	statuses []cliapi.StatusProvider
 }
 
-func (s *stubCLI) Run([]string, cliapi.BuildInfo) int { return 0 }
+func (s *stubCLI) Run(entry.Process) int { return 0 }
 
 func (s *stubCLI) RegisterCommand(c cliapi.Command) (modules.Release, error) {
 	s.commands = append(s.commands, c)
@@ -209,9 +210,14 @@ func TestFootgunWithTTLIsAccepted(t *testing.T) {
 // 否则「这个模块没有开关」和「这个模块忘了注册」会长得一模一样。
 func TestModulesEnumerateUnregisteredOnes(t *testing.T) {
 	m := start(t)
-	// 组合根递进来的就是整张图——包含 plugin-manager 自己（它在 Start 里也
-	// RegisterSelf 了自己，走的是同一个口，没有后门）。
-	m.SetCatalog([]modules.Component{
+	// 名单由**内核**在装配完成后递一次（component.CatalogAware）；这里用类型断言
+	// 直接调同一个方法，因为「递进来的是一张指定的图」这个场景在生产里只有内核
+	// 那一处，为它开一个导出的测试入口反而会让两条路并存。
+	//
+	// 递进来的就是整张图——包含 plugin-manager 自己（它在 Start 里也 RegisterSelf
+	// 了自己，走的是同一个口，没有后门）。
+	catalog := m.(interface{ SetCatalog([]modules.Component) })
+	catalog.SetCatalog([]modules.Component{
 		{Name: "config", Type: "infra"},
 		{Name: "plugin-manager", Type: "infra"},
 		{Name: "deepseek", Type: "model"},
@@ -248,7 +254,7 @@ func TestModulesEnumerateUnregisteredOnes(t *testing.T) {
 	}
 	// 图里没有、但上报过的：显式列出来而不是静默吞掉（app 层测试会拦这种配置
 	// 错误——模块名与组件名不一致）。这里是 plugin-manager 自己 + deepseek。
-	m.SetCatalog(nil)
+	catalog.SetCatalog(nil)
 	if n := len(m.Modules()); n != 2 {
 		t.Fatalf("图为空时该列出 2 个上报过的模块（plugin-manager + deepseek），得到 %d", n)
 	}

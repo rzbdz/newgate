@@ -21,10 +21,9 @@ package wrapper
 
 import (
 	"context"
-	"path/filepath"
-	"strings"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	"github.com/rzbdz/newgate/go/component/entry"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 	"github.com/rzbdz/newgate/go/modules/runtime/injection"
@@ -33,9 +32,13 @@ import (
 type service struct {
 	agents  agentapi.AgentCatalog
 	runtime runtimeapi.Runtime
+	entry   modules.Release
 }
 
-var _ Wrapper = (*service)(nil)
+var (
+	_ Wrapper       = (*service)(nil)
+	_ entry.Handler = (*service)(nil)
+)
 
 // New 声明 shim 接管组件。它不提供任何跨模块扩展点——外部只需要「分发一次
 // 调用」和「装/摘链接」，没有第三个模块往它里面注册东西。
@@ -54,29 +57,54 @@ func New() modules.Component {
 		Start: func(_ context.Context, ctx modules.Context) error {
 			instance.agents = modules.MustGet(ctx, agentapi.AgentCatalogCapability)
 			instance.runtime = modules.MustGet(ctx, runtimeapi.Capability)
+			// 申报自己为**有条件**的入口（entry.RankShim）：argv0 是某个被接管的
+			// client 时先问本模块，不是就放过去让默认入口接手。
+			//
+			// 为什么这件事必须由 wrapper 自己做：哪些名字算 client、什么条件才认领
+			// 一次调用，是本模块的策略。以前它写在 cmd/newgate/main.go 里，判据和
+			// 数据分居两地，而且组合根因此 import 了本模块（删掉就编译不过）。
+			registry := modules.MustGet(ctx, entry.Capability)
+			release, err := registry.Register(instance, entry.RankShim)
+			if err != nil {
+				return err
+			}
+			instance.entry = release
 			return nil
+		},
+		Stop: func(context.Context) error {
+			if instance.entry == nil {
+				return nil
+			}
+			return instance.entry()
 		},
 	}
 }
 
-// Dispatch 见接口注释。
+// Claims 见 entry.Handler：argv0（basename，剥掉 .exe）是某个已接管 client 时认领。
 //
-// argv[0] 取 basename 并剥掉 Windows 的 .exe：用户双击、shell 别名、npm 装的
-// 兜底脚本都会改变路径形态，但 `.exe` 后缀两边是同一个意思。剥后缀是历史行为
-// （npm 的 claude 兜底脚本会以 claude.exe 出现），不能去掉。
-func (s *service) Dispatch(_ context.Context, argv []string) (int, bool) {
-	if len(argv) == 0 {
-		return 0, false
+// 判据只读 Process，不碰 os.Args —— 「这次进程是怎么被调起来的」由组合根装好
+// 递进来（见 entry.Process 的注释）。
+func (s *service) Claims(p entry.Process) bool {
+	if p.Argv0 == "" {
+		return false
 	}
-	name := strings.TrimSuffix(filepath.Base(argv[0]), ".exe")
-	agent, ok := s.agents.Get(name)
+	_, ok := s.agents.Get(p.Argv0)
+	return ok
+}
+
+// Handle 执行这次替 client 跑的调用。成功路径不会返回：进程被 syscall.Exec 换掉了。
+func (s *service) Handle(p entry.Process) int {
+	agent, ok := s.agents.Get(p.Argv0)
 	if !ok {
-		return 0, false
+		return 1
 	}
 	// profile 传空 = 动态模式（注入档位名而不是真实模型名），这是 argv0 分发
 	// 的既定语义：用户没在命令行上钉 profile，就让代理按请求时的当前配置解析。
-	return s.runtime.Launch(agent, argv[1:], ""), true
+	return s.runtime.Launch(agent, p.Args, "")
 }
+
+// Name 进日志与诊断。
+func (s *service) Name() string { return "wrapper" }
 
 // Install/Uninstall/Installed/Foreign 把 shim 的字节操作转给 injection。
 //

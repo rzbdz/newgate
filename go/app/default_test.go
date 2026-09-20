@@ -7,6 +7,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/go/component"
 	cliapi "github.com/rzbdz/newgate/go/modules/cli/extension"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/modules/gateway/special"
 )
 
@@ -65,10 +66,15 @@ func TestDefaultGraphLayering(t *testing.T) {
 		}
 	}
 
-	if got, want := app.Names(), []string{"claude", "opencode"}; !reflect.DeepEqual(got, want) {
+	// 客户端目录与它带来的接管配置：**经端口问，而不是经组合根的门面**。
+	// 组合根不认识任何模块（见 direction_test.go），所以它没有 Get/Names 之类的
+	// 便利方法——那类方法每加一个都是一条「app → 那个模块」的依赖边，而且只为
+	// 测试方便存在。
+	catalog := modules.MustGet(app.Context(), agentapi.AgentCatalogCapability)
+	if got, want := catalog.Names(), []string{"claude", "opencode"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("agents = %v, want %v", got, want)
 	}
-	opencode, ok := app.Get("opencode")
+	opencode, ok := catalog.Get("opencode")
 	if !ok || opencode.Config == nil {
 		t.Fatal("opencode takeover was not injected by opencode-omo")
 	}

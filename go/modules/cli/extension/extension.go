@@ -41,6 +41,7 @@ import (
 	"strings"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	"github.com/rzbdz/newgate/go/component/entry"
 )
 
 // Diagnostic 是模块交给 CLI 展示的一组结构化状态，
@@ -373,11 +374,16 @@ type Documented interface {
 	Help() HelpLine
 }
 
-// CLI 既是进程组合根最终调用的入口，也是模块注入自己那一份东西的端口。
+// CLI 既是进程入口最终调用的分派器，也是模块注入自己那一份东西的端口。
 //
-// 两件事共用一个接口是有意的：它们都是「界面这件事」的两面——外面把一次命令行
+// 两件事共用一个接口是有意的：它们都是「界面这件事」的两面——入口把一次命令行
 // 调用交给它（Run），模块把自己的一部分挂到它上面（RegisterXxx）。分成两个端口
 // 只会让每个模块都要 Need 两次、而它们永远是同一个组件提供的。
+//
+// **它不再由组合根点名调用**（2026-09-20）：界面在自己的 Start 里往 root 的
+// 入口账本申报一个 Handler（rank = entry.DefaultRank，即「谁都没认领就是我」），
+// 组合根只问账本「这次调用归谁」。于是换界面（甚至换成一个 web-daemon）在组合根
+// 上是零改动，`app` 里也再没有一行 import 本包。
 //
 // 为什么注入必须是 Register 而不是让模块 Provide 一个「命令端口」：后者没有生命
 // 周期。模块认领一个命令名之后没人能撤销它，也没人查重——两个模块认领同一个名字
@@ -387,7 +393,13 @@ type Documented interface {
 // **读侧不在这里**：命令账本、诊断、状态行都归界面自己，它直接读自己的 service，
 // 不需要经过接口。
 type CLI interface {
-	Run(args []string, build BuildInfo) int
+	// Run 执行一次命令行调用。p 是**这次进程调用**的全部事实（argv0 / args /
+	// env / 版本），由组合根装好递进来——界面自己去读 os.Args 就又把「进程是
+	// 怎么被调起来的」抄了一遍，而那正是 entry 包存在的理由。
+	//
+	// argv0 分发（`newgate-<preset>` ≡ `newgate --preset <preset>`）在界面内部完成，
+	// 因为那是**命令行语法**，属于界面；「这次调用归不归界面管」才是 entry 的事。
+	Run(p entry.Process) int
 
 	// RegisterCommand 注入一条命令。命令名（Names）是查重的逻辑键，撞名当场
 	// 报错而不是先到先得。
@@ -486,12 +498,13 @@ type Unstyled interface {
 	Unstyled(args []string) bool
 }
 
-// BuildInfo 把链接期版本信息显式传入界面，避免模块读取可变全局构建状态。
-type BuildInfo struct {
-	Version    string
-	BuildTime  string
-	CommitTime string
-}
+// **BuildInfo 已删（2026-09-20）**：链接期版本信息现在是**进程事实**的一部分
+// （entry.Process 的 Version/BuildTime/CommitTime），由组合根装一次、经
+// `entry.MakeProcess` 落进 buildinfo 叶子，界面与别的模块一样**读**它。
+//
+// 为什么不再从 Run 的参数hand 递：那个参数是「这次命令行调用」的形状，而版本号
+// 是「这个二进制」的事实——两者混在一个类型里，等于让「换一个界面实现」也要重新
+// 定义版本怎么传。删掉之后 Run 收的就是纯粹的调用现场（见 CLI.Run）。
 
 // Capability 是界面的端口身份。模块用它注入自己的命令与状态行；进程组合根用它
 // 把这次调用交给界面。

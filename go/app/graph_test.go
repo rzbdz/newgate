@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	modules "github.com/rzbdz/newgate/go/component"
+	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
 	"github.com/rzbdz/newgate/go/testing/testkit"
 )
 
@@ -45,7 +47,8 @@ func TestGraphCanBeRebuiltAfterStop(t *testing.T) {
 		t.Fatalf("两次装配的组件数不同：%v vs %v", firstNames, got)
 	}
 	// 客户端目录也必须干净：第二次仍应只有 claude 和 opencode，不该翻倍。
-	if got := second.Names(); len(got) != 2 {
+	catalog := modules.MustGet(second.Context(), agentapi.AgentCatalogCapability)
+	if got := catalog.Names(); len(got) != 2 {
 		t.Fatalf("第二次装配的客户端目录 = %v，期望恰好 [claude opencode]", got)
 	}
 }
@@ -56,6 +59,11 @@ func TestGraphCanBeRebuiltAfterStop(t *testing.T) {
 // 生成器只看静态文件（有 module.go + 导出 New()），图是运行期真装配的结果。
 // 两者不一致意味着某个模块被扫进来了却在图上缺席——那要么是它没提供任何
 // 东西（无害但可疑），要么是接口对不上（危险）。这里用名字集合对齐。
+//
+// **root 要对上的是另一本账**（2026-09-20）：它是唯一的 built-in，不参与 modules/
+// 扫描（见 go/root 的包注释），所以「图 = 扫描清单」这条等式现在写成
+// 「图 = 扫描清单 + built-in」。这条等式仍然是有意义的断言：它保证**没有第二个
+// 模块**绕过扫描被偷偷装进来。
 func TestGraphCoversEveryModule(t *testing.T) {
 	testkit.Sandbox(t)
 
@@ -72,8 +80,13 @@ func TestGraphCoversEveryModule(t *testing.T) {
 		}
 		names[name] = true
 	}
-	if got := len(names); got != len(generatedComponents()) {
-		t.Fatalf("图里 %d 个组件，生成清单 %d 个", got, len(generatedComponents()))
+	want := len(generatedComponents()) + len(builtinComponents())
+	if got := len(names); got != want {
+		t.Fatalf("图里 %d 个组件，扫描清单 %d + built-in %d = %d",
+			got, len(generatedComponents()), len(builtinComponents()), want)
+	}
+	if !names["root"] {
+		t.Fatalf("唯一的 built-in 必须总在图里（实际 %v）", built.ComponentNames())
 	}
 
 	// 地基与两条接管通路是产品定义的一部分，缺一个都跑不起来。

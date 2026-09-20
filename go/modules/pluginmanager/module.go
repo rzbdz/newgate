@@ -30,6 +30,10 @@ import (
 //
 // 唯一的硬依赖是 confighook：登记 state.json 字段必须走它的端口
 // （与 modules/claudecode 登记 classifier_naked、classifier_override 同款）。
+// 本模块想要「图里有哪些组件」这份名单，所以实现内核的 CatalogAware：装配完成
+// 后内核递一次（见 api.go 里 Manager 的注释）。
+var _ modules.CatalogAware = (*service)(nil)
+
 func New() modules.Component {
 	service := &service{}
 	var releases []modules.Release
