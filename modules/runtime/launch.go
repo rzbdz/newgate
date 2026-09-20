@@ -13,6 +13,9 @@ package runtime
 // 命令——那条命令就是下面的 launchCommand，名字由它自己声明（各 agent 一个）。
 
 import (
+	"bufio"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/rzbdz/newgate/lib/i18n"
@@ -106,6 +109,14 @@ func runLaunch(rt Runtime, agents confighookapi.AgentCatalog, args []string) int
 	}
 	a, _ := agents.Get(agentName)
 
+	// 没装的工具：这次调用归**我们**（见 offerInstall 与 takeYes）。装在的照旧，
+	// 一个字都不碰它的命令行。
+	if !agents.Installed(agentName) {
+		if handled, rest := offerInstall(agents, a, passthrough); handled {
+			passthrough = rest
+		}
+	}
+
 	// profile 不存在立刻报错，绝不静默回落到默认——那正是「切了没生效」的来源。
 	if profile != "" {
 		if _, err := store.LoadProfile(profile); err != nil {
@@ -187,3 +198,81 @@ func splitLaunch(agents confighookapi.AgentCatalog, args []string) (agent, profi
 	}
 	return agent, profile, rest, nil
 }
+
+// takeYes 从透传参数里摘掉 `-y` / `--yes`。
+//
+// **只在「这个工具没装」时调用**（见 runLaunch）：命令根本不存在，所以它后面的参数
+// 不可能是给它的——`newgate opencode -y` 里的 `-y` 只可能是「确认安装」。反过来，
+// 装着的工具一律原样透传：那时 `-y` 是**它自己的**参数，摘走等于改用户的命令行。
+// 判据就一条：装没装。
+func takeYes(args []string) (yes bool, rest []string) {
+	for _, a := range args {
+		if a == "-y" || a == "--yes" {
+			yes = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return yes, rest
+}
+
+// confirm 问一句 y/N。读不到输入（没有终端、管道）一律当「不」——
+// 一次没人回答的提问不该被当成同意，那是「静默地跑了用户没批准的事」。
+func confirm(prompt string) bool {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		fmt.Fprintln(os.Stderr)
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
+// offerInstall 在「这个工具没装」时接手这次调用：问一句、装、然后**照常启动**。
+//
+// 为什么装完接着启动而不是让用户再敲一遍：他敲的那条命令本来就是「跑它」，装上只是
+// 途中的一步。转头让用户重来一次，是把我们自己的实现细节变成了他的操作步骤。
+//
+// 返回 (是否已经处理掉这次调用, 剩下的透传参数)。没有安装器时返回 false——那种
+// 客户端不支持自助安装，落回原来那条路（FindReal 会报一句「PATH 上找不到」）。
+func offerInstall(agents confighookapi.AgentCatalog, a *confighookapi.Agent, passthrough []string) (bool, []string) {
+	inst := agents.Installer(a.ID)
+	if inst == nil {
+		return false, passthrough
+	}
+	yes, rest := takeYes(passthrough)
+	cmdline := joinArgv(inst.Command())
+	if !yes {
+		if !confirm(i18n.T("{agent} is not installed. Run `{cmd}` to install it? [y/N] ",
+			i18n.A{"agent": a.ID, "cmd": cmdline})) {
+			fmt.Fprintln(os.Stderr, i18n.T("Not installing. Do it yourself with: {cmd}",
+				i18n.A{"cmd": cmdline}))
+			os.Exit(0)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T("running: {cmd}", i18n.A{"cmd": cmdline}))
+	if err := inst.Install(os.Stderr); err != nil {
+		// best-effort：装不上不是故障（没有 npm、网络不通、没有权限都正常），
+		// 但**必须说清楚**——「没装成却看着像装成了」会让人在一个不存在的工具上
+		// 排查半天。原样带上命令与它的报错。
+		fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T("install failed: {err}", i18n.A{"err": err}))
+		os.Exit(69)
+	}
+	if !agents.Installed(a.ID) {
+		// 装是装完了，但这个进程的 PATH 里还是找不到它（包管理器的 bin 目录不在这
+		// 一次的 PATH 上，或者装到了别处）。**不假装成功**：说清楚，让用户开个新
+		// shell 再跑——那条路一定对，而继续往下走只会在启动时炸得更难懂。
+		fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T(
+			"{agent} was installed but is still not on PATH — open a new shell and try again",
+			i18n.A{"agent": a.ID}))
+		os.Exit(69)
+	}
+	return true, rest
+}
+
+// joinArgv 把 argv 拼成一行给人看（不做 shell 转义：它是提示文本，不是给 shell 执行的东西）。
+func joinArgv(argv []string) string { return strings.Join(argv, " ") }

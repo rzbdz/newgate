@@ -25,10 +25,13 @@ type registry struct {
 	agents map[string]*Agent
 	// facts 是客户端模块交上来的**运行时事实**（见 AgentFacts）。它与 agents 分开
 	// 存是有意的：描述符是「这个客户端是什么」，事实是「它此刻怎么样」，后者可以不交。
-	facts  map[string]AgentFacts
-	fields map[string]string
-	tokens map[string]uint64
-	next   uint64
+	facts map[string]AgentFacts
+	// installers 是「怎么把这家工具装上」（见 AgentInstaller）。与 facts 分开：
+	// 一个客户端可以只交其中一份，两份的用途也不一样（一份用来回答、一份用来动手）。
+	installers map[string]AgentInstaller
+	fields     map[string]string
+	tokens     map[string]uint64
+	next       uint64
 }
 
 var (
@@ -40,10 +43,11 @@ var (
 // 两个 capability 共享同一事实源，但通过不同接口限制消费者权限。
 func New() modules.Component {
 	registry := &registry{
-		agents: make(map[string]*Agent),
-		facts:  make(map[string]AgentFacts),
-		fields: make(map[string]string),
-		tokens: make(map[string]uint64),
+		agents:     make(map[string]*Agent),
+		facts:      make(map[string]AgentFacts),
+		installers: make(map[string]AgentInstaller),
+		fields:     make(map[string]string),
+		tokens:     make(map[string]uint64),
 	}
 	var releases []modules.Release
 	return modules.Component{
@@ -94,6 +98,35 @@ func (r *registry) RegisterAgent(agent *Agent) (modules.Release, error) {
 	return r.release("agent:"+agent.ID, token, func() {
 		delete(r.agents, agent.ID)
 	}), nil
+}
+
+// RegisterAgentInstaller 记下客户端模块交上来的安装方式。
+//
+// 与 RegisterAgentFacts 同一条规矩：要求描述符先到、不许两个人抢同一个客户端。
+func (r *registry) RegisterAgentInstaller(agentID string, installer AgentInstaller) (modules.Release, error) {
+	if installer == nil {
+		return nil, fmt.Errorf("nil installer for agent %s", agentID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.agents[agentID]; !ok {
+		return nil, fmt.Errorf("agent installer targets unknown agent %s", agentID)
+	}
+	if _, exists := r.installers[agentID]; exists {
+		return nil, fmt.Errorf("agent %s already has an installer registered", agentID)
+	}
+	token := r.newToken("installer:" + agentID)
+	r.installers[agentID] = installer
+	return r.release("installer:"+agentID, token, func() {
+		delete(r.installers, agentID)
+	}), nil
+}
+
+// Installer 返回客户端的安装方式；没交返回 nil。
+func (r *registry) Installer(id string) AgentInstaller {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.installers[id]
 }
 
 // RegisterAgentFacts 记下客户端模块交上来的运行时事实。

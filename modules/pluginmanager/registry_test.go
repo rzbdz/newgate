@@ -62,6 +62,10 @@ func (s *stubHooks) RegisterAgent(*confighookapi.Agent) (modules.Release, error)
 	return func() error { return nil }, nil
 }
 
+func (s *stubHooks) RegisterAgentInstaller(string, confighookapi.AgentInstaller) (modules.Release, error) {
+	return func() error { return nil }, nil
+}
+
 func (s *stubHooks) RegisterAgentFacts(string, confighookapi.AgentFacts) (modules.Release, error) {
 	return func() error { return nil }, nil
 }

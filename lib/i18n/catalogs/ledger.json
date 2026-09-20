@@ -573,7 +573,7 @@
       "where": "modules/breaker/view.go:38"
     },
     "Both profile {first} and {second} were given, and they disagree": {
-      "where": "modules/runtime/launch.go:156",
+      "where": "modules/runtime/launch.go:167",
       "args": [
         "first",
         "second"
@@ -959,7 +959,7 @@
       ]
     },
     "No such profile {profile} (available: {list})": {
-      "where": "modules/runtime/launch.go:113",
+      "where": "modules/runtime/launch.go:124",
       "args": [
         "list",
         "profile"
@@ -970,6 +970,12 @@
       "args": [
         "source",
         "tag"
+      ]
+    },
+    "Not installing. Do it yourself with: {cmd}": {
+      "where": "modules/runtime/launch.go:252",
+      "args": [
+        "cmd"
       ]
     },
     "Not running": {
@@ -1204,7 +1210,7 @@
       "where": "modules/cli/extension/extension.go:233"
     },
     "Run once with a given profile": {
-      "where": "modules/runtime/launch.go:72"
+      "where": "modules/runtime/launch.go:75"
     },
     "Runtime": {
       "where": "modules/pluginmanager/module.go:80"
@@ -1345,14 +1351,14 @@
       "where": "modules/gateway/command_debug.go:91"
     },
     "Unknown agent {agent} (known: {list})": {
-      "where": "modules/runtime/launch.go:185",
+      "where": "modules/runtime/launch.go:196",
       "args": [
         "agent",
         "list"
       ]
     },
     "Unknown option {option} (an unknown option before the tool counts as a typo, docs/08-operations.md rule 5)": {
-      "where": "modules/runtime/launch.go:165",
+      "where": "modules/runtime/launch.go:176",
       "args": [
         "option"
       ]
@@ -1400,7 +1406,7 @@
       "where": "modules/config/view.go:769"
     },
     "Which agent to launch? e.g. newgate claude or newgate run claude": {
-      "where": "modules/runtime/launch.go:182"
+      "where": "modules/runtime/launch.go:193"
     },
     "Which agent to release? e.g. newgate off claude": {
       "where": "modules/runtime/commands.go:338"
@@ -1736,7 +1742,7 @@
       ]
     },
     "cannot find {names} in PATH (skipped the shim directory {dir})": {
-      "where": "modules/confighook/api.go:201",
+      "where": "modules/confighook/api.go:206",
       "args": [
         "dir",
         "names"
@@ -2279,6 +2285,12 @@
         "why"
       ]
     },
+    "install failed: {err}": {
+      "where": "modules/runtime/launch.go:262",
+      "args": [
+        "err"
+      ]
+    },
     "interface: {source} could not produce its view: {err}": {
       "where": "lib/view/view.go:647",
       "args": [
@@ -2507,6 +2519,9 @@
       "args": [
         "chain"
       ]
+    },
+    "no install command was declared": {
+      "where": "modules/confighook/install.go:52"
     },
     "no key": {
       "where": "modules/config/commands.go:219"
@@ -3107,6 +3122,12 @@
         "file"
       ]
     },
+    "running: {cmd}": {
+      "where": "modules/runtime/launch.go:257",
+      "args": [
+        "cmd"
+      ]
+    },
     "send real requests to candidates and report their health": {
       "where": "modules/gateway/command_probe.go:50"
     },
@@ -3306,6 +3327,13 @@
     },
     "the health score uses the main probe latency only; total time also includes dialect and quirk checks": {
       "where": "modules/gateway/command_probe.go:180"
+    },
+    "the install command failed ({cmd}): {err}": {
+      "where": "modules/confighook/install.go:60",
+      "args": [
+        "cmd",
+        "err"
+      ]
     },
     "the new process did not attach to the listening socket within 5 seconds: {err}": {
       "where": "modules/runtime/daemon/daemon.go:446",
@@ -3673,6 +3701,19 @@
         "agent"
       ]
     },
+    "{agent} is not installed. Run `{cmd}` to install it? [y/N] ": {
+      "where": "modules/runtime/launch.go:250",
+      "args": [
+        "agent",
+        "cmd"
+      ]
+    },
+    "{agent} was installed but is still not on PATH — open a new shell and try again": {
+      "where": "modules/runtime/launch.go:269",
+      "args": [
+        "agent"
+      ]
+    },
     "{ago} ago": {
       "where": "modules/breaker/command.go:173",
       "args": [
@@ -3969,7 +4010,7 @@
       ]
     },
     "{option} needs a profile name": {
-      "where": "modules/runtime/launch.go:153",
+      "where": "modules/runtime/launch.go:164",
       "args": [
         "option"
       ]

@@ -15,6 +15,9 @@ import (
 // 每次注册都返回 Release，使模块停止时能精确撤销自己的贡献。
 type ConfigHooks interface {
 	RegisterAgent(*Agent) (modules.Release, error)
+	// RegisterAgentInstaller 交上「我家工具怎么装」（见 AgentInstaller）。
+	// 不交 = 这个客户端不提供自助安装，`newgate <agent>` 在没装的机器上照旧报错。
+	RegisterAgentInstaller(agentID string, installer AgentInstaller) (modules.Release, error)
 	// RegisterAgentFacts 交上「我自己那个客户端此刻怎么样」（见 AgentFacts）。
 	//
 	// 它是**另一条**注册而不是描述符上的字段：描述符在 Start 里交一次就定了，
@@ -31,6 +34,8 @@ type AgentCatalog interface {
 	Names() []string
 	// Facts 拿到某个客户端交上来的运行时事实；nil = 它没交。
 	Facts(id string) AgentFacts
+	// Installer 拿到某个客户端的安装方式；nil = 它没交（那就不提供自助安装）。
+	Installer(id string) AgentInstaller
 	// Installed 报告这个客户端在不在**这台机器**上。
 	//
 	// 有事实就问事实（那是客户端自己的判据），没有就按 Bin 在 PATH 上找（跳过我们

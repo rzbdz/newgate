@@ -192,8 +192,9 @@ func (g *Graph) Stop() {
 // FakeCatalog 是 AgentCatalog 的最小实现：一张 map。
 // 用 Set 一次装完，之后 Get/Names 就是它。
 type FakeCatalog struct {
-	agents map[string]*agentapi.Agent
-	facts  map[string]agentapi.AgentFacts
+	agents     map[string]*agentapi.Agent
+	facts      map[string]agentapi.AgentFacts
+	installers map[string]agentapi.AgentInstaller
 }
 
 // NewCatalog 建一个空目录。
@@ -213,6 +214,19 @@ func (c *FakeCatalog) Add(agents ...*agentapi.Agent) *FakeCatalog {
 func (c *FakeCatalog) Get(id string) (*agentapi.Agent, bool) {
 	a, ok := c.agents[id]
 	return a, ok
+}
+
+// Installer 说「这个 agent 交了安装方式没有」。默认没有；要验安装那条路用
+// WithInstaller 塞一个假的（真的去跑 npm 会把测试变成联网测试）。
+func (c *FakeCatalog) Installer(string) agentapi.AgentInstaller { return nil }
+
+// WithInstaller 给某个 agent 塞一份假安装器。
+func (c *FakeCatalog) WithInstaller(id string, in agentapi.AgentInstaller) *FakeCatalog {
+	if c.installers == nil {
+		c.installers = map[string]agentapi.AgentInstaller{}
+	}
+	c.installers[id] = in
+	return c
 }
 
 // Facts 说「这个 agent 交了运行时事实没有」。假目录里一律没有——测试要验的是

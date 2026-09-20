@@ -820,6 +820,10 @@
       "text": "当前未生效：此 shell 中 {source} 覆盖了它（单条命令可用 NEWGATE_LANG={tag}）",
       "reviewed": true
     },
+    "Not installing. Do it yourself with: {cmd}": {
+      "text": "不装。你自己跑这条：{cmd}",
+      "reviewed": true
+    },
     "Not running": {
       "text": "未运行",
       "reviewed": true
@@ -2044,6 +2048,10 @@
       "text": "注入 {patch}（{why}）",
       "reviewed": true
     },
+    "install failed: {err}": {
+      "text": "安装失败: {err}",
+      "reviewed": true
+    },
     "interface: {source} could not produce its view: {err}": {
       "text": "界面：{source} 产不出它这一面：{err}",
       "reviewed": true
@@ -2234,6 +2242,10 @@
     },
     "no entry claimed this call (asked: {chain})": {
       "text": "没有任何入口认领这次调用（问过：{chain}）",
+      "reviewed": true
+    },
+    "no install command was declared": {
+      "text": "这个客户端没有声明安装命令",
       "reviewed": true
     },
     "no key": {
@@ -2724,6 +2736,10 @@
       "text": "经 /bin/sh 执行 {file} 也失败: {err}",
       "reviewed": true
     },
+    "running: {cmd}": {
+      "text": "正在跑: {cmd}",
+      "reviewed": true
+    },
     "send real requests to candidates and report their health": {
       "text": "给候选打真实请求，出健康报告",
       "reviewed": true
@@ -2898,6 +2914,10 @@
     },
     "the health score uses the main probe latency only; total time also includes dialect and quirk checks": {
       "text": "健康评分只用主探活延迟；总耗时还包含方言和 quirk 检查",
+      "reviewed": true
+    },
+    "the install command failed ({cmd}): {err}": {
+      "text": "安装命令失败（{cmd}）: {err}",
       "reviewed": true
     },
     "the new process did not attach to the listening socket within 5 seconds: {err}": {
@@ -3258,6 +3278,14 @@
     },
     "{agent} is back to a direct connection; newgate start will no longer take it over (newgate on {agent} restores it)": {
       "text": "{agent} 已恢复直连；newgate start 不再接管它（newgate on {agent} 恢复）",
+      "reviewed": true
+    },
+    "{agent} was installed but is still not on PATH — open a new shell and try again": {
+      "text": "{agent} 装上了，但这个进程的 PATH 上还是找不到它 —— 开一个新 shell 再试一次",
+      "reviewed": true
+    },
+    "{agent} is not installed. Run `{cmd}` to install it? [y/N] ": {
+      "text": "{agent} 还没装。要跑 `{cmd}` 装上它吗？[y/N] ",
       "reviewed": true
     },
     "{ago} ago": {

@@ -17,8 +17,11 @@ func (catalog testCatalog) Get(id string) (*agentapi.Agent, bool) {
 	return agent, ok
 }
 
-// Facts / Installed 补齐目录端口（见 agentapi.AgentCatalog），走真实现那条判据。
+// Installer / Facts / Installed 补齐目录端口（见 agentapi.AgentCatalog），走真实现那条判据。
 func (catalog testCatalog) Facts(string) agentapi.AgentFacts { return nil }
+
+// Installer：这些测试不验安装，一律没有（那就不提供自助安装）。
+func (catalog testCatalog) Installer(string) agentapi.AgentInstaller { return nil }
 
 func (catalog testCatalog) Installed(id string) bool {
 	return agentapi.InstalledDefault(catalog[id], nil)
