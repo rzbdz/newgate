@@ -203,14 +203,35 @@ func (r *Registry) Register(name string, read Contributor) (modules.Release, err
 	}, nil
 }
 
-// Snapshot 问一遍所有贡献者，返回这一刻的全部概念（按 Source, ID 排序）。
+// Snapshot 问一遍贡献者，返回这一刻的概念（按 Source, ID 排序）。
+//
+// 不带参数 = 问全部。带名字 = **只问这几位**——这条不是优化洁癖，是刷新语义的
+// 一部分：界面每几秒刷一次的是计数器与日志（那几位产出很便宜），而配置那一位要
+// 重读并重新解析每一份 profile、每一个源文件。让「刷一下计数器」顺带把整个配置
+// 目录重读一遍，是把成本花在没人看的地方。
+//
+// 名字不认识时**不报错**（那位没装、或者刚被关掉）：刷新是后台行为，为一个已经
+// 不在的贡献者让整次刷新失败，界面会停在上一帧。
 //
 // 排序是给**诊断输出**用的：同一份装配跑两次，界面上的卡片顺序必须一样，否则
 // 用户会以为东西变了。真正的版面顺序由前端按 Kind 与它自己的分组决定。
-func (r *Registry) Snapshot() ([]Concept, error) {
+func (r *Registry) Snapshot(only ...string) ([]Concept, error) {
 	r.mu.RLock()
 	sources := append([]source(nil), r.sources...)
 	r.mu.RUnlock()
+	if len(only) > 0 {
+		want := make(map[string]bool, len(only))
+		for _, name := range only {
+			want[name] = true
+		}
+		kept := sources[:0:0]
+		for _, s := range sources {
+			if want[s.name] {
+				kept = append(kept, s)
+			}
+		}
+		sources = kept
+	}
 
 	var out []Concept
 	owner := map[string]string{}

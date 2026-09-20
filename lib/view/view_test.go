@@ -57,6 +57,53 @@ func TestSnapshotAsksEveryTime(t *testing.T) {
 	}
 }
 
+// TestSnapshotCanAskJustSomeContributors：界面刷新计数器与日志（便宜）时不该
+// 顺带把配置那一位也叫醒——那一位要重读并重新解析每一份 profile 与每一个源文件。
+// 让「刷一下计数器」付那个成本，是把钱花在没人看的地方。
+func TestSnapshotCanAskJustSomeContributors(t *testing.T) {
+	r := NewRegistry()
+	var cheap, expensive atomic.Int64
+	mustCount(t, r, "gateway", &cheap)
+	mustCount(t, r, "config", &expensive)
+
+	if _, err := r.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	if cheap.Load() != 1 || expensive.Load() != 1 {
+		t.Fatalf("不带参数该问全部: gateway=%d config=%d", cheap.Load(), expensive.Load())
+	}
+
+	if _, err := r.Snapshot("gateway"); err != nil {
+		t.Fatal(err)
+	}
+	if cheap.Load() != 2 {
+		t.Errorf("点名问的那位该被再问一次: %d", cheap.Load())
+	}
+	if expensive.Load() != 1 {
+		t.Errorf("没点名的那位不该被吵醒: %d 次", expensive.Load())
+	}
+
+	// 名字不认识（那位没装、或刚被关掉）不报错：刷新是后台行为，为一个不在的
+	// 贡献者让整次刷新失败，界面会停在上一帧。
+	got, err := r.Snapshot("nobody")
+	if err != nil {
+		t.Fatalf("不认识的名字不该让刷新失败: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("问了不存在的贡献者，结果该是空的: %+v", got)
+	}
+}
+
+func mustCount(t *testing.T, r *Registry, name string, n *atomic.Int64) {
+	t.Helper()
+	if _, err := r.Register(name, func() ([]Concept, error) {
+		n.Add(1)
+		return []Concept{{ID: name + ".x", Kind: KindSeries}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSnapshotRejectsDuplicateID(t *testing.T) {
 	r := NewRegistry()
 	mustRegister(t, r, "one", Concept{ID: "a", Kind: KindCode})

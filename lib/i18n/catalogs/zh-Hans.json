@@ -868,6 +868,10 @@
       "text": "代理未运行 · newgate start 之后才生效",
       "reviewed": true
     },
+    "Proxy log": {
+      "text": "代理日志",
+      "reviewed": true
+    },
     "Proxy log: paged in the terminal, -f keeps following": {
       "text": "代理日志：终端上分页，-f 持续跟随",
       "reviewed": true

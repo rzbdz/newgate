@@ -672,7 +672,7 @@
       "where": "modules/config/commands.go:544"
     },
     "Counters": {
-      "where": "modules/gateway/view.go:44"
+      "where": "modules/gateway/view.go:55"
     },
     "Created only after a config file has been taken over": {
       "where": "modules/runtime/diagnostics.go:189"
@@ -1049,6 +1049,9 @@
     },
     "Proxy is not running · it takes effect after newgate start": {
       "where": "modules/runtime/commands.go:331"
+    },
+    "Proxy log": {
+      "where": "modules/gateway/view.go:93"
     },
     "Proxy log: paged in the terminal, -f keeps following": {
       "where": "modules/gateway/command_logs.go:41"
@@ -2108,7 +2111,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:220",
+      "where": "lib/view/view.go:241",
       "args": [
         "err",
         "source"
@@ -3333,14 +3336,14 @@
       "where": "lib/view/view.go:180"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:241",
+      "where": "lib/view/view.go:262",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:233",
+      "where": "lib/view/view.go:254",
       "args": [
         "a",
         "b",
@@ -3348,7 +3351,7 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:238",
+      "where": "lib/view/view.go:259",
       "args": [
         "source"
       ]
