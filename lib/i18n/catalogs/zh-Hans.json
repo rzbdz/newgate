@@ -1572,6 +1572,10 @@
       "text": "无法 runtime 开关：这个模块没有上报任何开关点",
       "reviewed": true
     },
+    "cannot clear the per-client profiles: {err}": {
+      "text": "清不掉各客户端的链头：{err}",
+      "reviewed": true
+    },
     "cannot create {file}: {err}": {
       "text": "建 {file} 失败：{err}",
       "reviewed": true
@@ -1974,6 +1978,10 @@
     },
     "following the global default ({profile})": {
       "text": "跟随全局缺省（{profile}）",
+      "reviewed": true
+    },
+    "force: every client follows the default": {
+      "text": "强制全部跟随（每个客户端都跟随全局缺省）",
       "reviewed": true
     },
     "forwarded upstream to get the true value": {
@@ -3571,6 +3579,10 @@
     },
     "{option} needs a profile name": {
       "text": "{option} 需要一个 profile 名",
+      "reviewed": true
+    },
+    "{profile} (the global default)": {
+      "text": "{profile}（缺省）",
       "reviewed": true
     },
     "{provider}/{model}: HTTP {status} · {err}": {

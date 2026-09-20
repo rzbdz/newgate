@@ -45,8 +45,41 @@ func registerView(v view.Service) (modules.Release, error) {
 		Label: func() string { return i18n.T("+ profile", nil) },
 		Run:   newProfileFile,
 	}
+	// 「force apply」：把**每一个**客户端的链头清成「跟随全局缺省」。
+	//
+	// 它挂在**栏目**上而不是某张卡上，有两个理由，两个都不是排版：
+	//
+	//   - 它动的不是某一格，而是**所有客户端**（今天三家，将来更多）。挂到某一家的卡
+	//     上，那个按钮就会在一个它管不着的地方；挂到「全局设置」那张卡上，读起来又像
+	//     「这一格的一个选项」，而它不是——它是一次批量收敛。
+	//   - 界面不认识「客户端」这件事（那是 confighook 的词汇）。让顶栏那个通用保存
+	//     按钮多一个「force」含义，就等于让界面知道「清掉 active 是什么意思」——
+	//     正是这套设计要避免的那种耦合。
+	//
+	// 用例是一句话：**改完全局默认，想让所有客户端都跟着它**。单独设过的客户端
+	// 不跟着走是对的（它们被明确指定过），但「全部收敛回跟随，然后我只维护一个
+	// 默认」是常见诉求，而逐个去点一遍要十六次操作。
+	forceFollow := view.Action{
+		ID:    "force-follow",
+		Label: func() string { return i18n.T("force: every client follows the default", nil) },
+		Run:   forceAllFollow,
+	}
 	return v.Register("config",
-		view.Title(func() string { return i18n.T("Configuration", nil) }).Does(create), concepts)
+		view.Title(func() string { return i18n.T("Configuration", nil) }).
+			Does(create).Does(forceFollow), concepts)
+}
+
+// forceAllFollow 清掉所有 per-agent 链头（见 store.ClearAllAgentProfiles）。
+//
+// 它不改全局默认本身：用户要的是「大家都跟着它」，不是「把它改成别的」。
+//
+// 一条都不存在时**也算成功**（返回 nil）：那正是用户想要的状态，报一个错只会让人
+// 以为没生效。界面做完动作会重读快照，各家的链头那一格会自己显示成「跟随缺省」。
+func forceAllFollow() (string, error) {
+	if _, err := store.ClearAllAgentProfiles(); err != nil {
+		return "", i18n.Ef(err, "cannot clear the per-client profiles: {err}", nil)
+	}
+	return "", nil
 }
 
 // newProfileFile 建一份空的档位文件，名字自己挑（第一个没被占用的）。

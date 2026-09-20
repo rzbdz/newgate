@@ -390,6 +390,25 @@ func ClearActiveProfile(agent string) error {
 	return SaveState(s)
 }
 
+// ClearAllAgentProfiles 让**每一个** agent 都回落到全局默认，返回清掉了几条。
+//
+// 它是「force apply」那件事的落点：改全局默认 profile 时，单独设过的那些 agent
+// 不会跟着走——那是**对的**（它们是被明确指定过的），但用户常常想要的是「全部
+// 收敛回跟随，然后我只要维护一个默认」。逐个客户端去点一遍是十六次操作，而这个
+// 动作就是那件事本身。
+//
+// 返回条数是为了让调用方能说一句「清了 N 条」：一个把十六行配置删掉的动作，
+// 如果屏幕上什么都不说，用户没法确认它到底做了没有。
+func ClearAllAgentProfiles() (int, error) {
+	s := LoadState()
+	n := len(s.Active)
+	if n == 0 {
+		return 0, nil
+	}
+	s.Active = nil
+	return n, SaveState(s)
+}
+
 // SetTakeoverWanted 记下「用户要不要接管这个 agent」（期望态）。
 // 只改期望态，不碰磁盘——具体怎么接管是 runtime/takeover 的事。
 func SetTakeoverWanted(agent string, want bool) error {

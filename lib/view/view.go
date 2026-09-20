@@ -236,8 +236,21 @@ type ToggleItem struct {
 	// Value 是 select/text 格的当前值；On 是 switch 格的状态。
 	Value string `json:"value,omitempty"`
 	On    bool   `json:"on,omitempty"`
-	// Options 是 select 格的候选（机器取值，不翻译）。
+	// Options 是 select 格的候选（**机器取值**，不翻译）。
 	Options []string `json:"options,omitempty"`
+	// OptionLabels 给某个取值换一个**给人看的说法**（取值 → 显示）。没列到的按取值
+	// 本身显示，空取值没列到时显示成「—」。
+	//
+	// 为什么需要它、而不是把说法直接写进 Options：Options 里那些值是**会被存进配置
+	// 的**（档位名、profile 名、`inherit`），显示层改一个字的代价是配置里多一个不
+	// 认识的值。而有的取值**根本没法直接给用户看**——链头那一格的空取值就是：
+	// 它的意思是「跟随全局缺省」，而「缺省是谁」只有后端知道。
+	//
+	// 更要紧的是它把两件**配置上完全不同**的事分开了：用户选了 `ds`（state.json
+	// 里记着 `active: {claude: ds}`）与用户什么都没选、只是此刻全局默认正好是 `ds`
+	// （state.json 里没有这一条）。两者在这一格里的**当前值**是同一个字符串，不换
+	// 个说法就分不出来——而它们的行为差别是「以后改全局默认时它跟不跟着走」。
+	OptionLabels map[string]string `json:"option_labels,omitempty"`
 	// Why 是一句话说明这一格影响什么（鼠标悬停时给）。
 	Why string `json:"why,omitempty"`
 	// Placeholder 是空格子里的提示（比如「空 = 只听回环」）。空值时它比 why

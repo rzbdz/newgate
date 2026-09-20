@@ -33,14 +33,24 @@ func (p AgentProfile) ProfileItem() view.ToggleItem {
 	if n := p.Note(); n != "" {
 		why += " · " + n
 	}
+	active := p.Active()
 	return view.ToggleItem{
 		ID:    ProfileItemID,
 		Kind:  view.ToggleSelect,
 		Label: i18n.T("Profile", nil),
-		Value: p.Active(),
+		Value: active,
 		// 空串排在最前：它是「跟随全局缺省」，不是一个没得选的空档。
 		Options: append([]string{""}, p.Options()...),
-		Why:     why,
+		// 那一档的说法要**点名跟着谁**，而且要与我们给它的值长得不一样：不然
+		// 「跟随全局缺省（此刻正好是 ds）」与「我就是要选 ds」在下拉里是同一个词，
+		// 而这两件事配置上完全不同——后者在 state.json 里记着一条，前者没有，
+		// 行为差别是「以后改全局默认时它跟不跟着走」。
+		//
+		// 括号不会与 profile 名撞：档位文件的名字里不可能有括号（那是个文件名）。
+		OptionLabels: map[string]string{
+			"": i18n.T("{profile} (the global default)", i18n.A{"profile": active}),
+		},
+		Why: why,
 	}
 }
 
