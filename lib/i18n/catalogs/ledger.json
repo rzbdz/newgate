@@ -671,6 +671,9 @@
     "Count": {
       "where": "modules/config/commands.go:544"
     },
+    "Counters": {
+      "where": "modules/gateway/view.go:44"
+    },
     "Created only after a config file has been taken over": {
       "where": "modules/runtime/diagnostics.go:189"
     },
@@ -682,6 +685,9 @@
     },
     "Daemon": {
       "where": "modules/runtime/diagnostics.go:63"
+    },
+    "Default profile": {
+      "where": "modules/config/view.go:331"
     },
     "Description": {
       "where": "modules/config/commands.go:105"
@@ -754,6 +760,9 @@
     },
     "Full request log (turns itself off after 30 minutes by default)": {
       "where": "modules/gateway/command_debug.go:39"
+    },
+    "Global settings": {
+      "where": "modules/config/view.go:336"
     },
     "Glossary": {
       "where": "modules/cli/cli.go:150"
@@ -1294,6 +1303,9 @@
     "Which agent to take over? e.g. newgate on claude": {
       "where": "modules/runtime/commands.go:319"
     },
+    "Which profile the chain starts from when no agent-specific one is set.": {
+      "where": "modules/config/view.go:332"
+    },
     "Why it exists": {
       "where": "modules/gateway/command_special.go:141"
     },
@@ -1443,6 +1455,9 @@
         "dir",
         "names"
       ]
+    },
+    "another save is in progress, try again in a moment": {
+      "where": "modules/config/store/cas.go:154"
     },
     "api_key missing": {
       "where": "modules/config/diagnostics.go:194"
@@ -2090,6 +2105,13 @@
       "args": [
         "patch",
         "why"
+      ]
+    },
+    "interface: {source} could not produce its view: {err}": {
+      "where": "lib/view/view.go:220",
+      "args": [
+        "err",
+        "source"
       ]
     },
     "invalid request JSON": {
@@ -3041,6 +3063,12 @@
     "the current shell's PATH is not in effect yet; reopen the shell or `exec $SHELL -l`": {
       "where": "modules/runtime/takeover/takeover.go:233"
     },
+    "the file content in this request is not readable: {err}": {
+      "where": "modules/config/view.go:408",
+      "args": [
+        "err"
+      ]
+    },
     "the file is empty": {
       "where": "modules/config/store/store.go:243"
     },
@@ -3089,11 +3117,23 @@
     "the real executable was not found (forwarding will fail)": {
       "where": "modules/runtime/commands.go:146"
     },
+    "the settings in this request are not readable: {err}": {
+      "where": "modules/config/view.go:349",
+      "args": [
+        "err"
+      ]
+    },
     "the stop request was accepted, but the proxy (pid {pid}) did not exit within 2 seconds (see the log {log})": {
       "where": "modules/runtime/daemon/daemon.go:536",
       "args": [
         "log",
         "pid"
+      ]
+    },
+    "the tier bindings in this request are not readable: {err}": {
+      "where": "modules/config/view.go:226",
+      "args": [
+        "err"
       ]
     },
     "the top level already has this key": {
@@ -3289,6 +3329,36 @@
     "verdict": {
       "where": "modules/gateway/command_probe.go:200"
     },
+    "view: a contributor registered with no source name": {
+      "where": "lib/view/view.go:180"
+    },
+    "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
+      "where": "lib/view/view.go:241",
+      "args": [
+        "id",
+        "source"
+      ]
+    },
+    "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
+      "where": "lib/view/view.go:233",
+      "args": [
+        "a",
+        "b",
+        "id"
+      ]
+    },
+    "view: {source} contributed a concept with no id": {
+      "where": "lib/view/view.go:238",
+      "args": [
+        "source"
+      ]
+    },
+    "view: {source} registered a nil contributor — the interface would show nothing for it": {
+      "where": "lib/view/view.go:183",
+      "args": [
+        "source"
+      ]
+    },
     "was not taken over in the first place": {
       "where": "modules/runtime/commands.go:345"
     },
@@ -3412,6 +3482,12 @@
       "args": [
         "file",
         "n"
+      ]
+    },
+    "{file} is not valid JSON": {
+      "where": "modules/config/view.go:261",
+      "args": [
+        "file"
       ]
     },
     "{head} · {n} target · {elapsed}": {

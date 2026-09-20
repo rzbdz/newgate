@@ -12,6 +12,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/modules/config"
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
@@ -61,6 +62,8 @@ func New() modules.Component {
 			// 数据面（forward 整个目录）一个字都不认识它——那条由
 			// direction_test.go 钉住，跟「数据面不认识任何策略」同一把尺子。
 			modules.Optional(porthubapi.Capability),
+			// web 界面同 ui：弱依赖。装了就报自己那面（计数器），没装就跳过。
+			modules.Optional(viewapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
@@ -86,6 +89,16 @@ func New() modules.Component {
 
 			// ui 是**弱依赖**（见 component.Optional）：没装任何 ui 时这些命令就没有
 			// 入口，但网关功能照常——本模块不依赖 ui 存在。
+			// web 界面那一份（计数器）先注册：它**不依赖 cli**，只装 dashboard
+			// 的装配里也要有——下面那段一旦 return，这里就永远不会跑。
+			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
+				rel, err := v.Register("gateway", metricsConcepts)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, rel)
+			}
+
 			cli, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {
 				return nil

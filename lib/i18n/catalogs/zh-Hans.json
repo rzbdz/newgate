@@ -382,7 +382,6 @@
     },
     "Available": {
       "text": "可用",
-      "machine": true,
       "reviewed": true
     },
     "Backups": {
@@ -435,7 +434,6 @@
     },
     "Cannot write the language to state.json: {err}": {
       "text": "无法将语言写入 state.json：{err}",
-      "machine": true,
       "reviewed": true
     },
     "Cannot write the pidfile (status/metrics will not see this process): {err}": {
@@ -502,13 +500,16 @@
       "text": "数量",
       "reviewed": true
     },
+    "Counters": {
+      "text": "计数",
+      "reviewed": true
+    },
     "Created only after a config file has been taken over": {
       "text": "接管过配置文件之后才会生成",
       "reviewed": true
     },
     "Currently following the system locale; this setting will take effect once LANG/LC_ALL stop overriding it": {
       "text": "当前跟随系统区域设置；待 LANG/LC_ALL 不再覆盖后此设置才会生效",
-      "machine": true,
       "reviewed": true
     },
     "DNS resolution": {
@@ -517,6 +518,10 @@
     },
     "Daemon": {
       "text": "守护进程",
+      "reviewed": true
+    },
+    "Default profile": {
+      "text": "默认 profile",
       "reviewed": true
     },
     "Description": {
@@ -595,6 +600,10 @@
       "text": "全量请求日志（默认 30 分钟自动关）",
       "reviewed": true
     },
+    "Global settings": {
+      "text": "全局设置",
+      "reviewed": true
+    },
     "Glossary": {
       "text": "术语",
       "reviewed": true
@@ -633,7 +642,6 @@
     },
     "Language": {
       "text": "语言",
-      "machine": true,
       "reviewed": true
     },
     "Last probe": {
@@ -702,7 +710,6 @@
     },
     "No catalog for {lang}": {
       "text": "没有 {lang} 的目录",
-      "machine": true,
       "reviewed": true
     },
     "No expiry: newgate debug on --forever": {
@@ -735,7 +742,6 @@
     },
     "No such language: {tag}. Available: {list}": {
       "text": "没有叫 {tag} 的语言。可用：{list}",
-      "machine": true,
       "reviewed": true
     },
     "No such profile {profile} (available: {list})": {
@@ -744,7 +750,6 @@
     },
     "Not in effect now: {source} overrides it in this shell (use NEWGATE_LANG={tag} for one command)": {
       "text": "当前未生效：此 shell 中 {source} 覆盖了它（单条命令可用 NEWGATE_LANG={tag}）",
-      "machine": true,
       "reviewed": true
     },
     "Not running": {
@@ -789,7 +794,6 @@
     },
     "Overridden by {n} file in the config dir": {
       "other": "被配置目录中的 {n} 个文件覆盖",
-      "machine": true,
       "reviewed": true
     },
     "PATH line": {
@@ -930,7 +934,6 @@
     },
     "Requested {want}, using {got} (no catalog for it)": {
       "text": "请求了 {want}，改用 {got}（没有它的目录）",
-      "machine": true,
       "reviewed": true
     },
     "Restart the proxy, keeping the takeover scene as it is": {
@@ -951,7 +954,6 @@
     },
     "Saved to state.json: {tag}": {
       "text": "已保存到 state.json：{tag}",
-      "machine": true,
       "reviewed": true
     },
     "Shape errors": {
@@ -1092,7 +1094,6 @@
     },
     "Usage: newgate lang <tag>  (see `newgate lang` for the list)": {
       "text": "用法：newgate lang <tag>（列表见 `newgate lang`）",
-      "machine": true,
       "reviewed": true
     },
     "Usage: newgate schema-repair on|off (no argument changes anything)": {
@@ -1125,6 +1126,10 @@
     },
     "Which agent to take over? e.g. newgate on claude": {
       "text": "要接管谁？例：newgate on claude",
+      "reviewed": true
+    },
+    "Which profile the chain starts from when no agent-specific one is set.": {
+      "text": "没有为某个 agent 单独指定时，链从哪个 profile 开始。",
       "reviewed": true
     },
     "Why it exists": {
@@ -1261,6 +1266,10 @@
     },
     "an external file is still in {dir}: {names} (it shadows newgate's shim)": {
       "text": "同名外部文件仍在 {dir}：{names}（会遮住 newgate 的 shim）",
+      "reviewed": true
+    },
+    "another save is in progress, try again in a moment": {
+      "text": "另一次保存正在进行，稍后再试",
       "reviewed": true
     },
     "api_key missing": {
@@ -1741,12 +1750,10 @@
     },
     "from config": {
       "text": "来自配置",
-      "machine": true,
       "reviewed": true
     },
     "from the system locale": {
       "text": "来自系统区域设置",
-      "machine": true,
       "reviewed": true
     },
     "full diagnostic bundle": {
@@ -1833,6 +1840,10 @@
       "text": "注入 {patch}（{why}）",
       "reviewed": true
     },
+    "interface: {source} could not produce its view: {err}": {
+      "text": "界面：{source} 产不出它这一面：{err}",
+      "reviewed": true
+    },
     "invalid request JSON": {
       "text": "请求 JSON 无效",
       "reviewed": true
@@ -1863,7 +1874,6 @@
     },
     "language": {
       "text": "语言",
-      "machine": true,
       "reviewed": true
     },
     "lay down the default configuration": {
@@ -1932,7 +1942,6 @@
     },
     "machine-translated, unreviewed: {n}": {
       "other": "机器翻译、未审校：{n}",
-      "machine": true,
       "reviewed": true
     },
     "main latency": {
@@ -1945,7 +1954,6 @@
     },
     "missing: {n}": {
       "other": "缺失：{n}",
-      "machine": true,
       "reviewed": true
     },
     "mixed dialects": {
@@ -2514,7 +2522,6 @@
     },
     "source": {
       "text": "来源",
-      "machine": true,
       "reviewed": true
     },
     "special off: {list}": {
@@ -2613,6 +2620,10 @@
       "text": "当前 shell 的 PATH 还没生效，重开 shell 或 `exec $SHELL -l`",
       "reviewed": true
     },
+    "the file content in this request is not readable: {err}": {
+      "text": "此请求里的文件内容读不出来：{err}",
+      "reviewed": true
+    },
     "the file is empty": {
       "text": "文件是空的",
       "reviewed": true
@@ -2665,8 +2676,16 @@
       "text": "找不到真实可执行文件（转发会失败）",
       "reviewed": true
     },
+    "the settings in this request are not readable: {err}": {
+      "text": "此请求里的设置读不出来：{err}",
+      "reviewed": true
+    },
     "the stop request was accepted, but the proxy (pid {pid}) did not exit within 2 seconds (see the log {log})": {
       "text": "停机请求已被接受，但代理 (pid {pid}) 2 秒内没有退出（看日志 {log}）",
+      "reviewed": true
+    },
+    "the tier bindings in this request are not readable: {err}": {
+      "text": "此请求里的档位绑定读不出来：{err}",
       "reviewed": true
     },
     "the top level already has this key": {
@@ -2873,6 +2892,26 @@
       "text": "结论",
       "reviewed": true
     },
+    "view: a contributor registered with no source name": {
+      "text": "view：有个贡献者登记时没写来源名",
+      "reviewed": true
+    },
+    "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
+      "text": "view：概念 {id}（{source}）没有 kind —— 界面不知道怎么渲染它",
+      "reviewed": true
+    },
+    "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
+      "text": "view：概念 {id} 被 {a} 和 {b} 同时报了 —— 同一个 id 上放两个概念，意味着其中一个在界面上永远点不到",
+      "reviewed": true
+    },
+    "view: {source} contributed a concept with no id": {
+      "text": "view：{source} 贡献了一个没有 id 的概念",
+      "reviewed": true
+    },
+    "view: {source} registered a nil contributor — the interface would show nothing for it": {
+      "text": "view：{source} 登记了一个空的产出函数 —— 界面上它会静默地什么都没有",
+      "reviewed": true
+    },
     "was not taken over in the first place": {
       "text": "本来就没被接管",
       "reviewed": true
@@ -2891,7 +2930,6 @@
     },
     "which message catalog the interface reads — see `newgate lang`": {
       "text": "界面读的是哪份消息目录 —— 见 `newgate lang`",
-      "machine": true,
       "reviewed": true
     },
     "who is going through newgate, with which profile": {
@@ -2962,23 +3000,24 @@
       "text": "{file} 里有 {n} 处没命中精确规则，归到了中档，建议核对",
       "reviewed": true
     },
+    "{file} is not valid JSON": {
+      "text": "{file} 不是合法的 JSON",
+      "reviewed": true
+    },
     "{head} · {n} target · {elapsed}": {
       "text": "{head} · {n} 目标 · {elapsed}",
       "reviewed": true
     },
     "{lang} (source language) · {total} messages": {
       "text": "{lang}（源语言）· {total} 条消息",
-      "machine": true,
       "reviewed": true
     },
     "{lang} · {pct}% translated ({done}/{total}), {machine} machine, {missing} missing": {
       "text": "{lang} · 已翻译 {pct}%（{done}/{total}），{machine} 条机器翻译，{missing} 条缺失",
-      "machine": true,
       "reviewed": true
     },
     "{lang} · {total} messages, all translated": {
       "text": "{lang} · {total} 条消息，全部已翻译",
-      "machine": true,
       "reviewed": true
     },
     "{link} is not a link newgate installed, left untouched": {
@@ -3020,7 +3059,6 @@
     "{n} message comes from the config dir": {
       "text": "{n} 条消息来自配置目录",
       "other": "{n} 条消息来自 config 目录",
-      "machine": true,
       "reviewed": true
     },
     "{n} original config · newgate stop can restore it": {
@@ -3101,7 +3139,6 @@
     },
     "… and {n} more": {
       "other": "… 还有 {n} 条",
-      "machine": true,
       "reviewed": true
     },
     "…(truncated, {n} characters total)": {
