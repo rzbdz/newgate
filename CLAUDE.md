@@ -51,9 +51,12 @@ go vet ./... && gofmt -l component modules cmd
 | `modules/confighook` | agent/config/state-field 注册端口 | 配置文件接管 |
 | `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
 | `modules/cli` | 命令行界面：分派、排版、注入点（**不含任何业务知识**，见 §4） | `newgate <动词>` 的分派与 help |
-| `modules/<客户端或模型>` | Claude Code、DeepSeek、组合行为 | 新增可组合组件 |
-| `app`（在 `modules/` 之外） | 组合根：装配清单与 `App` 所有权对象 | 换默认装配 |
-| `tools/genmodules` | 构建期扫描 `modules/` 生成装配清单 | 改模块发现规则 |
+| `modules/<客户端>` | Claude Code、opencode 的接入与组合行为（**客户端**留 core） | 新增客户端支持 |
+| `modules-ext/modules/<上游或交叉语义>` | 上游怪癖修补（DeepSeek 尾部形状、GLM 思维链、客户端×模型交叉语义）。**不在本仓库**：住在发行版仓库里，构建期 clone 到 `go/modules-ext/` | 修某个上游的怪癖 |
+| `app`（在 `modules/` 之外） | 组合根：装图、把这次调用交给入口。**不认识任何模块** | 换装图方式 |
+| `root`（唯一的 built-in，不在 `modules/` 下） | 入口账本：谁认领这次进程调用 | 加入口类型 |
+| `tools/genmodules` | 构建期扫描 `modules/` + 落实发行版声明，生成装配清单 | 改模块发现规则 |
+| `tools/extmanifest` | 读 Pin 与 Spec、把发行版代码拉到 `go/modules-ext/` | 改发行版机制 |
 | `testing/{testkit,upstream,system}` | 测试设施：模块层起图、进程内假上游、系统层整图 | 加测试设施（不是产品代码） |
 
 每个 `modules/<name>`（无例外）都必须在根目录提供唯一的 `module.go`，由它用
@@ -75,6 +78,38 @@ service」。端口不声明基数（没有 `One`/`Many`），需要唯一性由
 `modules/` 得到）：装一个模块 = 把目录复制进 `modules/`、重新编译。`make build`
 会自动重生成，`make check-generate` 只校验；`app` 里有一条测试跑它，拦住
 「加了模块忘了生成」的静默漏装配。
+
+### 发行版（modules-ext，2026-09-20 起）
+
+**core 只是内核**：链的复合、结局的推进、身份的定义、故障的隔离。**哪些模块属于
+这个产品**是发行版的事，答案在两张纸里，分属两个主人：
+
+    "我这次构建用哪个发行版？"   → 仓库根的 modules-ext.json（Pin：repo/revision/spec）
+    "这个发行版由哪些模块组成？" → 发行版仓库里的 dist.json（Spec：modules/disable）
+
+构建期按 Pin 把发行版仓库 clone 到 `go/modules-ext/`（**产物，在 .gitignore 里**），
+`make generate` 把 Spec 点名的模块写进装配清单。装模块/关模块**都不改 core 的代码**：
+
+```bash
+$EDITOR modules-ext.json     # 换发行版仓库或钉的提交
+$EDITOR go/modules-ext/dist.json  # 或在发行版仓库里改规格书
+make build                   # 会自动重新 generate（Pin 变了要重跑）
+```
+
+- **`make build` 自己会重跑 generate**，所以换发行版必须把 `NEWGATE_MODULES_PIN`
+  给**整个 make 调用**（`NEWGATE_MODULES_PIN=… make build`），只给 `make generate`
+  那一发是没用的——第二发会把清单按默认 Pin 生成回去。
+- `NEWGATE_MODULES_PIN` 指另一份 Pin（试装变体、发行版自己的构建脚本用）；
+  `NEWGATE_EXT_DRYRUN=1` 不拉代码（离网/CI，checkout 由构建方准备）。
+- 官方发行版：`git@github.com:rzbdz/newgate-modules-ext.git`，`main` = 官方发行版，
+  `template` = 给别人 fork 的骨架。**fork 它 + `build/release.sh` 就是一个新发行版**。
+- **两个 checkout，别搞混**：`go/modules-ext/` 是**构建期产物**（Pin 说了算，别在里面
+  改代码，下次 `make generate` 会把它切回钉的那一发）；改 ext 模块请去独立的工作目录
+  `/root/workspace/newgate-ext`（`origin` = ssh，直推），推完把 `modules-ext.json` 的
+  `revision` 挪到新提交、重跑 `make generate`。
+- 装不装 ext 都要能编：`TestRemovalMatrix`（app/matrix_test.go）逐个模块摘一遍，
+  **只有 built-in（root）不可摘**；`app/direction_test.go` 与
+  `modules/gateway/direction_test.go` 守着「组合根/数据面不认识任何具体模块」。
 
 档位阶梯（2026-09-16 四档化）：
 `heavy`(fable) > `normal`(opus，**主力**) > `mid`(sonnet) > `light`(haiku)，
@@ -259,6 +294,10 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
 
   两条可选接口让命令自己声明例外，省得界面列名单：`Handoff`（这条命令马上要把
   控制权交给别的进程）、`Unstyled`（这一次的输出不是版式——JSON / KV 原文 / 日志）。
+- **两条棘轮测试**守着上面那些「方向」：`app/direction_test.go`（组合根不 import
+  任何 `modules/…`）、`app/matrix_test.go`（摘除矩阵 + 零依赖模块独立加载）、
+  `modules/gateway/direction_test.go`（数据面不认识任何策略）。加模块/加依赖前先
+  想一下它们会不会红——红了就是方向被掰回去了。
 - **提交**：英文 subject（`fix(scope): …` / `feat(scope): …`），正文说明
   「现场是什么样、为什么这么改、验证了什么」。概念的设计动机写在所属
   package 或声明旁；行为变化才更新专题文档。结尾只带

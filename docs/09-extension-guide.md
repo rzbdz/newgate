@@ -254,7 +254,86 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 - **fail-open**：贡献者 panic 当作「它没跑过」，判决按零值合并（零值 = 没有
   意见）。一个坏策略绝不能把整条链的判断夺走。
 
-## 8. 文档和历史
+## 8. 外部模块与发行版（modules-ext）
+
+**core 不认识任何一个具体模块**（`app/direction_test.go` 守着）。所以「装一个模块」
+这件事有两条路：
+
+| 你想做什么 | 放哪里 | 谁决定装 |
+| --- | --- | --- |
+| 内核机制的一部分（网关、熔断、接管、界面） | `go/modules/`，随 core 走 | 扫描 `modules/` 目录，全装 |
+| 某个上游的怪癖、某个客户端的特殊行为、产品取舍 | **发行版仓库**，构建期 clone 到 `go/modules-ext/` | 发行版的规格书点名 |
+
+判据很直接：**「换个发行版，这个模块还该在吗？」** 该在 → core；不该在 → ext。
+DeepSeek 的尾部形状修补、GLM 的思维链回传、客户端×模型的交叉语义都属于第二类：
+它们是产品决策，随上游和发行版变。
+
+### 两张纸
+
+    modules-ext.json   仓库根，**构建者**的：这次构建用哪个发行版
+    dist.json          发行版仓库根，**发行版作者**的：这个产品由哪些模块组成
+
+```json
+// modules-ext.json —— 只钉三件事
+{ "repo": "https://github.com/rzbdz/newgate-modules-ext.git",
+  "revision": "b8244e243db57ce282f49649c84916b77edf8229",
+  "spec": "dist.json" }
+
+// dist.json —— 发行版自己的形态
+{ "distribution": "newgate-default",
+  "core": { "repo": "https://github.com/rzbdz/newgate.git", "revision": "…" },
+  "modules": ["hello", "deepseek", "glm"],
+  "disable": ["cli"] }
+```
+
+**分成两张纸是为了让 fork 有意义**：把「启用哪几个模块」放在 core 仓库里的话，
+fork 了 ext 的人加了模块，还得回去改 core 的文件才能启用它。
+
+### 写一个外部模块
+
+形态与 `modules/` 里**完全一样**（一个目录、一个 `module.go`、导出
+`func New() modules.Component`，见 §1）。差别只有两处：
+
+- 它在发行版仓库的 `modules/<名字>/` 下，构建期被 clone 到
+  `go/modules-ext/modules/<名字>/`；
+- import 路径是 `github.com/rzbdz/newgate/go/modules-ext/modules/<名字>`（对内核的
+  import 不变——checkout 就在内核的 module 里，所以发行版仓库**不需要 go.mod**）。
+
+**目录名不必是 Go 标识符**：`simple-cli` 这种连字符名字合法，生成器会把 import
+别名拧成 `ext_simple_cli`（`aliasFor`）。但**推之前请在内核 checkout 里跑一遍
+`gofmt -l .` 与 `go vet ./...`**——ext 的包编进内核的 module，所以它们的不合格
+会在内核的 CI 里红。
+
+### 关掉一个 core 模块
+
+`disable` 名单。它不需要那个模块是可选的：关掉一个被人 `Need` 的模块会在构图期
+当场失败——那是对的，说明这份规格书自相矛盾。关掉一个没人依赖的模块（如
+`pluginmanager`、`cli`）就只是少了一个功能。
+
+「只有 built-in 不可摘」是**被测试守着的**，不是一句口号：`app/matrix_test.go`
+逐个模块摘一遍，看失败的方式对不对（要么装得起来，要么因为别人硬依赖它而当场
+失败并点名那个端口）。所以想让一个模块可摘，**别让它被 MustGet 伸手拿**——
+声明 `Need` 或 `Optional`。
+
+### 造一个发行版
+
+```bash
+git clone <你 fork 的 ext 仓库> my-dist && cd my-dist
+$EDITOR dist.json
+build/release.sh          # 拿核心源码（或 $NEWGATE_CORE）→ 写 Pin → make static
+```
+
+官方发行版仓库 `rzbdz/newgate-modules-ext` 有两个分支：`template`（给别人 fork 的
+骨架）与 `main`（官方发行版）。
+
+### 两个 checkout，别搞混
+
+| 目录 | 角色 | 能不能在里面改代码 |
+| --- | --- | --- |
+| `go/modules-ext/`（core 里） | **构建期产物**：Pin 钉的那一发被 clone 到这里 | 不能——下次 `make generate` 会把它切回钉的提交 |
+| `/root/workspace/newgate-ext` | **开发工作目录**：独立 clone，`origin` = ssh | 能，改完直推，然后把 Pin 的 `revision` 挪过去 |
+
+## 9. 文档和历史
 
 新增概念先在所属 package comment 中说明问题、边界和依赖方向；公开契约旁的
 注释解释调用者必须遵守的语义。只有跨 package 行为变化时才更新对应专题文档，
