@@ -35,7 +35,10 @@ func newgateNamedProcess(t *testing.T) int {
 		t.Skipf("起不了测试进程: %v", err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	waitForCmdline(t, cmd.Process.Pid) // 等 exec 完，别站在过渡态上断言（见该函数）
+	// 等判据自己成立，而不是等一个「cmdline 非空」的中间态（见 waitForProcess）：
+	// 用它的测试要的正是这个组合——Alive 认它，isServe 不认它。
+	waitForProcess(t, cmd.Process.Pid,
+		func(p int) bool { return Alive(p) && !isServe(p) }, "一个像 newgate 但不是 __serve 的进程")
 	return cmd.Process.Pid
 }
 

@@ -35,32 +35,39 @@ func newgateServeProcess(t *testing.T) int {
 		t.Skipf("起不了测试进程: %v", err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	waitForCmdline(t, cmd.Process.Pid)
+	waitForProcess(t, cmd.Process.Pid,
+		func(p int) bool { return Alive(p) && isServe(p) }, "一个 __serve 进程")
 	return cmd.Process.Pid
 }
 
-// waitForCmdline 等子进程真的 exec 完再往下走。
+// waitForProcess 等到这个 pid 真的满足**被测判据**再往下断言。
 //
-// `cmd.Start()` 返回的瞬间子进程还是 bash，`exec -a` 还没跑；那个窗口里
-// /proc/<pid>/cmdline 会读出**空串**。而被测的两个判据（Alive / isServe）都拿
-// cmdline 当证据——测试自己站在过渡态上断言，就是一条会飘的测试。
+// 这里原来等的是「cmdline 非空」——不够。`cmd.Start()` 返回的瞬间子进程还是
+// bash，`exec -a` 还没跑，那个窗口里 /proc/<pid>/cmdline 读出空串；被测的
+// Alive / isServe 都拿 cmdline 当证据，测试于是站在了过渡态上。空串只是这个
+// 窗口**好认**的那种坏形态：读到的若还是 bash 那行 `-c …`，两个判据看着都成立，
+// 可 shell 随时可能退出（PATH 里找不到 sleep、exec 被拒、起手慢），断言就站在
+// 一个正在消失的进程上——2026-09-20 发行版 CI 上就是这么飘的：
+// TestReconcileHealsFromTheLock 0.00 秒报「锁里有个活着的 daemon，不该报没在跑」，
+// 而同一份代码在内核 CI 与本机压三十遍都绿。
 //
-// 2026-09-20 CI 上真飘过一次：`TestReconcileRefusesALockThatIsNotTheDaemon`
-// 报「证据不足时不该认它当真身: &{… Exe:/usr/bin/bash}」——那个 bash 正处在
-// exec 窗口里，空 cmdline 被 isServe 当成了「是 daemon」（生产代码那一侧也
-// 一起修了：证据不足现在一律拒绝）。
-//
-// 空串是这个窗口唯一的坏形态：读到的不管是旧内容（bash 那行 `-c` 参数里带着
-// newgate / __serve）还是新内容（`newgate-sleep`），两个判据给出的答案都对。
-func waitForCmdline(t *testing.T, pid int) {
+// 所以改成等判据本身成立。认不出来时**失败并带上证据**，不是跳过：夹具起不来
+// 通常意味着判据在这台机器上不成立，那正是生产代码要听的事。
+func waitForProcess(t *testing.T, pid int, want func(int) bool, what string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	if _, err := os.Stat("/proc/self"); err != nil {
+		t.Skipf("这台机器没有 /proc（非 Linux？）：Alive/isServe 都退化成 kill(0)，测不出东西")
+	}
+	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if b, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil && len(b) > 0 {
+		if want(pid) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Skipf("pid %d 的 cmdline 一直读不出内容（非 Linux？）", pid)
+			b, _ := ioutil.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+			t.Fatalf("pid %d 等了 3 秒也没能成为%s（Alive=%v isServe=%v cmdline=%q）——"+
+				"要么夹具起不来，要么判据在这台机器上不成立",
+				pid, what, Alive(pid), isServe(pid), b)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
