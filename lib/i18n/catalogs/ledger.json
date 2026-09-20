@@ -713,6 +713,9 @@
     "Daemon": {
       "where": "modules/runtime/diagnostics.go:63"
     },
+    "Data plane": {
+      "where": "modules/breaker/module.go:67"
+    },
     "Default profile": {
       "where": "modules/config/view.go:573"
     },
@@ -1199,6 +1202,9 @@
     },
     "Run once with a given profile": {
       "where": "modules/runtime/launch.go:72"
+    },
+    "Runtime": {
+      "where": "modules/pluginmanager/module.go:80"
     },
     "Runtime switches": {
       "where": "modules/pluginmanager/view.go:91"
@@ -2234,7 +2240,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:508",
+      "where": "lib/view/view.go:540",
       "args": [
         "err",
         "source"
@@ -3543,17 +3549,17 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:410"
+      "where": "lib/view/view.go:436"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:529",
+      "where": "lib/view/view.go:561",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:521",
+      "where": "lib/view/view.go:553",
       "args": [
         "a",
         "b",
@@ -3561,19 +3567,19 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:526",
+      "where": "lib/view/view.go:558",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:419",
+      "where": "lib/view/view.go:445",
       "args": [
         "source"
       ]
     },
     "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
-      "where": "lib/view/view.go:415",
+      "where": "lib/view/view.go:441",
       "args": [
         "source"
       ]

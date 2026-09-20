@@ -63,7 +63,8 @@ func New() modules.Component {
 			// 有——下面那段一旦 return，这里就永远不会跑（与 gateway 同一条）。
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
 				viewRelease, err := v.Register("breaker",
-					viewapi.Title(func() string { return i18n.T("Breaker", nil) }),
+					viewapi.Title(func() string { return i18n.T("Breaker", nil) }).
+						In(func() string { return i18n.T("Data plane", nil) }),
 					func() ([]viewapi.Concept, error) {
 						return healthConcepts(table)
 					})

@@ -76,7 +76,8 @@ func New() modules.Component {
 			// 跑到这里，而绝大多数进程没有人会看界面（见 lib/view 的包注释）。
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
 				rel, err := v.Register("plugin-manager",
-					viewapi.Title(func() string { return i18n.T("Plugins", nil) }),
+					viewapi.Title(func() string { return i18n.T("Plugins", nil) }).
+						In(func() string { return i18n.T("Runtime", nil) }),
 					func() ([]viewapi.Concept, error) {
 						return viewConcepts(service)
 					})

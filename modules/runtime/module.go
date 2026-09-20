@@ -68,7 +68,8 @@ func New() modules.Component {
 			// （与 gateway/config 同一条）。
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
 				rel, err := v.Register("runtime",
-					viewapi.Title(func() string { return i18n.T("Takeover", nil) }), takeoverConcepts)
+					viewapi.Title(func() string { return i18n.T("Takeover", nil) }).
+						In(func() string { return i18n.T("Runtime", nil) }), takeoverConcepts)
 				if err != nil {
 					return err
 				}

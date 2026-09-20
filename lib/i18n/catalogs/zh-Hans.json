@@ -556,6 +556,10 @@
       "text": "守护进程",
       "reviewed": true
     },
+    "Data plane": {
+      "text": "数据面",
+      "reviewed": true
+    },
     "Default profile": {
       "text": "默认 profile",
       "reviewed": true
@@ -1030,6 +1034,10 @@
     },
     "Run once with a given profile": {
       "text": "用某个 profile 跑一次",
+      "reviewed": true
+    },
+    "Runtime": {
+      "text": "运行",
       "reviewed": true
     },
     "Runtime switches": {

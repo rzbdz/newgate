@@ -105,7 +105,8 @@ func New() modules.Component {
 			// 的装配里也要有——下面那段一旦 return，这里就永远不会跑。
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
 				rel, err := v.Register("gateway",
-					viewapi.Title(func() string { return i18n.T("Gateway", nil) }), gatewayConcepts)
+					viewapi.Title(func() string { return i18n.T("Gateway", nil) }).
+						In(func() string { return i18n.T("Data plane", nil) }), gatewayConcepts)
 				if err != nil {
 					return err
 				}

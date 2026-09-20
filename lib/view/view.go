@@ -337,6 +337,29 @@ type Contributor func() ([]Concept, error)
 // 都在产出函数里），这条只是把栏名拉齐到同一个规矩上。
 type Section struct {
 	Title func() string
+	// Group 是这一栏在侧栏里归到哪个标题下。**空 = 不归任何一档**，排在最上面。
+	//
+	// 为什么要它：栏目是各模块自己报的（今天七位），而侧栏此前只能按来源名字母序
+	// 平铺——于是「熔断」排在第一位、「配置」夹在中间，而那份顺序**没有任何含义**
+	// （它只是 `breaker` < `config`）。分组把「这一栏是干什么的」变成看得见的：
+	// 配一次就基本不动的那一节在最上面，下面是按用途归拢的几类。
+	//
+	// 与 Concept.Group 那条一样，**名字由贡献者给**：内核不认识任何模块名，界面
+	// 更不认识（它只把拿到的标题画出来）。也同样是**只影响排列**，不参与任何身份
+	// ——哪一栏在哪个组里变了，URL、草稿、路由都不受影响（那些按 Source 走）。
+	Group func() string
+}
+
+// In 给这一栏指定它在侧栏里的分组（可选，不写就是不归任何一档）。
+//
+//	v.Register("gateway", view.Title(...).In(func() string { return i18n.T("Data plane", nil) }), concepts)
+//
+// 为什么是链在 Title 后面的方法、而不是 Register 多一个参数：调用点有七处，而
+// **绝大多数栏目不需要分组**——多一个必填参数会让那七处都写一个空占位，看的人
+// 还得判断「这个空是没想好还是真的没有」。链式调用让「不分组」保持原样一行不动。
+func (s Section) In(group func() string) Section {
+	s.Group = group
+	return s
 }
 
 // Title 造一个栏目名。传进来的是个**闭包**，不是译好的字符串：
@@ -360,6 +383,8 @@ func Title(f func() string) Section { return Section{Title: f} }
 type SectionInfo struct {
 	Source string `json:"source"`
 	Title  string `json:"title"`
+	// Group 是这一栏归到哪个标题下（空 = 不归，排在最上面）。见 Section.Group。
+	Group string `json:"group,omitempty"`
 }
 
 // Service 是贡献者看到的那一面：登记一个产出函数。
@@ -395,6 +420,7 @@ type source struct {
 	id    int
 	name  string
 	title func() string // Register 拒绝 nil，所以这里一定非空
+	group func() string // 可空：没写就是不分组
 	read  Contributor
 }
 
@@ -421,7 +447,7 @@ func (r *Registry) Register(name string, section Section, read Contributor) (mod
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := source{id: r.next, name: name, title: section.Title, read: read}
+	s := source{id: r.next, name: name, title: section.Title, group: section.Group, read: read}
 	r.next++
 	r.sources = append(r.sources, s)
 	return func() error {
@@ -462,7 +488,13 @@ func (r *Registry) Sections() []SectionInfo {
 			// 整个界面白屏——比一栏的标题写成 source 名严重得多。
 			title = s.name
 		}
-		out = append(out, SectionInfo{Source: s.name, Title: title})
+		// 分组名与栏名同一个时机求值（快照这一刻的语言）：它也是给人看的字，
+		// 在 Start 里求值会冻在源语言上（见 Title 的注释）。
+		group := ""
+		if s.group != nil {
+			group = s.group()
+		}
+		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Source < out[j].Source })
 	return out
