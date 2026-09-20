@@ -540,19 +540,36 @@ type stateData struct {
 func stateConcept() view.Concept {
 	file := paths.StateFile()
 	snap, _ := store.Load()
-	active := ""
-	if snap != nil && snap.State != nil {
-		active = snap.State.DefaultProfile
+	var st *domain.State
+	if snap != nil {
+		st = snap.State
 	}
-	names := profileNames()
-	host := ""
-	if snap != nil && snap.State != nil {
-		host = snap.State.Host
+	return view.Concept{
+		ID: "config.state", Kind: view.KindToggles, Title: i18n.T("Global settings", nil),
+		Data: stateView(file, st),
+		Apply: func(edit json.RawMessage, base string) (string, error) {
+			return applyStateDefaultProfile("config.state", file, edit, base)
+		},
+		// Preview：见 view.Concept.Preview。这一对（`config.state` 是控件半、
+		// `config.file.state.json` 是原文半）与档位那一对是同一件事，所以少了它
+		// 就会长出同一个 bug：在原文里改完、再拨一下开关，整份盖回去。
+		Preview: func(draft []byte) (any, error) {
+			return stateView(file, parseStateDraft(draft)), nil
+		},
 	}
-	data := stateData{
+}
+
+// stateView 把一份 state 拼成开关卡要的素材。加载与预览共用（理由同 profileView：
+// 两条路必须给出同一个形状）。
+func stateView(file string, st *domain.State) stateData {
+	active, host := "", ""
+	if st != nil {
+		active, host = st.DefaultProfile, st.Host
+	}
+	return stateData{
 		File: relToRoot(file), Base: store.Revision(file),
 		Items: []toggleItem{{
-			ID: "default_profile", Kind: "select", Value: active, Options: names,
+			ID: "default_profile", Kind: "select", Value: active, Options: profileNames(),
 			Label: i18n.T("Default profile", nil),
 			Why:   i18n.T("Which profile the chain starts from when no agent-specific one is set.", nil),
 		}, {
@@ -566,13 +583,18 @@ func stateConcept() view.Concept {
 				"Empty = loopback only. Changing it takes effect after a restart.", nil),
 		}},
 	}
-	return view.Concept{
-		ID: "config.state", Kind: view.KindToggles, Title: i18n.T("Global settings", nil),
-		Data: data,
-		Apply: func(edit json.RawMessage, base string) (string, error) {
-			return applyStateDefaultProfile("config.state", file, edit, base)
-		},
-	}
+}
+
+// parseStateDraft 把一份 state.json 的草稿解析成 State。
+//
+// 与 store.LoadState 同一套规则（读不出来就零值 + Normalize——那是刻意的 fail-open，
+// 一个手改坏的文件不该让所有 agent 停摆），只是输入是**内存里的草稿**：预览要的正是
+// 还没落盘的那一份。
+func parseStateDraft(draft []byte) *domain.State {
+	s := &domain.State{}
+	_ = json.Unmarshal(draft, s)
+	s.Normalize()
+	return s
 }
 
 func applyStateDefaultProfile(conceptID, file string, edit json.RawMessage, base string) (string, error) {

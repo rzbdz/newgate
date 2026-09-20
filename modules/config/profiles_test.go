@@ -298,3 +298,44 @@ func findConcept(t *testing.T, id string) view.Concept {
 	t.Fatalf("这份装配里没有 %s", id)
 	return view.Concept{}
 }
+
+// TestPreviewFollowsTheDraftInGlobalSettings：开关那一半也要能跟着原文走。
+//
+// 与档位那一对是同一件事（`config.state` 是控件半、`config.file.state.json` 是原文
+// 半），所以少了 Preview 就会长出同一个 bug：在原文里改完 default_profile、再拨一下
+// 开关，控件交上去的是**整份** state，刚改的那一格当场被盖回去。
+func TestPreviewFollowsTheDraftInGlobalSettings(t *testing.T) {
+	testkit.Sandbox(t)
+	seedFile(t, "demo.kv", "normal=p/m\n")
+	if err := os.WriteFile(paths.StateFile(), []byte(`{"default_profile":"demo","port":8899}`), 0o660); err != nil {
+		t.Fatal(err)
+	}
+
+	c := findConcept(t, "config.state")
+	if c.Preview == nil {
+		t.Fatal("全局设置那张卡没有 Preview——原文改完再拨开关会整份盖回去")
+	}
+	data, err := c.Preview([]byte(`{"default_profile":"别处改的","port":8899}`))
+	if err != nil {
+		t.Fatalf("预览一份合法草稿报错: %v", err)
+	}
+	sd, ok := data.(stateData)
+	if !ok {
+		t.Fatalf("预览回来的不是 stateData 而是 %T（界面拿它当 data 用）", data)
+	}
+	got := map[string]any{}
+	for _, it := range sd.Items {
+		got[it.ID] = it.Value
+	}
+	if got["default_profile"] != "别处改的" {
+		t.Errorf("预览没跟着草稿走: %+v", got)
+	}
+
+	// 半成品（JSON 还缺着右括号）：**fail-open，不报错**。这里与档位那一对刻意
+	// 不同——档位是逐行文本，敲到一半本来就解析不了，报错让界面保持上一次的样子；
+	// 而 state 是整份 JSON，读不出来就是零值，那与「还没写」长得一样，预览不出
+	// 一个错值就够了。区别写在这里，免得以后有人「顺手统一」成一种。
+	if _, err := c.Preview([]byte(`{"default_profile":`)); err != nil {
+		t.Errorf("半成品 JSON 该 fail-open（零值），实际报错: %v", err)
+	}
+}
