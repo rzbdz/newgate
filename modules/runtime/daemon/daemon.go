@@ -118,14 +118,29 @@ func isZombie(pid int) bool {
 // `newgate __serve` 持有监听 socket。
 //
 // 它只用在「从锁文件反推 daemon」这条**推断**路径上，所以要求比 Alive 更硬的
-// 证据；pidfile 那条路是写者自证身份，仍然只用 Alive。读不到 /proc（非 Linux）
-// 时不猜，放过。
+// 证据；pidfile 那条路是写者自证身份，仍然只用 Alive。判不了（非 Linux，
+// 没有 /proc）时不猜、放过。
+//
+// 「判不了」与「证据不足」在这条路径上是两种处理，别混：判不了 = 这台机器
+// 根本没给判据（放过）；证据不足 = 判据在、但读到的内容说明不了问题（**拒绝**，
+// 老实说「不知道」）。原先把后者也算成放过（`len(b) == 0 || …`），2026-09-20
+// 在 CI 上飘过一次：测试起的进程正在 exec 成另一个镜像，那个窗口里 cmdline 是
+// 空的，于是「刚 fork 出来的 bash」被当成了守护进程本体。
 func isServe(pid int) bool {
 	b, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err != nil {
-		return true
+		// 这台机器没有 /proc（非 Linux）：判据不存在，放过。
+		if _, e := os.Stat("/proc/self"); e != nil {
+			return true
+		}
+		// 有 /proc 却读不到这个 pid：它在 Alive 与这里之间没了。**刚死不是
+		// 是 daemon**——拿一个已经不存在的 pid 去当真身（status 报假 pid、
+		// stop 去 SIGTERM 别人的进程）正是这条路径要防的事。
+		return false
 	}
-	return len(b) == 0 || strings.Contains(string(b), "__serve")
+	// 空 cmdline 是 exec 过渡态（同 Alive 的注释）。**推断**路径上它意味着
+	// 证据不足，而证据不足要说不知道，不能猜。
+	return len(b) > 0 && strings.Contains(string(b), "__serve")
 }
 
 // LockHolder 读锁文件里的 pid（新老两个位置），读不出给 0。

@@ -13,6 +13,7 @@ package daemon
 //     而不是报「没在跑」——已经坏在磁盘上的现场也得能自愈。
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -34,7 +35,35 @@ func newgateServeProcess(t *testing.T) int {
 		t.Skipf("起不了测试进程: %v", err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	waitForCmdline(t, cmd.Process.Pid)
 	return cmd.Process.Pid
+}
+
+// waitForCmdline 等子进程真的 exec 完再往下走。
+//
+// `cmd.Start()` 返回的瞬间子进程还是 bash，`exec -a` 还没跑；那个窗口里
+// /proc/<pid>/cmdline 会读出**空串**。而被测的两个判据（Alive / isServe）都拿
+// cmdline 当证据——测试自己站在过渡态上断言，就是一条会飘的测试。
+//
+// 2026-09-20 CI 上真飘过一次：`TestReconcileRefusesALockThatIsNotTheDaemon`
+// 报「证据不足时不该认它当真身: &{… Exe:/usr/bin/bash}」——那个 bash 正处在
+// exec 窗口里，空 cmdline 被 isServe 当成了「是 daemon」（生产代码那一侧也
+// 一起修了：证据不足现在一律拒绝）。
+//
+// 空串是这个窗口唯一的坏形态：读到的不管是旧内容（bash 那行 `-c` 参数里带着
+// newgate / __serve）还是新内容（`newgate-sleep`），两个判据给出的答案都对。
+func waitForCmdline(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if b, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil && len(b) > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Skipf("pid %d 的 cmdline 一直读不出内容（非 Linux？）", pid)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // zombiePid 造一个**僵尸**：子进程退出了但没人收尸（不调 Wait）。这正是现场里

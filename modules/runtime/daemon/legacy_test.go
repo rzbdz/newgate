@@ -33,6 +33,7 @@ func newgateNamedProcess(t *testing.T) int {
 		t.Skipf("起不了测试进程: %v", err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	waitForCmdline(t, cmd.Process.Pid) // 等 exec 完，别站在过渡态上断言（见该函数）
 	return cmd.Process.Pid
 }
 
