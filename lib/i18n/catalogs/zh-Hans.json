@@ -376,6 +376,10 @@
       "text": "有 agent 声明接管但未生效，重跑 newgate start",
       "reviewed": true
     },
+    "An agent was released but the takeover is still in effect (the release did not take); rerun: newgate off <agent>": {
+      "text": "有 agent 被释放过、接管却仍然生效（释放没成功）；重跑：newgate off <agent>",
+      "reviewed": true
+    },
     "Availability": {
       "text": "可用性",
       "reviewed": true
@@ -2890,6 +2894,10 @@
     },
     "turned off": {
       "text": "已关",
+      "reviewed": true
+    },
+    "turned off but still in effect": {
+      "text": "已关掉但仍在生效",
       "reviewed": true
     },
     "turned on": {

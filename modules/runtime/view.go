@@ -26,7 +26,11 @@ import (
 	"github.com/rzbdz/newgate/modules/runtime/takeover"
 )
 
-// takeoverPhase 是一个 agent 此刻处在三种状态的哪一种。
+// takeoverPhase 是一个 agent 此刻处在四种状态的哪一种。
+//
+// 四种，不是两种：「接管没有」听起来像二选一，实际上意愿与现实各有真假，而**两种
+// 不一致各自对应一个真实故障现场**（CLI 那行汇总的注释一直把它们称作「两个对称
+// 故障」，但代码从来只为其中一个亮过灯——另一个是 2026-09-21 补上的）。
 type takeoverPhase int
 
 const (
@@ -36,14 +40,28 @@ const (
 	phaseActive
 	// phasePending 用户要求接管，磁盘上却没生效。
 	//
-	// 这是**唯一的危险故障**：工具会静默直连（请求不经过 newgate），而任何一处
-	// 单看都「正常」。典型成因是 start/build 之后漏了一步 `newgate on`。
+	// 这是**危险的那一个**：工具会静默直连（请求不经过 newgate），而任何一处单看
+	// 都「正常」。典型成因是 start/build 之后漏了一步 `newgate on`。
 	phasePending
+	// phaseStale 用户明确关掉过它，磁盘上却还装着。
+	//
+	// 成因是**释放失败**（权限坑：接管时写下的文件被 umask 削成别的用户写不动，
+	// 见 CLAUDE.md §3.1——`Off` 先记意愿再动手，动手失败就留下这个状态）。
+	//
+	// 它不如上一个危险（流量仍然经过网关，是安全的那一侧），但它同样**看不出来**：
+	// 用户以为这个工具直连了，而屏幕上一切正常。所以它是 warn 而不是 bad。
+	phaseStale
 )
 
-// phaseOf 是三种状态**唯一**的判据（CLI 的 status 行与 web 那张表都走它）。
+// phaseOf 是四种状态**唯一**的判据（CLI 的 status 行与 web 那张表都走它）。
+//
+// `Wanted` 的缺省是 true（没表过态就算想要，见 domain.State.TakeoverWanted），
+// 所以「没表态」不会落进 phaseStale——这个状态只可能来自用户**明确**关掉过它。
+// 没有这一条的话，从老版本升上来的机器会集体误报（那时的接管没记进 state.json）。
 func phaseOf(s takeover.Status) takeoverPhase {
 	switch {
+	case s.Active && !s.Wanted:
+		return phaseStale
 	case s.Active:
 		return phaseActive
 	case s.Wanted:
@@ -96,7 +114,7 @@ func takeoverTable(rows []takeover.Status) view.Table {
 	return table
 }
 
-// stateCell 把三态翻成人话 + 语义色。
+// stateCell 把四种状态翻成人话 + 语义色。
 func stateCell(s takeover.Status) (string, string) {
 	switch phaseOf(s) {
 	case phaseActive:
@@ -105,6 +123,11 @@ func stateCell(s takeover.Status) (string, string) {
 		// 危险的是**没生效**那一半，所以文案要点明「没生效」，而不是只说
 		// 「要求接管」——后者读起来像已经成了。
 		return i18n.T("declared but not in effect", nil), view.ToneBad
+	case phaseStale:
+		// 同样要点明「没生效」，而且要说明**是哪一半没生效**：用户关过它，
+		// 所以「还接着」才是那个意外。tone 是 warn 不是 bad——流量仍然经过
+		// 网关，是安全的那一侧（见 phaseStale 的注释）。
+		return i18n.T("turned off but still in effect", nil), view.ToneWarn
 	default:
 		return i18n.T("direct", nil), ""
 	}

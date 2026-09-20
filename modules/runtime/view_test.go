@@ -7,15 +7,17 @@ import (
 	"github.com/rzbdz/newgate/modules/runtime/takeover"
 )
 
-// TestTakeoverPhaseIsThreeStates 钉住三态判据。
+// TestTakeoverPhaseIsFourStates 钉住四态判据。
 //
 // 它**不是**布尔值，而这一点是这张表存在的理由：「接管没接管」听起来像二选一，
-// 实际上有三种现场，中间那种（用户要求接管、磁盘上却没生效）是这个机制唯一的
-// 危险故障——工具会**静默直连**，请求根本不经过 newgate，而任何一处单看都正常。
+// 实际上意愿与现实各有真假，两种**不一致**各自对应一个真实故障现场：
 //
-// CLI 那行汇总与 web 这张表都从 phaseOf 出发，所以判据错了是两个界面一起错
-// （这正是要在这里钉住的原因）。
-func TestTakeoverPhaseIsThreeStates(t *testing.T) {
+//	要求接管却没装上 = 危险（工具静默直连，请求根本不经过 newgate）
+//	关掉过却还装着   = 意外（用户以为直连了，其实还在走网关）
+//
+// 两者都是「任何一处单看都正常」的那种错，所以只能在这里钉住。CLI 那行汇总与
+// web 这张表都从 phaseOf 出发，判据错了是两个界面一起错。
+func TestTakeoverPhaseIsFourStates(t *testing.T) {
 	cases := []struct {
 		name string
 		s    takeover.Status
@@ -25,15 +27,15 @@ func TestTakeoverPhaseIsThreeStates(t *testing.T) {
 		{"要求了但没装上 = 危险的那种", takeover.Status{Wanted: true, Active: false}, phasePending},
 		{"没要求 = 直连（正常）", takeover.Status{Wanted: false, Active: false}, phaseDirect},
 
-		// 用户要求过 off、磁盘上却没放开（释放失败：多用户下常见的权限坑，
-		// 见 CLAUDE.md §3.1）。**今天算「生效中」**——判据是「磁盘说了算」。
+		// 用户明确关过它、磁盘上却没放开（释放失败：多用户下常见的权限坑，
+		// 见 CLAUDE.md §3.1）。CLI 那行汇总的注释一直把这一种称作「两个对称
+		// 故障」之一，可代码从没为它亮过灯——2026-09-21 补上（那时它被当成
+		// 「生效中」，于是屏幕上一切正常）。
 		//
-		// 这里记的是**现状**，不是主张：CLI 那行汇总的注释把这一种也称作
-		// 「两个对称故障」之一（「放开过但文件还指着代理」），可代码从没为它
-		// 亮过灯。两种读法都说得通（磁盘是现实 / 意愿没兑现也是故障），而它
-		// 会改变用户看到的东西，所以**不在这里单方面定**：先按现状钉住，
-		// 要改就两个界面一起改（phaseOf 是它们共同的判据）。
-		{"没要求但磁盘还装着 = 按现状算生效", takeover.Status{Wanted: false, Active: true}, phaseActive},
+		// 它**不会**被「没表过态」误触：Wanted 的缺省是 true（见 domain.State.
+		// TakeoverWanted），所以从老版本升上来的机器（那时的接管没记进 state.json）
+		// 拿到的是 wanted=true，落进 phaseActive。
+		{"明确关过但磁盘还装着 = 释放没生效", takeover.Status{Wanted: false, Active: true}, phaseStale},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -57,6 +59,12 @@ func TestDangerousPhaseIsRed(t *testing.T) {
 	}
 	if _, tone := stateCell(takeover.Status{Agent: "claude", Wanted: true, Active: true}); tone != view.ToneOK {
 		t.Errorf("生效中该是 %q，实际 %q", view.ToneOK, tone)
+	}
+	// 反过来的那一半（关过、却没放开）是 **warn，不是 bad**：流量仍然经过网关，
+	// 那是安全的一侧；bad 留给「静默直连」那一种。两种都红的话，红就指不出重点。
+	stale := takeover.Status{Agent: "claude", Wanted: false, Active: true}
+	if text, tone := stateCell(stale); tone != view.ToneWarn {
+		t.Errorf("「关过但还接着」该是 %q，实际 %q（文案 %q）", view.ToneWarn, tone, text)
 	}
 	// 直连是正常态：**不着色**。给它上色会让一张全是「直连」的表看起来像故障。
 	if text, tone := stateCell(takeover.Status{Agent: "opencode"}); tone != "" {

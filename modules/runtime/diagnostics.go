@@ -106,9 +106,9 @@ func checkDaemon() cliapi.Diagnostic {
 // 的现场：接管过但没生效（工具静默直连），或者放开过但文件还指着代理。
 func (r runtimeReporter) Status() []cliapi.StatusLine {
 	var on, off []string
-	wanted, active := 0, 0
+	wanted, active, stale := 0, 0, 0
 	for _, s := range takeover.List() {
-		// 三态判据走 phaseOf（view.go），与 web 那张表同源：两个界面对同一份磁盘
+		// 四态判据走 phaseOf（view.go），与 web 那张表同源：两个界面对同一份磁盘
 		// 状态给出不同答案，比其中一个不显示更糟。这里只决定**怎么排版**。
 		switch phaseOf(s) {
 		case phaseActive:
@@ -116,6 +116,12 @@ func (r runtimeReporter) Status() []cliapi.StatusLine {
 			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.OK))
 		case phasePending:
 			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.Bad))
+		case phaseStale:
+			// 用户关过它、磁盘却没放开（释放失败）。排在 `on` 一侧——它**确实**
+			// 还在走 newgate，那是事实；⚠ 说的是「你要的不是这个」。
+			active++
+			stale++
+			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.Warn))
 		default:
 			off = append(off, s.Agent)
 		}
@@ -128,6 +134,12 @@ func (r runtimeReporter) Status() []cliapi.StatusLine {
 	// 那个工具会静默直连。
 	if _, doc := controlplane.State(); doc != nil && active < wanted {
 		line += "\n" + style.Hint(style.Yellow(i18n.T("An agent declares takeover but it is not in effect; rerun newgate start", nil)))
+	}
+	// 反过来的那一半（⚠ 那一类）：用户关过它，磁盘上却还装着——释放失败
+	// （权限坑，见 CLAUDE.md §3.1）。**必须配一句解释**：一个没有说明的 ⚠
+	// 只会让人猜，而它说的正是「你以为直连了，其实还在走网关」。
+	if stale > 0 {
+		line += "\n" + style.Hint(style.Yellow(i18n.T("An agent was released but the takeover is still in effect (the release did not take); rerun: newgate off <agent>", nil)))
 	}
 	return []cliapi.StatusLine{{Rank: rankStatusTakeover, Label: i18n.T("Takeover", nil), Value: line}}
 }
