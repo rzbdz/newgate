@@ -4,6 +4,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	gatewayapi "github.com/rzbdz/newgate/modules/gateway"
@@ -36,6 +37,9 @@ func New() modules.Component {
 			// ui 是**弱依赖**（见 component.Optional）：装着界面就把 `newgate
 			// breaker` 挂上去，没装就跳过——健康表本身照常工作，只是没有入口。
 			modules.Optional(cliapi.Capability),
+			// web 界面那条同理，而且它是**另一条**：只装 dashboard（不装 cli）的
+			// 装配里，这张表照样该出现在网页上。
+			modules.Optional(viewapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Breaker(table)),
@@ -53,6 +57,18 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, release)
+
+			// web 界面那一份**先**注册：它不依赖 cli，只装 dashboard 的装配里也要
+			// 有——下面那段一旦 return，这里就永远不会跑（与 gateway 同一条）。
+			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
+				viewRelease, err := v.Register("breaker", func() ([]viewapi.Concept, error) {
+					return healthConcepts(table)
+				})
+				if err != nil {
+					return err
+				}
+				releases = append(releases, viewRelease)
+			}
 
 			ui, ok := modules.Get(ctx, cliapi.Capability)
 			if !ok {

@@ -16,9 +16,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rzbdz/newgate/lib/durarg"
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
+	"github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/gateway/controlplane"
 )
@@ -97,7 +97,7 @@ func runBreaker(host cliapi.Host) int {
 			i18n.T("Failures", nil), i18n.T("Reason", nil))
 		for _, b := range open {
 			t.Row(b.Provider+"/"+b.Model, stateLabel(b), ruleLabel(b),
-				agoLabel(b.OpenedAt), untilLabel(b.OpenUntil, b.Trial),
+				agoLabel(b.OpenedAt), untilLabel(b),
 				fmt.Sprintf("%d", b.Fails), b.Reason)
 		}
 		fmt.Print(t.String())
@@ -155,9 +155,8 @@ func probeLabel(b Status) string {
 	if b.Checked.IsZero() || b.Grade == "" {
 		return style.Dim(i18n.T("never probed", nil))
 	}
-	// ProbeGrade 是 wire 契约里的档位名（fluent / usable / laggy / unavailable），
-	// 机器标记，原样显示。
-	return string(b.Grade)
+	// 文字与判据同源（见 view.go 的「文字与着色分家」）：这里只决定怎么上色。
+	return probeText(b)
 }
 
 func latencyLabel(b Status) string {
@@ -182,21 +181,23 @@ func checkedLabel(b Status) string {
 // `b.State` 的取值（closed / open / half-open）是机器标记，只用来做判据；翻的
 // 是给人看的那一侧。
 func stateLabel(b Status) string {
-	switch b.State {
-	case "half-open":
-		if b.Trial {
-			return style.Yellow(i18n.T("half-open · trial in flight", nil))
-		}
-		return style.Yellow(i18n.T("half-open · awaiting trial", nil))
-	case "open":
-		return style.Red(i18n.T("tripped", nil))
-	case "closed":
-		return style.Green(i18n.T("healthy", nil))
+	// 文字与判据都在 view.go（两个界面共用一份），这里只管上色。
+	text, tone := stateText(b)
+	return paint(text, tone)
+}
+
+// paint 把语义色套成 ANSI。**颜色只在渲染层出现**：同一份 stateText 的结果，
+// 网页那边套的是 CSS 类名，终端这边套的是转义序列（见 view.go 的分家说明）。
+func paint(text, tone string) string {
+	switch tone {
+	case view.ToneOK:
+		return style.Green(text)
+	case view.ToneWarn:
+		return style.Yellow(text)
+	case view.ToneBad:
+		return style.Red(text)
 	}
-	if b.Open {
-		return style.Red(i18n.T("tripped", nil))
-	}
-	return style.Green(i18n.T("healthy", nil))
+	return text
 }
 
 // ruleLabel 把快照里的账本名（机器标记）翻回人话。认不出来的原样显示：优雅
@@ -205,10 +206,7 @@ func ruleLabel(b Status) string {
 	if b.Rule == "" {
 		return style.Dim("-")
 	}
-	if name := bucketFromName(b.Rule).ruleName(); name != "" {
-		return name
-	}
-	return b.Rule
+	return ruleText(b)
 }
 
 func shapeLabel(b Status) string {
@@ -245,15 +243,10 @@ func agoLabel(at time.Time) string {
 // untilLabel 说清「还要等多久」，以及在冷却是干什么用的：退避之后冷却会
 // 越来越长（60s → 120s → … → 10 分钟），用户看到的数字对不上基准是正常的，
 // 所以把试探状态也放进来。
-func untilLabel(until time.Time, trial bool) string {
-	if trial {
-		return style.Yellow(i18n.T("trial in flight", nil))
+func untilLabel(b Status) string {
+	text, tone := untilText(b)
+	if text == "-" {
+		return style.Dim(text)
 	}
-	if until.IsZero() {
-		return style.Dim("-")
-	}
-	if d := time.Until(until); d > 0 {
-		return durarg.Format(int(d.Seconds()))
-	}
-	return style.Green(i18n.T("expired", nil))
+	return paint(text, tone)
 }

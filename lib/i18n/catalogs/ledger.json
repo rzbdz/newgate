@@ -545,6 +545,9 @@
     "Binding": {
       "where": "modules/config/commands.go:55"
     },
+    "Binding health": {
+      "where": "modules/breaker/view.go:38"
+    },
     "Both profile {first} and {second} were given, and they disagree": {
       "where": "modules/runtime/launch.go:156",
       "args": [
@@ -1553,6 +1556,9 @@
     "average latency": {
       "where": "modules/gateway/command_probe.go:200"
     },
+    "binding": {
+      "where": "modules/breaker/view.go:53"
+    },
     "binding health table: trips after consecutive failures, releases one half-open trial when the cooldown expires": {
       "where": "modules/breaker/plane.go:53"
     },
@@ -1972,7 +1978,7 @@
       "where": "modules/pluginmanager/command.go:120"
     },
     "expired": {
-      "where": "modules/breaker/command.go:258"
+      "where": "modules/breaker/view.go:173"
     },
     "extends cycle: {name} points back to itself": {
       "where": "modules/config/store/store.go:137",
@@ -2083,10 +2089,10 @@
       ]
     },
     "half-open · awaiting trial": {
-      "where": "modules/breaker/command.go:190"
+      "where": "modules/breaker/view.go:132"
     },
     "half-open · trial in flight": {
-      "where": "modules/breaker/command.go:188"
+      "where": "modules/breaker/view.go:130"
     },
     "handoff needs a TCP listener, got {type}": {
       "where": "modules/runtime/daemon/daemon.go:400",
@@ -2098,7 +2104,7 @@
       "where": "modules/cli/commands.go:51"
     },
     "healthy": {
-      "where": "modules/breaker/command.go:194"
+      "where": "modules/breaker/view.go:136"
     },
     "in effect": {
       "where": "modules/runtime/commands.go:170"
@@ -2123,7 +2129,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:241",
+      "where": "lib/view/view.go:285",
       "args": [
         "err",
         "source"
@@ -3283,10 +3289,10 @@
       "where": "modules/gateway/command_probe.go:150"
     },
     "trial in flight": {
-      "where": "modules/breaker/command.go:250"
+      "where": "modules/breaker/view.go:165"
     },
     "tripped": {
-      "where": "modules/breaker/command.go:192"
+      "where": "modules/breaker/view.go:134"
     },
     "troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)": {
       "where": "modules/gateway/forward/forward.go:1687"
@@ -3367,17 +3373,17 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:180"
+      "where": "lib/view/view.go:224"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:262",
+      "where": "lib/view/view.go:306",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:254",
+      "where": "lib/view/view.go:298",
       "args": [
         "a",
         "b",
@@ -3385,13 +3391,13 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:259",
+      "where": "lib/view/view.go:303",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:183",
+      "where": "lib/view/view.go:227",
       "args": [
         "source"
       ]
@@ -3430,7 +3436,7 @@
       ]
     },
     "{ago} ago": {
-      "where": "modules/breaker/command.go:174",
+      "where": "modules/breaker/command.go:173",
       "args": [
         "ago"
       ]
@@ -3584,6 +3590,12 @@
         "switches"
       ]
     },
+    "{ms}ms": {
+      "where": "modules/breaker/view.go:104",
+      "args": [
+        "ms"
+      ]
+    },
     "{name} did not claim": {
       "where": "component/entry/entry.go:183",
       "args": [
@@ -3628,6 +3640,10 @@
       ],
       "other": "{n} entries · {used} / {max} · hits {hits} · misses {misses} · evictions {evictions}"
     },
+    "{n} failure": {
+      "where": "modules/breaker/view.go:86",
+      "other": "{n} failures"
+    },
     "{n} message comes from the config dir": {
       "where": "modules/locale/diagnostics.go:58",
       "args": [
@@ -3664,12 +3680,20 @@
       ],
       "other": "{n} profiles · default {name}"
     },
+    "{n} shape error": {
+      "where": "modules/breaker/view.go:88",
+      "other": "{n} shape errors"
+    },
     "{n} shim": {
       "where": "modules/runtime/commands.go:150",
       "args": [
         "n"
       ],
       "other": "{n} shims"
+    },
+    "{n} spared": {
+      "where": "modules/breaker/view.go:91",
+      "other": "{n} spared"
     },
     "{n} stop in the chain": {
       "where": "modules/config/diagnostics.go:238",
@@ -3679,7 +3703,7 @@
       "other": "{n} stops in the chain"
     },
     "{n} time": {
-      "where": "modules/breaker/command.go:218",
+      "where": "modules/breaker/command.go:216",
       "other": "{n} times"
     },
     "{n} total": {

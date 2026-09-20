@@ -392,6 +392,10 @@
       "text": "绑定",
       "reviewed": true
     },
+    "Binding health": {
+      "text": "binding 健康表",
+      "reviewed": true
+    },
     "Both profile {first} and {second} were given, and they disagree": {
       "text": "同时给了 profile {first} 和 {second}，不一致",
       "reviewed": true
@@ -1342,6 +1346,10 @@
     },
     "average latency": {
       "text": "平均延迟",
+      "reviewed": true
+    },
+    "binding": {
+      "text": "binding",
       "reviewed": true
     },
     "binding health table: trips after consecutive failures, releases one half-open trial when the cooldown expires": {
@@ -3064,6 +3072,10 @@
       "text": "{modules} 个模块 · {switches} 个可运行期开关点",
       "reviewed": true
     },
+    "{ms}ms": {
+      "text": "{ms}ms",
+      "reviewed": true
+    },
     "{name} did not claim": {
       "text": "{name} 未认领",
       "reviewed": true
@@ -3088,6 +3100,10 @@
       "text": "{n} 条 · {used} / {max} · 命中 {hits} · 未命中 {misses} · 淘汰 {evictions}",
       "reviewed": true
     },
+    "{n} failure": {
+      "other": "{n} 次失败",
+      "reviewed": true
+    },
     "{n} message comes from the config dir": {
       "text": "{n} 条消息来自配置目录",
       "other": "{n} 条消息来自 config 目录",
@@ -3109,8 +3125,16 @@
       "text": "{n} 个 · 默认 {name}",
       "reviewed": true
     },
+    "{n} shape error": {
+      "other": "{n} 次请求形状错误",
+      "reviewed": true
+    },
     "{n} shim": {
       "text": "{n} 个",
+      "reviewed": true
+    },
+    "{n} spared": {
+      "other": "{n} 次被救回",
       "reviewed": true
     },
     "{n} stop in the chain": {

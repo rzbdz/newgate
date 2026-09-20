@@ -71,6 +71,50 @@ const (
 	KindLog = "log"
 )
 
+// Table 是 KindTable 的数据形状：几列 + 几行，**只读**。
+//
+// 形状定在这里、而不是各模块自己拼一个 map 的原因与 Kind 那组常量一样：前端
+// 只认这一种摆法。谁的表都长这样，前端就只有一个渲染器。
+//
+// 为什么行是「按列名索引的 map」而不是数组：列的顺序是**展示**的事（前端可以
+// 按窄屏重排、将来可以给用户拖动），而格子和列的对应关系是**数据**的事。用
+// 数组下标把它们绑死，前端一动列顺序，所有格子就串位了——那种错还会看起来很
+// 正常（每一格都有值，只是值不对）。
+type Table struct {
+	Columns []Column `json:"columns"`
+	// Rows 的每一项是「列 ID → 格子」。缺的列渲染成空白，不是错误：一张表的
+	// 行本来就可以有稀疏的字段（比如「只计数没摘牌」的行没有冷却时刻）。
+	Rows []map[string]Cell `json:"rows"`
+}
+
+// Column 是表头的一列。
+type Column struct {
+	// ID 是这一列的**身份**：行里的格子按它索引。稳定的机器标记，不翻译。
+	ID string `json:"id"`
+	// Label 是给人看的表头（可以翻译、可以改）。
+	Label string `json:"label"`
+	// Align 是 "right" 时右对齐。数字列要它——左对齐的数字没法竖着比大小。
+	Align string `json:"align,omitempty"`
+}
+
+// Cell 是一格。
+type Cell struct {
+	Text string `json:"text"`
+	// Tone 是这一格的颜色语义，取 cli 那套 ok/warn/bad/skip 里的前三个
+	// （没有 "skip"：那是「这一步没跑」的意思，只对流程有意义，表格里用不上）。
+	//
+	// 空串 = 不着色。**不许**在这里传 ANSI：颜色是渲染层的事，内核只给语义，
+	// 否则同一份数据在网页与终端上就得各写一遍转义。
+	Tone string `json:"tone,omitempty"`
+}
+
+// Tone 的取值。前端按这几个词上色，其余一律当没给。
+const (
+	ToneOK   = "ok"
+	ToneWarn = "warn"
+	ToneBad  = "bad"
+)
+
 // Applier 把这个概念的一次修改落盘。
 //
 // `edit` 的形状由**这个概念自己**定义（每个概念的应用者自己解释），界面不解析
