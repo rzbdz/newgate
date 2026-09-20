@@ -4,6 +4,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
 )
@@ -43,7 +44,9 @@ func New() modules.Component {
 		Requires: []modules.Requirement{
 			// ui 是**弱依赖**（见 component.Optional）：装着界面就把 `newgate plugin`
 			// 与那一行 status 挂上去，没装就跳过——开关账本照常工作。
+			// web 界面同款、各注册各的（两个界面可以并存）。
 			modules.Optional(cliapi.Capability),
+			modules.Optional(viewapi.Capability),
 			modules.Need(confighookapi.ConfigHooksCapability),
 		},
 		Provides: []modules.Provision{
@@ -64,6 +67,21 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, self)
+
+			// web 界面那一份：开关点画成开关。放在 cli 那段「没装就 return」**之前**
+			// ——只装 dashboard 的装配里也要有（与 config/gateway 同一条）。
+			//
+			// 注册时只登记产出函数，不算「现在开着没有」：每条 `newgate …` 命令都会
+			// 跑到这里，而绝大多数进程没有人会看界面（见 lib/view 的包注释）。
+			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
+				rel, err := v.Register("plugin-manager", func() ([]viewapi.Concept, error) {
+					return viewConcepts(service)
+				})
+				if err != nil {
+					return err
+				}
+				releases = append(releases, rel)
+			}
 
 			// 命令与状态行都是这个模块的用户界面，由它自己贡献——界面不认识它。
 			// ui 没装就跳过：开关账本照常工作，只是没有入口。

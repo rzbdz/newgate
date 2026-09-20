@@ -119,7 +119,7 @@
       ]
     },
     "  {path} reverts automatically in {left}": {
-      "where": "modules/pluginmanager/command.go:267",
+      "where": "modules/pluginmanager/command.go:246",
       "args": [
         "left",
         "path"
@@ -478,7 +478,7 @@
       ]
     },
     "({left} left)": {
-      "where": "modules/pluginmanager/command.go:391",
+      "where": "modules/pluginmanager/command.go:356",
       "args": [
         "left"
       ]
@@ -1143,6 +1143,9 @@
     "Run once with a given profile": {
       "where": "modules/runtime/launch.go:72"
     },
+    "Runtime switches": {
+      "where": "modules/pluginmanager/view.go:82"
+    },
     "Saved to state.json: {tag}": {
       "where": "modules/locale/command.go:61",
       "args": [
@@ -1172,6 +1175,9 @@
     },
     "Stop the proxy + every agent back to a direct connection": {
       "where": "modules/runtime/commands.go:586"
+    },
+    "Switches that need a time limit": {
+      "where": "modules/pluginmanager/view.go:98"
     },
     "TCP connection": {
       "where": "modules/gateway/probe/net.go:78"
@@ -1616,7 +1622,7 @@
       ]
     },
     "cannot read providers.json: {err}": {
-      "where": "modules/config/store/store.go:386",
+      "where": "modules/config/store/store.go:408",
       "args": [
         "err"
       ]
@@ -1674,7 +1680,7 @@
       ]
     },
     "cannot write the control token: {err}": {
-      "where": "modules/config/store/store.go:327"
+      "where": "modules/config/store/store.go:349"
     },
     "cannot write {path}: {err}": {
       "where": "modules/config/commands.go:159",
@@ -2269,7 +2275,7 @@
       ]
     },
     "module \"{target}\" reports no switch points, cannot be toggled at runtime (a v1 limitation)": {
-      "where": "modules/pluginmanager/command.go:298",
+      "where": "modules/pluginmanager/command.go:277",
       "args": [
         "target"
       ]
@@ -2332,7 +2338,7 @@
       "where": "modules/config/commands.go:214"
     },
     "no module named \"{target}\" (see the list with newgate plugin)": {
-      "where": "modules/pluginmanager/command.go:293",
+      "where": "modules/pluginmanager/command.go:272",
       "args": [
         "target"
       ]
@@ -2347,7 +2353,7 @@
       "where": "modules/gateway/rewrite/splice.go:441"
     },
     "no such profile: {name} (available: {list})": {
-      "where": "modules/config/store/store.go:338",
+      "where": "modules/config/store/store.go:360",
       "args": [
         "list",
         "name"
@@ -2360,8 +2366,14 @@
         "name"
       ]
     },
+    "no switch point named \"{path}\" — the page is probably stale, reload it": {
+      "where": "modules/pluginmanager/view.go:141",
+      "args": [
+        "path"
+      ]
+    },
     "no switch point named \"{target}\" (see the list with newgate plugin)": {
-      "where": "modules/pluginmanager/command.go:285",
+      "where": "modules/pluginmanager/command.go:264",
       "args": [
         "target"
       ]
@@ -2397,7 +2409,7 @@
       ]
     },
     "off": {
-      "where": "modules/pluginmanager/command.go:405"
+      "where": "modules/pluginmanager/command.go:370"
     },
     "off (whole layer)": {
       "where": "modules/gateway/command_special.go:132"
@@ -2526,14 +2538,8 @@
         "path"
       ]
     },
-    "plugin: serialization failed: {err}": {
-      "where": "modules/pluginmanager/command.go:246",
-      "args": [
-        "err"
-      ]
-    },
     "plugin: unknown duration \"{value}\" (supported: 30s / 2m / 2min / 1h / forever)": {
-      "where": "modules/pluginmanager/command.go:324",
+      "where": "modules/pluginmanager/command.go:303",
       "args": [
         "value"
       ]
@@ -2545,7 +2551,7 @@
       ]
     },
     "plugin: {path} is a footgun, forever is not accepted (give a duration, e.g. 5m)": {
-      "where": "modules/pluginmanager/command.go:223",
+      "where": "modules/pluginmanager/set.go:28",
       "args": [
         "path"
       ]
@@ -2671,7 +2677,7 @@
       "where": "modules/config/commands.go:693"
     },
     "profile {name}: {err}": {
-      "where": "modules/config/store/store.go:393",
+      "where": "modules/config/store/store.go:415",
       "args": [
         "err",
         "name"
@@ -2685,14 +2691,14 @@
       ]
     },
     "profile {profile} role {role}: model is empty": {
-      "where": "modules/config/store/store.go:416",
+      "where": "modules/config/store/store.go:438",
       "args": [
         "profile",
         "role"
       ]
     },
     "profile {profile} role {role}: provider {provider} is not defined": {
-      "where": "modules/config/store/store.go:400",
+      "where": "modules/config/store/store.go:422",
       "args": [
         "profile",
         "provider",
@@ -2721,7 +2727,7 @@
       "where": "modules/gateway/probe/probe.go:155"
     },
     "provider {provider} has no key → {hint}": {
-      "where": "modules/config/store/store.go:411",
+      "where": "modules/config/store/store.go:433",
       "args": [
         "hint",
         "provider"
@@ -2836,7 +2842,7 @@
       ]
     },
     "revert it: newgate plugin {target} on": {
-      "where": "modules/pluginmanager/command.go:273",
+      "where": "modules/pluginmanager/command.go:252",
       "args": [
         "target"
       ]
@@ -2913,10 +2919,10 @@
       "where": "modules/gateway/command_probe.go:50"
     },
     "set api_key in providers.json": {
-      "where": "modules/config/store/store.go:406"
+      "where": "modules/config/store/store.go:428"
     },
     "set the environment variable {env} or fill in api_key": {
-      "where": "modules/config/store/store.go:408",
+      "where": "modules/config/store/store.go:430",
       "args": [
         "env"
       ]
@@ -3046,10 +3052,10 @@
       "where": "modules/config/commands.go:715"
     },
     "switched off": {
-      "where": "modules/pluginmanager/command.go:261"
+      "where": "modules/pluginmanager/command.go:240"
     },
     "switched on": {
-      "where": "modules/pluginmanager/command.go:259"
+      "where": "modules/pluginmanager/command.go:238"
     },
     "takes effect immediately; running sessions are unaffected": {
       "where": "modules/config/commands.go:69"
@@ -3131,6 +3137,12 @@
       "args": [
         "log",
         "pid"
+      ]
+    },
+    "the switches in this request are not readable: {err}": {
+      "where": "modules/pluginmanager/view.go:126",
+      "args": [
+        "err"
       ]
     },
     "the tier bindings in this request are not readable: {err}": {
@@ -3258,10 +3270,10 @@
       "where": "modules/gateway/forward/forward.go:1687"
     },
     "turned off": {
-      "where": "modules/pluginmanager/command.go:398"
+      "where": "modules/pluginmanager/command.go:363"
     },
     "turned on": {
-      "where": "modules/pluginmanager/command.go:403"
+      "where": "modules/pluginmanager/command.go:368"
     },
     "unavailable": {
       "where": "modules/config/commands.go:216"
@@ -3722,6 +3734,13 @@
         "ok",
         "unrated",
         "usable"
+      ]
+    },
+    "{why} — footguns need a time limit; use: newgate plugin {path} on 5m": {
+      "where": "modules/pluginmanager/view.go:93",
+      "args": [
+        "path",
+        "why"
       ]
     },
     "{why}, override not applied": {

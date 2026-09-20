@@ -956,6 +956,10 @@
       "text": "用某个 profile 跑一次",
       "reviewed": true
     },
+    "Runtime switches": {
+      "text": "运行期开关",
+      "reviewed": true
+    },
     "Saved to state.json: {tag}": {
       "text": "已保存到 state.json：{tag}",
       "reviewed": true
@@ -990,6 +994,10 @@
     },
     "Stop the proxy + every agent back to a direct connection": {
       "text": "停代理 + 所有 agent 恢复直连",
+      "reviewed": true
+    },
+    "Switches that need a time limit": {
+      "text": "需要限时的开关",
       "reviewed": true
     },
     "TCP connection": {
@@ -2048,6 +2056,10 @@
       "text": "未知档位 {name}（{known}）",
       "reviewed": true
     },
+    "no switch point named \"{path}\" — the page is probably stale, reload it": {
+      "text": "没有名为 {path} 的开关点 —— 页面多半已经过期了，重新载入一下",
+      "reviewed": true
+    },
     "no switch point named \"{target}\" (see the list with newgate plugin)": {
       "text": "没有叫 \"{target}\" 的开关点（newgate plugin 看清单）",
       "reviewed": true
@@ -2198,10 +2210,6 @@
     },
     "plugin-manager: unknown Danger \"{danger}\" on switch point \"{path}\" (safe/quirk/footgun)": {
       "text": "plugin-manager: 开关点 \"{path}\" 的 Danger \"{danger}\" 不认识（safe/quirk/footgun）",
-      "reviewed": true
-    },
-    "plugin: serialization failed: {err}": {
-      "text": "plugin: 序列化失败: {err}",
       "reviewed": true
     },
     "plugin: unknown duration \"{value}\" (supported: 30s / 2m / 2min / 1h / forever)": {
@@ -2688,6 +2696,10 @@
       "text": "停机请求已被接受，但代理 (pid {pid}) 2 秒内没有退出（看日志 {log}）",
       "reviewed": true
     },
+    "the switches in this request are not readable: {err}": {
+      "text": "这次请求里的开关读不出来：{err}",
+      "reviewed": true
+    },
     "the tier bindings in this request are not readable: {err}": {
       "text": "此请求里的档位绑定读不出来：{err}",
       "reviewed": true
@@ -3131,6 +3143,10 @@
     },
     "{usable} usable ({fast} fast · {ok} usable · {unrated} unrated) · {laggy} laggy · {down} unavailable": {
       "text": "可用 {usable}（流畅 {fast} · 可用 {ok} · 未评分 {unrated}）· 卡顿 {laggy} · 不可用 {down}",
+      "reviewed": true
+    },
+    "{why} — footguns need a time limit; use: newgate plugin {path} on 5m": {
+      "text": "{why} —— footgun 必须带时限；改它用：newgate plugin {path} on 5m",
       "reviewed": true
     },
     "{why}, override not applied": {

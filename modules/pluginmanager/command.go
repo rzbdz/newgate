@@ -213,42 +213,21 @@ func (c *command) toggle(host cliapi.Host, target string, on bool, dur string) i
 	}
 
 	st := store.LoadState()
-	cfg := Parse(rawConfig(st)).Prune()
 
 	var changed []string
 	for _, sw := range switches {
-		// footgun 不接受「永久」：这是结构性保证的一半（另一半在注册期——
-		// footgun 必须声明 TTL > 0，所以哪怕不给时长也有兜底时限）。
-		if sw.Danger == DangerFootgun && forever {
-			return host.Die(64, i18n.T(
-				"plugin: {path} is a footgun, forever is not accepted (give a duration, e.g. 5m)",
-				i18n.A{"path": sw.Path}))
-		}
-		// 出厂态决定这条走哪张表：Default=true 是 kill switch（写 Off 表），
-		// Default=false 是 mode（写 On 表）。用户的动作可能等于出厂态（比如
-		// 对一个出厂开着的开关点说 on），那就等于撤销这条设定。
-		wantOff := sw.Default != on
-		if wantOff {
-			cfg.Off = setEntry(cfg.Off, sw.Path, effectiveTTL(sw, ttl, forever))
-		} else {
-			cfg.Off = dropEntry(cfg.Off, sw.Path)
-		}
-		if !wantOff && !sw.Default {
-			cfg.On = setEntry(cfg.On, sw.Path, effectiveTTL(sw, ttl, forever))
-		} else {
-			cfg.On = dropEntry(cfg.On, sw.Path)
+		// **写语义只有一份**（SetSwitch）：出厂态决定走哪张表、动作等于出厂态就是
+		// 撤销这条设定、footgun 不接受永久——这几条错了，命令行与浏览器就会对同一
+		// 份配置给出不同答案。所以这里不重写一遍，只负责落盘与通知。
+		//
+		// 它返回的 error 目前只有两种：footgun 说了「永久」（用法错误，64），以及
+		// 配置序列化失败（理论上到不了——里面只有字符串与时间）。
+		if err := SetSwitch(st, sw, on, ttl, forever); err != nil {
+			return host.Die(64, err.Error())
 		}
 		changed = append(changed, sw.Path)
 	}
 
-	raw, merr := cfg.Marshal()
-	if merr != nil {
-		return host.Die(70, i18n.T("plugin: serialization failed: {err}", i18n.A{"err": merr}))
-	}
-	if st.ModuleConfig == nil {
-		st.ModuleConfig = map[string][]byte{}
-	}
-	st.ModuleConfig[StateKey] = raw
 	if serr := store.SaveState(st); serr != nil {
 		return host.Die(70, serr.Error())
 	}
@@ -326,20 +305,6 @@ func switchTTL(s string) (time.Duration, bool, error) {
 			i18n.A{"value": s})
 	}
 	return d, false, nil
-}
-
-// effectiveTTL 这次该记多长时限：用户给了就用用户的，没给就用开关点声明的默认值。
-func effectiveTTL(sw Switch, ttl time.Duration, forever bool) time.Time {
-	if forever {
-		return time.Time{}
-	}
-	if ttl == 0 {
-		ttl = sw.TTL
-	}
-	if ttl == 0 {
-		return time.Time{}
-	}
-	return time.Now().Add(ttl)
 }
 
 func setEntry(table map[string]Entry, path string, until time.Time) map[string]Entry {

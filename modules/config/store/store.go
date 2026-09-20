@@ -281,20 +281,42 @@ func stateJSONFields() map[string]bool {
 }
 
 func SaveState(s *domain.State) error {
-	typed, err := json.Marshal(s)
+	b, err := StateBytes(s)
 	if err != nil {
 		return err
 	}
+	// 临时文件名随机、同目录（见 writeFileAtomic）：固定名 "<path>.tmp" 是两个
+	// 并发写者会撞上的名字，撞上就是「你 rename 了别人的字节」。
+	return writeFileAtomic(paths.StateFile(), b)
+}
+
+// StateBytes 是 SaveState 会写下去的那份字节：已知字段 + 各模块自己那段原文。
+//
+// 导出它是因为**写这份文件的路径不止一条**（命令行改档位/改开关点，浏览器改同一个
+// 开关点），而安全的那条是「读基线 → 比对 → 原子写」（WriteIfUnchanged）。只给一个
+// SaveState 的话，第二个写者要么绕开基线检查直接写（把别人的改动盖掉，而且是静默
+// 的），要么自己拼一遍序列化——拼漏了 ModuleConfig，别人的模块段就整段消失。
+//
+// 序列化的规则只在这里有一份：哪些键是已知字段、哪些是别人寄存的原文。
+func StateBytes(s *domain.State) ([]byte, error) {
+	typed, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(typed, &fields); err != nil {
-		return err
+		return nil, err
 	}
 	for name, raw := range s.ModuleConfig {
 		if _, owned := fields[name]; !owned {
 			fields[name] = append(json.RawMessage(nil), raw...)
 		}
 	}
-	return writeJSON(paths.StateFile(), fields, 0o660)
+	b, err := json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
 }
 
 // NewControlToken 生成控制端点令牌（crypto/rand，48 位十六进制）。
