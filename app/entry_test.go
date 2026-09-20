@@ -9,7 +9,7 @@ import (
 	"github.com/rzbdz/newgate/testing/testkit"
 )
 
-// TestTheDaemonEntrySurvivesARemovedUI 是 2026-09-21 那个 bug 的棘轮。
+// TestTheDaemonEntrySurvivesARemovedUI 是 2026-09-20 那个 bug 的棘轮。
 //
 // 现场：`__serve`（守护进程本体）原本注册成 cli 的一条命令，于是
 // `disable: ["cli"]` 的装配**编得出来、却永远起不来**——进程一问入口账本，

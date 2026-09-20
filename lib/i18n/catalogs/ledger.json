@@ -790,7 +790,7 @@
       ]
     },
     "How": {
-      "where": "modules/runtime/view.go:101"
+      "where": "modules/runtime/view.go:102"
     },
     "In PATH": {
       "where": "modules/runtime/commands.go:126"
@@ -853,7 +853,7 @@
       "where": "modules/cli/extension/extension.go:237"
     },
     "Mechanism": {
-      "where": "modules/runtime/view.go:100"
+      "where": "modules/runtime/view.go:101"
     },
     "Memory + the thinkcache.bin cold layer; restored automatically after a restart, counts only, never content": {
       "where": "modules/gateway/thinkcache_status.go:50"
@@ -1340,7 +1340,7 @@
       "where": "modules/config/view.go:332"
     },
     "Who goes through newgate": {
-      "where": "modules/runtime/view.go:83"
+      "where": "modules/runtime/view.go:84"
     },
     "Why it exists": {
       "where": "modules/gateway/command_special.go:141"
@@ -1452,7 +1452,7 @@
       ]
     },
     "agent": {
-      "where": "modules/runtime/view.go:96"
+      "where": "modules/runtime/view.go:97"
     },
     "agent {agent} falls back to the default profile": {
       "where": "modules/config/store/watch.go:212",
@@ -1896,7 +1896,7 @@
       "where": "modules/gateway/status.go:64"
     },
     "declared but not in effect": {
-      "where": "modules/runtime/view.go:125"
+      "where": "modules/runtime/view.go:126"
     },
     "declared takeover but not in effect": {
       "where": "modules/runtime/commands.go:173"
@@ -3113,7 +3113,7 @@
       "where": "modules/pluginmanager/command.go:238"
     },
     "taken over": {
-      "where": "modules/runtime/view.go:121"
+      "where": "modules/runtime/view.go:122"
     },
     "takes effect immediately; running sessions are unaffected": {
       "where": "modules/config/commands.go:69"
@@ -3331,7 +3331,7 @@
       "where": "modules/pluginmanager/command.go:363"
     },
     "turned off but still in effect": {
-      "where": "modules/runtime/view.go:130"
+      "where": "modules/runtime/view.go:131"
     },
     "turned on": {
       "where": "modules/pluginmanager/command.go:368"
