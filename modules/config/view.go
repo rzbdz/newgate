@@ -280,7 +280,50 @@ func profileConcept(name string, all []string) view.Concept {
 			}
 			return profileView(name, file, p), nil
 		},
+		Actions: profileActions(name),
 	}
+}
+
+// profileActions 是这张档位卡上的按钮；它**已经就是默认**时返回空。
+//
+// 为什么已经默认的那一张不挂：「把当前这份设为默认」显示在它自己身上是纯噪音，
+// 而卡片上按钮一多，真正有用的那个就会被淹掉。判据只有一条（此刻的 DefaultProfile
+// 是不是它），所以它不会骗人。
+//
+// 为什么是两个而不是一个：改默认 profile 这件事，用户想要的常常不止「默认改成它」，
+// 还有「**所有客户端**都跟着它」。单独设过的客户端不跟着走是对的（它们被明确指定
+// 过），但要逐个去点一遍就是十六次操作——第二个按钮把「设默认」与「收敛」一次做完，
+// 它不多做任何别的事。
+func profileActions(name string) []view.Action {
+	if store.LoadState().DefaultProfile == name {
+		return nil
+	}
+	return []view.Action{
+		{
+			ID:    "set-default",
+			Label: func() string { return i18n.T("set as the default profile", nil) },
+			Run:   func() (string, error) { return setDefaultProfile(name, false) },
+		},
+		{
+			ID: "set-default-force",
+			Label: func() string {
+				return i18n.T("set as the default, and make every client follow it", nil)
+			},
+			Run: func() (string, error) { return setDefaultProfile(name, true) },
+		},
+	}
+}
+
+// setDefaultProfile 把一份档位设成全局默认；force 时顺带清掉每个客户端的链头。
+//
+// 它**不改这一份档位本身**：用户要的是「默认用它」，不是「把它改一改」。所以这个
+// 按钮不会让这张卡变脏、也不会产生一份待保存的草稿——它是一次落盘的动作，
+// 做完界面重读一遍（见 lib/view 的 Concept.Actions）。
+func setDefaultProfile(name string, force bool) (string, error) {
+	if err := store.SetDefaultProfile(name, force); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 // profileView 把一份**已经解析好的**档位拼成编辑器要的全部素材。

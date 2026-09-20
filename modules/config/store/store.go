@@ -390,6 +390,25 @@ func ClearActiveProfile(agent string) error {
 	return SaveState(s)
 }
 
+// SetDefaultProfile 改全局默认；clearAgents 为真时顺带把每个 agent 的链头清掉。
+//
+// 两件事**一次写完**（一次 Load + 一次 Save）：分两次的话，中间那一刻 state.json
+// 是半成品——默认已经改了、客户端还没收敛——而另一次编辑恰好落在那一刻就会被
+// 后一次 Save 整个盖掉。这与「保存是 CAS」那条防的是同一类事故。
+func SetDefaultProfile(profile string, clearAgents bool) error {
+	if _, err := LoadProfile(profile); err != nil {
+		avail, _ := ListProfiles()
+		return i18n.E("no such profile: {name} (available: {list})",
+			i18n.A{"name": profile, "list": strings.Join(avail, ", ")})
+	}
+	s := LoadState()
+	s.DefaultProfile = profile
+	if clearAgents {
+		s.Active = nil
+	}
+	return SaveState(s)
+}
+
 // ClearAllAgentProfiles 让**每一个** agent 都回落到全局默认，返回清掉了几条。
 //
 // 它是「force apply」那件事的落点：改全局默认 profile 时，单独设过的那些 agent

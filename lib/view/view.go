@@ -381,6 +381,22 @@ type Concept struct {
 	// rows）：一个人的族加一行标题是纯噪音。所以贡献者可以放心地给每一张卡都写
 	// 上分组，不必自己先数一遍。
 	Group string
+	// Actions 是**这张卡上**的动作（见 Section.Actions，形状完全一样）。
+	//
+	// 与栏目动作的分工只有一条：**这件事是不是针对某一张卡**。
+	//
+	//	「再建一份档位文件」   栏目动作：新建出来的东西此刻还没有概念，
+	//	                       没有哪张卡挂得住它。
+	//	「把当前这份设为默认」  卡片动作：它说的是**这一张**（哪一份 profile），
+	//	                       而那是只有这张卡自己知道的事。
+	//
+	// Run 依然是**不接参数**的，而这次它接不到参数是**对**的：界面能提供的只有
+	// 「用户点了这个按钮」，而「点的是哪一张卡」在贡献者构造这个 Action 的时候
+	// 就已经定下来了（闭包）。让界面回传一个 id 反而危险——它手里那份快照可能
+	// 已经旧了，而一个按名字走的动作会作用到一个**已经不存在**的档位上。
+	//
+	// 与栏目动作另一条相同：它**不开事务、不碰快照**，跑完界面自己重读一遍。
+	Actions []Action
 }
 
 // Conflict 是「你手里那份已经不是最新的了」。
@@ -676,6 +692,53 @@ func (r *Registry) RunAction(source, id string) (string, error) {
 		return "", i18n.E("{source}.{action} has nothing to run", i18n.A{"source": source, "action": id})
 	}
 	return found.Run()
+}
+
+// RunConceptAction 跑某个概念上的一个动作（见 Concept.Actions）。
+//
+// 与 RunAction 只有一处不同：**它得先问一遍贡献者**。栏目动作在登记时就躺在账本
+// 里，而概念动作是产出函数每次现造出来的（见 lib/view 的包注释：概念是「有人来问
+// 的时候」才算的）——所以「这个 ID 是哪一张卡」这件事，账本自己不知道。
+//
+// 代价是这一次点击要跑一遍产出函数（配置那一位会重读全部档位）。**可接受**：它是
+// 一次用户点击，不是热路径；而换来的是这套东西的一条性质——动作的作用对象就是
+// **用户此刻在屏幕上看到的那一张卡**，不是账本里某个可能已经过期的注册。
+//
+// 找不到就报错，不装作跑过：界面手里的快照可能已经旧了（那一份档位刚被删掉），
+// 而一个按名字走的动作会作用到一个不存在的东西上。
+func (r *Registry) RunConceptAction(conceptID, actionID string) (string, error) {
+	r.mu.RLock()
+	reads := make([]Contributor, 0, len(r.sources))
+	for _, s := range r.sources {
+		reads = append(reads, s.read)
+	}
+	r.mu.RUnlock()
+
+	for _, read := range reads {
+		cs, err := read()
+		if err != nil {
+			continue // 这一位整个产不出来：它本来就不可能是那张卡的主人
+		}
+		for _, c := range cs {
+			if c.ID != conceptID {
+				continue
+			}
+			for _, a := range c.Actions {
+				if a.ID != actionID {
+					continue
+				}
+				if a.Run == nil {
+					return "", i18n.E("{concept}.{action} has nothing to run",
+						i18n.A{"concept": conceptID, "action": actionID})
+				}
+				return a.Run()
+			}
+			return "", i18n.E("{concept} has no action called {action} — the page is probably stale, reload it",
+				i18n.A{"concept": conceptID, "action": actionID})
+		}
+	}
+	return "", i18n.E("no view contributed a concept called {concept} — the page is probably stale, reload it",
+		i18n.A{"concept": conceptID})
 }
 
 // Snapshot 问一遍贡献者，返回这一刻的概念（按 Source, ID 排序）。

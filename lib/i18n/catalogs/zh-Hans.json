@@ -2336,6 +2336,10 @@
       "text": "没有有效的候选",
       "reviewed": true
     },
+    "no view contributed a concept called {concept} — the page is probably stale, reload it": {
+      "text": "没有任何界面贡献过叫 {concept} 的概念——页面多半已经旧了，重载一次",
+      "reviewed": true
+    },
     "none": {
       "text": "无",
       "reviewed": true
@@ -2806,6 +2810,14 @@
     },
     "set api_key in providers.json": {
       "text": "providers.json 里填 api_key",
+      "reviewed": true
+    },
+    "set as the default profile": {
+      "text": "设为默认 profile",
+      "reviewed": true
+    },
+    "set as the default, and make every client follow it": {
+      "text": "设为默认，并让每个客户端都跟随它",
       "reviewed": true
     },
     "set for this client only (other clients follow the global default)": {
@@ -3410,6 +3422,14 @@
     },
     "{bucket} {latency}/{n} sample": {
       "text": "{bucket} {latency}/{n}次",
+      "reviewed": true
+    },
+    "{concept} has no action called {action} — the page is probably stale, reload it": {
+      "text": "{concept} 上没有叫 {action} 的动作——页面多半已经旧了，重载一次",
+      "reviewed": true
+    },
+    "{concept}.{action} has nothing to run": {
+      "text": "{concept}.{action} 没有可跑的东西",
       "reviewed": true
     },
     "{dialect} dialect": {

@@ -35,18 +35,18 @@ func (p AgentProfile) ProfileItem() view.ToggleItem {
 	}
 	active := p.Active()
 	return view.ToggleItem{
-		ID:    ProfileItemID,
-		Kind:  view.ToggleSelect,
+		ID:   ProfileItemID,
+		Kind: view.ToggleSelect,
+		// 取值是**存下来的那个**，不是解析之后的（见 AgentProfile.Stored）：
+		// 这一格要回答的是「我单独定过没有」，而 `Active()` 把「跟随缺省到 ds」
+		// 与「我就是要 ds」压成同一个字符串——两种状态在界面上长得一样，用户就
+		// 没法知道改全局默认时这个客户端会不会跟着走。
 		Label: i18n.T("Profile", nil),
-		Value: active,
+		Value: p.Stored(),
 		// 空串排在最前：它是「跟随全局缺省」，不是一个没得选的空档。
 		Options: append([]string{""}, p.Options()...),
-		// 那一档的说法要**点名跟着谁**，而且要与我们给它的值长得不一样：不然
-		// 「跟随全局缺省（此刻正好是 ds）」与「我就是要选 ds」在下拉里是同一个词，
-		// 而这两件事配置上完全不同——后者在 state.json 里记着一条，前者没有，
-		// 行为差别是「以后改全局默认时它跟不跟着走」。
-		//
-		// 括号不会与 profile 名撞：档位文件的名字里不可能有括号（那是个文件名）。
+		// 那一档的说法要**点名跟着谁**：用户看到的是「跟随缺省」，而「缺省是谁」
+		// 只有后端知道。括号不会与 profile 名撞——那是个文件名。
 		OptionLabels: map[string]string{
 			"": i18n.T("{profile} (the global default)", i18n.A{"profile": active}),
 		},

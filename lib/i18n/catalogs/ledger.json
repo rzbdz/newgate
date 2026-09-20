@@ -487,7 +487,7 @@
       "where": "modules/config/view.go:45"
     },
     "+ provider": {
-      "where": "modules/config/view.go:748"
+      "where": "modules/config/view.go:791"
     },
     "+{n} body key": {
       "where": "modules/gateway/forward/forward.go:1662",
@@ -522,10 +522,10 @@
       "where": "modules/gateway/thinkcache_status.go:39"
     },
     "API key": {
-      "where": "modules/config/view.go:794"
+      "where": "modules/config/view.go:837"
     },
     "API key from env": {
-      "where": "modules/config/view.go:797"
+      "where": "modules/config/view.go:840"
     },
     "Add an empty array when a tool schema lacks required": {
       "where": "modules/gateway/command_schema.go:34"
@@ -543,7 +543,7 @@
       ]
     },
     "An IP (e.g. a Tailscale 100.x address) or 0.0.0.0 for every interface. Empty = loopback only. Changing it takes effect after a restart.": {
-      "where": "modules/config/view.go:629"
+      "where": "modules/config/view.go:672"
     },
     "An agent declares takeover but it is not in effect; rerun newgate start": {
       "where": "modules/runtime/diagnostics.go:142"
@@ -552,7 +552,7 @@
       "where": "modules/runtime/diagnostics.go:148"
     },
     "Anthropic base URL": {
-      "where": "modules/config/view.go:791"
+      "where": "modules/config/view.go:834"
     },
     "Availability": {
       "where": "modules/breaker/classify.go:68"
@@ -564,7 +564,7 @@
       "where": "modules/runtime/diagnostics.go:209"
     },
     "Bind address": {
-      "where": "modules/config/view.go:627"
+      "where": "modules/config/view.go:670"
     },
     "Binding": {
       "where": "modules/config/commands.go:57"
@@ -720,7 +720,7 @@
       "where": "modules/breaker/module.go:70"
     },
     "Default profile": {
-      "where": "modules/config/view.go:620"
+      "where": "modules/config/view.go:663"
     },
     "Description": {
       "where": "modules/config/commands.go:107"
@@ -798,7 +798,7 @@
       "where": "modules/gateway/module.go:109"
     },
     "Global settings": {
-      "where": "modules/config/view.go:595"
+      "where": "modules/config/view.go:638"
     },
     "Glossary": {
       "where": "modules/cli/cli.go:150"
@@ -889,7 +889,7 @@
       "where": "modules/gateway/thinkcache_status.go:50"
     },
     "Model names this provider serves, used to pick candidates for an explicit model request.": {
-      "where": "modules/config/view.go:802"
+      "where": "modules/config/view.go:845"
     },
     "Module switches": {
       "where": "modules/pluginmanager/status.go:50"
@@ -910,7 +910,7 @@
       ]
     },
     "Never sent to the browser: this field arrives empty, and writing a value is the only way to change it.": {
-      "where": "modules/config/view.go:796"
+      "where": "modules/config/view.go:839"
     },
     "New configuration failed to load, still using the last usable configuration: {err}": {
       "where": "modules/gateway/serve.go:221",
@@ -1071,7 +1071,7 @@
       "where": "modules/gateway/diagnostics.go:139"
     },
     "Profile": {
-      "where": "modules/confighook/view.go:40"
+      "where": "modules/confighook/view.go:44"
     },
     "Profiles": {
       "where": "modules/config/view.go:264"
@@ -1090,7 +1090,7 @@
       ]
     },
     "Providers": {
-      "where": "modules/config/view.go:725"
+      "where": "modules/config/view.go:768"
     },
     "Proxy": {
       "where": "modules/gateway/diagnostics.go:123"
@@ -1149,7 +1149,7 @@
       "where": "modules/breaker/classify.go:70"
     },
     "Reads the key from an environment variable instead of the file. Takes precedence over the field above.": {
-      "where": "modules/config/view.go:799"
+      "where": "modules/config/view.go:842"
     },
     "Reason": {
       "where": "modules/breaker/command.go:97"
@@ -1246,7 +1246,7 @@
       ]
     },
     "Some upstreams serve the Anthropic dialect on a different base and do not forward between them (ARK is the case this exists for).": {
-      "where": "modules/config/view.go:793"
+      "where": "modules/config/view.go:836"
     },
     "Spared": {
       "where": "modules/breaker/command.go:113"
@@ -1303,7 +1303,7 @@
       ]
     },
     "The name the tier bindings refer to. Renaming is a new provider: bindings that used the old name keep pointing at it.": {
-      "where": "modules/config/view.go:784"
+      "where": "modules/config/view.go:827"
     },
     "The process the pidfile points at is gone ({what}), and the lock file says the real daemon is pid {pid}": {
       "where": "modules/runtime/daemon/daemon.go:248",
@@ -1409,7 +1409,7 @@
       "where": "modules/config/commands.go:785"
     },
     "Where requests go. The path is appended by newgate.": {
-      "where": "modules/config/view.go:790"
+      "where": "modules/config/view.go:833"
     },
     "Which agent to launch? e.g. newgate claude or newgate run claude": {
       "where": "modules/runtime/launch.go:193"
@@ -1427,13 +1427,13 @@
       ]
     },
     "Which dialect this upstream speaks. Empty means openai.": {
-      "where": "modules/config/view.go:787"
+      "where": "modules/config/view.go:830"
     },
     "Which language this process speaks. Saved to state.json and applied at once — no restart.": {
       "where": "modules/locale/view.go:59"
     },
     "Which profile the chain starts from when no agent-specific one is set.": {
-      "where": "modules/config/view.go:621"
+      "where": "modules/config/view.go:664"
     },
     "Who goes through newgate": {
       "where": "modules/runtime/view.go:97"
@@ -1492,22 +1492,22 @@
       "where": "modules/gateway/metrics/hints.go:81"
     },
     "a profile must have a name — there is nothing to save it as": {
-      "where": "modules/config/view.go:457"
+      "where": "modules/config/view.go:500"
     },
     "a profile name must not contain path separators or \"..\": {name}": {
-      "where": "modules/config/view.go:460",
+      "where": "modules/config/view.go:503",
       "args": [
         "name"
       ]
     },
     "a profile named {name} already exists — pick another name, or delete that one first": {
-      "where": "modules/config/view.go:1132",
+      "where": "modules/config/view.go:1175",
       "args": [
         "name"
       ]
     },
     "a provider has no name — the tier bindings would have nothing to refer to": {
-      "where": "modules/config/view.go:834"
+      "where": "modules/config/view.go:877"
     },
     "a ref and provider/model cannot be combined: {binding}": {
       "where": "modules/config/domain/candidates.go:78",
@@ -1695,7 +1695,7 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "base URL": {
-      "where": "modules/config/view.go:788"
+      "where": "modules/config/view.go:831"
     },
     "binding": {
       "where": "modules/breaker/view.go:60"
@@ -1803,7 +1803,7 @@
       ]
     },
     "cannot read providers.json: {err}": {
-      "where": "modules/config/store/store.go:438",
+      "where": "modules/config/store/store.go:457",
       "args": [
         "err"
       ]
@@ -2114,13 +2114,13 @@
       "where": "modules/config/resolve/chain.go:183"
     },
     "e.g. DEEPSEEK_API_KEY": {
-      "where": "modules/config/view.go:798"
+      "where": "modules/config/view.go:841"
     },
     "each (provider, model) appears once in the whole chain": {
       "where": "modules/config/commands.go:363"
     },
     "empty = loopback only (127.0.0.1)": {
-      "where": "modules/config/view.go:628"
+      "where": "modules/config/view.go:671"
     },
     "empty binding": {
       "where": "modules/config/domain/candidates.go:63"
@@ -2199,7 +2199,7 @@
       ]
     },
     "following the global default ({profile})": {
-      "where": "modules/confighook/profile.go:80",
+      "where": "modules/confighook/profile.go:101",
       "args": [
         "profile"
       ]
@@ -2300,7 +2300,7 @@
       "where": "modules/breaker/view.go:143"
     },
     "https://…": {
-      "where": "modules/config/view.go:789"
+      "where": "modules/config/view.go:832"
     },
     "in effect": {
       "where": "modules/runtime/commands.go:170"
@@ -2331,7 +2331,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:718",
+      "where": "lib/view/view.go:781",
       "args": [
         "err",
         "source"
@@ -2491,7 +2491,7 @@
       ]
     },
     "models": {
-      "where": "modules/config/view.go:800"
+      "where": "modules/config/view.go:843"
     },
     "module": {
       "where": "modules/pluginmanager/view.go:133"
@@ -2510,7 +2510,7 @@
       ]
     },
     "name": {
-      "where": "modules/config/view.go:783"
+      "where": "modules/config/view.go:826"
     },
     "never probed": {
       "where": "modules/breaker/command.go:156"
@@ -2615,6 +2615,12 @@
     "no valid candidate": {
       "where": "modules/config/store/kv.go:145"
     },
+    "no view contributed a concept called {concept} — the page is probably stale, reload it": {
+      "where": "lib/view/view.go:740",
+      "args": [
+        "concept"
+      ]
+    },
     "none": {
       "where": "modules/runtime/commands.go:134"
     },
@@ -2631,7 +2637,7 @@
       "where": "modules/runtime/diagnostics.go:162"
     },
     "not set — paste the key here": {
-      "where": "modules/config/view.go:776"
+      "where": "modules/config/view.go:819"
     },
     "not taken over": {
       "where": "modules/runtime/commands.go:177"
@@ -2658,13 +2664,13 @@
       "where": "modules/breaker/command.go:133"
     },
     "one per line": {
-      "where": "modules/config/view.go:801"
+      "where": "modules/config/view.go:844"
     },
     "only POST is accepted": {
       "where": "modules/gateway/forward/forward.go:425"
     },
     "only if the two dialects live on different bases": {
-      "where": "modules/config/view.go:792"
+      "where": "modules/config/view.go:835"
     },
     "other": {
       "where": "modules/config/commands.go:231"
@@ -2920,7 +2926,7 @@
       "where": "modules/config/commands.go:698"
     },
     "profile {name}: {err}": {
-      "where": "modules/config/store/store.go:445",
+      "where": "modules/config/store/store.go:464",
       "args": [
         "err",
         "name"
@@ -2934,14 +2940,14 @@
       ]
     },
     "profile {profile} role {role}: model is empty": {
-      "where": "modules/config/store/store.go:468",
+      "where": "modules/config/store/store.go:487",
       "args": [
         "profile",
         "role"
       ]
     },
     "profile {profile} role {role}: provider {provider} is not defined": {
-      "where": "modules/config/store/store.go:452",
+      "where": "modules/config/store/store.go:471",
       "args": [
         "profile",
         "provider",
@@ -2949,7 +2955,7 @@
       ]
     },
     "protocol": {
-      "where": "modules/config/view.go:785"
+      "where": "modules/config/view.go:828"
     },
     "provider and model must both be set: {binding}": {
       "where": "modules/config/domain/candidates.go:83",
@@ -2973,7 +2979,7 @@
       "where": "modules/gateway/probe/probe.go:155"
     },
     "provider {provider} has no key → {hint}": {
-      "where": "modules/config/store/store.go:463",
+      "where": "modules/config/store/store.go:482",
       "args": [
         "hint",
         "provider"
@@ -3194,10 +3200,16 @@
       ]
     },
     "set api_key in providers.json": {
-      "where": "modules/config/store/store.go:458"
+      "where": "modules/config/store/store.go:477"
+    },
+    "set as the default profile": {
+      "where": "modules/config/view.go:304"
+    },
+    "set as the default, and make every client follow it": {
+      "where": "modules/config/view.go:310"
     },
     "set for this client only (other clients follow the global default)": {
-      "where": "modules/confighook/profile.go:78"
+      "where": "modules/confighook/profile.go:99"
     },
     "set in the config: {tier} (the default is {def}) — takes effect the next time {agent} is taken over (newgate on {agent})": {
       "where": "modules/confighook/slots.go:165",
@@ -3208,13 +3220,13 @@
       ]
     },
     "set the environment variable {env} or fill in api_key": {
-      "where": "modules/config/store/store.go:460",
+      "where": "modules/config/store/store.go:479",
       "args": [
         "env"
       ]
     },
     "set — leave empty to keep it": {
-      "where": "modules/config/view.go:778"
+      "where": "modules/config/view.go:821"
     },
     "several services on one port, or a port of its own when there is no shared one": {
       "where": "modules/porthub/module.go:46"
@@ -3359,7 +3371,7 @@
       "where": "modules/config/commands.go:71"
     },
     "the bind address must be an IP (or empty for loopback only), got {value}": {
-      "where": "modules/config/view.go:684",
+      "where": "modules/config/view.go:727",
       "args": [
         "value"
       ]
@@ -3392,7 +3404,7 @@
       "where": "modules/entry/module.go:81"
     },
     "the file content in this request is not readable: {err}": {
-      "where": "modules/config/view.go:1020",
+      "where": "modules/config/view.go:1063",
       "args": [
         "err"
       ]
@@ -3450,7 +3462,7 @@
       "where": "modules/config/commands.go:575"
     },
     "the providers in this request are not readable: {err}": {
-      "where": "modules/config/view.go:822",
+      "where": "modules/config/view.go:865",
       "args": [
         "err"
       ]
@@ -3477,7 +3489,7 @@
       "where": "modules/locale/view.go:93"
     },
     "the settings in this request are not readable: {err}": {
-      "where": "modules/config/view.go:657",
+      "where": "modules/config/view.go:700",
       "args": [
         "err"
       ]
@@ -3499,7 +3511,7 @@
       "where": "modules/cli/module.go:273"
     },
     "the tier bindings in this request are not readable: {err}": {
-      "where": "modules/config/view.go:424",
+      "where": "modules/config/view.go:467",
       "args": [
         "err"
       ]
@@ -3638,7 +3650,7 @@
       "where": "modules/pluginmanager/command.go:377"
     },
     "two providers are both named \"{name}\"": {
-      "where": "modules/config/view.go:838",
+      "where": "modules/config/view.go:881",
       "args": [
         "name"
       ]
@@ -3735,17 +3747,17 @@
       ]
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:570"
+      "where": "lib/view/view.go:586"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:739",
+      "where": "lib/view/view.go:802",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:731",
+      "where": "lib/view/view.go:794",
       "args": [
         "a",
         "b",
@@ -3753,19 +3765,19 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:736",
+      "where": "lib/view/view.go:799",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:579",
+      "where": "lib/view/view.go:595",
       "args": [
         "source"
       ]
     },
     "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
-      "where": "lib/view/view.go:575",
+      "where": "lib/view/view.go:591",
       "args": [
         "source"
       ]
@@ -3839,6 +3851,20 @@
         "n"
       ],
       "other": "{bucket} {latency}/{n} samples"
+    },
+    "{concept} has no action called {action} — the page is probably stale, reload it": {
+      "where": "lib/view/view.go:736",
+      "args": [
+        "action",
+        "concept"
+      ]
+    },
+    "{concept}.{action} has nothing to run": {
+      "where": "lib/view/view.go:731",
+      "args": [
+        "action",
+        "concept"
+      ]
     },
     "{dialect} dialect": {
       "where": "modules/confighook/command.go:62",
@@ -3918,7 +3944,7 @@
       ]
     },
     "{file} is not valid JSON": {
-      "where": "modules/config/view.go:499",
+      "where": "modules/config/view.go:542",
       "args": [
         "file"
       ]
@@ -4166,14 +4192,14 @@
       ]
     },
     "{source} has no action called {action} — the page is probably stale, reload it": {
-      "where": "lib/view/view.go:672",
+      "where": "lib/view/view.go:688",
       "args": [
         "action",
         "source"
       ]
     },
     "{source}.{action} has nothing to run": {
-      "where": "lib/view/view.go:676",
+      "where": "lib/view/view.go:692",
       "args": [
         "action",
         "source"
@@ -4226,14 +4252,14 @@
       ]
     },
     "{verb} {file} failed: {err}": {
-      "where": "modules/config/view.go:966",
+      "where": "modules/config/view.go:1009",
       "args": [
         "file",
         "verb"
       ]
     },
     "{verb} {file} failed: {err} (someone else changed it since you opened this page — reload and try again)": {
-      "where": "modules/config/view.go:963",
+      "where": "modules/config/view.go:1006",
       "args": [
         "err",
         "file",

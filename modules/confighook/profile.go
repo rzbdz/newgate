@@ -26,12 +26,28 @@ type AgentProfile struct {
 	AgentID string
 }
 
-// Active 是这个客户端此刻走的 profile。
+// Active 是这个客户端此刻**实际走**的 profile（解析之后的那一个）。
 //
-// **它总是有一个值**：没单独设过时返回全局默认——界面要显示的是「此刻实际走哪条
-// 链」，而不是「用户有没有单独设过」。两者不一样，后者是 IsOverride。
+// **它总是有一个值**：没单独设过时返回全局默认。它回答的是「这个客户端的请求
+// 落到哪条链上」，所以写给人看的那句话（Note）用它。
+//
+// 界面上的**取值**不要用它——用 Stored。两者的差别是这一格存在的全部理由。
 func (p AgentProfile) Active() string {
 	return store.LoadState().ActiveFor(p.AgentID)
+}
+
+// Stored 是这个客户端**存下来的**那个选择；空串 = 没单独设过、跟随全局默认。
+//
+// 为什么界面要的是它、不是 Active：两者在「用户选了 ds」与「用户什么都没选、
+// 而此刻全局默认正好是 ds」这两种情形下**返回同一个字符串**（`ds`），而这两件事
+// 配置上完全不同（一个在 state.json 里记着一条，一个没有；行为差别是「以后改全局
+// 默认时它跟不跟着走」）。
+//
+// 这一条是实测踩出来的（2026-09-21）：第一版把 Active 当取值端出去，于是那一格
+// 永远显示 `ds`——「跟随缺省」那个标签一次都没露过面，用户的原话是「我点击 apply
+// 之后，还是显示没有缺省的啊」。
+func (p AgentProfile) Stored() string {
+	return store.LoadState().Active[p.AgentID]
 }
 
 // IsOverride 说这个客户端是不是**单独设过**（而不是跟着全局默认走）。
@@ -62,13 +78,18 @@ func (p AgentProfile) Options() []string {
 // 与槽位表那条同规矩：留下一份「和缺省一样」的记录，会让以后改缺省的人发现自己的
 // 改动对一部分用户不生效——而那些用户从没配过任何东西。
 func (p AgentProfile) Write(profile string) error {
-	// **与全局默认同名 = 没设过**：界面上的取值来自 Active()（此刻实际走哪条），
-	// 所以用户完全可能选中一个恰好等于全局默认的名字。那时留下一份「和缺省一样」的
-	// 记录，会让以后改默认的人发现这个客户端没跟着变，而他从没单独设过它——
-	// 与槽位表那边同一条规矩。
-	if profile == "" || profile == store.LoadState().DefaultProfile {
+	// 空串 = 回到「跟随全局默认」（那个键消失）。
+	if profile == "" {
 		return store.ClearActiveProfile(p.AgentID)
 	}
+	// 别的值一律**记下来**，哪怕它恰好等于此刻的全局默认。
+	//
+	// 曾经这里写的是「与全局默认同名 = 没设过」（与槽位表那条同规矩）。那是错的，
+	// 因为这一格的取值是**存下来的那个**（见 Stored）：用户明确选了 `ds` 之后，
+	// 那一格会显示回 `ds（缺省）`——他想固定住的东西看起来像没固定，而界面上
+	// 再没有任何办法表达「我就是要它」。
+	//
+	// 槽位表那边不一样：那边的取值本来就是「此刻实际走哪一档」，没有第二种读法。
 	return store.SetActiveProfile(p.AgentID, profile)
 }
 
