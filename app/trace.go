@@ -180,21 +180,30 @@ func lastFingerprint(f *os.File) string {
 
 // 指纹要把「每次都会变」的两位去掉：时间戳前缀与耗时。剩下的部分（模块、顺序、
 // 弱依赖命中与否）才是「这一版装配成什么样」。
+//
+// **耗时要按形状认，不能按词认**：装配记录是翻过译的（component 调的
+// i18n.T），中文那行是「启动 4/23 locale 完成（用时 3.489ms）」——只认英文的
+// 「(took …)」一条都剥不掉，于是每一行的耗时都进了指纹，**每次运行都是新指纹**，
+// 整段每次都重写。2026-09-20 线上实测：同一份二进制连写四条不同的指纹
+// （e5fe…/c683…），而这台开发机的沙箱是英文，一直没露头。
+//
+// 单位不翻译（`ms` 在中文行里还是 `ms`），所以「数字 + 单位」是语言无关的判据。
 var (
-	traceStamp    = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)
-	traceTook     = regexp.MustCompile(`\(took [^)]*\)`)
-	traceTookTail = regexp.MustCompile(`, took [^,\n]*$`)
+	traceStamp = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)
+	// 耗时按**形状**剥：数字紧跟单位。单位不翻译（中文那行是「…完成（用时
+	// 3.489ms）」，ms 还是 ms），所以这条判据与语言无关——而只认英文的
+	// 「(took …)」会漏掉全部译文，症状是换个语言就每次都重写整段
+	// （2026-09-20 线上实测：同一份二进制连写四条不同指纹；沙箱是英文，没露头）。
+	//
+	// 括号与逗号**不用管**：它们每次都在同一处，稳定；这里要的只是稳定，不是好看。
+	// 也正因为如此，这条正则里一个中文标点都不需要——少一样要维护的东西。
+	traceDuration = regexp.MustCompile(`\d+(?:\.\d+)?(?:ns|µs|us|ms|s)\b`)
 )
 
 // normalizeTraceLine 去掉一行装配记录里与「装了什么」无关的部分。
-//
-// 两种耗时的写法都要认：逐组件的 `… done (took 321µs)`，和收尾那句
-// `assembly complete: 24 components, took 12ms`。
 func normalizeTraceLine(l string) string {
 	l = traceStamp.ReplaceAllString(l, "")
-	l = traceTook.ReplaceAllString(l, "(took)")
-	l = traceTookTail.ReplaceAllString(l, "")
-	return l
+	return traceDuration.ReplaceAllString(l, "(d)")
 }
 
 // assemblyFingerprint 是整段记录的哈希（去时间戳、去耗时之后）。

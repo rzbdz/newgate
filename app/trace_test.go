@@ -55,6 +55,29 @@ var (
 	}
 )
 
+// 同一段记录在**中文**下的样子——逐字抄自线上日志（2026-09-20 15:18），不是
+// 编出来的：全角括号、`用时`、以及中文的 `，` 分隔。
+//
+// 为什么必须有：这套归一化当初只认英文的 `(took …)`，于是译文的每一行都把耗时
+// 带进了指纹，**每次运行都是新指纹**，整段每次都重写（线上实测，同一份二进制连
+// 写四条不同指纹）。而那时的测试全用英文——测试自己挑了一门语言，恰好是唯一能
+// 通过的那门。这与「测试自己用 O_RDWR 打开文件」是同一类错：喂给被测代码的
+// 输入不是真实的那一份。
+var (
+	assemblyZH = []string{
+		"装配：第 1 个 loader 交出 2 个组件",
+		"启动 1/2 cli 完成（用时 321µs）",
+		"启动 2/2 gateway 完成（用时 1ms）",
+		"装配完成：2 个组件，用时 12ms",
+	}
+	assemblyZH2 = []string{
+		"装配：第 1 个 loader 交出 2 个组件",
+		"启动 1/2 cli 完成（用时 999µs）",
+		"启动 2/2 gateway 完成（用时 8ms）",
+		"装配完成：2 个组件，用时 55ms",
+	}
+)
+
 func TestFingerprintIgnoresTimeAndDuration(t *testing.T) {
 	_, fp1 := record(t, "", assemblyA...)
 	_, fp2 := record(t, "", assemblyA2...)
@@ -64,6 +87,19 @@ func TestFingerprintIgnoresTimeAndDuration(t *testing.T) {
 	_, fp3 := record(t, "", assemblyB...)
 	if fp1 == fp3 {
 		t.Error("多起了一个模块，指纹却没变——那升级那一发的整段记录就不会写出来了")
+	}
+
+	// 译文的同一段：耗时变了，指纹必须不变（线上就是栽在这里）。
+	_, zh1 := record(t, "", assemblyZH...)
+	_, zh2 := record(t, "", assemblyZH2...)
+	if zh1 != zh2 {
+		t.Errorf("中文下两份只差耗时的记录应当同指纹——否则中文机器上整段每次都重写\n  %s\n  %s", zh1, zh2)
+	}
+	// 而且归一化要真的把耗时剥掉了，不是碰巧相等。
+	if strings.Contains(normalizeTraceLine(assemblyZH[1]), "321") ||
+		strings.Contains(normalizeTraceLine(assemblyZH[3]), "12ms") {
+		t.Errorf("耗时没被剥掉：%q / %q",
+			normalizeTraceLine(assemblyZH[1]), normalizeTraceLine(assemblyZH[3]))
 	}
 }
 
