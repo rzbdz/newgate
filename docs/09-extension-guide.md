@@ -185,7 +185,7 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 ```
 
 契约要点（DeepSeek 的 `shape.go` 是参考实现——**上游怪癖模块不在本仓库**，住在
-发行版仓库 `newgate-modules-ext` 的 `modules/deepseek/`；它的表测试就是
+发行版仓库 `newgate-ext` 的 `modules/deepseek/`；它的表测试就是
 这条判据的行权点）：
 
 - **core 里不许出现上游专有字符串**。转发路径只读 `Result.Shape` 那个名字
@@ -362,7 +362,7 @@ $EDITOR dist.json
 build/build.sh            # 生成清单 → 编静态二进制 → dist/
 ```
 
-官方发行版仓库 `rzbdz/newgate-modules-ext` 有两个分支：`template`（给别人 fork 的
+官方发行版仓库 `rzbdz/newgate-ext` 有两个分支：`template`（给别人 fork 的
 骨架）与 `main`（官方发行版）。
 
 ### 两个 checkout，别搞混

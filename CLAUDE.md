@@ -108,7 +108,7 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
 `app/independence_test.go` 守着这条边界（Pin 文件、`modules-ext` 的 import 路径、
 `extmanifest`、`NEWGATE_MODULES_PIN` / `NEWGATE_EXT_DRYRUN`，一个都不许回来）。
 
-- 官方发行版：`git@github.com:rzbdz/newgate-modules-ext.git`，`main` = 官方发行版，
+- 官方发行版：`git@github.com:rzbdz/newgate-ext.git`，`main` = 官方发行版，
   `template` = 给别人 fork 的骨架。**fork 它 + `build/build.sh` 就是一个新发行版**。
 - **改发行版模块请去发行版的工作目录**（如 `/root/workspace/newgate-ext`），那是个
   独立的 Go module，改完直接提交推送；要动内核就去内核仓库改、推，再回来挪 gitlink。

@@ -11,7 +11,7 @@ The `content[].thinking` in the thinking mode must be passed back to the API.
 
 **这句话不可信。** 它把「这一轮没有新指令」报成了「推理没回传」。实测（打
 真实 `smt-deepseek/deepseek-flash`，每格 3/3，一手数据在发行版仓库
-`newgate-modules-ext` 的 `modules/deepseek/st-reasoning.go` 文件头与本文 §2b）结论是：
+`newgate-ext` 的 `modules/deepseek/st-reasoning.go` 文件头与本文 §2b）结论是：
 
 > 这条 400 的**唯一**触发条件是**尾部形状**——**最后一条 `role:"user"` 消息的
 > `content[]` 非空、且里面全是 `tool_result` 块**。
