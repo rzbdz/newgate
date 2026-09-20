@@ -15,6 +15,7 @@ import (
 	mod_cli "github.com/rzbdz/newgate/go/modules/cli"
 	mod_config "github.com/rzbdz/newgate/go/modules/config"
 	mod_confighook "github.com/rzbdz/newgate/go/modules/confighook"
+	mod_entry "github.com/rzbdz/newgate/go/modules/entry"
 	mod_gateway "github.com/rzbdz/newgate/go/modules/gateway"
 	mod_opencode "github.com/rzbdz/newgate/go/modules/opencode"
 	mod_opencodeomo "github.com/rzbdz/newgate/go/modules/opencodeomo"
@@ -36,6 +37,7 @@ func coreModules() []Entry {
 		{Dir: "cli", Component: mod_cli.New()},
 		{Dir: "config", Component: mod_config.New()},
 		{Dir: "confighook", Component: mod_confighook.New()},
+		{Dir: "entry", Component: mod_entry.New()},
 		{Dir: "gateway", Component: mod_gateway.New()},
 		{Dir: "opencode", Component: mod_opencode.New()},
 		{Dir: "opencodeomo", Component: mod_opencodeomo.New()},
@@ -50,7 +52,7 @@ func coreModules() []Entry {
 // generatedComponents 是内核自己那张图要装的组件。
 // 顺序不是依赖声明——真实启动顺序由 capability 依赖图在构图期计算。
 func generatedComponents() []modules.Component {
-	out := make([]modules.Component, 0, 13)
+	out := make([]modules.Component, 0, 14)
 	for _, e := range coreModules() {
 		out = append(out, e.Component)
 	}

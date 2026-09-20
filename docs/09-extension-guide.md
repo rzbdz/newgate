@@ -354,6 +354,13 @@ my-dist/
 失败并点名那个端口）。所以想让一个模块可摘，**别让它被 MustGet 伸手拿**——
 声明 `Need` 或 `Optional`。
 
+那个唯一的 built-in 是 `modules/entry`（入口账本）。它不在任何名单上：
+`app.Selection.Load` 拒绝关掉**组合根自己要用的端口**的提供者
+（`app/manifest.go` 的 `compositionRootPorts`，今天只有入口账本一个）。
+想弄清这条边界，读两处就够：`app/manifest.go` 的 `compositionRootPorts`
+（组合根依赖什么）与 `app/matrix_test.go` 的 `TestTheOnlyBuiltinCannotBeRemoved`
+（两套说法必须指向同一个组件）。
+
 ### 造一个发行版
 
 ```bash

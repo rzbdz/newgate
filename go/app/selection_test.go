@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	"github.com/rzbdz/newgate/go/component/entry"
 	modscan "github.com/rzbdz/newgate/go/tools/genmodules/scan"
 )
 
@@ -87,7 +88,12 @@ func TestSelectionRejectsUnknownNames(t *testing.T) {
 	}{
 		{"点了不存在的目录", Selection{Disable: []string{"nope"}}, "nope"},
 		{"写了组件名而不是目录名", Selection{Disable: []string{"config-hook"}}, "config-hook"},
-		{"点了 built-in root", Selection{Disable: []string{"root"}}, "root"},
+		{"点了组合根自己要用的那个模块", Selection{Disable: []string{"entry"}}, "entry"},
+		{
+			"点了 Extra 里的模块（不要它就别列进去）",
+			Selection{Extra: []Entry{{Dir: "hello", Component: helloProbe()}}, Disable: []string{"hello"}},
+			"hello",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -102,7 +108,7 @@ func TestSelectionRejectsUnknownNames(t *testing.T) {
 	}
 }
 
-// 重复装配、没写目录名、以及空图（只剩 built-in）也必须在装配前就报错。
+// 重复装配、没写目录名、以及「把内核模块全关掉」也必须在装配前就报错。
 func TestSelectionRejectsDuplicatesAndEmptyGraph(t *testing.T) {
 	core := CoreModules()
 	if len(core) == 0 {
@@ -116,13 +122,26 @@ func TestSelectionRejectsDuplicatesAndEmptyGraph(t *testing.T) {
 	if _, err := anonymous.Load(); err == nil {
 		t.Error("Extra 里没写目录名，没报错")
 	}
+
+	// 全关掉：**必须**报错，而且得是因为组合根自己要用的那个关不掉——
+	// 不是"关成功了然后装出一张空图"（空图跑起来只会让人以为命令坏了）。
 	all := make([]string, 0, len(core))
 	for _, e := range core {
 		all = append(all, e.Dir)
 	}
-	if _, err := (Selection{Disable: all}).Load(); err == nil {
-		t.Error("把所有内核模块都关掉（图里只剩 built-in），没报错")
+	_, err := Selection{Disable: all}.Load()
+	if err == nil {
+		t.Fatal("把所有内核模块都关掉，没报错")
 	}
+	if !strings.Contains(err.Error(), modules.Name(entry.Capability)) {
+		t.Errorf("全关掉的报错该点名组合根要的那个端口 %q，实际：%v", modules.Name(entry.Capability), err)
+	}
+}
+
+// helloProbe 冒充一个"消费者自己的模块"（Extra 那条路上来的），用来验证
+// 「disable 管不着 Extra」那条拒绝。
+func helloProbe() modules.Component {
+	return modules.Component{Name: "hello-probe", Type: "example"}
 }
 
 // Extra 装在自带的后面——顺序不是依赖声明，但「消费者自己的模块排在后面」让

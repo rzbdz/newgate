@@ -75,8 +75,9 @@ type Handler interface {
 	Handle(Process) int
 }
 
-// Registry 是入口申报账本。它由 **root 组件**提供（见 go/root），因为 root 是
-// 唯一的 built-in：用户摘不掉它，所以「入口一定有人管」这条不变式由它保证。
+// Registry 是入口申报账本。它由 **modules/entry 那个模块**提供（见 go/modules/entry），
+// 那是内核唯一认识、也是唯一摘不掉的模块：用户摘不掉它，所以「入口一定有人管」
+// 这条不变式由它保证。
 type Registry interface {
 	// Register 申报一个入口。rank 小的先被问（见 DefaultRank）。
 	Register(h Handler, rank int) (component.Release, error)
@@ -190,7 +191,9 @@ func joinAsked(asked []string, winner string) string {
 	return out
 }
 
-// Capability 是入口申报账本的端口身份。它由 root 提供（见 go/root）。
+// Capability 是入口申报账本的端口身份。它由 modules/entry 提供（见 go/modules/entry）。
+//
+// 组合根（app）也 import 本包——它是唯一能这么做的模块侧契约（见本包开头那段）。
 var Capability = component.NewCapability[Registry]("entry")
 
 // ---- 申报期能犯的两种错 ----

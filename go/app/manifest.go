@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	modules "github.com/rzbdz/newgate/go/component"
+	"github.com/rzbdz/newgate/go/component/entry"
 )
 
 // Entry 是一个组件在**装配清单里的身份**：目录名 + 组件定义。
@@ -54,38 +55,43 @@ type Selection struct {
 // 「我在清单里多写了一份」已经很远了。
 func (s Selection) Load() ([]modules.Component, error) {
 	core := CoreModules()
-	known := make(map[string]bool, len(core))
+	known := make(map[string]Entry, len(core))
 	for _, e := range core {
-		known[e.Dir] = true
+		known[e.Dir] = e
 	}
+	extra := make(map[string]bool, len(s.Extra))
 	for _, e := range s.Extra {
 		if e.Dir == "" {
 			return nil, fmt.Errorf("装配选择：Extra 里有一个没写目录名的组件（组件名 %q）——"+
 				"目录名是关掉它、以及报错时说清是谁的凭据", e.Component.Name)
 		}
-		known[e.Dir] = true
+		extra[e.Dir] = true
 	}
 
 	off := make(map[string]bool, len(s.Disable))
 	for _, dir := range s.Disable {
-		switch {
-		case dir == "root":
-			return nil, fmt.Errorf("装配选择：disable 点了 root 的名。它是唯一不可摘的 built-in" +
-				"（入口账本住在它身上），关掉它没有任何入口能回答「这次调用归谁」")
-		case !known[dir]:
+		e, isCore := known[dir]
+		if !isCore {
+			if extra[dir] {
+				return nil, fmt.Errorf("装配选择：disable 点名了 %q，但那是 Extra 里的模块——"+
+					"Extra 是你自己交上来的表，不想装就别把它列进去"+
+					"（disable 只用来关掉内核自带的模块；列在这里是**没有效果**的，而你多半以为它关掉了）", dir)
+			}
 			return nil, fmt.Errorf("装配选择：disable 点名了 %q，但内核与自己都没有这个模块"+
 				"（写的是**目录名**吗？比如 claudecode_deepseek 而不是 claudecode-deepseek）", dir)
+		}
+		if port, serves := servesCompositionRoot(e.Component); serves {
+			return nil, fmt.Errorf("装配选择：disable 点名了 %q（组件 %s），但它提供了组合根自己要用的端口 %q——"+
+				"关掉它，进程就没有任何东西能回答「这次调用归谁」了。"+
+				"它摘不掉这件事不是一张名单说了算，而是组合根自己的依赖说了算（见 compositionRootPorts）",
+				dir, e.Component.Name, port)
 		}
 		off[dir] = true
 	}
 
-	// built-in 永远在，且排在前面：它提供入口账本，别的模块在 Start 里往它申报。
-	builtins := builtinComponents()
-	out := append([]modules.Component{}, builtins...)
-	owner := make(map[string]string, len(core)+len(s.Extra)+len(builtins))
-	for _, c := range builtins {
-		owner[c.Name] = "built-in"
-	}
+	// 顺序不是依赖声明：真实启动顺序由 capability 依赖图在构图期算（见 package 注释）。
+	out := make([]modules.Component, 0, len(core)+len(s.Extra))
+	owner := make(map[string]string, len(core)+len(s.Extra))
 	add := func(dir string, c modules.Component) error {
 		if prev, dup := owner[c.Name]; dup {
 			return fmt.Errorf("装配选择：组件 %q 装了两次（%s 与 %s）——"+
@@ -108,9 +114,38 @@ func (s Selection) Load() ([]modules.Component, error) {
 			return nil, err
 		}
 	}
-	if len(out) == len(builtins) {
-		return nil, fmt.Errorf("装配选择：除了 built-in 一个组件都没有" +
+	if len(out) == 0 {
+		return nil, fmt.Errorf("装配选择：一个组件都没有" +
 			"（disable 把内核模块全关掉了？）——空图跑起来只会让人以为命令坏了")
 	}
 	return out, nil
+}
+
+// compositionRootPorts 是**组合根自己要用的端口**：它起完图之后必须拿到的那些。
+//
+// 今天只有一个——入口申报账本（app.Main 起完图第一件事就是问它「这次调用归谁」）。
+// 这不是一张「不可摘模块的名单」，而是本包自己的依赖清单：谁提供这些端口，谁就
+// 摘不掉（见 Load），因为摘掉它等于组合根拿不到自己活着需要的东西。
+//
+// 边界必须在**这个**方向：机制不认模块名。2026-09-20 之前这里写的是
+// `case dir == "root"`——「哪个模块不可摘」于是被硬编码进内核一次、又被模块自己
+// 用 `Type = builtin` 声明了一次，两处说的是同一件事却各说各的，改一处不会让
+// 另一处红。现在只有一个说法（组合根的依赖），Type 那个标记只剩摘除矩阵在用。
+//
+// 它也必须**短**：这个列表每长一条，模块的可替换性就少一分。能不加就不加。
+func compositionRootPorts() []string {
+	return []string{modules.Name(entry.Capability)}
+}
+
+// servesCompositionRoot 报告组件是否提供了组合根自己要用的端口；是的话连同
+// 端口名一起返回（报错要用它点名「缺的是哪东西」，而不是「哪个模块」）。
+func servesCompositionRoot(c modules.Component) (string, bool) {
+	for _, provision := range c.Provides {
+		for _, port := range compositionRootPorts() {
+			if provision.Name() == port {
+				return port, true
+			}
+		}
+	}
+	return "", false
 }

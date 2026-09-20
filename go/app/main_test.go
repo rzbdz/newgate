@@ -5,14 +5,14 @@ import (
 	"testing"
 
 	modules "github.com/rzbdz/newgate/go/component"
-	"github.com/rzbdz/newgate/go/root"
+	"github.com/rzbdz/newgate/go/modules/entry"
 )
 
-// onlyRoot 是「一张只有入口账本的图」——没有任何模块申报入口。
-type onlyRoot struct{}
+// onlyEntry 是「一张只有入口账本的图」——内核唯一必要的那一个模块，没人申报入口。
+type onlyEntry struct{}
 
-func (onlyRoot) Load() ([]modules.Component, error) {
-	return []modules.Component{root.New()}, nil
+func (onlyEntry) Load() ([]modules.Component, error) {
+	return []modules.Component{entry.New()}, nil
 }
 
 // 没人认领这次调用时，Main 必须说一句人话退出（69），而不是崩、也不是 0。
@@ -23,7 +23,7 @@ func (onlyRoot) Load() ([]modules.Component, error) {
 func TestMainExitsWhenNoEntryClaims(t *testing.T) {
 	t.Setenv("NEWGATE_HOME", t.TempDir()) // 装配留痕要往配置目录写日志
 
-	if code := Main(context.Background(), Options{Loader: onlyRoot{}}); code != 69 {
+	if code := Main(context.Background(), Options{Loader: onlyEntry{}}); code != 69 {
 		t.Errorf("只有入口账本、没人申报时退出码 = %d，想要 69", code)
 	}
 }

@@ -54,7 +54,7 @@ go vet ./... && gofmt -l component modules cmd
 | `modules/<客户端>` | Claude Code、opencode 的接入与组合行为（**客户端**留 core） | 新增客户端支持 |
 | **发行版的模块**（上游怪癖修补、客户端×交叉语义） | **不在本仓库**：住在发行版仓库里，那是**另一个 Go module** | 修某个上游的怪癖 |
 | `app`（在 `modules/` 之外） | 组合根：装图、把这次调用交给入口。**不认识任何模块**；对内提供 `Selection`/`Main` 这条接缝 | 换装图方式 |
-| `root`（唯一的 built-in，不在 `modules/` 下） | 入口账本：谁认领这次进程调用 | 加入口类型 |
+| `modules/entry`（唯一的 built-in，也是**内核唯一认识的那个模块**） | 入口账本：谁认领这次进程调用。**摘不掉**，而判据是「组合根自己要用它提供的端口」（`app/manifest.go` 的 `compositionRootPorts`），不是一张名单 | 加入口类型 |
 | `tools/genmodules` | 构建期扫描 `modules/`，生成装配清单（**只看本仓库、完全离线**） | 改模块发现规则 |
 | `tools/genmodules/scan` | 「哪些目录算组件」+「目录名怎么拧成 import 别名」的唯一实现（发行版的生成器也用这份） | 改组件判据 |
 | `testing/{testkit,upstream,system}` | 测试设施：模块层起图、进程内假上游、系统层整图。**从这里起是对外 API**（发行版拿 `system.StartWith` 测自己的模块） | 加测试设施（不是产品代码） |
@@ -113,7 +113,7 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
 - **改发行版模块请去发行版的工作目录**（如 `/root/workspace/newgate-ext`），那是个
   独立的 Go module，改完直接提交推送；要动内核就去内核仓库改、推，再回来挪 gitlink。
 - 装不装发行版都要能编：`TestRemovalMatrix`（app/matrix_test.go）逐个模块摘一遍，
-  **只有 built-in（root）不可摘**；`app/direction_test.go` 与
+  **只有 built-in（`modules/entry`）不可摘**；`app/direction_test.go` 与
   `modules/gateway/direction_test.go` 守着「组合根/数据面不认识任何具体模块」。
 - 测试边界：**内核的测试只管内核的逻辑与内核的模块**；发行版模块的行为（DeepSeek
   的尾部形状、推理回填、跨上游迁移）由发行版自己的测试与 `mock/` 端到端锁。

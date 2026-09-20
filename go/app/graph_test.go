@@ -60,10 +60,11 @@ func TestGraphCanBeRebuiltAfterStop(t *testing.T) {
 // 两者不一致意味着某个模块被扫进来了却在图上缺席——那要么是它没提供任何
 // 东西（无害但可疑），要么是接口对不上（危险）。这里用名字集合对齐。
 //
-// **root 要对上的是另一本账**（2026-09-20）：它是唯一的 built-in，不参与 modules/
-// 扫描（见 go/root 的包注释），所以「图 = 扫描清单」这条等式现在写成
-// 「图 = 扫描清单 + built-in」。这条等式仍然是有意义的断言：它保证**没有第二个
-// 模块**绕过扫描被偷偷装进来。
+// **这条等式没有例外**（2026-09-20 起）：生成的清单是**唯一**的组件来源，组合根
+// 不再额外装入任何东西。2026-09-20 之前有一个例外——入口账本的拥有者住在
+// modules/ 之外、由组合根显式装入，于是等式写成「图 = 扫描清单 + built-in」，
+// 而这一行代码就是「没有第二个模块绕过扫描被偷偷装进来」的守卫；现在等式本身
+// 就是那个守卫。
 func TestGraphCoversEveryModule(t *testing.T) {
 	testkit.Sandbox(t)
 
@@ -80,13 +81,13 @@ func TestGraphCoversEveryModule(t *testing.T) {
 		}
 		names[name] = true
 	}
-	want := len(generatedComponents()) + len(builtinComponents())
+	want := len(generatedComponents())
 	if got := len(names); got != want {
-		t.Fatalf("图里 %d 个组件，扫描清单 %d + built-in %d = %d",
-			got, len(generatedComponents()), len(builtinComponents()), want)
+		t.Fatalf("图里 %d 个组件，扫描清单 %d 个（两者必须逐个对上：装模块只有扫描这一条路）",
+			got, want)
 	}
-	if !names["root"] {
-		t.Fatalf("唯一的 built-in 必须总在图里（实际 %v）", built.ComponentNames())
+	if !names["entry"] {
+		t.Fatalf("entry（唯一摘不掉的模块）必须总在图里（实际 %v）", built.ComponentNames())
 	}
 
 	// 地基与两条接管通路是产品定义的一部分，缺一个都跑不起来。

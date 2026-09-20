@@ -24,7 +24,8 @@ import (
 // # 它怎么把这次调用交出去
 //
 // 它不认识 cli，也不认识 wrapper：两者（以及将来的 web-daemon）都在自己的 Start
-// 里往 **root**（唯一的 built-in，见 go/root）的入口账本申报，这里只问账本一次。
+// 里往 **modules/entry**（内核唯一认识的那个模块，见 go/modules/entry）的入口账本
+// 申报，这里只问账本一次。
 // 「谁是入口」因此成了模块自己的知识，换界面在组合根上是零改动。
 type App struct{ manager *modules.Manager }
 

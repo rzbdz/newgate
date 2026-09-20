@@ -7,9 +7,9 @@ import (
 	modules "github.com/rzbdz/newgate/go/component"
 	"github.com/rzbdz/newgate/go/component/entry"
 	agentapi "github.com/rzbdz/newgate/go/modules/confighook"
+	entrymod "github.com/rzbdz/newgate/go/modules/entry"
 	runtimeapi "github.com/rzbdz/newgate/go/modules/runtime"
 	wrapperapi "github.com/rzbdz/newgate/go/modules/wrapper"
-	"github.com/rzbdz/newgate/go/root"
 	"github.com/rzbdz/newgate/go/testing/testkit"
 )
 
@@ -55,10 +55,10 @@ func harness(t *testing.T, agents ...*agentapi.Agent) (entry.Registry, *fakeRunt
 			Type:     "test",
 			Provides: []modules.Provision{modules.Provide(agentapi.AgentCatalogCapability, catalog.AsCatalog())},
 		},
-		// 入口账本的提供者是**唯一那个 built-in**（root，见 go/root）：本模块在
-		// 自己的 Start 里往它申报，所以测试图里必须有它——缺了就该当场 panic，
-		// 那正是「申报口没了」的现场。
-		root.New(),
+		// 入口账本的提供者是 modules/entry——内核唯一认识、也唯一摘不掉的那个
+		// 模块：本模块在自己的 Start 里往它申报，所以测试图里必须有它——缺了
+		// 就该当场 panic，那正是「申报口没了」的现场。
+		entrymod.New(),
 		wrapperapi.New(),
 	)
 	// 依赖顺序：wrapper 必须在两个提供者之后启动，否则 Start 里的 MustGet 会 panic。

@@ -7,7 +7,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/go/component"
 	"github.com/rzbdz/newgate/go/component/entry"
-	"github.com/rzbdz/newgate/go/root"
+	entrymod "github.com/rzbdz/newgate/go/modules/entry"
 	"github.com/rzbdz/newgate/go/testing/testkit"
 )
 
@@ -30,17 +30,18 @@ import (
 //
 // # 判据的边界
 //
-// 边界就是模块自己声明的 `Type`：只有 `root.TypeBuiltin` 不可摘（它是唯一一个
-// off-tree 的，提供入口账本，见 go/root）。这个边界不是这里规定的——它是**被
-// 检查的**：如果哪天有人把某个业务模块也标成 built-in，下面的矩阵会少测一个，
-// 而 TestGraphCoversEveryModule 与 modules_gen 的账对不上，两条一起红。
+// 边界就是模块自己声明的 `Type`：只有 `entrymod.TypeBuiltin` 不可摘（它是内核
+// 唯一认识的那个模块——提供入口账本，见 go/modules/entry）。这个边界不是这里
+// 规定的——它是**被检查的**：如果哪天有人把某个业务模块也标成 built-in，下面的
+// 矩阵会少测一个，而 TestTheOnlyBuiltinCannotBeRemoved 会发现「标着 built-in 的
+// 那个模块并不是组合根依赖的那个」，两条一起红。
 func TestRemovalMatrix(t *testing.T) {
 	testkit.Sandbox(t)
-	all := fullGraph()
+	all := generatedComponents()
 
 	victims := 0
 	for _, victim := range all {
-		if victim.Type == root.TypeBuiltin {
+		if victim.Type == entrymod.TypeBuiltin {
 			continue
 		}
 		victims++
@@ -84,36 +85,60 @@ func TestRemovalMatrix(t *testing.T) {
 // 摘掉之后必须当场失败，而且要说得出为什么。
 //
 // 为什么值得单独一条：矩阵跳过了 built-in，所以「built-in 真的不可摘吗」在那边
-// 是**没有被检查的假设**。这里把它变成检查——摘掉 root 之后，图必须因为缺
+// 是**没有被检查的假设**。这里把它变成检查——摘掉 entry 之后，图必须因为缺
 // `entry` 端口而拒绝启动。
 //
-// 它守的是一个具体的退化：如果哪天入口账本改成「谁需要谁自己建一个」，root 就
-// 变成可有可无的东西，而那些「看起来还能跑」的构建会在第一次调用时才发现没有
-// 任何入口认领（进程只能报一句人话退出）。那时候这条测试会红。
+// 它还负责把**两套说法对到一起**。今天「不可摘」有两个出处：
+//
+//	模块自己声明的分类  Type = entrymod.TypeBuiltin      （矩阵按它划边界）
+//	组合根自己的依赖    提供 app.compositionRootPorts()  （Selection.Load 按它拒绝）
+//
+// 两者必须指向同一个组件。对不上时的症状很隐蔽：有人给一个业务模块标上 built-in，
+// 矩阵于是**跳过**它（少测一个），而 Selection.Load 又允许关掉它（它不提供组合根
+// 要的端口）——它成了唯一没人看着的模块，正好是这套测试要防的那类退化。
 func TestTheOnlyBuiltinCannotBeRemoved(t *testing.T) {
 	testkit.Sandbox(t)
-	all := fullGraph()
+	all := generatedComponents()
 
 	var builtins []modules.Component
 	for _, component := range all {
-		if component.Type == root.TypeBuiltin {
+		if component.Type == entrymod.TypeBuiltin {
 			builtins = append(builtins, component)
 		}
 	}
-	if len(builtins) != 1 || builtins[0].Name != "root" {
+	if len(builtins) != 1 {
 		var names []string
 		for _, b := range builtins {
 			names = append(names, b.Name)
 		}
-		t.Fatalf("built-in 应当有且只有 root，实际 %v", names)
+		t.Fatalf("built-in 应当有且只有一个（entry），实际 %v", names)
+	}
+	if name := builtins[0].Name; name != "entry" {
+		t.Fatalf("built-in 是 %q，想要 entry（内核唯一认识的那个模块）", name)
+	}
+	if _, serves := servesCompositionRoot(builtins[0]); !serves {
+		t.Fatalf("entry 标着 built-in，却没提供组合根自己要用的端口 %v——"+
+			"那样 Selection.Load 会允许关掉它，矩阵又跳过它：它成了唯一没人看着的模块",
+			compositionRootPorts())
+	}
+	// 反向也要成立：组合根要用的端口只能有一个来源。多一个提供者，构图期会以
+	// 「重复提供」失败，而那时离「谁才是入口账本」这个问题已经很远了。
+	for _, component := range all {
+		if component.Name == builtins[0].Name {
+			continue
+		}
+		if port, serves := servesCompositionRoot(component); serves {
+			t.Fatalf("组件 %s 也提供了组合根要用的端口 %s——入口账本只能有一个来源",
+				component.Name, port)
+		}
 	}
 
-	_, err := modules.NewContext(context.Background(), staticLoader(without(all, "root")))
+	_, err := modules.NewContext(context.Background(), staticLoader(without(all, "entry")))
 	if err == nil {
-		t.Fatal("摘掉 root 竟然装起来了：入口账本没了，进程起得来但谁也不是入口")
+		t.Fatal("摘掉 entry 竟然装起来了：入口账本没了，进程起得来但谁也不是入口")
 	}
 	if !strings.Contains(err.Error(), modules.Name(entry.Capability)) {
-		t.Fatalf("摘掉 root 的报错该点名 %q 端口（那是它提供的东西），实际：\n%v",
+		t.Fatalf("摘掉 entry 的报错该点名 %q 端口（那是它提供的东西），实际：\n%v",
 			modules.Name(entry.Capability), err)
 	}
 }
@@ -128,7 +153,7 @@ func TestTheOnlyBuiltinCannotBeRemoved(t *testing.T) {
 // 整图上活得很好（别人恰好提供了），一被单独装起来就 panic——而那时人往往已经
 // 在排查别的问题了。
 func TestDependencyFreeModulesLoadStandalone(t *testing.T) {
-	all := fullGraph()
+	all := generatedComponents()
 
 	checked := 0
 	for _, component := range all {
@@ -147,11 +172,6 @@ func TestDependencyFreeModulesLoadStandalone(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("一个零依赖模块都没有——要么依赖声明被加满了，要么这条判据写错了")
 	}
-}
-
-// fullGraph 是这个二进制会被装出来的全部组件（built-in + 扫描清单）。
-func fullGraph() []modules.Component {
-	return append(builtinComponents(), generatedComponents()...)
 }
 
 // staticLoader 把一张写死的组件表交给内核（矩阵的每一行都要一张少一个人的图）。
