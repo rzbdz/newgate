@@ -1124,6 +1124,10 @@
       "text": "未知选项 {option}（tool 之前出现的未知选项按拼错处理，docs/08-operations.md 规则5）",
       "reviewed": true
     },
+    "Upstream quirk patches": {
+      "text": "上游怪癖补丁",
+      "reviewed": true
+    },
     "Upstream quirk patches: they apply only to the upstream that claimed the request, and every change is logged": {
       "text": "上游怪癖补丁：只对认领本次请求的上游生效，改动逐条写日志",
       "reviewed": true

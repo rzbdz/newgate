@@ -10,7 +10,9 @@ import (
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/view"
 	"github.com/rzbdz/newgate/modules/config/paths"
+	"github.com/rzbdz/newgate/modules/config/store"
 	"github.com/rzbdz/newgate/modules/gateway/metrics"
+	"github.com/rzbdz/newgate/modules/gateway/special"
 )
 
 // 网关贡献给 web 界面的东西：**计数器**。
@@ -40,7 +42,8 @@ type seriesData struct {
 	Total  uint64        `json:"total"`
 }
 
-// metricsConcepts 是网关这一刻的展示面：计数器，以及代理日志的尾巴。
+// gatewayConcepts 是网关这一刻的展示面：计数器、代理日志的尾巴，以及
+// special_treatment 插件层的清单。
 //
 // 它被调用的时机是**有人来看界面**，不是装配——所以计数器是「现在」的，日志尾巴
 // 也是「现在」的，而不是这个进程起来那一刻的（见 lib/view 的包注释）。
@@ -49,14 +52,61 @@ type seriesData struct {
 // 的语义（`-> provider/model`、`X-Newgate-Route`、上游原文那几行）。界面自己去读
 // 文件的话，它就得认识那些行——而它们是 grep 的锚点，不是给人看的文案（与
 // metrics 那边同一条理由）。
-func metricsConcepts() ([]view.Concept, error) {
+func gatewayConcepts() ([]view.Concept, error) {
 	return []view.Concept{
 		{
 			ID: "gateway.metrics", Kind: view.KindSeries, Title: i18n.T("Counters", nil),
 			Data: seriesGroups(),
 		},
 		logConcept(),
+		specialConcept(),
 	}, nil
+}
+
+// specialConcept 是 special_treatment 插件层：哪些补丁在动请求、为什么存在、
+// 此刻是否生效。
+//
+// **为什么它必须在 cli 那段 return 之前注册**：这一层会**改用户的请求**，而
+// `newgate st` 就是为回答「是不是 newgate 把我的请求改坏了」而存在的（见
+// command_special.go 的注释）。只装 dashboard 的装配（dist-dashboard 关掉了 cli）
+// 里那条命令根本不存在——没有这张卡，那个问题在那份发行版里没有任何答案。
+//
+// **它只读，这是有意的，但要说清代价**：在装了 cli 的装配里，开与关是
+// `newgate st on|off` 的事，这里只负责「看清楚」。而在**没有 cli 的那份装配里
+// 那条命令同样不存在**——那里要改只有一个办法：`config.file.state.json` 那张
+// code 卡上手工改 `ModuleConfig["gateway"]`。这个缺口是真的：可写需要一个 CAS
+// 写（store.WriteIfUnchanged + 把 StaleError 翻成 view.Conflict），那与
+// pluginmanager 把 footgun 留成只读是同一条取舍（见那边的注释），先按只读发，
+// 但别把「只读」说成「别处能改」——在那一份发行版里别处没有。
+//
+// 数据全是内存里的（插件表 + state.json），所以它跟计数器一样便宜，可以跟着
+// 界面的几秒一次刷新一起被问——与 config 那位要重读并重解析每一份 profile 的
+// 贡献者不同（见 web-dashboard 的按源刷新）。
+func specialConcept() view.Concept {
+	st := store.LoadState()
+	rows := []map[string]view.Cell{}
+	for _, p := range special.Plugins() {
+		mark, word := specialState(st, p.Name())
+		rows = append(rows, map[string]view.Cell{
+			"state":  {Text: word, Tone: specialTone(mark)},
+			"plugin": {Text: p.Name()},
+			// 只取 Why 的第一行：完整说明常常好几行，铺进表里会把表淹掉——CLI 那边
+			// 是同一条取舍（`newgate st <插件>` 才是读全文的地方）。
+			"why": {Text: strings.SplitN(p.Why(), "\n", 2)[0]},
+		})
+	}
+	return view.Concept{
+		ID: "gateway.special", Kind: view.KindTable,
+		Title: i18n.T("Upstream quirk patches", nil),
+		Data: view.Table{
+			Columns: []view.Column{
+				{ID: "state", Label: i18n.T("State", nil)},
+				{ID: "plugin", Label: i18n.T("Plugin", nil)},
+				{ID: "why", Label: i18n.T("Why it exists", nil)},
+			},
+			Rows: rows,
+		},
+	}
 }
 
 type logData struct {

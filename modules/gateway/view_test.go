@@ -5,6 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
+	"github.com/rzbdz/newgate/lib/view"
+	"github.com/rzbdz/newgate/modules/gateway/gatewaystate"
+	"github.com/rzbdz/newgate/modules/gateway/special"
+	"github.com/rzbdz/newgate/testing/testkit"
 )
 
 // 日志那条概念的取材部分（tailLines / redactLine）是纯函数，所以它在叶子里就能
@@ -97,6 +103,133 @@ func TestRedactLine(t *testing.T) {
 	for in, want := range cases {
 		if got := redactLine(in); got != want {
 			t.Errorf("redactLine(%q) = %q，想要 %q", in, got, want)
+		}
+	}
+}
+
+// fakePlugin 是这条断言用的假插件：真的插件住在发行版里（deepseek / glm /
+// claudecode_*），内核自带的装配一个都没有——不装假的，这条棘轮在 CI 里就只会
+// 走 t.Skip，等于没写。
+type fakePlugin struct{ name, why string }
+
+func (f fakePlugin) Name() string                { return f.name }
+func (f fakePlugin) Why() string                 { return f.why }
+func (f fakePlugin) Match(*special.Request) bool { return false }
+func (f fakePlugin) Apply(b []byte, _ *special.Request) ([]byte, []string, error) {
+	return b, nil, nil
+}
+
+// installFakePlugins 换上一本只有这几枚插件的注册表，跑完还原。
+//
+// 注册表是**进程级**的（插件在模块 Start 里注册进来），所以这里用带所有权的
+// InstallDefault——与 modules/gateway/module.go 里那条同一个口子，用完必须还回去，
+// 否则别的测试会看见这几枚假插件。
+func installFakePlugins(t *testing.T, ps ...special.Plugin) {
+	t.Helper()
+	reg := special.NewRegistry()
+	for _, p := range ps {
+		if _, err := reg.Register(p); err != nil {
+			t.Fatalf("装假插件 %q: %v", p.Name(), err)
+		}
+	}
+	t.Cleanup(special.InstallDefault(reg))
+}
+
+// specialTableOf 取出那张卡的数据。断言放在**数据**上而不是渲染出来的 HTML 上
+// （与 archmap 那边同一条）：数据是结论，渲染只是它的一种画法。
+func specialTableOf(t *testing.T) view.Table {
+	t.Helper()
+	c := specialConcept()
+	if c.ID != "gateway.special" || c.Kind != view.KindTable {
+		t.Fatalf("这张卡的身份变了: id=%q kind=%q", c.ID, c.Kind)
+	}
+	tb, ok := c.Data.(view.Table)
+	if !ok {
+		t.Fatalf("Data 不是 view.Table，是 %T", c.Data)
+	}
+	return tb
+}
+
+// TestTheSpecialTableListsEveryPluginAndItsState 是这张卡的棘轮。
+//
+// 它存在的理由：special_treatment 会**改用户的请求**，而 `newgate st` 是回答
+// 「是不是 newgate 把我的请求改坏了」的地方。只装 dashboard 的装配里那条命令
+// 不存在（dist-dashboard 关掉了 cli），这张卡就是唯一的答案——所以它必须真的
+// 列出**每一个**插件、并且把层开关与单插件开关都反映在状态上。
+//
+// 状态的说法与 CLI 同源（specialState 一处判据），这里钉的是「它确实被用上了」：
+// 漏掉层开关的话，界面会把整层关掉画成「全部生效」——比不显示更坏。
+func TestTheSpecialTableListsEveryPluginAndItsState(t *testing.T) {
+	testkit.Sandbox(t)
+	installFakePlugins(t,
+		fakePlugin{name: "shape-400", why: "the upstream rejects a tail it cannot read\n(second line, which the table must not carry)"},
+		fakePlugin{name: "reasoning-backfill", why: "clients drop the reasoning content"},
+	)
+
+	ps := special.Plugins()
+	if len(ps) != 2 {
+		t.Fatalf("这本注册表该有两枚插件，实际 %d", len(ps))
+	}
+	stateOf := func(tb view.Table, name string) view.Cell {
+		t.Helper()
+		for _, r := range tb.Rows {
+			if r["plugin"].Text == name {
+				return r["state"]
+			}
+		}
+		t.Fatalf("表里没有插件 %q", name)
+		return view.Cell{}
+	}
+
+	// —— 默认：层开着、没有单独关掉的 → 每一行都生效 ——
+	tb := specialTableOf(t)
+	if len(tb.Rows) != len(ps) {
+		t.Errorf("表里有 %d 行，注册了 %d 个插件——少的那几个用户在界面上看不见",
+			len(tb.Rows), len(ps))
+	}
+	for _, p := range ps {
+		if got := stateOf(tb, p.Name()); got.Text != i18n.T("active", nil) || got.Tone != view.ToneOK {
+			t.Errorf("默认状态下 %q 该是生效(ok)，实际 %q/%q", p.Name(), got.Text, got.Tone)
+		}
+		for _, r := range tb.Rows {
+			if r["plugin"].Text != p.Name() {
+				continue
+			}
+			// Why 只给第一行：完整说明有好几行，铺进表里会把表淹掉。
+			if w := r["why"].Text; w == "" || strings.Contains(w, "\n") {
+				t.Errorf("%q 的 why 该是单行非空，实际 %q", p.Name(), w)
+			}
+		}
+	}
+
+	// —— 单独关掉一个：只有它那一行变，而且要说清是**哪一种**关 ——
+	//
+	// 断言钉的是**具体那句话与那个颜色**，不是「不是 active 就行」：两种关掉各有
+	// 各的说法（「整层关了」/「单独关掉」），把两个标签写反——界面对着一个被关掉的
+	// 插件说「整层都关了」——只断言「变了」的测试照样绿。
+	off := ps[0].Name()
+	if err := gatewaystate.SetSpecialPlugin(off, false); err != nil {
+		t.Fatal(err)
+	}
+	tb = specialTableOf(t)
+	if got := stateOf(tb, off); got.Text != i18n.T("disabled individually", nil) || got.Tone != view.ToneBad {
+		t.Errorf("单独关掉 %q 之后该说「disabled individually」(bad)，实际 %q/%q", off, got.Text, got.Tone)
+	}
+	for _, p := range ps[1:] {
+		if got := stateOf(tb, p.Name()); got.Text != i18n.T("active", nil) {
+			t.Errorf("只关了 %q，%q 却也变成了 %q", off, p.Name(), got.Text)
+		}
+	}
+
+	// —— 整层关掉：每一行都要说这件事，而且说的是「整层」 ——
+	if err := gatewaystate.SetSpecialTreatment(false); err != nil {
+		t.Fatal(err)
+	}
+	tb = specialTableOf(t)
+	for _, p := range ps {
+		if got := stateOf(tb, p.Name()); got.Text != i18n.T("layer off", nil) || got.Tone != view.ToneWarn {
+			t.Errorf("整层关掉之后 %q 该说「layer off」(warn)，实际 %q/%q——"+
+				"画成生效是「全部补丁都在」的谎", p.Name(), got.Text, got.Tone)
 		}
 	}
 }

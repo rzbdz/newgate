@@ -7,6 +7,7 @@ import (
 
 	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
+	"github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/store"
@@ -115,6 +116,9 @@ func findPlugin(name string) special.Plugin {
 }
 
 // specialState 单个插件此刻的状态：层开关 + 单插件开关。
+//
+// 两个界面共用它：CLI 印那个 mark，web 卡片把同一个 mark 翻成颜色（specialTone）。
+// 判据只有这一处——「什么算生效」不该在两张界面上各写一遍，那迟早会各说各话。
 func specialState(st *domain.State, name string) (mark, word string) {
 	switch {
 	case !gatewaystate.SpecialEnabled(st):
@@ -123,6 +127,28 @@ func specialState(st *domain.State, name string) (mark, word string) {
 		return style.Bad, i18n.T("disabled individually", nil)
 	}
 	return style.OK, i18n.T("active", nil)
+}
+
+// specialTone 把 CLI 那个 mark 翻成 web 卡片的颜色。
+//
+// **一对一，不重新判断严重度**：生效 → ok，整层关掉 → warn，单独关掉一个 → bad，
+// 与终端上那个 mark 说的是同一件事。这条不是审美：`runtime/view.go` 写着「两个
+// 界面对同一份磁盘状态给出不同答案，比其中一个不显示更糟」——把 CLI 的 ✗ 在网页上
+// 画成黄色，就是那个「不同答案」，而且是**最坏的一种**：两边的文字一样，只有严重度
+// 不一样，看的人先信了颜色，再看文字时已经晚了。
+//
+// tone 的词表只有三个（ok/warn/bad，见 lib/view），而 mark 有四个：style.Skip
+// （整层关掉的 `·`）没有对应的 tone，落到 warn 上——「这些补丁现在都不在」该被看见，
+// 但它不是 bad：那一档已经被「单独关掉」占着了。
+func specialTone(mark string) string {
+	switch mark {
+	case style.OK:
+		return view.ToneOK
+	case style.Bad:
+		return view.ToneBad
+	default:
+		return view.ToneWarn
+	}
 }
 
 func specialList(host cliapi.Host, st *domain.State) int {

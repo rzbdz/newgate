@@ -27,7 +27,7 @@
       "where": "modules/gateway/command_schema.go:53"
     },
     "   Requests forwarded unchanged, upstream quirks no longer patched": {
-      "where": "modules/gateway/command_special.go:83"
+      "where": "modules/gateway/command_special.go:84"
     },
     "   Tool schemas are forwarded unchanged": {
       "where": "modules/gateway/command_schema.go:56"
@@ -678,7 +678,7 @@
       "where": "modules/config/commands.go:544"
     },
     "Counters": {
-      "where": "modules/gateway/view.go:55"
+      "where": "modules/gateway/view.go:58"
     },
     "Created only after a config file has been taken over": {
       "where": "modules/runtime/diagnostics.go:203"
@@ -699,7 +699,7 @@
       "where": "modules/config/commands.go:105"
     },
     "Disable: newgate st off {name}": {
-      "where": "modules/gateway/command_special.go:167",
+      "where": "modules/gateway/command_special.go:193",
       "args": [
         "name"
       ]
@@ -708,7 +708,7 @@
       "where": "modules/gateway/serve.go:337"
     },
     "Enable: newgate st on {name}": {
-      "where": "modules/gateway/command_special.go:165",
+      "where": "modules/gateway/command_special.go:191",
       "args": [
         "name"
       ]
@@ -759,7 +759,7 @@
       "where": "modules/config/commands.go:105"
     },
     "Full description: newgate st <plugin> · disable one: newgate st off <plugin> · disable the layer: newgate st off": {
-      "where": "modules/gateway/command_special.go:149"
+      "where": "modules/gateway/command_special.go:175"
     },
     "Full log": {
       "where": "modules/gateway/diagnostics.go:181"
@@ -901,19 +901,19 @@
       "where": "modules/gateway/diagnostics.go:81"
     },
     "No plugin named {name} (run newgate st for the list)": {
-      "where": "modules/gateway/command_special.go:90",
+      "where": "modules/gateway/command_special.go:91",
       "args": [
         "name"
       ]
     },
     "No plugin named {name} (run newgate st for the list); switch the whole layer with newgate st on|off": {
-      "where": "modules/gateway/command_special.go:70",
+      "where": "modules/gateway/command_special.go:71",
       "args": [
         "name"
       ]
     },
     "No plugins registered": {
-      "where": "modules/gateway/command_special.go:138"
+      "where": "modules/gateway/command_special.go:164"
     },
     "No such language: {tag}. Available: {list}": {
       "where": "modules/locale/command.go:55",
@@ -993,16 +993,16 @@
       "where": "modules/gateway/status.go:78"
     },
     "Plugin": {
-      "where": "modules/gateway/command_special.go:141"
+      "where": "modules/gateway/command_special.go:167"
     },
     "Plugin {name} disabled": {
-      "where": "modules/gateway/command_special.go:99",
+      "where": "modules/gateway/command_special.go:100",
       "args": [
         "name"
       ]
     },
     "Plugin {name} enabled": {
-      "where": "modules/gateway/command_special.go:97",
+      "where": "modules/gateway/command_special.go:98",
       "args": [
         "name"
       ]
@@ -1066,7 +1066,7 @@
       "where": "modules/runtime/commands.go:331"
     },
     "Proxy log": {
-      "where": "modules/gateway/view.go:93"
+      "where": "modules/gateway/view.go:143"
     },
     "Proxy log: paged in the terminal, -f keeps following": {
       "where": "modules/gateway/command_logs.go:41"
@@ -1257,7 +1257,7 @@
       "where": "modules/runtime/commands.go:430"
     },
     "The whole layer is still off; run newgate st on first": {
-      "where": "modules/gateway/command_special.go:102"
+      "where": "modules/gateway/command_special.go:103"
     },
     "This does not change takeover intent: the next newgate start reinstalls it": {
       "where": "modules/runtime/commands.go:112"
@@ -1297,8 +1297,11 @@
         "option"
       ]
     },
+    "Upstream quirk patches": {
+      "where": "modules/gateway/view.go:100"
+    },
     "Upstream quirk patches: they apply only to the upstream that claimed the request, and every change is logged": {
-      "where": "modules/gateway/command_special.go:148"
+      "where": "modules/gateway/command_special.go:174"
     },
     "Usage: newgate debug on [minutes] [--forever] | off (no argument changes anything)": {
       "where": "modules/gateway/command_debug.go:50"
@@ -1343,7 +1346,7 @@
       "where": "modules/runtime/view.go:84"
     },
     "Why it exists": {
-      "where": "modules/gateway/command_special.go:141"
+      "where": "modules/gateway/command_special.go:167"
     },
     "[breaker] health table read/write failed (continuing with in-memory state): {err}": {
       "where": "modules/breaker/plane.go:254",
@@ -1440,7 +1443,7 @@
       "where": "modules/cli/module.go:129"
     },
     "active": {
-      "where": "modules/gateway/command_special.go:125"
+      "where": "modules/gateway/command_special.go:129"
     },
     "added reasoning_effort:\"low\" (the upstream error asks for low/high/max)": {
       "where": "modules/thinking/st-always.go:112"
@@ -1936,7 +1939,7 @@
       "where": "modules/config/commands.go:218"
     },
     "disabled individually": {
-      "where": "modules/gateway/command_special.go:123"
+      "where": "modules/gateway/command_special.go:127"
     },
     "disabled: {why}": {
       "where": "modules/config/resolve/chain.go:201",
@@ -2192,7 +2195,7 @@
       "where": "modules/config/commands.go:591"
     },
     "layer off": {
-      "where": "modules/gateway/command_special.go:121"
+      "where": "modules/gateway/command_special.go:125"
     },
     "lazy probe returned 404, recorded as upstream unsupported": {
       "where": "modules/gateway/metrics/hints.go:62"
@@ -2451,10 +2454,10 @@
       "where": "modules/pluginmanager/command.go:370"
     },
     "off (whole layer)": {
-      "where": "modules/gateway/command_special.go:132"
+      "where": "modules/gateway/command_special.go:158"
     },
     "on": {
-      "where": "modules/gateway/command_special.go:130"
+      "where": "modules/gateway/command_special.go:156"
     },
     "once the cooldown expires, one real request is let through as a trial: success closes the breaker, failure re-trips it and doubles the cooldown (capped at 10 minutes)": {
       "where": "modules/breaker/command.go:133"
@@ -3021,23 +3024,23 @@
       ]
     },
     "special_treatment layer disabled": {
-      "where": "modules/gateway/command_special.go:82"
+      "where": "modules/gateway/command_special.go:83"
     },
     "special_treatment layer enabled": {
-      "where": "modules/gateway/command_special.go:80"
+      "where": "modules/gateway/command_special.go:81"
     },
     "special_treatment switches and descriptions": {
-      "where": "modules/gateway/command_special.go:51"
+      "where": "modules/gateway/command_special.go:52"
     },
     "special_treatment {layer} · {n} plugin": {
-      "where": "modules/gateway/command_special.go:134",
+      "where": "modules/gateway/command_special.go:160",
       "args": [
         "layer"
       ],
       "other": "special_treatment {layer} · {n} plugins"
     },
     "st [on|off] [plugin]": {
-      "where": "modules/gateway/command_special.go:50"
+      "where": "modules/gateway/command_special.go:51"
     },
     "start {index}/{total} {name} done (took {took})": {
       "where": "component/component.go:281",
