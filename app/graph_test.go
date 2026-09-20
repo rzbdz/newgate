@@ -124,6 +124,16 @@ func TestGraphCoversEveryModule(t *testing.T) {
 // 所以这条不变量现在的写法是：**没有任何组件对界面声明一条非 Optional 的边**。
 // 换句话说，对 ui 只允许弱依赖——装着就注册，不装就跳过；不允许 Need，那等于
 // 宣称「没有界面我就活不了」，也就把界面重新拖回了依赖图里。
+// uiCapabilities 是「界面」这一类端口。**一条规矩要认全部成员**：2026-09-20 之前
+// 这里只写死了 "cli"，而那时 view 已经有七个消费者了——一个新模块写
+// `Need(viewapi.Capability)`（等于宣称「没有 dashboard 我就活不了」）不会红，
+// 而这条测试的注释正说着不许这么干。判断界面端口别按名字猜，看它是不是
+// 「别人往它里面注册、它自己不依赖别人」的那一类。
+var uiCapabilities = map[string]bool{
+	"cli":  true, // 终端界面：命令、状态行、诊断项往里注册
+	"view": true, // web 界面的概念账本：各模块往里注册自己那一面
+}
+
 func TestUIStaysOutOfTheDependencyGraph(t *testing.T) {
 	testkit.Sandbox(t)
 
@@ -135,7 +145,7 @@ func TestUIStaysOutOfTheDependencyGraph(t *testing.T) {
 
 	for _, component := range built.Components() {
 		for _, requirement := range component.Requires {
-			if requirement.Name() != "cli" {
+			if !uiCapabilities[requirement.Name()] {
 				continue
 			}
 			if !requirement.Optional() {
@@ -166,6 +176,18 @@ func TestUIStaysOutOfTheDependencyGraph(t *testing.T) {
 //
 // 「cli 先起」不等于「cli 早于一切」：cli 自己不依赖任何模块（TestCLIDependenciesOnlyShrink），
 // 所以它就是拓扑序里最前面那几个之一，先于它意味着基本没什么要在它前面。
+//
+// # 为什么这条只管 cli，不管 view（尽管上面那条规矩两个都管）
+//
+// 两条界面端口的**注册时机不同**，所以对顺序的要求也不同：
+//
+//   - `cli` 的命令/状态行账本是在它自己的 `Start` 里建的——所以往里面注册的模块
+//     必须排在它**之后**，否则 Start 跑的时候账本还不存在，那条命令就丢了。
+//     这是顺序上的**硬要求**，也就是这条测试存在的原因。
+//   - `view` 的概念账本在 web-dashboard 的 `New()` 里就建好了（见
+//     modules/web-dashboard/module.go 的注释：必须早于任何 Start，否则比它先
+//     Start 的模块注册不进来）。于是注册发生在谁的 Start 里都接得住——
+//     顺序对 view 真的无所谓，多一条断言只是把一个不存在的约束写死。
 func TestInjectorsStartAfterTheUI(t *testing.T) {
 	testkit.Sandbox(t)
 
