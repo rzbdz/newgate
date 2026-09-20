@@ -47,7 +47,10 @@ import (
 // Server 拥有代理数据面的 listener、热配置快照和优雅交接状态。
 // 它是运行资源而不是组件端口；生命周期由上层 daemon/CLI 明确控制。
 type Server struct {
-	Port   int
+	Port int
+	// Host 是监听地址；空串 = 回环（见 domain.State.Host 那段注释：放开它是个
+	// 明确的决定，默认不动）。
+	Host   string
 	Logger *log.Logger
 	// Watch 配置快照的持有者。热路径只做一次原子指针读，不碰文件系统。
 	// 改了配置**不需要重启**：watcher 换页后，新进来的请求就用新配置，
@@ -95,11 +98,14 @@ type Server struct {
 }
 
 // New 构造尚未监听的 Server，使配置、日志和策略账本在启动副作用前就完整可见。
-func New(port int, lg *log.Logger, w *store.Watcher, filters *policy.Registry) *Server {
+//
+// host 为空 = 只绑回环（默认）。绑定地址是启动参数而不是热配置：换监听地址要
+// 重新 bind，那不是热路径能做的事（与 Port 同级）。
+func New(host string, port int, lg *log.Logger, w *store.Watcher, filters *policy.Registry) *Server {
 	if filters == nil {
 		filters = policy.New()
 	}
-	return &Server{Port: port, Logger: lg, Watch: w, Filters: filters,
+	return &Server{Host: host, Port: port, Logger: lg, Watch: w, Filters: filters,
 		stopCh: make(chan struct{}), drainCh: make(chan struct{})}
 }
 
@@ -287,7 +293,7 @@ func (s *Server) Start() error {
 	s.srv = &http.Server{Handler: handler}
 	s.ln = ln
 	s.signalReady() // 交接进来的进程：告诉父进程「socket 已接上」
-	s.logf("[proxy] %s", i18n.T("listening on 127.0.0.1:{port}", i18n.A{"port": s.Port}))
+	s.logf("[proxy] %s", i18n.T("listening on {host}:{port}", i18n.A{"host": s.bindHost(), "port": s.Port}))
 	return s.srv.Serve(ln)
 }
 
@@ -317,11 +323,20 @@ func (s *Server) listen() (net.Listener, error) {
 		}
 		return ln, nil
 	}
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.Port))
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", s.bindHost(), s.Port))
 	if err != nil {
-		return nil, i18n.Ef(err, "listening on 127.0.0.1:{port} failed", i18n.A{"port": s.Port})
+		return nil, i18n.Ef(err, "listening on {host}:{port} failed",
+			i18n.A{"host": s.bindHost(), "port": s.Port})
 	}
 	return ln, nil
+}
+
+// bindHost 是这次监听实际用的地址：没配就是回环。
+func (s *Server) bindHost() string {
+	if s.Host == "" {
+		return "127.0.0.1"
+	}
+	return s.Host
 }
 
 // signalReady 优雅交接的另一半握手：进入 accept 循环前往父进程给的

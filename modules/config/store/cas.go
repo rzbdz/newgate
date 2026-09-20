@@ -119,6 +119,38 @@ func WriteIfUnchanged(path, base string, data []byte) (string, error) {
 	return newRev, err
 }
 
+// RemoveIfUnchanged 删一个文件，前提是它还是**加载时那一版**（base 即快照报的
+// 基线；空串 = 预期它不存在——那正好就是「还没建」，删成即为幂等成功）。
+//
+// 为什么删文件也要 CAS：界面按下「删除某个档位」时，命令行可能刚改了或刚删了
+// 同一个文件。没有基线比对，界面以为自己在删一份它看过的东西，实际可能已经是
+// 别的内容——一次删除把别人刚写的配置抹掉。报 StaleError，让界面走冲突，把两
+// 边摆出来。
+func RemoveIfUnchanged(path, base string) error {
+	_, err := WithLock(func() error {
+		disk, err := os.ReadFile(path)
+		switch {
+		case err == nil:
+		case os.IsNotExist(err):
+			if base == "" {
+				return nil // 本来就预期它不存在：删成
+			}
+			return &StaleError{Path: path, Base: base}
+		default:
+			return err
+		}
+		current := ""
+		if disk != nil {
+			current = RevisionOf(disk)
+		}
+		if current != base {
+			return &StaleError{Path: path, Base: base, Current: current, Disk: disk}
+		}
+		return os.Remove(path)
+	})
+	return err
+}
+
 // WithLock 拿配置目录的写锁跑 fn。
 //
 // flock 而不是 pidfile：fd 一关锁就没了，进程被 kill -9 也不会留下需要人工清理的
@@ -165,6 +197,9 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o2770); err != nil {
 		return err
 	}
+	// 先把**当前这份**抄进历史环（见 history.go）。放在替换之前，且不因它失败而
+	// 拒绝写盘——为了留备份让用户的保存失败，是把安全网变成了路障。
+	snapshotBeforeWrite(path)
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err

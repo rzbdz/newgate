@@ -61,3 +61,41 @@ func TestRolesOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestReaddedEmptyTierInheritsParent：删除一个档位再空加回去，不该盖掉父的候选。
+//
+// 现场（2026-09-20）：界面里删掉 vision、再添加一个空档位，applyProfileRoles 把
+// `vision: []` 写进文件；MergeFrom 原来用这个空数组**盖掉**父 profile 的 vision，
+// 于是那一档解析不出任何东西——用户以为 binding 逻辑坏了。这里钉住：空档位 = 没写，
+// 父的候选照常继承。
+func TestReaddedEmptyTierInheritsParent(t *testing.T) {
+	base := &Profile{Roles: map[string]Candidates{
+		"heavy":  {{Provider: "p", Model: "fable"}},
+		"vision": {{Provider: "p", Model: "v-class"}},
+	}}
+	child := &Profile{Roles: map[string]Candidates{
+		"vision": {}, // 删除后又空加回来
+	}}
+
+	child.MergeFrom(base)
+	got := child.CandidatesFor("vision")
+	if len(got) != 1 || got[0].Model != "v-class" {
+		t.Fatalf("空档位该继承父的候选，实际 %v", got)
+	}
+}
+
+// TestExplicitCandidatesStillOverrideParent：反过来——子写了真候选，父的就要被盖。
+// 这条守的是合并的方向不能反过来（继承是「缺了才借」，不是「有也来添乱」）。
+func TestExplicitCandidatesStillOverrideParent(t *testing.T) {
+	base := &Profile{Roles: map[string]Candidates{
+		"normal": {{Provider: "p", Model: "opus-parent"}},
+	}}
+	child := &Profile{Roles: map[string]Candidates{
+		"normal": {{Provider: "q", Model: "opus-child"}},
+	}}
+	child.MergeFrom(base)
+	got := child.CandidatesFor("normal")
+	if len(got) != 1 || got[0].Provider != "q" || got[0].Model != "opus-child" {
+		t.Fatalf("显式候选要被尊重，父的不能盖过它: %v", got)
+	}
+}

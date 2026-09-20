@@ -45,10 +45,10 @@
       "where": "modules/gateway/command_probe.go:186"
     },
     "  (failover)": {
-      "where": "modules/gateway/forward/forward.go:1226"
+      "where": "modules/gateway/forward/forward.go:1241"
     },
     "  (first byte exceeded {limit} — upstream stalling or queued)": {
-      "where": "modules/gateway/forward/forward.go:1113",
+      "where": "modules/gateway/forward/forward.go:1128",
       "args": [
         "limit"
       ]
@@ -156,7 +156,7 @@
       ]
     },
     "#{req} <- {model} stream={stream} req={bytes} bytes  start": {
-      "where": "modules/gateway/forward/forward.go:809",
+      "where": "modules/gateway/forward/forward.go:824",
       "args": [
         "bytes",
         "model",
@@ -165,7 +165,7 @@
       ]
     },
     "#{req} body we sent ({bytes} bytes): {body}": {
-      "where": "modules/gateway/forward/forward.go:1190",
+      "where": "modules/gateway/forward/forward.go:1205",
       "args": [
         "body",
         "bytes",
@@ -173,7 +173,7 @@
       ]
     },
     "#{req} chain budget {budget} ms exhausted, stopping at step {step}": {
-      "where": "modules/gateway/forward/forward.go:926",
+      "where": "modules/gateway/forward/forward.go:941",
       "args": [
         "budget",
         "req",
@@ -181,13 +181,13 @@
       ]
     },
     "#{req} client cancelled; upstream cut off (saves the remaining tokens)": {
-      "where": "modules/gateway/forward/forward.go:1325",
+      "where": "modules/gateway/forward/forward.go:1340",
       "args": [
         "req"
       ]
     },
     "#{req} client disconnected (forwarded {chunks} chunks / {bytes} bytes): {err}": {
-      "where": "modules/gateway/forward/forward.go:1264",
+      "where": "modules/gateway/forward/forward.go:1279",
       "args": [
         "bytes",
         "chunks",
@@ -196,7 +196,7 @@
       ]
     },
     "#{req} client request {method} {path}{headers}\n    body({bytes} bytes): {body}": {
-      "where": "modules/gateway/forward/forward.go:811",
+      "where": "modules/gateway/forward/forward.go:826",
       "args": [
         "body",
         "bytes",
@@ -207,7 +207,7 @@
       ]
     },
     "#{req} count_tokens ({bytes} bytes) -> local rough estimate {n} tokens": {
-      "where": "modules/gateway/forward/forward.go:640",
+      "where": "modules/gateway/forward/forward.go:655",
       "args": [
         "bytes",
         "n",
@@ -215,7 +215,7 @@
       ]
     },
     "#{req} count_tokens -> {name} upstream true value: {value}": {
-      "where": "modules/gateway/forward/forward.go:718",
+      "where": "modules/gateway/forward/forward.go:733",
       "args": [
         "name",
         "req",
@@ -223,28 +223,28 @@
       ]
     },
     "#{req} count_tokens forward failed ({err}); falling back to local rough estimate": {
-      "where": "modules/gateway/forward/forward.go:692",
+      "where": "modules/gateway/forward/forward.go:707",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} count_tokens upstream {code}; falling back to local rough estimate": {
-      "where": "modules/gateway/forward/forward.go:707",
+      "where": "modules/gateway/forward/forward.go:722",
       "args": [
         "code",
         "req"
       ]
     },
     "#{req} dump write failed (check permissions/disk): {err}": {
-      "where": "modules/gateway/forward/forward.go:1385",
+      "where": "modules/gateway/forward/forward.go:1400",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} learned {name} has no count_tokens endpoint (upstream {code}); falling back to local rough estimate, no retry": {
-      "where": "modules/gateway/forward/forward.go:700",
+      "where": "modules/gateway/forward/forward.go:715",
       "args": [
         "code",
         "name",
@@ -252,7 +252,7 @@
       ]
     },
     "#{req} learned {provider}/{model} {what} — applied to later requests automatically (turn off with `newgate st`)": {
-      "where": "modules/gateway/forward/forward.go:1356",
+      "where": "modules/gateway/forward/forward.go:1371",
       "args": [
         "model",
         "provider",
@@ -261,14 +261,14 @@
       ]
     },
     "#{req} no usable candidate; skipped: {skips}": {
-      "where": "modules/gateway/forward/forward.go:905",
+      "where": "modules/gateway/forward/forward.go:920",
       "args": [
         "req",
         "skips"
       ]
     },
     "#{req} non-stream response ended: {bytes} bytes / {ms} ms total": {
-      "where": "modules/gateway/forward/forward.go:1320",
+      "where": "modules/gateway/forward/forward.go:1335",
       "args": [
         "bytes",
         "ms",
@@ -276,7 +276,7 @@
       ]
     },
     "#{req} recorded {bytes} bytes of reasoning and {n} key {keys} this round; replaying them to the client next round": {
-      "where": "modules/gateway/forward/forward.go:1293",
+      "where": "modules/gateway/forward/forward.go:1308",
       "args": [
         "bytes",
         "keys",
@@ -285,21 +285,21 @@
       "other": "#{req} recorded {bytes} bytes of reasoning and {n} keys {keys} this round; replaying them to the client next round"
     },
     "#{req} scene NOT saved (check permissions/disk): {err}": {
-      "where": "modules/gateway/forward/forward.go:1183",
+      "where": "modules/gateway/forward/forward.go:1198",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} scene archived to {dir}/": {
-      "where": "modules/gateway/forward/forward.go:1185",
+      "where": "modules/gateway/forward/forward.go:1200",
       "args": [
         "dir",
         "req"
       ]
     },
     "#{req} sending upstream {target}\n    body({bytes} bytes, delta vs original {delta}): {body}": {
-      "where": "modules/gateway/forward/forward.go:1032",
+      "where": "modules/gateway/forward/forward.go:1047",
       "args": [
         "body",
         "bytes",
@@ -309,7 +309,7 @@
       ]
     },
     "#{req} set \"required\": [] on {n} tool to pass strict validators (semantically a no-op): {changes}": {
-      "where": "modules/gateway/forward/forward.go:971",
+      "where": "modules/gateway/forward/forward.go:986",
       "args": [
         "changes",
         "req"
@@ -317,7 +317,7 @@
       "other": "#{req} set \"required\": [] on {n} tools to pass strict validators (semantically a no-op): {changes}"
     },
     "#{req} stream ended normally: {chunks} chunks / {bytes} bytes / {ms} ms total": {
-      "where": "modules/gateway/forward/forward.go:1316",
+      "where": "modules/gateway/forward/forward.go:1331",
       "args": [
         "bytes",
         "chunks",
@@ -326,28 +326,28 @@
       ]
     },
     "#{req} tools repair skipped (parse failed, sending as-is): {err}": {
-      "where": "modules/gateway/forward/forward.go:967",
+      "where": "modules/gateway/forward/forward.go:982",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} tools write-back failed, sending as-is: {err}": {
-      "where": "modules/gateway/forward/forward.go:976",
+      "where": "modules/gateway/forward/forward.go:991",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} upstream raw: {body}": {
-      "where": "modules/gateway/forward/forward.go:1189",
+      "where": "modules/gateway/forward/forward.go:1204",
       "args": [
         "body",
         "req"
       ]
     },
     "#{req} upstream response headers {code}{headers}": {
-      "where": "modules/gateway/forward/forward.go:1220",
+      "where": "modules/gateway/forward/forward.go:1235",
       "args": [
         "code",
         "headers",
@@ -355,7 +355,7 @@
       ]
     },
     "#{req} upstream sent no reasoning this round ({n} tool call, request thinking={thinking}, tool id {keys}); wire layer: {wire}. None of these history messages can be replayed next round (no placeholders are fabricated)": {
-      "where": "modules/gateway/forward/forward.go:1309",
+      "where": "modules/gateway/forward/forward.go:1324",
       "args": [
         "keys",
         "req",
@@ -365,7 +365,7 @@
       "other": "#{req} upstream sent no reasoning this round ({n} tool calls, request thinking={thinking}, tool id {keys}); wire layer: {wire}. None of these history messages can be replayed next round (no placeholders are fabricated)"
     },
     "#{req} upstream stream cut (forwarded {chunks} chunks / {bytes} bytes): {err}{note}": {
-      "where": "modules/gateway/forward/forward.go:1340",
+      "where": "modules/gateway/forward/forward.go:1355",
       "args": [
         "bytes",
         "chunks",
@@ -375,7 +375,7 @@
       ]
     },
     "#{req} upstream {code}, full evidence saved to {base}.*": {
-      "where": "modules/gateway/forward/forward.go:1169",
+      "where": "modules/gateway/forward/forward.go:1184",
       "args": [
         "base",
         "code",
@@ -383,7 +383,7 @@
       ]
     },
     "#{req} upstream {code}, writing evidence failed (the directory is creatable but files are not writable; check permissions/disk — CLAUDE.md §3.1 records this trap): {err}": {
-      "where": "modules/gateway/forward/forward.go:1165",
+      "where": "modules/gateway/forward/forward.go:1180",
       "args": [
         "code",
         "err",
@@ -391,7 +391,7 @@
       ]
     },
     "#{req} {binding} request shape rejected (detector {detector}; evidence {base}.*)": {
-      "where": "modules/gateway/forward/forward.go:1176",
+      "where": "modules/gateway/forward/forward.go:1191",
       "args": [
         "base",
         "binding",
@@ -400,7 +400,7 @@
       ]
     },
     "#{req} {note} ({bytes} bytes)": {
-      "where": "modules/gateway/forward/forward.go:1754",
+      "where": "modules/gateway/forward/forward.go:1769",
       "args": [
         "bytes",
         "note",
@@ -408,7 +408,7 @@
       ]
     },
     "#{req} {route}  {path}  {status}  first byte {ms} ms  stream={stream}  profile={profile}{failover}": {
-      "where": "modules/gateway/forward/forward.go:1222",
+      "where": "modules/gateway/forward/forward.go:1237",
       "args": [
         "failover",
         "ms",
@@ -421,7 +421,7 @@
       ]
     },
     "#{req} {route} client cancelled during connect ({err}); stopping the whole chain": {
-      "where": "modules/gateway/forward/forward.go:1087",
+      "where": "modules/gateway/forward/forward.go:1102",
       "args": [
         "err",
         "req",
@@ -429,7 +429,7 @@
       ]
     },
     "#{req} {route} connect failed: {err}{note}{hint}": {
-      "where": "modules/gateway/forward/forward.go:1115",
+      "where": "modules/gateway/forward/forward.go:1130",
       "args": [
         "err",
         "hint",
@@ -448,7 +448,7 @@
       "where": "modules/config/diagnostics.go:275"
     },
     "(field absent)": {
-      "where": "modules/gateway/forward/forward.go:1662"
+      "where": "modules/gateway/forward/forward.go:1677"
     },
     "(no observer)": {
       "where": "modules/gateway/thinkcache/observe.go:243"
@@ -469,7 +469,7 @@
       "where": "modules/config/diagnostics.go:280"
     },
     "(unrecognized)": {
-      "where": "modules/gateway/forward/forward.go:1666"
+      "where": "modules/gateway/forward/forward.go:1681"
     },
     "(until {until})": {
       "where": "modules/gateway/status.go:60",
@@ -484,10 +484,10 @@
       ]
     },
     "+ provider": {
-      "where": "modules/config/view.go:423"
+      "where": "modules/config/view.go:631"
     },
     "+{n} body key": {
-      "where": "modules/gateway/forward/forward.go:1647",
+      "where": "modules/gateway/forward/forward.go:1662",
       "args": [
         "n"
       ],
@@ -519,10 +519,10 @@
       "where": "modules/gateway/thinkcache_status.go:39"
     },
     "API key": {
-      "where": "modules/config/view.go:469"
+      "where": "modules/config/view.go:677"
     },
     "API key from env": {
-      "where": "modules/config/view.go:472"
+      "where": "modules/config/view.go:680"
     },
     "Add an empty array when a tool schema lacks required": {
       "where": "modules/gateway/command_schema.go:34"
@@ -539,6 +539,9 @@
         "names"
       ]
     },
+    "An IP (e.g. a Tailscale 100.x address) or 0.0.0.0 for every interface. Empty = loopback only. Changing it takes effect after a restart.": {
+      "where": "modules/config/view.go:517"
+    },
     "An agent declares takeover but it is not in effect; rerun newgate start": {
       "where": "modules/runtime/diagnostics.go:136"
     },
@@ -546,7 +549,7 @@
       "where": "modules/runtime/diagnostics.go:142"
     },
     "Anthropic base URL": {
-      "where": "modules/config/view.go:466"
+      "where": "modules/config/view.go:674"
     },
     "Availability": {
       "where": "modules/breaker/classify.go:68"
@@ -556,6 +559,9 @@
     },
     "Backups": {
       "where": "modules/runtime/diagnostics.go:197"
+    },
+    "Bind address": {
+      "where": "modules/config/view.go:515"
     },
     "Binding": {
       "where": "modules/config/commands.go:55"
@@ -665,7 +671,7 @@
       "where": "modules/runtime/commands.go:220"
     },
     "Configuration": {
-      "where": "modules/config/view.go:39"
+      "where": "modules/config/view.go:40"
     },
     "Configuration hot-reloaded (generation {gen}): {changes} — running sessions are unaffected": {
       "where": "modules/gateway/serve.go:215",
@@ -708,7 +714,7 @@
       "where": "modules/runtime/diagnostics.go:63"
     },
     "Default profile": {
-      "where": "modules/config/view.go:335"
+      "where": "modules/config/view.go:508"
     },
     "Description": {
       "where": "modules/config/commands.go:105"
@@ -786,7 +792,7 @@
       "where": "modules/gateway/module.go:108"
     },
     "Global settings": {
-      "where": "modules/config/view.go:340"
+      "where": "modules/config/view.go:522"
     },
     "Glossary": {
       "where": "modules/cli/cli.go:150"
@@ -877,7 +883,7 @@
       "where": "modules/gateway/thinkcache_status.go:50"
     },
     "Model names this provider serves, used to pick candidates for an explicit model request.": {
-      "where": "modules/config/view.go:477"
+      "where": "modules/config/view.go:685"
     },
     "Module switches": {
       "where": "modules/pluginmanager/status.go:50"
@@ -892,13 +898,13 @@
       "where": "modules/runtime/commands.go:248"
     },
     "NEWGATE_LISTENER_FD={value} is not an fd number": {
-      "where": "modules/gateway/forward/forward.go:303",
+      "where": "modules/gateway/forward/forward.go:309",
       "args": [
         "value"
       ]
     },
     "Never sent to the browser: this field arrives empty, and writing a value is the only way to change it.": {
-      "where": "modules/config/view.go:471"
+      "where": "modules/config/view.go:679"
     },
     "New configuration failed to load, still using the last usable configuration: {err}": {
       "where": "modules/gateway/serve.go:221",
@@ -1066,7 +1072,7 @@
       ]
     },
     "Providers": {
-      "where": "modules/config/view.go:403"
+      "where": "modules/config/view.go:608"
     },
     "Proxy": {
       "where": "modules/gateway/diagnostics.go:123"
@@ -1125,7 +1131,7 @@
       "where": "modules/breaker/classify.go:70"
     },
     "Reads the key from an environment variable instead of the file. Takes precedence over the field above.": {
-      "where": "modules/config/view.go:474"
+      "where": "modules/config/view.go:682"
     },
     "Reason": {
       "where": "modules/breaker/command.go:97"
@@ -1216,7 +1222,7 @@
       ]
     },
     "Some upstreams serve the Anthropic dialect on a different base and do not forward between them (ARK is the case this exists for).": {
-      "where": "modules/config/view.go:468"
+      "where": "modules/config/view.go:676"
     },
     "Spared": {
       "where": "modules/breaker/command.go:113"
@@ -1273,7 +1279,7 @@
       ]
     },
     "The name the tier bindings refer to. Renaming is a new provider: bindings that used the old name keep pointing at it.": {
-      "where": "modules/config/view.go:459"
+      "where": "modules/config/view.go:667"
     },
     "The process the pidfile points at is gone ({what}), and the lock file says the real daemon is pid {pid}": {
       "where": "modules/runtime/daemon/daemon.go:248",
@@ -1370,7 +1376,7 @@
       "where": "modules/breaker/command.go:96"
     },
     "Where requests go. The path is appended by newgate.": {
-      "where": "modules/config/view.go:465"
+      "where": "modules/config/view.go:673"
     },
     "Which agent to launch? e.g. newgate claude or newgate run claude": {
       "where": "modules/runtime/launch.go:182"
@@ -1382,10 +1388,10 @@
       "where": "modules/runtime/commands.go:319"
     },
     "Which dialect this upstream speaks. Empty means openai.": {
-      "where": "modules/config/view.go:462"
+      "where": "modules/config/view.go:670"
     },
     "Which profile the chain starts from when no agent-specific one is set.": {
-      "where": "modules/config/view.go:336"
+      "where": "modules/config/view.go:509"
     },
     "Who goes through newgate": {
       "where": "modules/runtime/view.go:84"
@@ -1443,8 +1449,17 @@
     "a plugin rewrote the request (each rewrite is logged)": {
       "where": "modules/gateway/metrics/hints.go:81"
     },
+    "a profile must have a name — there is nothing to save it as": {
+      "where": "modules/config/view.go:305"
+    },
+    "a profile name must not contain path separators or \"..\": {name}": {
+      "where": "modules/config/view.go:308",
+      "args": [
+        "name"
+      ]
+    },
     "a provider has no name — the tier bindings would have nothing to refer to": {
-      "where": "modules/config/view.go:509"
+      "where": "modules/config/view.go:717"
     },
     "a ref and provider/model cannot be combined: {binding}": {
       "where": "modules/config/domain/candidates.go:78",
@@ -1497,7 +1512,7 @@
       "where": "modules/thinking/st-always.go:112"
     },
     "advancing to next chain step: {step}": {
-      "where": "modules/gateway/forward/forward.go:1120",
+      "where": "modules/gateway/forward/forward.go:1135",
       "args": [
         "step"
       ]
@@ -1547,7 +1562,7 @@
       ]
     },
     "another save is in progress, try again in a moment": {
-      "where": "modules/config/store/cas.go:154"
+      "where": "modules/config/store/cas.go:186"
     },
     "api_key missing": {
       "where": "modules/config/diagnostics.go:194"
@@ -1629,7 +1644,7 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "base URL": {
-      "where": "modules/config/view.go:463"
+      "where": "modules/config/view.go:671"
     },
     "binding": {
       "where": "modules/breaker/view.go:60"
@@ -1700,7 +1715,7 @@
       ]
     },
     "cannot read config — run `newgate doctor`": {
-      "where": "modules/gateway/forward/forward.go:355"
+      "where": "modules/gateway/forward/forward.go:370"
     },
     "cannot read mappings: {err}": {
       "where": "modules/config/commands.go:84",
@@ -1709,13 +1724,13 @@
       ]
     },
     "cannot read providers.json: {err}": {
-      "where": "modules/config/store/store.go:408",
+      "where": "modules/config/store/store.go:410",
       "args": [
         "err"
       ]
     },
     "cannot read request body: {err}": {
-      "where": "modules/gateway/forward/forward.go:766"
+      "where": "modules/gateway/forward/forward.go:781"
     },
     "cannot read the config, so this run injects no real model names and no window declaration (the proxy still routes by tier name): {err}": {
       "where": "modules/runtime/launch/launch.go:122",
@@ -1755,7 +1770,7 @@
       ]
     },
     "cannot resolve extends {name}: {err}": {
-      "where": "modules/config/store/store.go:153",
+      "where": "modules/config/store/store.go:155",
       "args": [
         "name"
       ]
@@ -1767,7 +1782,7 @@
       ]
     },
     "cannot write the control token: {err}": {
-      "where": "modules/config/store/store.go:349"
+      "where": "modules/config/store/store.go:351"
     },
     "cannot write {path}: {err}": {
       "where": "modules/config/commands.go:159",
@@ -1789,7 +1804,7 @@
       ]
     },
     "capability cache load failed (will re-probe this run): {err}": {
-      "where": "modules/gateway/forward/forward.go:278",
+      "where": "modules/gateway/forward/forward.go:284",
       "args": [
         "err"
       ]
@@ -1871,13 +1886,13 @@
       ]
     },
     "control stop requested by {addr}, exiting": {
-      "where": "modules/gateway/forward/forward.go:486",
+      "where": "modules/gateway/forward/forward.go:501",
       "args": [
         "addr"
       ]
     },
     "control token mismatch": {
-      "where": "modules/gateway/forward/forward.go:416"
+      "where": "modules/gateway/forward/forward.go:431"
     },
     "convert a profile to KV text": {
       "where": "modules/config/commands.go:693"
@@ -2002,7 +2017,7 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "drain complete, exiting (socket continues under pid {pid})": {
-      "where": "modules/gateway/forward/forward.go:553",
+      "where": "modules/gateway/forward/forward.go:568",
       "args": [
         "pid"
       ]
@@ -2017,10 +2032,13 @@
       "where": "modules/config/resolve/chain.go:183"
     },
     "e.g. DEEPSEEK_API_KEY": {
-      "where": "modules/config/view.go:473"
+      "where": "modules/config/view.go:681"
     },
     "each (provider, model) appears once in the whole chain": {
       "where": "modules/config/commands.go:358"
+    },
+    "empty = loopback only (127.0.0.1)": {
+      "where": "modules/config/view.go:516"
     },
     "empty binding": {
       "where": "modules/config/domain/candidates.go:63"
@@ -2046,7 +2064,7 @@
       "where": "component/entry/entry.go:216"
     },
     "error {code}: {msg}": {
-      "where": "modules/gateway/forward/forward.go:1681",
+      "where": "modules/gateway/forward/forward.go:1696",
       "args": [
         "code",
         "msg"
@@ -2062,7 +2080,7 @@
       "where": "modules/breaker/view.go:182"
     },
     "extends cycle: {name} points back to itself": {
-      "where": "modules/config/store/store.go:137",
+      "where": "modules/config/store/store.go:139",
       "args": [
         "name"
       ]
@@ -2127,7 +2145,7 @@
       "where": "modules/config/commands.go:42"
     },
     "graceful handoff: socket handed to new process pid {pid}, draining in-flight requests": {
-      "where": "modules/gateway/forward/forward.go:535",
+      "where": "modules/gateway/forward/forward.go:550",
       "args": [
         "pid"
       ]
@@ -2188,19 +2206,19 @@
       "where": "modules/breaker/view.go:143"
     },
     "https://…": {
-      "where": "modules/config/view.go:464"
+      "where": "modules/config/view.go:672"
     },
     "in effect": {
       "where": "modules/runtime/commands.go:170"
     },
     "inherited fd {fd} is not a TCP listener": {
-      "where": "modules/gateway/forward/forward.go:312",
+      "where": "modules/gateway/forward/forward.go:318",
       "args": [
         "fd"
       ]
     },
     "inheriting listener fd {fd} failed": {
-      "where": "modules/gateway/forward/forward.go:308",
+      "where": "modules/gateway/forward/forward.go:314",
       "args": [
         "fd"
       ]
@@ -2213,14 +2231,14 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:464",
+      "where": "lib/view/view.go:480",
       "args": [
         "err",
         "source"
       ]
     },
     "invalid request JSON": {
-      "where": "modules/gateway/forward/forward.go:424"
+      "where": "modules/gateway/forward/forward.go:439"
     },
     "isolated for at least 60s; only a successful probe can restore it afterwards": {
       "where": "modules/gateway/command_probe.go:233"
@@ -2258,7 +2276,7 @@
       "where": "modules/gateway/metrics/hints.go:62"
     },
     "length delta vs original after rewrite: {diff} bytes": {
-      "where": "modules/gateway/forward/forward.go:1383",
+      "where": "modules/gateway/forward/forward.go:1398",
       "args": [
         "diff"
       ]
@@ -2304,17 +2322,19 @@
       "where": "modules/pluginmanager/command.go:45"
     },
     "listener handle not ready yet": {
-      "where": "modules/gateway/forward/forward.go:520"
+      "where": "modules/gateway/forward/forward.go:535"
     },
-    "listening on 127.0.0.1:{port}": {
-      "where": "modules/gateway/forward/forward.go:290",
+    "listening on {host}:{port}": {
+      "where": "modules/gateway/forward/forward.go:296",
       "args": [
+        "host",
         "port"
       ]
     },
-    "listening on 127.0.0.1:{port} failed": {
-      "where": "modules/gateway/forward/forward.go:322",
+    "listening on {host}:{port} failed": {
+      "where": "modules/gateway/forward/forward.go:328",
       "args": [
+        "host",
         "port"
       ]
     },
@@ -2364,14 +2384,14 @@
       "where": "modules/gateway/command_metrics.go:176"
     },
     "model {model} is neither a known tier ({tiers}) nor bound in any profile; run `newgate tier` for available bindings": {
-      "where": "modules/gateway/forward/forward.go:907",
+      "where": "modules/gateway/forward/forward.go:922",
       "args": [
         "model",
         "tiers"
       ]
     },
     "models": {
-      "where": "modules/config/view.go:475"
+      "where": "modules/config/view.go:683"
     },
     "module": {
       "where": "modules/pluginmanager/view.go:133"
@@ -2390,7 +2410,7 @@
       ]
     },
     "name": {
-      "where": "modules/config/view.go:458"
+      "where": "modules/config/view.go:666"
     },
     "never probed": {
       "where": "modules/breaker/command.go:156"
@@ -2458,7 +2478,7 @@
       "where": "modules/gateway/rewrite/splice.go:441"
     },
     "no such profile: {name} (available: {list})": {
-      "where": "modules/config/store/store.go:360",
+      "where": "modules/config/store/store.go:362",
       "args": [
         "list",
         "name"
@@ -2505,7 +2525,7 @@
       "where": "modules/config/commands.go:212"
     },
     "not set — paste the key here": {
-      "where": "modules/config/view.go:451"
+      "where": "modules/config/view.go:659"
     },
     "not taken over": {
       "where": "modules/runtime/commands.go:177"
@@ -2529,13 +2549,13 @@
       "where": "modules/breaker/command.go:133"
     },
     "one per line": {
-      "where": "modules/config/view.go:476"
+      "where": "modules/config/view.go:684"
     },
     "only POST is accepted": {
-      "where": "modules/gateway/forward/forward.go:410"
+      "where": "modules/gateway/forward/forward.go:425"
     },
     "only if the two dialects live on different bases": {
-      "where": "modules/config/view.go:467"
+      "where": "modules/config/view.go:675"
     },
     "other": {
       "where": "modules/config/commands.go:226"
@@ -2734,7 +2754,7 @@
       ]
     },
     "pre-gate diagnosis {provider}/{model} attempt {attempt}/{total}: HTTP {status} {err} ({latency})": {
-      "where": "modules/gateway/forward/forward.go:209",
+      "where": "modules/gateway/forward/forward.go:215",
       "args": [
         "attempt",
         "err",
@@ -2787,11 +2807,17 @@
     "profile": {
       "where": "modules/config/diagnostics.go:370"
     },
+    "profile \"{name}\" already exists": {
+      "where": "modules/config/view.go:312",
+      "args": [
+        "name"
+      ]
+    },
     "profile kv <name> [--write]": {
       "where": "modules/config/commands.go:693"
     },
     "profile {name}: {err}": {
-      "where": "modules/config/store/store.go:415",
+      "where": "modules/config/store/store.go:417",
       "args": [
         "err",
         "name"
@@ -2805,14 +2831,14 @@
       ]
     },
     "profile {profile} role {role}: model is empty": {
-      "where": "modules/config/store/store.go:438",
+      "where": "modules/config/store/store.go:440",
       "args": [
         "profile",
         "role"
       ]
     },
     "profile {profile} role {role}: provider {provider} is not defined": {
-      "where": "modules/config/store/store.go:422",
+      "where": "modules/config/store/store.go:424",
       "args": [
         "profile",
         "provider",
@@ -2820,7 +2846,7 @@
       ]
     },
     "protocol": {
-      "where": "modules/config/view.go:460"
+      "where": "modules/config/view.go:668"
     },
     "provider and model must both be set: {binding}": {
       "where": "modules/config/domain/candidates.go:83",
@@ -2844,7 +2870,7 @@
       "where": "modules/gateway/probe/probe.go:155"
     },
     "provider {provider} has no key → {hint}": {
-      "where": "modules/config/store/store.go:433",
+      "where": "modules/config/store/store.go:435",
       "args": [
         "hint",
         "provider"
@@ -2925,7 +2951,7 @@
       "where": "modules/runtime/commands.go:129"
     },
     "request body has no top-level model string field ({method} {path})": {
-      "where": "modules/gateway/forward/forward.go:793",
+      "where": "modules/gateway/forward/forward.go:808",
       "args": [
         "method",
         "path"
@@ -2941,7 +2967,7 @@
       "where": "modules/breaker/plane.go:286"
     },
     "request short-circuited by special plugin {plugin} (no upstream call)": {
-      "where": "modules/gateway/forward/forward.go:1752",
+      "where": "modules/gateway/forward/forward.go:1767",
       "args": [
         "plugin"
       ]
@@ -2965,7 +2991,7 @@
       ]
     },
     "rewriting model failed: {err}": {
-      "where": "modules/gateway/forward/forward.go:934"
+      "where": "modules/gateway/forward/forward.go:949"
     },
     "role bindings   profile {name}": {
       "where": "modules/config/diagnostics.go:173",
@@ -3007,7 +3033,7 @@
       ]
     },
     "route: {route}\nstatus: 400\ntag: {tag}\ndetector: {detector}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n": {
-      "where": "modules/gateway/forward/forward.go:1483",
+      "where": "modules/gateway/forward/forward.go:1498",
       "args": [
         "detector",
         "reqHeaders",
@@ -3017,7 +3043,7 @@
       ]
     },
     "route: {route}\nstatus: {status}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n": {
-      "where": "modules/gateway/forward/forward.go:1434",
+      "where": "modules/gateway/forward/forward.go:1449",
       "args": [
         "reqHeaders",
         "respHeaders",
@@ -3052,16 +3078,16 @@
       ]
     },
     "set api_key in providers.json": {
-      "where": "modules/config/store/store.go:428"
+      "where": "modules/config/store/store.go:430"
     },
     "set the environment variable {env} or fill in api_key": {
-      "where": "modules/config/store/store.go:430",
+      "where": "modules/config/store/store.go:432",
       "args": [
         "env"
       ]
     },
     "set — leave empty to keep it": {
-      "where": "modules/config/view.go:453"
+      "where": "modules/config/view.go:661"
     },
     "skipped (you turned it off; newgate on {agent} restores it)": {
       "where": "modules/runtime/takeover/takeover.go:177",
@@ -3199,6 +3225,12 @@
     "takes effect immediately; running sessions are unaffected": {
       "where": "modules/config/commands.go:69"
     },
+    "the bind address must be an IP (or empty for loopback only), got {value}": {
+      "where": "modules/config/view.go:567",
+      "args": [
+        "value"
+      ]
+    },
     "the chain head is fixed; fallbacks follow the predicted TTFT of this context": {
       "where": "modules/config/commands.go:357"
     },
@@ -3212,13 +3244,13 @@
       "where": "modules/runtime/takeover/takeover.go:233"
     },
     "the file content in this request is not readable: {err}": {
-      "where": "modules/config/view.go:658",
+      "where": "modules/config/view.go:903",
       "args": [
         "err"
       ]
     },
     "the file is empty": {
-      "where": "modules/config/store/store.go:243"
+      "where": "modules/config/store/store.go:245"
     },
     "the full assembly record above is new; it is written again only when the graph changes": {
       "where": "app/trace.go:260"
@@ -3251,7 +3283,7 @@
       "where": "modules/config/commands.go:570"
     },
     "the providers in this request are not readable: {err}": {
-      "where": "modules/config/view.go:497",
+      "where": "modules/config/view.go:705",
       "args": [
         "err"
       ]
@@ -3275,7 +3307,7 @@
       "where": "modules/runtime/commands.go:146"
     },
     "the settings in this request are not readable: {err}": {
-      "where": "modules/config/view.go:353",
+      "where": "modules/config/view.go:540",
       "args": [
         "err"
       ]
@@ -3294,7 +3326,7 @@
       ]
     },
     "the tier bindings in this request are not readable: {err}": {
-      "where": "modules/config/view.go:230",
+      "where": "modules/config/view.go:299",
       "args": [
         "err"
       ]
@@ -3383,7 +3415,7 @@
       "where": "modules/config/commands.go:657"
     },
     "tier {tier} has no usable candidate under profile {profile} (tiers: {tiers}); run `newgate tier {tier}` to see why each candidate was skipped": {
-      "where": "modules/gateway/forward/forward.go:911",
+      "where": "modules/gateway/forward/forward.go:926",
       "args": [
         "profile",
         "tier",
@@ -3415,7 +3447,7 @@
       "where": "modules/breaker/view.go:141"
     },
     "troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)": {
-      "where": "modules/gateway/forward/forward.go:1687"
+      "where": "modules/gateway/forward/forward.go:1702"
     },
     "turned off": {
       "where": "modules/pluginmanager/command.go:363"
@@ -3427,7 +3459,7 @@
       "where": "modules/pluginmanager/command.go:368"
     },
     "two providers are both named \"{name}\"": {
-      "where": "modules/config/view.go:513",
+      "where": "modules/config/view.go:721",
       "args": [
         "name"
       ]
@@ -3480,7 +3512,7 @@
       "where": "modules/breaker/status/status.go:129"
     },
     "upstream {provider} connect failed: {err}": {
-      "where": "modules/gateway/forward/forward.go:1116",
+      "where": "modules/gateway/forward/forward.go:1131",
       "args": [
         "err",
         "provider"
@@ -3508,17 +3540,17 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:366"
+      "where": "lib/view/view.go:382"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:485",
+      "where": "lib/view/view.go:501",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:477",
+      "where": "lib/view/view.go:493",
       "args": [
         "a",
         "b",
@@ -3526,19 +3558,19 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:482",
+      "where": "lib/view/view.go:498",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:375",
+      "where": "lib/view/view.go:391",
       "args": [
         "source"
       ]
     },
     "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
-      "where": "lib/view/view.go:371",
+      "where": "lib/view/view.go:387",
       "args": [
         "source"
       ]
@@ -3669,7 +3701,7 @@
       ]
     },
     "{file} is not valid JSON": {
-      "where": "modules/config/view.go:265",
+      "where": "modules/config/view.go:395",
       "args": [
         "file"
       ]
@@ -3882,7 +3914,7 @@
       ]
     },
     "{route} -> {status}{note}  upstream said: {body}": {
-      "where": "modules/gateway/forward/forward.go:1153",
+      "where": "modules/gateway/forward/forward.go:1168",
       "args": [
         "body",
         "note",
@@ -3929,6 +3961,21 @@
         "usable"
       ]
     },
+    "{verb} {file} failed: {err}": {
+      "where": "modules/config/view.go:849",
+      "args": [
+        "file",
+        "verb"
+      ]
+    },
+    "{verb} {file} failed: {err} (someone else changed it since you opened this page — reload and try again)": {
+      "where": "modules/config/view.go:846",
+      "args": [
+        "err",
+        "file",
+        "verb"
+      ]
+    },
     "{why} — footguns need a time limit; use: newgate plugin {path} on 5m": {
       "where": "modules/pluginmanager/view.go:106",
       "args": [
@@ -3953,7 +4000,7 @@
       "other": "… and {n} more"
     },
     "…(truncated, {n} characters total)": {
-      "where": "modules/gateway/forward/forward.go:1612",
+      "where": "modules/gateway/forward/forward.go:1627",
       "args": [
         "n"
       ]

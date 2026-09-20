@@ -199,6 +199,15 @@ func (p *Profile) MergeFrom(base *Profile) {
 			merged[k] = v
 		}
 		for k, v := range p.Roles {
+			// 空档位 = 没写，**不盖父**。区别既有 `CandidatesFor` 早就废了——它把
+			// 空列表当成稀疏（继续回落/走缺省），所以一个 `[]` 从来没能力说「明确
+			// 不要这一档」；而它在继承里盖掉父的候选，唯一造成的后果是「删除后再
+			// 添加」的老配置（界面删档位再空加回来的常见操作）悄悄失去父的候选，
+			// 那一档从此解析不出任何东西。两个语义选一个：它只能表达「没写」，那就
+			// 连继承的遮蔽一起去掉，让空 = 掉到父/缺省，一致。（2026-09-20）
+			if len(v) == 0 {
+				continue
+			}
 			merged[k] = fillBareProviders(v, merged[k])
 		}
 		p.Roles = merged
@@ -378,8 +387,19 @@ type State struct {
 	ActiveProfile   string `json:"active_profile,omitempty"`
 	FallbackProfile string `json:"fallback_profile,omitempty"`
 
-	Port      int  `json:"port"`
-	TakenOver bool `json:"taken_over"`
+	Port int `json:"port"`
+	// Host 是网关**监听在哪个地址**（空 = 只监听本机回环）。
+	//
+	// 为什么要可配：默认只绑 127.0.0.1 是安全的那一档——这台机器上的任何程序都
+	// 够得着 8899，而 8899 能改配置、能拨运行期开关。想从别处（同机的另一个
+	// 容器、Tailscale 网段、局域网）打开界面的人才需要放开它，而那是个**明确的
+	// 决定**，不该由默认值替用户做。
+	//
+	// 值可以是 IP（`100.64.0.1`）或 `0.0.0.0`（全部网卡）。**改成非回环时，
+	// web 界面的 Host 门也要跟着放开**（见 web-dashboard 的 allowedHost）——
+	// 那道门挡的是 DNS rebinding，与监听地址是两件事。
+	Host      string `json:"host,omitempty"`
+	TakenOver bool   `json:"taken_over"`
 
 	// ControlToken 控制端点（/__newgate/stop）的 Bearer 令牌。
 	// 为什么需要它：共享部署里同组用户读得到这份 state（0660），却对
@@ -413,6 +433,16 @@ type State struct {
 	// 判据是「这个键是谁的词汇」——它们全是网关的，放在共享配置里就等于
 	// 加一个网关开关要动 config。
 	ModuleConfig map[string][]byte `json:"-"`
+}
+
+// BindHost 是**实际**要绑的地址：没配就是回环。
+//
+// 注意 nil 接收者也要能问（daemon 起在读到 state 之前的那一小段）。
+func (s *State) BindHost() string {
+	if s == nil || s.Host == "" {
+		return "127.0.0.1"
+	}
+	return s.Host
 }
 
 // Normalize 补默认值。读盘后调用。

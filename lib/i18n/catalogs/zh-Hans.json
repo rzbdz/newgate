@@ -328,6 +328,10 @@
       "text": "（还有 {left}）",
       "reviewed": true
     },
+    "+ provider": {
+      "text": "+ provider",
+      "reviewed": true
+    },
     "+{n} body key": {
       "text": "+{n} 个正文 key",
       "reviewed": true
@@ -356,6 +360,14 @@
       "text": "未命中只能补空串（那几轮模型看不到自己的上一轮推理）；日志逐条有记",
       "reviewed": true
     },
+    "API key": {
+      "text": "API key",
+      "reviewed": true
+    },
+    "API key from env": {
+      "text": "从环境变量取 key",
+      "reviewed": true
+    },
     "Add an empty array when a tool schema lacks required": {
       "text": "工具 schema 缺 required 时补空数组",
       "reviewed": true
@@ -372,12 +384,20 @@
       "text": "shell 里已导出 {names}",
       "reviewed": true
     },
+    "An IP (e.g. a Tailscale 100.x address) or 0.0.0.0 for every interface. Empty = loopback only. Changing it takes effect after a restart.": {
+      "text": "填一个 IP（比如 Tailscale 的 100.x 地址），或 0.0.0.0 表示所有网卡。留空 = 只监听回环。改完要重启才生效。",
+      "reviewed": true
+    },
     "An agent declares takeover but it is not in effect; rerun newgate start": {
       "text": "有 agent 声明接管但未生效，重跑 newgate start",
       "reviewed": true
     },
     "An agent was released but the takeover is still in effect (the release did not take); rerun: newgate off <agent>": {
       "text": "有 agent 被释放过、接管却仍然生效（释放没成功）；重跑：newgate off <agent>",
+      "reviewed": true
+    },
+    "Anthropic base URL": {
+      "text": "Anthropic 方言的 base",
       "reviewed": true
     },
     "Availability": {
@@ -390,6 +410,10 @@
     },
     "Backups": {
       "text": "备份",
+      "reviewed": true
+    },
+    "Bind address": {
+      "text": "监听地址",
       "reviewed": true
     },
     "Binding": {
@@ -482,6 +506,10 @@
     },
     "Config is unusable, refusing to take over": {
       "text": "配置不可用，拒绝接管",
+      "reviewed": true
+    },
+    "Configuration": {
+      "text": "配置",
       "reviewed": true
     },
     "Configuration hot-reloaded (generation {gen}): {changes} — running sessions are unaffected": {
@@ -608,6 +636,10 @@
       "text": "全量请求日志（默认 30 分钟自动关）",
       "reviewed": true
     },
+    "Gateway": {
+      "text": "网关",
+      "reviewed": true
+    },
     "Global settings": {
       "text": "全局设置",
       "reviewed": true
@@ -704,6 +736,10 @@
       "text": "内存 + thinkcache.bin 冷层；重启后自动装回，只存计数不存内容",
       "reviewed": true
     },
+    "Model names this provider serves, used to pick candidates for an explicit model request.": {
+      "text": "这家能提供的模型名。客户端点名要某个模型时，候选就是从这些里面挑。",
+      "reviewed": true
+    },
     "Module switches": {
       "text": "模块开关",
       "reviewed": true
@@ -722,6 +758,10 @@
     },
     "NEWGATE_LISTENER_FD={value} is not an fd number": {
       "text": "NEWGATE_LISTENER_FD={value} 不是 fd 号",
+      "reviewed": true
+    },
+    "Never sent to the browser: this field arrives empty, and writing a value is the only way to change it.": {
+      "text": "这个值不会发给浏览器：界面上拿到的永远是空的，敲一个新的才是改。",
       "reviewed": true
     },
     "New configuration failed to load, still using the last usable configuration: {err}": {
@@ -840,6 +880,10 @@
       "text": "插件 {name} 已开",
       "reviewed": true
     },
+    "Plugins": {
+      "text": "插件",
+      "reviewed": true
+    },
     "Port not responding": {
       "text": "端口无响应",
       "reviewed": true
@@ -866,6 +910,10 @@
     },
     "Provider {name} is not defined": {
       "text": "provider {name} 未定义",
+      "reviewed": true
+    },
+    "Providers": {
+      "text": "上游（provider）",
       "reviewed": true
     },
     "Proxy": {
@@ -910,6 +958,10 @@
     },
     "Rate limit": {
       "text": "限流",
+      "reviewed": true
+    },
+    "Reads the key from an environment variable instead of the file. Takes precedence over the field above.": {
+      "text": "从环境变量读 key，而不是写在文件里。填了它就压过上面那一格。",
       "reviewed": true
     },
     "Reason": {
@@ -1000,6 +1052,10 @@
       "text": "有些服务没起来：{err}",
       "reviewed": true
     },
+    "Some upstreams serve the Anthropic dialect on a different base and do not forward between them (ARK is the case this exists for).": {
+      "text": "有的上游把两种方言放在不同的 base 上，而且互相不转发（火山方舟就是这样，这个字段是为它加的）。",
+      "reviewed": true
+    },
     "Spared": {
       "text": "救回",
       "reviewed": true
@@ -1066,6 +1122,10 @@
     },
     "The lock file currently says pid {pid} (normal within the graceful handoff window, it lines up by itself within milliseconds)": {
       "text": "锁文件此刻写着 pid {pid}（优雅交接的窗口内正常，几毫秒后自己会对上）",
+      "reviewed": true
+    },
+    "The name the tier bindings refer to. Renaming is a new provider: bindings that used the old name keep pointing at it.": {
+      "text": "档位绑定引用的就是这个名字。改名等于换了新的一家——原来绑在旧名字上的那些还指着旧的。",
       "reviewed": true
     },
     "The process the pidfile points at is gone ({what}), and the lock file says the real daemon is pid {pid}": {
@@ -1160,6 +1220,10 @@
       "text": "还要等",
       "reviewed": true
     },
+    "Where requests go. The path is appended by newgate.": {
+      "text": "请求发到哪。后面的路径由 newgate 拼。",
+      "reviewed": true
+    },
     "Which agent to launch? e.g. newgate claude or newgate run claude": {
       "text": "要启动哪个 agent？例：newgate claude 或 newgate run claude",
       "reviewed": true
@@ -1170,6 +1234,10 @@
     },
     "Which agent to take over? e.g. newgate on claude": {
       "text": "要接管谁？例：newgate on claude",
+      "reviewed": true
+    },
+    "Which dialect this upstream speaks. Empty means openai.": {
+      "text": "这家上游说的是哪种方言。留空 = openai。",
       "reviewed": true
     },
     "Which profile the chain starts from when no agent-specific one is set.": {
@@ -1230,6 +1298,18 @@
     },
     "a plugin rewrote the request (each rewrite is logged)": {
       "text": "插件改写了请求（逐条有日志）",
+      "reviewed": true
+    },
+    "a profile must have a name — there is nothing to save it as": {
+      "text": "档位得有个名字 —— 没有名字就不知道存成什么",
+      "reviewed": true
+    },
+    "a profile name must not contain path separators or \"..\": {name}": {
+      "text": "档位文件名不能含路径分隔符或 \"..\"：{name}",
+      "reviewed": true
+    },
+    "a provider has no name — the tier bindings would have nothing to refer to": {
+      "text": "有一个 provider 没有名字——档位绑定就没有东西可以引用了",
       "reviewed": true
     },
     "a ref and provider/model cannot be combined: {binding}": {
@@ -1378,6 +1458,10 @@
     },
     "average latency": {
       "text": "平均延迟",
+      "reviewed": true
+    },
+    "base URL": {
+      "text": "base URL",
       "reviewed": true
     },
     "binding": {
@@ -1720,8 +1804,16 @@
       "text": "与链上更前面的重复，已去重",
       "reviewed": true
     },
+    "e.g. DEEPSEEK_API_KEY": {
+      "text": "例如 DEEPSEEK_API_KEY",
+      "reviewed": true
+    },
     "each (provider, model) appears once in the whole chain": {
       "text": "同 (provider, model) 全链仅一次",
+      "reviewed": true
+    },
+    "empty = loopback only (127.0.0.1)": {
+      "text": "留空 = 只监听本机回环（127.0.0.1）",
       "reviewed": true
     },
     "empty binding": {
@@ -1884,6 +1976,10 @@
       "text": "正常",
       "reviewed": true
     },
+    "https://…": {
+      "text": "https://…",
+      "reviewed": true
+    },
     "in effect": {
       "text": "生效",
       "reviewed": true
@@ -1980,12 +2076,12 @@
       "text": "监听句柄还没就绪",
       "reviewed": true
     },
-    "listening on 127.0.0.1:{port}": {
-      "text": "监听 127.0.0.1:{port}",
+    "listening on {host}:{port}": {
+      "text": "监听 {host}:{port}",
       "reviewed": true
     },
-    "listening on 127.0.0.1:{port} failed": {
-      "text": "监听 127.0.0.1:{port} 失败",
+    "listening on {host}:{port} failed": {
+      "text": "监听 {host}:{port} 失败",
       "reviewed": true
     },
     "local rough estimate fallback (upstream has no such endpoint)": {
@@ -2028,6 +2124,10 @@
       "text": "模型 {model} 既不是已知档位（{tiers}），也不在任何 profile 的绑定里。跑 `newgate tier` 看可用绑定",
       "reviewed": true
     },
+    "models": {
+      "text": "模型清单",
+      "reviewed": true
+    },
     "module": {
       "text": "模块",
       "reviewed": true
@@ -2038,6 +2138,10 @@
     },
     "module {module} tried to register {key}, which is a built-in role name; ignored": {
       "text": "模块 {module} 想注册 {key}，但这是内置档位名，已忽略",
+      "reviewed": true
+    },
+    "name": {
+      "text": "名字",
       "reviewed": true
     },
     "never probed": {
@@ -2144,6 +2248,10 @@
       "text": "未定义",
       "reviewed": true
     },
+    "not set — paste the key here": {
+      "text": "还没设——把 key 贴在这里",
+      "reviewed": true
+    },
     "not taken over": {
       "text": "未接管",
       "reviewed": true
@@ -2168,8 +2276,16 @@
       "text": "冷却到期后会放行一次真实请求作试探：成功即合闸，失败则回闸并把冷却翻倍（上限 10 分钟）",
       "reviewed": true
     },
+    "one per line": {
+      "text": "一行一个",
+      "reviewed": true
+    },
     "only POST is accepted": {
       "text": "只接受 POST",
+      "reviewed": true
+    },
+    "only if the two dialects live on different bases": {
+      "text": "只有两种方言不在同一个 base 上时才填",
       "reviewed": true
     },
     "other": {
@@ -2352,6 +2468,10 @@
       "text": "profile",
       "reviewed": true
     },
+    "profile \"{name}\" already exists": {
+      "text": "档位「{name}」已经存在了",
+      "reviewed": true
+    },
     "profile kv <name> [--write]": {
       "text": "profile kv <名> [--write]",
       "reviewed": true
@@ -2370,6 +2490,10 @@
     },
     "profile {profile} role {role}: provider {provider} is not defined": {
       "text": "profile {profile} 档位 {role}: provider {provider} 未定义",
+      "reviewed": true
+    },
+    "protocol": {
+      "text": "协议",
       "reviewed": true
     },
     "provider and model must both be set: {binding}": {
@@ -2572,6 +2696,10 @@
       "text": "设环境变量 {env} 或填 api_key",
       "reviewed": true
     },
+    "set — leave empty to keep it": {
+      "text": "已设置——留空 = 不改",
+      "reviewed": true
+    },
     "skipped (you turned it off; newgate on {agent} restores it)": {
       "text": "跳过（你 off 过它；newgate on {agent} 可恢复）",
       "reviewed": true
@@ -2684,6 +2812,10 @@
       "text": "即刻生效；已在运行的会话不受影响",
       "reviewed": true
     },
+    "the bind address must be an IP (or empty for loopback only), got {value}": {
+      "text": "监听地址得是个 IP（或者留空表示只听回环），收到的是 {value}",
+      "reviewed": true
+    },
     "the chain head is fixed; fallbacks follow the predicted TTFT of this context": {
       "text": "链头固定；fallback 按当前上下文的预测 TTFT 排序",
       "reviewed": true
@@ -2742,6 +2874,10 @@
     },
     "the provider was rejected as unavailable — see newgate metrics / probe": {
       "text": "provider 被熔断摘除，见 newgate metrics / probe",
+      "reviewed": true
+    },
+    "the providers in this request are not readable: {err}": {
+      "text": "这次请求里的 provider 表读不出来：{err}",
       "reviewed": true
     },
     "the proxy (pid {pid}) runs as another user and has no control token — ask the user who started it to run `newgate stop` once (after that any group member can stop it)": {
@@ -2912,6 +3048,10 @@
       "text": "已开",
       "reviewed": true
     },
+    "two providers are both named \"{name}\"": {
+      "text": "有两个 provider 都叫 \"{name}\"",
+      "reviewed": true
+    },
     "type": {
       "text": "分类",
       "reviewed": true
@@ -3010,6 +3150,10 @@
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
       "text": "view：{source} 登记了一个空的产出函数 —— 界面上它会静默地什么都没有",
+      "reviewed": true
+    },
+    "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
+      "text": "view: {source} 登记时没有报栏目名——侧边栏那一栏就没有东西可以做标题（用 view.Title）",
       "reviewed": true
     },
     "was not taken over in the first place": {
@@ -3249,6 +3393,14 @@
       "text": "可用 {usable}（流畅 {fast} · 可用 {ok} · 未评分 {unrated}）· 卡顿 {laggy} · 不可用 {down}",
       "reviewed": true
     },
+    "{verb} {file} failed: {err}": {
+      "text": "{verb} {file} 失败：{err}",
+      "reviewed": true
+    },
+    "{verb} {file} failed: {err} (someone else changed it since you opened this page — reload and try again)": {
+      "text": "{verb} {file} 失败：{err}（页面打开后别人改过——重载后再试）",
+      "reviewed": true
+    },
     "{why} — footguns need a time limit; use: newgate plugin {path} on 5m": {
       "text": "{why} —— footgun 必须带时限；改它用：newgate plugin {path} on 5m",
       "reviewed": true
@@ -3275,122 +3427,6 @@
     },
     "● Running": {
       "text": "● 运行中",
-      "reviewed": true
-    },
-    "Configuration": {
-      "text": "配置",
-      "reviewed": true
-    },
-    "Gateway": {
-      "text": "网关",
-      "reviewed": true
-    },
-    "Plugins": {
-      "text": "插件",
-      "reviewed": true
-    },
-    "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
-      "text": "view: {source} 登记时没有报栏目名——侧边栏那一栏就没有东西可以做标题（用 view.Title）",
-      "reviewed": true
-    },
-    "+ provider": {
-      "text": "+ provider",
-      "reviewed": true
-    },
-    "API key": {
-      "text": "API key",
-      "reviewed": true
-    },
-    "API key from env": {
-      "text": "从环境变量取 key",
-      "reviewed": true
-    },
-    "Anthropic base URL": {
-      "text": "Anthropic 方言的 base",
-      "reviewed": true
-    },
-    "Model names this provider serves, used to pick candidates for an explicit model request.": {
-      "text": "这家能提供的模型名。客户端点名要某个模型时，候选就是从这些里面挑。",
-      "reviewed": true
-    },
-    "Never sent to the browser: this field arrives empty, and writing a value is the only way to change it.": {
-      "text": "这个值不会发给浏览器：界面上拿到的永远是空的，敲一个新的才是改。",
-      "reviewed": true
-    },
-    "Providers": {
-      "text": "上游（provider）",
-      "reviewed": true
-    },
-    "Reads the key from an environment variable instead of the file. Takes precedence over the field above.": {
-      "text": "从环境变量读 key，而不是写在文件里。填了它就压过上面那一格。",
-      "reviewed": true
-    },
-    "Some upstreams serve the Anthropic dialect on a different base and do not forward between them (ARK is the case this exists for).": {
-      "text": "有的上游把两种方言放在不同的 base 上，而且互相不转发（火山方舟就是这样，这个字段是为它加的）。",
-      "reviewed": true
-    },
-    "The name the tier bindings refer to. Renaming is a new provider: bindings that used the old name keep pointing at it.": {
-      "text": "档位绑定引用的就是这个名字。改名等于换了新的一家——原来绑在旧名字上的那些还指着旧的。",
-      "reviewed": true
-    },
-    "Where requests go. The path is appended by newgate.": {
-      "text": "请求发到哪。后面的路径由 newgate 拼。",
-      "reviewed": true
-    },
-    "Which dialect this upstream speaks. Empty means openai.": {
-      "text": "这家上游说的是哪种方言。留空 = openai。",
-      "reviewed": true
-    },
-    "a provider has no name — the tier bindings would have nothing to refer to": {
-      "text": "有一个 provider 没有名字——档位绑定就没有东西可以引用了",
-      "reviewed": true
-    },
-    "base URL": {
-      "text": "base URL",
-      "reviewed": true
-    },
-    "e.g. DEEPSEEK_API_KEY": {
-      "text": "例如 DEEPSEEK_API_KEY",
-      "reviewed": true
-    },
-    "https://…": {
-      "text": "https://…",
-      "reviewed": true
-    },
-    "models": {
-      "text": "模型清单",
-      "reviewed": true
-    },
-    "name": {
-      "text": "名字",
-      "reviewed": true
-    },
-    "not set — paste the key here": {
-      "text": "还没设——把 key 贴在这里",
-      "reviewed": true
-    },
-    "one per line": {
-      "text": "一行一个",
-      "reviewed": true
-    },
-    "only if the two dialects live on different bases": {
-      "text": "只有两种方言不在同一个 base 上时才填",
-      "reviewed": true
-    },
-    "protocol": {
-      "text": "协议",
-      "reviewed": true
-    },
-    "set — leave empty to keep it": {
-      "text": "已设置——留空 = 不改",
-      "reviewed": true
-    },
-    "the providers in this request are not readable: {err}": {
-      "text": "这次请求里的 provider 表读不出来：{err}",
-      "reviewed": true
-    },
-    "two providers are both named \"{name}\"": {
-      "text": "有两个 provider 都叫 \"{name}\"",
       "reviewed": true
     }
   }

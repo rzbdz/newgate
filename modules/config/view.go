@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,15 +48,57 @@ func registerView(v view.Service) (modules.Release, error) {
 // 那一张卡片带 Broken 说明，其余照常。
 func concepts() ([]view.Concept, error) {
 	var out []view.Concept
-	out = append(out, stateConcept())
-	// provider 表排在最前面：装完 newgate 第一件事就是配一家上游，而档位绑定要
-	// 先有 provider 可选。版面顺序上它也是「读一遍就能配出一家」的那张。
-	out = append(out, providersConcept())
-	for _, name := range profileNames() {
-		out = append(out, profileConcept(name))
+	// **顺序是产品决定，不是字母序**（见 view.Concept.Order）：先配上游、再挑档位。
+	// 字母序会把 `config.profile.*` 排到 `config.providers` 前面，于是左栏第一屏
+	// 全是档位文件、而上游配置在第一屏之外——而「先有上游才选得出绑定」这件事与
+	// 操作的先后是同一件事。
+	out = append(out, stateConcept())     // Order 0：全局设置
+	out = append(out, providersConcept()) // Order 1：上游
+	// 一个档位一份文件，一份文件一张卡——**改档位、改继承、改名、删除、新增**全都
+	// 在这张卡上（见 applyProfileRoles）。2026-09-20 之前这里还有一张「档位文件」
+	// 目录卡：它列的文件与下面这些卡一一对应，是同一件事说两遍（用户的原话是
+	// 「这个多余的啊」），而它独有的那点功能（新增/改名/删除）现在都在卡自己身上。
+	names := profileNames()
+	for _, name := range names {
+		out = append(out, profileConcept(name, names))
 	}
 	out = append(out, fileConcepts()...)
 	return out, nil
+}
+
+// profileFamily 说一个档位属于哪一族（左栏分组用）。
+//
+// 规则一条：把名字按 "-" 从左往右切，**切到的那一段本身是一个存在的档位**时，
+// 它就是这一族的名字（`claude-cheap` → `claude`，`minimax-fast` → `minimax`）。
+// 切不出来（没有 `demo-*` 这种兄弟）就用自己的名字——自己一族。
+//
+// 为什么要有它：档位是**一族一族**长出来的（先 `claude`，再派生出 `claude-cheap`），
+// 而左栏平铺十六行之后，一眼看不出谁是谁的变体。分组的判据必须是「那一族真的存在」
+// 而不是「名字里有横杠」：横杠在档位名里很常见（`gpt-4.1-mini`），凭它分组会造出
+// 一堆并不存在的家族。
+func profileFamily(name string, all []string) string {
+	exists := make(map[string]bool, len(all))
+	for _, n := range all {
+		exists[n] = true
+	}
+	// 逐个扫描字符，遇到一个 "-" 就试一次它左边那一段。
+	//
+	// **不要把它写成 `for i := strings.Index(name, "-"); i > 0; i = strings.Index(name[i+1:], "-") + i + 1`**
+	// ——那是这一段原来的写法，而它有一个会**把整个 daemon 挂死**的错：`name[i+1:]`
+	// 里再也没有 "-" 时 `Index` 回 -1，`-1 + i + 1` 恰好等于 `i`，于是下标原地踏步、
+	// 循环永不退出。触发条件平常到不能再平常——界面上的「＋新建档位」造出来的名字
+	// 就是 `new-profile`：它在 `new` 之后没有第二个横杠，而 `new` 又不是一个已有的
+	// 档位，于是**第一次刷新快照就死循环**（2026-09-20 实测：CPU 打满、`/ui/api/snapshot`
+	// 一个字节都不回、浏览器那层「新建之后切到新卡」永远不成立）。
+	//
+	// 症状之所以难认，是因为挂的是**读快照**这条所有人共用的路：界面整个卡住，
+	// 而磁盘上文件建得好好的——看起来像前端没刷新，不像后端在空转。
+	for i := 0; i < len(name); i++ {
+		if name[i] == '-' && exists[name[:i]] {
+			return name[:i]
+		}
+	}
+	return name
 }
 
 // brokenConcept 是「这东西现在读不出来」的那张卡片：身份照报（前端才知道少了
@@ -95,19 +138,22 @@ type providerChoice struct {
 // 下拉框选而不是凭记忆敲字符串。这份清单从配置里来（各家声明过的模型），不问
 // 上游——探活是 `newgate probe` 的事，界面加载不该去碰网络。
 type profileData struct {
-	Profile     string           `json:"profile"`
-	File        string           `json:"file"` // 相对配置根；保存时原样回传
-	Base        string           `json:"base"` // 基线（内容哈希），见 store.WriteIfUnchanged
-	Description string           `json:"description,omitempty"`
-	Default     bool             `json:"default"`
-	Pinned      bool             `json:"pinned,omitempty"`
-	Excluded    bool             `json:"excluded,omitempty"`
-	Extends     string           `json:"extends,omitempty"`
-	Roles       []roleData       `json:"roles"`
-	Providers   []providerChoice `json:"providers"`
+	Profile     string `json:"profile"`
+	File        string `json:"file"` // 相对配置根；保存时原样回传
+	Base        string `json:"base"` // 基线（内容哈希），见 store.WriteIfUnchanged
+	Description string `json:"description,omitempty"`
+	Default     bool   `json:"default"`
+	Pinned      bool   `json:"pinned,omitempty"`
+	Excluded    bool   `json:"excluded,omitempty"`
+	Extends     string `json:"extends,omitempty"`
+	// ExtendsOptions 是可选的父档位（别的档位文件名）。**它必须由后端给**：
+	// 界面不认识「档位文件」这件事，它只知道「这一格有个下拉，选项是这些」。
+	ExtendsOptions []string         `json:"extends_options"`
+	Roles          []roleData       `json:"roles"`
+	Providers      []providerChoice `json:"providers"`
 }
 
-func profileConcept(name string) view.Concept {
+func profileConcept(name string, all []string) view.Concept {
 	conceptID := "config.profile." + name
 	file, err := profileFile(name)
 	if err != nil {
@@ -126,11 +172,20 @@ func profileConcept(name string) view.Concept {
 	if snapErr != nil {
 		snap = &store.Snapshot{}
 	}
+	// 父档位的可选项 = 别的档位（不含自己：自己继承自己是个环，解析时会报错）。
+	// 第一个是空串 = **不继承**，它必须有一个看得见的位置（界面把它画成「—」）。
+	extOpts := []string{""}
+	for _, n := range profileNames() {
+		if n != name {
+			extOpts = append(extOpts, n)
+		}
+	}
 	data := profileData{
 		Profile: name, File: relToRoot(file), Base: store.Revision(file),
 		Description: pr.Description, Pinned: pr.Pinned, Excluded: pr.Excluded, Extends: pr.Extends,
-		Default:   snap.State != nil && snap.State.DefaultProfile == name,
-		Providers: providerChoices(snap),
+		Default:        snap.State != nil && snap.State.DefaultProfile == name,
+		Providers:      providerChoices(snap),
+		ExtendsOptions: extOpts,
 	}
 	for _, id := range roleOrder(pr) {
 		rd := roleData{ID: id}
@@ -145,6 +200,9 @@ func profileConcept(name string) view.Concept {
 	}
 	return view.Concept{
 		ID: conceptID, Kind: view.KindMapping, Title: title,
+		// Order 10：档位文件排在「上游 / 全局设置」之后（见 concepts 的注释）。
+		// Group：按家族归拢，左栏里 `claude-cheap` 缩在 `claude` 下面（见 profileFamily）。
+		Order: 10, Group: profileFamily(name, all),
 		Data: data,
 		Apply: func(edit json.RawMessage, base string) (string, error) {
 			return applyProfileRoles(conceptID, file, edit, base)
@@ -225,20 +283,82 @@ func providerChoices(snap *store.Snapshot) []providerChoice {
 func applyProfileRoles(conceptID, file string, edit json.RawMessage, base string) (string, error) {
 	var patch struct {
 		Roles map[string][]bindingData `json:"roles"`
+		// Extends / Name / Delete 与 roles **同一张卡**交上来：一张 kv 卡就是那一份
+		// 文件的全部（档位、继承、改名、删除）。分成两张卡的做法试过了——用户的原话
+		// 是「这些要收进各个 kv 内部」，而且分成两张时「档位文件」那张卡与每个 kv 的
+		// 卡说的是同一件事，是重复的。
+		Extends *string `json:"extends"`
+		Name    *string `json:"name"`
+		Delete  bool    `json:"delete"`
+		// Create 建一份**新**档位文件（内容是空的：描述、档位全空，用户接着在卡片里
+		// 填）。放在这里而不是单开一张「档位文件」卡：一张 kv 卡就是那一份文件的全部，
+		// 「再加一份」从任何一张 kv 卡上都够得着（用户的原话：这些要收进各个 kv 内部）。
+		Create *string `json:"create"`
 	}
 	if err := json.Unmarshal(edit, &patch); err != nil {
 		return "", i18n.Ef(err, "the tier bindings in this request are not readable: {err}", i18n.A{"err": err})
 	}
-	roles := map[string]domain.Candidates{}
-	for id, list := range patch.Roles {
-		// 空列表**保留**（写进去一个空档位），不当作「删掉这个键」：界面把一个档位
-		// 的候选全删光，意思是「这一档没有候选」——那与「没写这一档」（于是往上
-		// 继承）是两件事，替用户选后者等于改了他没碰过的语义。
-		cands := make(domain.Candidates, 0, len(list))
-		for _, b := range list {
-			cands = append(cands, domain.Binding{Provider: b.Provider, Model: b.Model, Ref: b.Ref})
+
+	if patch.Create != nil {
+		name := strings.TrimSpace(*patch.Create)
+		if name == "" {
+			return "", i18n.E("a profile must have a name — there is nothing to save it as", nil)
 		}
-		roles[id] = cands
+		if strings.ContainsAny(name, `/\`) || name == "." || name == ".." || strings.Contains(name, "..") {
+			return "", i18n.E("a profile name must not contain path separators or \"..\": {name}", i18n.A{"name": name})
+		}
+		newFile := filepath.Join(paths.Mappings(), name+".kv")
+		if _, err := os.Stat(newFile); err == nil {
+			return "", i18n.E("profile \"{name}\" already exists", i18n.A{"name": name})
+		}
+		// 新文件要求「此刻不存在」（base=""）：WriteIfUnchanged 会拦住并发下别人
+		// 刚建好的同一个名字。
+		body := store.SerializeProfileKV(&domain.Profile{Name: name})
+		if _, err := store.WriteIfUnchanged(newFile, "", []byte(body)); err != nil {
+			return "", profileErr("create", newFile, err)
+		}
+		return "", nil
+	}
+
+	if patch.Delete {
+		// 删的是整份文件。CAS 用 base（加载时那一版）——别人刚改过就不删，报冲突。
+		if err := store.RemoveIfUnchanged(file, base); err != nil {
+			return "", profileErr("remove", file, err)
+		}
+		return "", nil
+	}
+
+	// roles 为 nil 表示**这一次没动档位**（只改了继承或名字）：保持文件里现有的。
+	var roles map[string]domain.Candidates
+	if patch.Roles != nil {
+		roles = map[string]domain.Candidates{}
+		for id, list := range patch.Roles {
+			// 空列表**保留**（写进去一个空档位），不当作「删掉这个键」：界面把一个档位
+			// 的候选全删光，意思是「这一档没有候选」——那与「没写这一档」（于是往上
+			// 继承）是两件事，替用户选后者等于改了他没碰过的语义。
+			cands := make(domain.Candidates, 0, len(list))
+			for _, b := range list {
+				cands = append(cands, domain.Binding{Provider: b.Provider, Model: b.Model, Ref: b.Ref})
+			}
+			roles[id] = cands
+		}
+	}
+
+	// 改名 = 建新文件 + 删旧文件（两次独立的 CAS）。名字必须是干净的**文件词干**：
+	// 带路径分隔符或 ".." 的名字能把文件写到 mappings/ 外面去。
+	newName := ""
+	if patch.Name != nil {
+		newName = strings.TrimSpace(*patch.Name)
+		if newName == "" {
+			return "", i18n.E("a profile must have a name — there is nothing to save it as", nil)
+		}
+		if strings.ContainsAny(newName, `/\`) || newName == "." || newName == ".." || strings.Contains(newName, "..") {
+			return "", i18n.E("a profile name must not contain path separators or \"..\": {name}", i18n.A{"name": newName})
+		}
+	}
+	curStem := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+	if newName == "" || newName == curStem {
+		newName = "" // 没改名
 	}
 
 	if strings.HasSuffix(file, ".kv") {
@@ -250,7 +370,17 @@ func applyProfileRoles(conceptID, file string, edit json.RawMessage, base string
 		if err != nil {
 			return "", err
 		}
-		pr.Roles = roles
+		if roles != nil {
+			pr.Roles = roles
+		}
+		if patch.Extends != nil {
+			pr.Extends = strings.TrimSpace(*patch.Extends)
+		}
+		if newName != "" {
+			// .kv 里**没有名字这个字段**——名字就是文件名。所以改名 = 内容原样搬到
+			// 新文件名下（内容里不含名字，不存在「路径与内容不一致」的问题）。
+			return renameProfile(conceptID, file, newName, base, []byte(store.SerializeProfileKV(pr)))
+		}
 		return writeThrough(conceptID, file, base, []byte(store.SerializeProfileKV(pr)))
 	}
 
@@ -258,7 +388,7 @@ func applyProfileRoles(conceptID, file string, edit json.RawMessage, base string
 	if err != nil {
 		return "", err
 	}
-	// map[string]json.RawMessage：只替换 roles 那一个键，别的键连**解析都不解析**，
+	// map[string]json.RawMessage：只替换动过的那几个键，别的键连**解析都不解析**，
 	// 于是它们不可能被这次保存改变形状（数字的写法、键的顺序、未知字段）。
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(b, &doc); err != nil {
@@ -267,16 +397,52 @@ func applyProfileRoles(conceptID, file string, edit json.RawMessage, base string
 	if doc == nil {
 		doc = map[string]json.RawMessage{}
 	}
-	raw, err := json.Marshal(roles)
-	if err != nil {
-		return "", err
+	if roles != nil {
+		raw, err := json.Marshal(roles)
+		if err != nil {
+			return "", err
+		}
+		doc["roles"] = raw
 	}
-	doc["roles"] = raw
+	if patch.Extends != nil {
+		ext := strings.TrimSpace(*patch.Extends)
+		if ext == "" {
+			delete(doc, "extends")
+		} else {
+			raw, err := json.Marshal(ext)
+			if err != nil {
+				return "", err
+			}
+			doc["extends"] = raw
+		}
+	}
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return "", err
 	}
+	if newName != "" {
+		return renameProfile(conceptID, file, newName, base, append(out, '\n'))
+	}
 	return writeThrough(conceptID, file, base, append(out, '\n'))
+}
+
+// renameProfile 把一份档位文件改名：按新名字写一份（内容原样），再删掉旧的。
+//
+// 两次独立的 CAS：新文件要求**不存在**（base=""），旧文件要求**还是加载时那一版**。
+// 中间任何一步失败都如实报出来——半途改名（两份都在、或者旧的没了新的没建）是
+// 用户最不愿意看到的状态，所以宁可在错误里说清楚停在哪一步。
+func renameProfile(conceptID, oldFile, newName, base string, content []byte) (string, error) {
+	newFile := filepath.Join(paths.Mappings(), newName+filepath.Ext(oldFile))
+	if newFile == oldFile {
+		return writeThrough(conceptID, oldFile, base, content)
+	}
+	if err := writeProfileNewFile(newFile, content); err != nil {
+		return "", profileErr("create", newFile, err)
+	}
+	if err := store.RemoveIfUnchanged(oldFile, base); err != nil {
+		return "", profileErr("remove old", oldFile, err)
+	}
+	return "", nil
 }
 
 // writeThrough 是三个应用者共用的出口：落盘，并把「基线对不上」翻译成**界面的
@@ -303,11 +469,14 @@ func writeThrough(conceptID, file, base string, data []byte) (string, error) {
 type toggleItem struct {
 	ID      string   `json:"id"`
 	Label   string   `json:"label"`
-	Kind    string   `json:"kind"` // select | switch
+	Kind    string   `json:"kind"` // select | switch | text
 	Value   string   `json:"value,omitempty"`
 	On      bool     `json:"on,omitempty"`
 	Options []string `json:"options,omitempty"`
 	Why     string   `json:"why,omitempty"` // 一句话说明这个开关影响什么
+	// Placeholder 是空格子里的提示（比如「空 = 只听回环」）。空值时它比 why
+	// 更该被看见：用户对着一个空输入框，第一句话得告诉他空着是什么意思。
+	Placeholder string `json:"placeholder,omitempty"`
 }
 
 type stateData struct {
@@ -328,12 +497,25 @@ func stateConcept() view.Concept {
 		active = snap.State.DefaultProfile
 	}
 	names := profileNames()
+	host := ""
+	if snap != nil && snap.State != nil {
+		host = snap.State.Host
+	}
 	data := stateData{
 		File: relToRoot(file), Base: store.Revision(file),
 		Items: []toggleItem{{
 			ID: "default_profile", Kind: "select", Value: active, Options: names,
 			Label: i18n.T("Default profile", nil),
 			Why:   i18n.T("Which profile the chain starts from when no agent-specific one is set.", nil),
+		}, {
+			// 监听地址：默认只绑回环，因为 8899 能改配置、能拨开关。想从 tailnet /
+			// 局域网打开界面的人才需要放开它（放开之后 web 界面的 Host 门也认得
+			// Tailscale 网段，见 web-dashboard 的 isTailscale）。
+			ID: "host", Kind: "text", Value: host,
+			Label:       i18n.T("Bind address", nil),
+			Placeholder: i18n.T("empty = loopback only (127.0.0.1)", nil),
+			Why: i18n.T("An IP (e.g. a Tailscale 100.x address) or 0.0.0.0 for every interface. "+
+				"Empty = loopback only. Changing it takes effect after a restart.", nil),
 		}},
 	}
 	return view.Concept{
@@ -348,6 +530,11 @@ func stateConcept() view.Concept {
 func applyStateDefaultProfile(conceptID, file string, edit json.RawMessage, base string) (string, error) {
 	var patch struct {
 		DefaultProfile *string `json:"default_profile"`
+		// Host 是监听地址（空串 = 回环）。它在界面上也能改，但**改完要重启**
+		// 才生效：换监听地址要重新 bind，那不是热路径能做的事（见 forward.New 的
+		// 注释）。所以这一格保存之后，界面显示的仍是「配置成什么」，而此刻真正
+		// 在听的是哪一个是另一回事——那句话写在 why 里。
+		Host *string `json:"host"`
 	}
 	if err := json.Unmarshal(edit, &patch); err != nil {
 		return "", i18n.Ef(err, "the settings in this request are not readable: {err}", i18n.A{"err": err})
@@ -368,6 +555,24 @@ func applyStateDefaultProfile(conceptID, file string, edit json.RawMessage, base
 			return "", err
 		}
 		doc["default_profile"] = raw
+	}
+	if patch.Host != nil {
+		h := strings.TrimSpace(*patch.Host)
+		if h == "" {
+			// 空 = 回环，那是默认值——把键删掉而不是写一个空串，文件里少一行噪音，
+			// 语义与「没配过」完全一样（见 domain.State.BindHost）。
+			delete(doc, "host")
+		} else {
+			if net.ParseIP(h) == nil {
+				return "", i18n.E("the bind address must be an IP (or empty for loopback only), got {value}",
+					i18n.A{"value": h})
+			}
+			raw, err := json.Marshal(h)
+			if err != nil {
+				return "", err
+			}
+			doc["host"] = raw
+		}
 	}
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -415,6 +620,9 @@ func providersConcept() view.Concept {
 	return view.Concept{
 		ID: "config.providers", Kind: view.KindRecords,
 		Title: i18n.T("Providers", nil),
+		// Order 1：排在全局设置（0）之后、档位文件（10）之前——「先配上游，才选得出
+		// 档位绑定」，这个顺序与操作的先后是同一件事。
+		Order: 1,
 		Data: view.Records{
 			File:     relToRoot(file),
 			Items:    items,
@@ -622,12 +830,39 @@ func mustJSON(s string) json.RawMessage {
 	return b
 }
 
+// writeProfileNewFile 写一份「此刻不存在的」新文件：要求 base="" 让
+// WriteIfUnchanged（它还要返回新基线）把并发新建直接拒。
+func writeProfileNewFile(path string, data []byte) error {
+	_, err := store.WriteIfUnchanged(path, "", data)
+	return err
+}
+
+// profileErr 把三类失败包成一句可读的、按文件定位的报错——这是「不静默」的
+// 那条规矩（出错了要带上下文），也是「按文件定位」（这条路径同时动多份文件，
+// 用户必须知道是哪份坏了）。
+func profileErr(verb, file string, err error) error {
+	name := filepath.Base(file)
+	if sc, ok := err.(*store.StaleError); ok {
+		return i18n.E("{verb} {file} failed: {err} (someone else changed it since you opened this page — reload and try again)",
+			i18n.A{"verb": verb, "file": name, "err": sc.Error()})
+	}
+	return i18n.Ef(err, "{verb} {file} failed: {err}",
+		i18n.A{"verb": verb, "file": name})
+}
+
 // ---------- 源文件 ----------
 
 type fileData struct {
 	Path     string `json:"path"`
 	Language string `json:"language"`
 	Text     string `json:"text"`
+	// Base 是这份文件加载时的基线（内容哈希，见 store.WriteIfUnchanged）。
+	//
+	// **少了它，原文那一栏根本存不进去**：界面保存时把这份基线一起交回来，没有
+	// 基线就成了「我以为它不存在」，而磁盘上它是存在的——CAS 当场判过期，报
+	// 「这个文件在页面加载之后被别人改过」。用户看到的是「改原文点保存没反应，
+	// 改控件却好好的」（2026-09-20 实测）。
+	Base string `json:"base"`
 	// Redacted：这份内容是**脱敏过**的（凭据被换成了 ***），所以它只读——
 	// 写回去就是把 *** 落盘，那是数据丢失，比不能编辑严重得多。
 	Redacted bool `json:"redacted,omitempty"`
@@ -647,7 +882,17 @@ func fileConcepts() []view.Concept {
 		text, redacted := redact(string(b), language)
 		c := view.Concept{
 			ID: "config.file." + rel, Kind: view.KindCode, Title: rel,
-			Data: fileData{Path: rel, Language: language, Text: text, Redacted: redacted},
+			// Order 20：原文那一半排在所有控件卡之后。它在左栏里本来就不占位
+			// （有控件半时被折掉，见 App 的 navUnits），这个 Order 是给「没有
+			// 控件半、自己单独露脸」的那种文件用的（比如 providers.json 之外的
+			// 边角文件）。
+			Order: 20,
+			Data: fileData{
+				Path: rel, Language: language, Text: text, Redacted: redacted,
+				// 基线取自**磁盘上那份字节**（不是上面这段 text——text 可能被脱敏
+				// 改写过，用它算出来的哈希与盘上对不上，保存照样会被判过期）。
+				Base: store.Revision(path),
+			},
 		}
 		if !redacted {
 			c.Apply = func(edit json.RawMessage, base string) (string, error) {

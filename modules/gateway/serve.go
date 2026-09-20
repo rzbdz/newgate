@@ -237,7 +237,7 @@ func Serve(filters *policy.Registry, hub porthubapi.Service, listeners servingap
 	thinkcache.SetErrorHandler(func(err error) {
 		lg.Printf("[thinkcache] %v", err)
 	})
-	srv := forward.New(port, lg, watcher, filters)
+	srv := forward.New(watcher.Current().State.BindHost(), port, lg, watcher, filters)
 
 	// 这个端口的根 handler：装了 porthub 就交给它（挂载表优先，没人认领的落回
 	// 数据面），没装就是数据面自己——也就是这个机制出现之前的样子。

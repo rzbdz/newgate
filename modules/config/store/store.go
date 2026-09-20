@@ -68,6 +68,8 @@ func writeJSON(path string, v interface{}, mode os.FileMode) error {
 		return err
 	}
 	b = append(b, '\n')
+	// 同 writeFileAtomic：替换之前先把当前这份抄进历史环（见 history.go）。
+	snapshotBeforeWrite(path)
 	tmp := path + ".tmp"
 	if err := ioutil.WriteFile(tmp, b, mode); err != nil {
 		return err

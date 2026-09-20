@@ -48,7 +48,7 @@ func isolate(t *testing.T) {
 // 停机信号通道建起来，而控制停机那条测试正是要断言「令牌验过之后通道被关掉」。
 // 曾经这里写成 `&Server{Port: 0, Health: ...}`，靠那会儿恰好没有这类断言才没炸。
 func newTestServer() *Server {
-	return New(0, nil, nil, policy.New())
+	return New("", 0, nil, nil, policy.New())
 }
 
 // newLoggingTestServer 同 newTestServer，但把代理日志收进返回的 buffer——

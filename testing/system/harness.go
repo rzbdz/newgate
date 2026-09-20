@@ -182,7 +182,7 @@ func StartWith(t *testing.T, loader modules.Loader) *Harness {
 	watcher.Start()
 
 	health := modules.MustGet(graph.Context(), breakerapi.Capability)
-	server := forward.New(port, log.New(sink, "", 0), watcher, gwpolicy.Default())
+	server := forward.New("", port, log.New(sink, "", 0), watcher, gwpolicy.Default())
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Start() }()
 	t.Cleanup(func() {

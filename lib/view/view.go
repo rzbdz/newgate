@@ -161,6 +161,10 @@ type Record struct {
 	// 通常意味着删掉磁盘上的一段配置，那种动作该由贡献者显式说「这条可以删」，
 	// 而不是由「它是个 record」推出来。
 	Removable bool `json:"removable,omitempty"`
+	// Base 是**这一条**代表的那份文件加载时的基线，见 Records.Base。有的记录集
+	// 一条对应一份文件（如「这些档位文件」），删这一条就是删那份文件，得用这条
+	// 自己的版本来判断「没被别人抢先动过」。界面原样回传，不解释。
+	Base string `json:"base,omitempty"`
 }
 
 // Field 是一条记录里的一个字段。
@@ -251,6 +255,18 @@ type Concept struct {
 	// Apply 为 nil 表示这个概念**只读**（比如带凭据的文件：它的内容是脱敏过的，
 	// 写回去就是把 *** 落盘）。
 	Apply Applier
+	// Order 是**同一节里谁排前面**（小的在前，同值按 ID 排）。
+	//
+	// 为什么由贡献者说，而不是按 ID 字母序：字母序会把「一次装完就要配的基本项」
+	// （上游、全局设置）排到「一天天加出来的那一堆」后面——`config.profile.*` 字母
+	// 序在 `config.providers` 之前，于是左栏第一屏全是档位文件，而上游配置在第一屏
+	// 之外。那不是排版偏好：先配上游才选得出档位绑定，顺序与操作的先后是同一件事。
+	Order int
+	// Group 是**左栏分组**：同组的卡在竖栏里归到一个标题下（成员缩进一级）。
+	//
+	// 空串 = 不分组（自己一档）。它只影响排列，不影响任何身份——分组变了不会让
+	// 谁的 ID 跟着变。典型用法是「一族档位」：`claude` 与 `claude-cheap` 同组。
+	Group string
 }
 
 // Conflict 是「你手里那份已经不是最新的了」。
@@ -493,6 +509,11 @@ func (r *Registry) Snapshot(only ...string) ([]Concept, error) {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Source != out[j].Source {
 			return out[i].Source < out[j].Source
+		}
+		// Order 在前，ID 兜底：没声明 Order 的贡献者（今天大多数）行为与以前
+		// 一模一样（全是 0，于是按 ID 排），声明了的就能把自己排到前面去。
+		if out[i].Order != out[j].Order {
+			return out[i].Order < out[j].Order
 		}
 		return out[i].ID < out[j].ID
 	})
