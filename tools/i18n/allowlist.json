@@ -5,6 +5,7 @@
     "testing/system/harness.go": "测试夹具：读者是跑测试的开发者，不是 CLI 用户",
     "testing/testkit/testkit.go": "测试夹具：同上（沙箱已经把 NEWGATE_LANG 钉成源语言，日志稳定优先）",
     "testing/upstream/upstream.go": "假上游：这些是**模拟真实上游**的响应体，属于测试数据，不是 newgate 的文案",
+    "tools/ciyaml/ciyaml.go": "开发工具：同上——而且它是棘轮自己的声音（报的是「这份 workflow 结构不对」），用被它检查的目录来说话是循环",
     "tools/genmodules/main.go": "开发工具：读者是开发者，输出只出现在生成/校验流水线上",
     "tools/i18n/audit.go": "开发工具：同上",
     "tools/i18n/check/check.go": "开发工具：同上——而且它是棘轮自己的声音，用被它检查的目录来说话是循环",

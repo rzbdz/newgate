@@ -70,7 +70,8 @@ func TestTheCompositionRootNamesNoModule(t *testing.T) {
 	}
 }
 
-// repoDir 是 go/ 目录（本测试所在包的上两级）。
+// repoDir 是本测试文件所在的目录（app/）。要仓库根再加一级 ".."——2026-09-20
+// 摊平 go/ 之前这里是「包的上两级」，那句话跟着那层目录一起没了。
 func repoDir(t *testing.T) string {
 	t.Helper()
 	_, this, _, ok := runtime.Caller(0)
