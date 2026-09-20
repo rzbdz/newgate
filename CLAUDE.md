@@ -108,10 +108,13 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
 `app/independence_test.go` 守着这条边界（Pin 文件、`modules-ext` 的 import 路径、
 `extmanifest`、`NEWGATE_MODULES_PIN` / `NEWGATE_EXT_DRYRUN`，一个都不许回来）。
 
-- 官方发行版：`git@github.com:rzbdz/newgate-ext.git`，`main` = 官方发行版，
-  `template` = 给别人 fork 的骨架。**fork 它 + `build/build.sh` 就是一个新发行版**。
-- **改发行版模块请去发行版的工作目录**（如 `/root/workspace/newgate-ext`），那是个
-  独立的 Go module，改完直接提交推送；要动内核就去内核仓库改、推，再回来挪 gitlink。
+- 官方发行版：`git@github.com:rzbdz/newgate-ext.git`，**只有 `main` 一条分支**。
+  2026-09-20 删掉了 `template`（给别人 fork 的骨架）——「从零开始」这件事规格书本来
+  就能做，`dist-hello.json` 是活的最小样例。**fork 它 + `build/build.sh` 就是一个新发行版**。
+- **两个仓库在同一个工作区里改**（2026-09-20 定）：开发只开
+  `/root/workspace/newgate-ext`。改发行版模块就在仓库根下改、直接提交推送；改内核
+  进 `core/`（那是个 submodule，改之前先 `git checkout main`），推完回发行版
+  `git add core` 挪 gitlink。**不要为内核另开一个 checkout**。
 - 装不装发行版都要能编：`TestRemovalMatrix`（app/matrix_test.go）逐个模块摘一遍，
   **只有 built-in（`modules/entry`）不可摘**；`app/direction_test.go` 与
   `modules/gateway/direction_test.go` 守着「组合根/数据面不认识任何具体模块」。
