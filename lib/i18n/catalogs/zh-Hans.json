@@ -2884,6 +2884,10 @@
       "text": "当前 shell 的 PATH 还没生效，重开 shell 或 `exec $SHELL -l`",
       "reviewed": true
     },
+    "the file content in this request is not readable: {err}": {
+      "text": "这份请求里的文件内容读不出来: {err}",
+      "reviewed": true
+    },
     "the file is empty": {
       "text": "文件是空的",
       "reviewed": true
