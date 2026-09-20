@@ -4,7 +4,7 @@
 
 ### The mechanism for a gateway that picks the model — with no product in it.
 
-`heavy` · `normal` · `mid` · `light` · `vision`
+<sub>Tier routing with ordered fallbacks · a breaker that attributes the fault · restart without dropping a request · everything is a module · zero dependencies</sub>
 
 [![CI](https://github.com/rzbdz/newgate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rzbdz/newgate/actions/workflows/ci.yml)
 ![Go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)
