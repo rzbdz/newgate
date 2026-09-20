@@ -4,7 +4,6 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"os"
 	"sort"
 	"strings"
 )
@@ -163,7 +162,3 @@ func jsonNames(fsys fs.FS, dir string) ([]string, error) {
 	sort.Strings(names) // 目录序与文件系统有关，排序保证结果稳定
 	return names, nil
 }
-
-// catalogsJSONForTest 让测试能读**磁盘上**那份 JSON（它已经不在 embed 里了：嵌的
-// 是 bundle）。只给测试用——运行期不许走 JSON，那正是这次要消掉的那笔开销。
-func catalogsJSONForTest() fs.FS { return os.DirFS(".") }

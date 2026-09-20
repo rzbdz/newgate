@@ -2,9 +2,18 @@ package i18n
 
 import (
 	"encoding/binary"
+	"io/fs"
+	"os"
 	"slices"
 	"testing"
 )
+
+// catalogsJSONForTest 让测试能读**磁盘上**那份 JSON：它已经不在 embed 里了（嵌的
+// 是 bundle），而这几条要验的正是「bundle 与 JSON 一致」。
+//
+// 住在测试文件里而不是 catalogs.go：运行期不该有走 JSON 的路，那正是这一趟要消掉的
+// 开销——发布代码里放一个「只有测试用」的入口，下一个人就会以为它是个正经 API。
+func catalogsJSONForTest() fs.FS { return os.DirFS(".") }
 
 // 目录表的编译期形态（见 bundle.go）。这三条锁的是同一条链的三段：编出来的字节
 // 读得回来、**读回来的必须与 JSON 那份逐字段相同**、以及嵌在二进制里那一份确实
