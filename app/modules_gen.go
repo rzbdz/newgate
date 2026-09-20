@@ -22,7 +22,6 @@ import (
 	mod_pluginmanager "github.com/rzbdz/newgate/modules/pluginmanager"
 	mod_runtime "github.com/rzbdz/newgate/modules/runtime"
 	mod_thinking "github.com/rzbdz/newgate/modules/thinking"
-	mod_tui "github.com/rzbdz/newgate/modules/tui"
 	mod_wrapper "github.com/rzbdz/newgate/modules/wrapper"
 )
 
@@ -44,7 +43,6 @@ func coreModules() []Entry {
 		{Dir: "pluginmanager", Component: mod_pluginmanager.New()},
 		{Dir: "runtime", Component: mod_runtime.New()},
 		{Dir: "thinking", Component: mod_thinking.New()},
-		{Dir: "tui", Component: mod_tui.New()},
 		{Dir: "wrapper", Component: mod_wrapper.New()},
 	}
 }
@@ -52,7 +50,7 @@ func coreModules() []Entry {
 // generatedComponents 是内核自己那张图要装的组件。
 // 顺序不是依赖声明——真实启动顺序由 capability 依赖图在构图期计算。
 func generatedComponents() []modules.Component {
-	out := make([]modules.Component, 0, 14)
+	out := make([]modules.Component, 0, 13)
 	for _, e := range coreModules() {
 		out = append(out, e.Component)
 	}
