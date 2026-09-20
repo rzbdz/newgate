@@ -7,9 +7,8 @@ import (
 
 // StateKey 是 state.json 里本模块拥有的字段名（由 module.go 向 confighook 登记）。
 //
-// 它留在**机器本地**是对的：开关是现场调试动作，不是车队配置。多机共享配置
-// （configshare）的托管文件集合里不含 state.json，所以「A 机器关掉某个开关」
-// 不会漂到 B 机器。
+// 它留在**机器本地**是对的：开关是现场调试动作，不是车队配置。共享配置层的
+// 托管文件集合里不含 state.json，所以「A 机器关掉某个开关」不会漂到 B 机器。
 const StateKey = "plugin_manager"
 
 // Entry 是一次显式设定的记录。

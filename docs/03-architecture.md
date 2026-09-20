@@ -93,14 +93,17 @@ import，优雅交接期间新旧二进制混跑，控制面文档的形状是�
 | `modules/gateway` | HTTP 数据面和扩展执行 |
 | `modules/breaker` | binding 健康表（可用性 + 延迟排序）。**作为策略插进 gateway 的四个决策点**（`Need(gateway)`），不再被任何模块 import——这条边的方向 2026-09-18 翻过，先例与判据见 §1 |
 | `modules/pluginmanager` | 运行期开关账本 + 模块分类词汇表 |
-| `modules/tui` | menuconfig 风格终端界面（与 cli 同级的另一个 ui） |
-| `modules/configshare` | 多机共享配置（预留，见 `docs/12-newgate-remote.md`） |
 | `modules/runtime` | daemon、进程启动、shim、takeover |
 | `modules/cli` | 参数分派、渲染排版、进程退出码；命令/诊断/状态行由各 owner 注入，**界面不认识任何模块** |
-| `modules/<client>` | 客户端描述和客户端独有行为 |
-| `modules/<model>` | 模型族识别和上游独有行为 |
-| `modules/<client>_<model>` | 只存在于交叉点的行为 |
+| `modules/entry` | 入口账本：谁认领这次 argv[0]（唯一不可摘的模块，见 §4） |
+| `modules/thinking` | 「始终思考」模型的兜底翻译（上游怪癖里唯一属于机制的那条） |
+| `modules/wrapper` | 多调用型二进制的分发外壳 |
 | `app`（在 `modules/` 之外） | 组合根：装配清单与 `App` 所有权对象 |
+
+**这张表是内核的全部**，`ls modules/` 应该与上面一一对应（`app/layout_test.go`
+守着每个目录都是组件）。2026-09-20 之前它长得多：`tui`、`configshare`、
+`<client>`、`<model>`、`<client>_<model>` 都在这里——那些是**产品取舍**，随发行版变，
+现在住在发行版仓库（判据见 §1 的「换个发行版，这东西还该在吗」）。
 
 ### 注：模块之间只认 capability，但**共享叶子**可以直接 import
 

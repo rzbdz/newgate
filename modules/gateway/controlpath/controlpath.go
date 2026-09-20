@@ -17,11 +17,11 @@
 // 而 Go 层面 gateway 引的是 cli/extension 叶子、不是 modules/cli。结论始终没变，
 // 变的只是理由。）
 //
-// 同一条规矩已经有一个先例：modules/configshare/proto 把
+// 同一条规矩已经有一个先例：**配置共享**（发行版的功能，见 §1 的注）把
 // `/__newgate/config` `/__newgate/secrets` 定义在它自己的叶子里。
 //
-// 与 configshare 那两个的关系：同一段 `/__newgate/` 命名空间，但**不是同一台服务器**
-// ——configshare 的端点由它自己起，这里的五个由数据面起。所以常量各归各家，不合并。
+// 与那两个的关系：同一段 `/__newgate/` 命名空间，但**不是同一台服务器**
+// ——配置共享的端点由它自己起，这里的五个由数据面起。所以常量各归各家，不合并。
 package controlpath
 
 const (
