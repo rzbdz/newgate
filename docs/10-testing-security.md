@@ -116,6 +116,8 @@ count_tokens 与 metrics。
 ## 1.3 要花真 token 的那条
 
 ```bash
+# 脚本住在**发行版**仓库里（newgate-ext/mock/）：它打的是产品装配后的完整链路，
+# 内核树里没有它——这是故意的，内核的测试一律不出网。
 bash mock/e2e_reasoning_affinity.sh
 ```
 
