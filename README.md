@@ -51,6 +51,101 @@ restarted.
 | `light` | fast and cheap (background calls, summaries) |
 | `vision` | orthogonal image capability |
 
+## Takeover is invisible, and that is the feature
+
+You never point your CLI at newgate. `newgate on` points it for you, and the
+client is not asked:
+
+- a **PATH shim** sits in front of `claude` / `opencode`, so the binary you type
+  is newgate wearing that client's name — `argv[0]` decides which client is
+  being invoked, and one process serves all of them;
+- the client's **own config is rewritten in place** — `settings.json`, env
+  blocks, `opencode.json` — its model names replaced by tier names;
+- **byte-exact backups** are taken before anything is touched, and `newgate off`
+  restores those bytes, not "equivalent settings". The end-to-end suite checks
+  the restore with a checksum.
+
+The client never finds out. It reads its own config, believes it is talking to
+Anthropic or DeepSeek, and the requests simply arrive here first: model resolved
+from the tier, upstream quirks patched, request shape repaired, reasoning
+handed back the way that upstream wants it. Sessions in flight are not
+interrupted — a restart hands the listening socket to the new process and the
+old one drains.
+
+That is the whole trick, and it is why nothing has to be a plugin inside
+anyone's editor: **takeover is a file swap and a shim**, and every client gets
+it the same way. Per-client knowledge lives in a module (`modules/claudecode`,
+`modules/opencode` in a distribution), including the part that only matters at
+the crossing of one client and one model.
+
+## Switching APIs costs one command
+
+```bash
+newgate profile glm     # the next request takes glm's chain
+newgate tier normal     # and here is exactly where a `normal` request would go
+```
+
+Nothing else moves: your client keeps running, its config is untouched, no
+session is interrupted. A profile is a name bound to per-tier candidate chains,
+and `/p/<profile>/…` overrides it for a single request, so two upstreams can be
+compared without touching global state.
+
+When a provider goes slow, trips a breaker, or starts rejecting the shape of
+your request, the chain moves on by itself in the order you wrote down. The
+response says where it went (`X-Newgate-Route`), the log says why, and
+`newgate tier <tier>` explains the whole chain — including every candidate that
+was skipped and the reason. Nothing is silent: a rewritten request always
+reports what was rewritten.
+
+## Upgrades do not drop requests
+
+`newgate restart` is not stop-then-start. The old process hands its **listening
+socket** to the new one, then drains the requests it still has in flight (up to
+ten minutes) while the new process serves everything new. Streaming responses
+finish on the old process; the client never notices.
+
+This is what makes swapping the binary safe at any moment — including from a
+session that is itself going through the gateway, which is how this project is
+developed: the agent writing the code is talking through the daemon it is about
+to replace, in one command, with the old pid still serving the stream it is
+reading.
+
+## Everything is a module
+
+There is no privileged core to extend. A component is a directory with a
+`New()` that returns a `Component` — a name, a type, what it needs, what it
+provides, and `Start`/`Stop`. Everything else in this repository is one:
+
+| | |
+| --- | --- |
+| the gateway, the breaker, config, runtime, the CLI | modules |
+| the entry ledger (`modules/entry`) | a module |
+| the message catalog's owner (`modules/locale`) | a module |
+| what a distribution adds | modules, from another repository |
+| this repository's own binary | the composition root plus the kernel's modules |
+
+Coupling is by **capability**, never by import: a module declares
+`Need(gateway)` or `Optional(cli)` and gets a typed value, and no module
+package is ever imported by the root or by its peers. `newgate plugin` lists
+what is actually in this graph; `app/matrix_test.go` removes each module in
+turn and asserts the graph either still assembles or fails naming the port that
+went missing.
+
+Two consequences worth stating, because they are the point:
+
+- **The kernel does not know a single product module by name.** It contains the
+  string `deepseek` nowhere outside a doc comment. Which modules ship, whose
+  quirks get patched, in what order — a distribution decides, in a JSON file,
+  in another repository.
+- **"Cannot be removed" is derived, not listed.** Exactly one module resists
+  removal — the entry ledger — and the reason is `app/manifest.go` reading the
+  port the composition root itself consumes. Change what the root needs and the
+  set changes with it. Nobody maintains a name list.
+
+The user-visible proof is that `newgate` is itself one of those modules: the
+entry point is claimed, not hard-coded, so a distribution can replace it, and
+the skeleton distribution (framework + one `hello`) prints `hello world`.
+
 ## The one rule
 
 > **Would this still belong here if someone shipped a completely different
