@@ -129,7 +129,7 @@
       "where": "modules/runtime/takeover/takeover.go:111"
     },
     " (pidfile corrected)": {
-      "where": "modules/runtime/daemon/daemon.go:252"
+      "where": "modules/runtime/daemon/daemon.go:253"
     },
     " ({n} rewrites)": {
       "where": "modules/runtime/takeover/takeover.go:250",
@@ -400,7 +400,7 @@
       ]
     },
     "#{req} {note} ({bytes} bytes)": {
-      "where": "modules/gateway/forward/forward.go:1708",
+      "where": "modules/gateway/forward/forward.go:1711",
       "args": [
         "bytes",
         "note",
@@ -448,7 +448,7 @@
       "where": "modules/config/diagnostics.go:275"
     },
     "(field absent)": {
-      "where": "modules/gateway/forward/forward.go:1616"
+      "where": "modules/gateway/forward/forward.go:1619"
     },
     "(no observer)": {
       "where": "modules/gateway/thinkcache/observe.go:243"
@@ -469,7 +469,7 @@
       "where": "modules/config/diagnostics.go:280"
     },
     "(unrecognized)": {
-      "where": "modules/gateway/forward/forward.go:1620"
+      "where": "modules/gateway/forward/forward.go:1623"
     },
     "(until {until})": {
       "where": "modules/gateway/status.go:60",
@@ -484,7 +484,7 @@
       ]
     },
     "+{n} body key": {
-      "where": "modules/gateway/forward/forward.go:1601",
+      "where": "modules/gateway/forward/forward.go:1604",
       "args": [
         "n"
       ],
@@ -498,16 +498,16 @@
       ]
     },
     "--set-profile <name> [--agent <agent>]": {
-      "where": "modules/config/commands.go:701"
+      "where": "modules/config/commands.go:714"
     },
     "--set-profile is not implemented (this assembly has no config module)": {
-      "where": "modules/cli/cli.go:183"
+      "where": "modules/cli/cli.go:198"
     },
     "--set-profile needs a profile name": {
-      "where": "modules/cli/cli.go:177"
+      "where": "modules/cli/cli.go:192"
     },
     "; the pidfile could not be corrected: {err}": {
-      "where": "modules/runtime/daemon/daemon.go:250",
+      "where": "modules/runtime/daemon/daemon.go:251",
       "args": [
         "err"
       ]
@@ -617,7 +617,7 @@
       ]
     },
     "Chain": {
-      "where": "modules/config/commands.go:443"
+      "where": "modules/config/commands.go:446"
     },
     "Check: newgate doctor    Force takeover: newgate start --force": {
       "where": "modules/runtime/commands.go:226"
@@ -663,7 +663,7 @@
       "where": "modules/gateway/serve.go:216"
     },
     "Count": {
-      "where": "modules/config/commands.go:531"
+      "where": "modules/config/commands.go:544"
     },
     "Created only after a config file has been taken over": {
       "where": "modules/runtime/diagnostics.go:189"
@@ -750,7 +750,7 @@
       "where": "modules/gateway/command_debug.go:39"
     },
     "Glossary": {
-      "where": "modules/cli/cli.go:140"
+      "where": "modules/cli/cli.go:150"
     },
     "Graceful handover: taking over the listening socket from the parent process": {
       "where": "modules/gateway/serve.go:121"
@@ -922,7 +922,7 @@
       ]
     },
     "Note": {
-      "where": "modules/config/commands.go:531"
+      "where": "modules/config/commands.go:544"
     },
     "Of these, {n} is an assistant message in the request that could not be parsed (not a cache problem, the shape the client sends has changed)": {
       "where": "modules/gateway/thinkcache_status.go:45",
@@ -1117,7 +1117,7 @@
       "where": "modules/runtime/commands.go:646"
     },
     "Role": {
-      "where": "modules/config/commands.go:443"
+      "where": "modules/config/commands.go:444"
     },
     "Routing and configuration": {
       "where": "modules/cli/extension/extension.go:233"
@@ -1189,7 +1189,7 @@
       ]
     },
     "The process the pidfile points at is gone ({what}), and the lock file says the real daemon is pid {pid}": {
-      "where": "modules/runtime/daemon/daemon.go:247",
+      "where": "modules/runtime/daemon/daemon.go:248",
       "args": [
         "pid",
         "what"
@@ -1420,13 +1420,13 @@
       "where": "modules/gateway/command_probe.go:137"
     },
     "all profiles (priority / flags / overrides)": {
-      "where": "modules/config/commands.go:660"
+      "where": "modules/config/commands.go:673"
     },
     "an earlier candidate failed and a later one succeeded": {
       "where": "modules/gateway/metrics/hints.go:70"
     },
     "an excluded profile is only used when selected explicitly; it never joins automatic ordering": {
-      "where": "modules/config/commands.go:551"
+      "where": "modules/config/commands.go:564"
     },
     "an external file is still in {dir}: {names} (it shadows newgate's shim)": {
       "where": "modules/runtime/commands.go:106",
@@ -1545,7 +1545,7 @@
       "where": "modules/pluginmanager/command.go:161"
     },
     "cannot extract the listener fd: {err}": {
-      "where": "modules/runtime/daemon/daemon.go:406"
+      "where": "modules/runtime/daemon/daemon.go:407"
     },
     "cannot find the real {agent}: {err} — the shim will fail to forward, install it first": {
       "where": "modules/runtime/takeover/takeover.go:229",
@@ -1641,7 +1641,7 @@
       ]
     },
     "cannot send the stop request to the proxy (pid {pid}): {err}": {
-      "where": "modules/runtime/daemon/daemon.go:520",
+      "where": "modules/runtime/daemon/daemon.go:521",
       "args": [
         "pid"
       ]
@@ -1760,7 +1760,7 @@
       "where": "modules/gateway/forward/forward.go:373"
     },
     "convert a profile to KV text": {
-      "where": "modules/config/commands.go:680"
+      "where": "modules/config/commands.go:693"
     },
     "count": {
       "where": "modules/gateway/command_metrics.go:85"
@@ -1775,7 +1775,7 @@
       "where": "modules/gateway/command_metrics.go:76"
     },
     "created {path}": {
-      "where": "modules/config/commands.go:596",
+      "where": "modules/config/commands.go:609",
       "args": [
         "path"
       ]
@@ -1888,7 +1888,7 @@
       "where": "modules/config/commands.go:222"
     },
     "duplicate of an earlier candidate in the chain": {
-      "where": "modules/config/commands.go:563"
+      "where": "modules/config/commands.go:576"
     },
     "duplicate of an earlier candidate, deduplicated": {
       "where": "modules/config/resolve/chain.go:183"
@@ -1920,7 +1920,7 @@
       "where": "component/entry/entry.go:216"
     },
     "error {code}: {msg}": {
-      "where": "modules/gateway/forward/forward.go:1635",
+      "where": "modules/gateway/forward/forward.go:1638",
       "args": [
         "code",
         "msg"
@@ -1948,7 +1948,7 @@
       "where": "modules/config/diagnostics.go:210"
     },
     "fallback chain: who is used, what was skipped": {
-      "where": "modules/config/commands.go:644"
+      "where": "modules/config/commands.go:657"
     },
     "fast": {
       "where": "modules/breaker/status/status.go:123"
@@ -2050,7 +2050,7 @@
       "where": "modules/breaker/command.go:188"
     },
     "handoff needs a TCP listener, got {type}": {
-      "where": "modules/runtime/daemon/daemon.go:399",
+      "where": "modules/runtime/daemon/daemon.go:400",
       "args": [
         "type"
       ]
@@ -2093,7 +2093,7 @@
       "where": "modules/runtime/takeover/takeover.go:129"
     },
     "keep keys in environment variables (never on disk): NEWGATE_KEY_<PROVIDER in upper case, - becomes _>": {
-      "where": "modules/config/commands.go:602"
+      "where": "modules/config/commands.go:615"
     },
     "key {key} is registered by both {first} and {second}; keeping the first": {
       "where": "modules/config/roleprov/roleprov.go:176",
@@ -2113,7 +2113,7 @@
       "where": "modules/locale/diagnostics.go:79"
     },
     "lay down the default configuration": {
-      "where": "modules/config/commands.go:578"
+      "where": "modules/config/commands.go:591"
     },
     "layer off": {
       "where": "modules/gateway/command_special.go:121"
@@ -2271,7 +2271,7 @@
       "where": "modules/runtime/injection/shim.go:174"
     },
     "next: put your upstream keys into {path}": {
-      "where": "modules/config/commands.go:600",
+      "where": "modules/config/commands.go:613",
       "args": [
         "path"
       ]
@@ -2597,7 +2597,7 @@
       "where": "modules/config/diagnostics.go:370"
     },
     "profile kv <name> [--write]": {
-      "where": "modules/config/commands.go:680"
+      "where": "modules/config/commands.go:693"
     },
     "profile {name}: {err}": {
       "where": "modules/config/store/store.go:393",
@@ -2669,10 +2669,10 @@
       "where": "modules/config/commands.go:71"
     },
     "proxy is not running; the configuration is read on the next start": {
-      "where": "modules/config/commands.go:618"
+      "where": "modules/config/commands.go:631"
     },
     "proxy notified to re-read the configuration   pid {pid}": {
-      "where": "modules/config/commands.go:622",
+      "where": "modules/config/commands.go:635",
       "args": [
         "pid"
       ]
@@ -2684,7 +2684,7 @@
       "where": "modules/runtime/commands.go:154"
     },
     "re-read the configuration now (normally hot-reloaded within a second)": {
-      "where": "modules/config/commands.go:612"
+      "where": "modules/config/commands.go:625"
     },
     "reachable": {
       "where": "modules/gateway/command_probe.go:199"
@@ -2747,7 +2747,7 @@
       "where": "modules/breaker/plane.go:286"
     },
     "request short-circuited by special plugin {plugin} (no upstream call)": {
-      "where": "modules/gateway/forward/forward.go:1706",
+      "where": "modules/gateway/forward/forward.go:1709",
       "args": [
         "plugin"
       ]
@@ -2813,7 +2813,7 @@
       ]
     },
     "route: {route}\nstatus: 400\ntag: {tag}\ndetector: {detector}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n": {
-      "where": "modules/gateway/forward/forward.go:1437",
+      "where": "modules/gateway/forward/forward.go:1440",
       "args": [
         "detector",
         "reqHeaders",
@@ -2823,7 +2823,7 @@
       ]
     },
     "route: {route}\nstatus: {status}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n": {
-      "where": "modules/gateway/forward/forward.go:1388",
+      "where": "modules/gateway/forward/forward.go:1391",
       "args": [
         "reqHeaders",
         "respHeaders",
@@ -2972,7 +2972,7 @@
       "where": "modules/confighook/command.go:82"
     },
     "switch profile; omit --agent to set the global default": {
-      "where": "modules/config/commands.go:702"
+      "where": "modules/config/commands.go:715"
     },
     "switched off": {
       "where": "modules/pluginmanager/command.go:261"
@@ -2987,10 +2987,10 @@
       "where": "modules/config/commands.go:357"
     },
     "the chain's attempt budget is exhausted — see state.json chain.max_attempts": {
-      "where": "modules/config/commands.go:561"
+      "where": "modules/config/commands.go:574"
     },
     "the configuration already exists, nothing to initialize (--force overwrites)": {
-      "where": "modules/config/commands.go:593"
+      "where": "modules/config/commands.go:606"
     },
     "the current shell's PATH is not in effect yet; reopen the shell or `exec $SHELL -l`": {
       "where": "modules/runtime/takeover/takeover.go:233"
@@ -3002,7 +3002,7 @@
       "where": "modules/gateway/command_probe.go:180"
     },
     "the new process did not attach to the listening socket within 5 seconds: {err}": {
-      "where": "modules/runtime/daemon/daemon.go:445",
+      "where": "modules/runtime/daemon/daemon.go:446",
       "args": [
         "err"
       ]
@@ -3014,19 +3014,19 @@
       "where": "modules/config/store/watch.go:220"
     },
     "the pidfile holds no pid": {
-      "where": "modules/runtime/daemon/daemon.go:266"
+      "where": "modules/runtime/daemon/daemon.go:267"
     },
     "the pidfile is unreadable": {
-      "where": "modules/runtime/daemon/daemon.go:264"
+      "where": "modules/runtime/daemon/daemon.go:265"
     },
     "the provider has no api_key": {
-      "where": "modules/config/commands.go:555"
+      "where": "modules/config/commands.go:568"
     },
     "the provider was rejected as unavailable — see newgate metrics / probe": {
-      "where": "modules/config/commands.go:557"
+      "where": "modules/config/commands.go:570"
     },
     "the proxy (pid {pid}) runs as another user and has no control token — ask the user who started it to run `newgate stop` once (after that any group member can stop it)": {
-      "where": "modules/runtime/daemon/daemon.go:505",
+      "where": "modules/runtime/daemon/daemon.go:506",
       "args": [
         "pid"
       ]
@@ -3035,7 +3035,7 @@
       "where": "modules/breaker/command.go:66"
     },
     "the proxy refused the stop request (HTTP {code})": {
-      "where": "modules/runtime/daemon/daemon.go:525",
+      "where": "modules/runtime/daemon/daemon.go:526",
       "args": [
         "code"
       ]
@@ -3044,7 +3044,7 @@
       "where": "modules/runtime/commands.go:146"
     },
     "the stop request was accepted, but the proxy (pid {pid}) did not exit within 2 seconds (see the log {log})": {
-      "where": "modules/runtime/daemon/daemon.go:535",
+      "where": "modules/runtime/daemon/daemon.go:536",
       "args": [
         "log",
         "pid"
@@ -3122,7 +3122,7 @@
       "where": "modules/thinking/signatures.go:46"
     },
     "this profile does not define this role (sparse layer, expected)": {
-      "where": "modules/config/commands.go:553"
+      "where": "modules/config/commands.go:566"
     },
     "this screen": {
       "where": "modules/cli/commands.go:88"
@@ -3131,7 +3131,7 @@
       "where": "modules/gateway/command_probe.go:148"
     },
     "tier [role]": {
-      "where": "modules/config/commands.go:644"
+      "where": "modules/config/commands.go:657"
     },
     "tier {tier} has no usable candidate under profile {profile} (tiers: {tiers}); run `newgate tier {tier}` to see why each candidate was skipped": {
       "where": "modules/gateway/forward/forward.go:868",
@@ -3166,7 +3166,7 @@
       "where": "modules/breaker/command.go:192"
     },
     "troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)": {
-      "where": "modules/gateway/forward/forward.go:1641"
+      "where": "modules/gateway/forward/forward.go:1644"
     },
     "turned off": {
       "where": "modules/pluginmanager/command.go:398"
@@ -3194,7 +3194,7 @@
       ]
     },
     "unknown command {cmd} (see newgate --help)": {
-      "where": "modules/cli/cli.go:207",
+      "where": "modules/cli/cli.go:222",
       "args": [
         "cmd"
       ]
@@ -3247,7 +3247,7 @@
       "where": "modules/runtime/commands.go:345"
     },
     "what is written is placeholders — replace them with your own provider, endpoint and model names": {
-      "where": "modules/config/commands.go:601"
+      "where": "modules/config/commands.go:614"
     },
     "what turning it off does: {why}": {
       "where": "modules/pluginmanager/command.go:171",
@@ -3268,7 +3268,7 @@
       "where": "modules/runtime/commands.go:126"
     },
     "you rarely need this command: configuration changes apply within a second": {
-      "where": "modules/config/commands.go:624"
+      "where": "modules/config/commands.go:637"
     },
     "{agent} is back to a direct connection; newgate start will no longer take it over (newgate on {agent} restores it)": {
       "where": "modules/runtime/commands.go:349",
@@ -3432,7 +3432,7 @@
       ]
     },
     "{n} candidate skipped": {
-      "where": "modules/config/commands.go:529",
+      "where": "modules/config/commands.go:542",
       "args": [
         "n"
       ],
@@ -3606,7 +3606,7 @@
       ]
     },
     "— the semantic model layer proxy for AI CLIs": {
-      "where": "modules/cli/cli.go:79"
+      "where": "modules/cli/cli.go:80"
     },
     "… and {n} more": {
       "where": "modules/locale/diagnostics.go:66",
@@ -3616,7 +3616,7 @@
       "other": "… and {n} more"
     },
     "…(truncated, {n} characters total)": {
-      "where": "modules/gateway/forward/forward.go:1566",
+      "where": "modules/gateway/forward/forward.go:1569",
       "args": [
         "n"
       ]

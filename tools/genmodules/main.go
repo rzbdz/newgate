@@ -144,7 +144,9 @@ func render(modules []module) []byte {
 	b.WriteString("// app.Selection（见 docs/09-extension-guide.md §8）。\n")
 	b.WriteString("\npackage app\n\n")
 	b.WriteString("import (\n")
-	b.WriteString("\tmodules \"" + importPath + "/component\"\n")
+	b.WriteString("\tmodules \"")
+	b.WriteString(importPath)
+	b.WriteString("/component\"\n")
 	for _, m := range modules {
 		fmt.Fprintf(&b, "\t%s \"%s/%s\"\n", m.alias, importPath, m.path)
 	}

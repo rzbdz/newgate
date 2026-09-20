@@ -75,23 +75,30 @@ func usageText(service *service) string {
 	termWidth := clamp(widest(terms), 8, 18)
 
 	var b strings.Builder
-	b.WriteString(style.Bold("newgate") + " " +
-		i18n.T("— the semantic model layer proxy for AI CLIs", nil) + "\n")
+	b.WriteString(style.Bold("newgate"))
+	b.WriteString(" ")
+	b.WriteString(i18n.T("— the semantic model layer proxy for AI CLIs", nil))
+	b.WriteString("\n")
 
 	// 左列按显示宽度补齐（CJK 双宽），右列一律暗色——扫读时先看命令名，
 	// 需要时再看说明。
 	cmd := func(left, right string) {
 		prefix := "  " + style.Cyan(style.Pad(left, commandWidth))
 		if right == "" {
-			b.WriteString(prefix + "\n")
+			b.WriteString(prefix)
+			b.WriteString("\n")
 			return
 		}
 		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-commandWidth)
 		for i, line := range lines {
 			if i == 0 {
-				b.WriteString(prefix + line + "\n")
+				b.WriteString(prefix)
+				b.WriteString(line)
+				b.WriteString("\n")
 			} else {
-				b.WriteString(strings.Repeat(" ", 2+commandWidth) + line + "\n")
+				b.WriteString(strings.Repeat(" ", 2+commandWidth))
+				b.WriteString(line)
+				b.WriteString("\n")
 			}
 		}
 	}
@@ -123,7 +130,9 @@ func usageText(service *service) string {
 		})
 		// 标题是槽位的**显示名**，不是它的键：键是身份（ASCII 稳定标识），
 		// 随语言变的是这一层（见 extension.Section.Display）。
-		b.WriteString("\n" + style.Bold(slot.Display()) + "\n")
+		b.WriteString("\n")
+		b.WriteString(style.Bold(slot.Display()))
+		b.WriteString("\n")
 		for _, line := range lines {
 			cmd(line.Usage, line.Summary)
 		}
@@ -137,15 +146,21 @@ func usageText(service *service) string {
 	//
 	// 右列跟着左列一起折行：定义是模块写的，长度不受界面控制，写死一行的版式
 	// 迟早会被某一条长定义顶破 75 列上限（style.MaxColumns）。
-	b.WriteString("\n" + style.Bold(i18n.T("Glossary", nil)) + "\n")
+	b.WriteString("\n")
+	b.WriteString(style.Bold(i18n.T("Glossary", nil)))
+	b.WriteString("\n")
 	term := func(left, right string) {
 		prefix := "  " + style.Pad(style.Cyan(left), termWidth)
 		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-termWidth)
 		for i, line := range lines {
 			if i == 0 {
-				b.WriteString(prefix + line + "\n")
+				b.WriteString(prefix)
+				b.WriteString(line)
+				b.WriteString("\n")
 			} else {
-				b.WriteString(strings.Repeat(" ", 2+termWidth) + line + "\n")
+				b.WriteString(strings.Repeat(" ", 2+termWidth))
+				b.WriteString(line)
+				b.WriteString("\n")
 			}
 		}
 	}

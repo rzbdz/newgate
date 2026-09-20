@@ -440,22 +440,35 @@ func numberedBindingChain(steps []resolve.Step, extra func(resolve.Step) string)
 
 func tierOverview(rows []tierView) string {
 	var out strings.Builder
-	out.WriteString("  " + style.Dim(style.Pad(i18n.T("Role", nil), 6)) + "  " + style.Dim(i18n.T("Chain", nil)) + "\n")
+	out.WriteString("  ")
+	out.WriteString(style.Dim(style.Pad(i18n.T("Role", nil), 6)))
+	out.WriteString("  ")
+	out.WriteString(style.Dim(i18n.T("Chain", nil)))
+	out.WriteString("\n")
 	firstOf := map[string]string{}
 	for _, row := range rows {
 		prefix := "  " + style.Cyan(style.Pad(row.name, 6)) + "  "
 		switch {
 		case len(row.steps) == 0:
-			out.WriteString(prefix + style.Red(i18n.T("no usable candidate", nil)) + "\n")
+			out.WriteString(prefix)
+			out.WriteString(style.Red(i18n.T("no usable candidate", nil)))
+			out.WriteString("\n")
 		case firstOf[chainSig(row.steps)] != "":
-			out.WriteString(prefix + style.Dim("= "+firstOf[chainSig(row.steps)]) + "\n")
+			out.WriteString(prefix)
+			out.WriteString(style.Dim("= " + firstOf[chainSig(row.steps)]))
+			out.WriteString("\n")
 		default:
 			firstOf[chainSig(row.steps)] = row.name
 			for i, step := range row.steps {
 				if i == 0 {
-					out.WriteString(prefix + step.Binding.String() + "\n")
+					out.WriteString(prefix)
+					out.WriteString(step.Binding.String())
+					out.WriteString("\n")
 				} else {
-					out.WriteString("          " + style.Dim("→ ") + step.Binding.String() + "\n")
+					out.WriteString("          ")
+					out.WriteString(style.Dim("→ "))
+					out.WriteString(step.Binding.String())
+					out.WriteString("\n")
 				}
 			}
 		}

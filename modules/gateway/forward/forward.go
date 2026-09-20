@@ -1365,7 +1365,10 @@ func headerDump(h http.Header) string {
 		if k == "Authorization" || k == "X-Api-Key" || k == "Api-Key" {
 			v = "[REDACTED]"
 		}
-		sb.WriteString("\n      " + k + ": " + v)
+		sb.WriteString("\n      ")
+		sb.WriteString(k)
+		sb.WriteString(": ")
+		sb.WriteString(v)
 	}
 	return sb.String()
 }

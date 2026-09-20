@@ -189,7 +189,8 @@ func AcquireLock() error {
 		return i18n.Ef(err, "cannot acquire the lock: {err}", nil)
 	}
 	defer f.Close()
-	_, err = f.WriteString(strconv.Itoa(os.Getpid()) + "\n")
+	f.WriteString(strconv.Itoa(os.Getpid()))
+	f.WriteString("\n")
 	return err
 }
 
