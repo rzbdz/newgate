@@ -1066,7 +1066,7 @@
       "where": "modules/runtime/commands.go:331"
     },
     "Proxy log": {
-      "where": "modules/gateway/view.go:143"
+      "where": "modules/gateway/view.go:149"
     },
     "Proxy log: paged in the terminal, -f keeps following": {
       "where": "modules/gateway/command_logs.go:41"
@@ -1198,10 +1198,10 @@
       "where": "modules/runtime/commands.go:586"
     },
     "Switch points": {
-      "where": "modules/pluginmanager/view.go:128"
+      "where": "modules/pluginmanager/view.go:135"
     },
     "Switches that need a time limit": {
-      "where": "modules/pluginmanager/view.go:107"
+      "where": "modules/pluginmanager/view.go:111"
     },
     "TCP connection": {
       "where": "modules/gateway/probe/net.go:78"
@@ -1298,7 +1298,7 @@
       ]
     },
     "Upstream quirk patches": {
-      "where": "modules/gateway/view.go:100"
+      "where": "modules/gateway/view.go:103"
     },
     "Upstream quirk patches: they apply only to the upstream that claimed the request, and every change is logged": {
       "where": "modules/gateway/command_special.go:174"
@@ -1581,7 +1581,7 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "binding": {
-      "where": "modules/breaker/view.go:56"
+      "where": "modules/breaker/view.go:60"
     },
     "binding health table: trips after consecutive failures, releases one half-open trial when the cooldown expires": {
       "where": "modules/breaker/plane.go:53"
@@ -2005,7 +2005,7 @@
       "where": "modules/pluginmanager/command.go:120"
     },
     "expired": {
-      "where": "modules/breaker/view.go:176"
+      "where": "modules/breaker/view.go:182"
     },
     "extends cycle: {name} points back to itself": {
       "where": "modules/config/store/store.go:137",
@@ -2116,10 +2116,10 @@
       ]
     },
     "half-open · awaiting trial": {
-      "where": "modules/breaker/view.go:135"
+      "where": "modules/breaker/view.go:139"
     },
     "half-open · trial in flight": {
-      "where": "modules/breaker/view.go:133"
+      "where": "modules/breaker/view.go:137"
     },
     "handoff needs a TCP listener, got {type}": {
       "where": "modules/runtime/daemon/daemon.go:400",
@@ -2131,7 +2131,7 @@
       "where": "modules/cli/commands.go:51"
     },
     "healthy": {
-      "where": "modules/breaker/view.go:139"
+      "where": "modules/breaker/view.go:143"
     },
     "in effect": {
       "where": "modules/runtime/commands.go:170"
@@ -2156,7 +2156,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:285",
+      "where": "lib/view/view.go:303",
       "args": [
         "err",
         "source"
@@ -2314,7 +2314,7 @@
       ]
     },
     "module": {
-      "where": "modules/pluginmanager/view.go:126"
+      "where": "modules/pluginmanager/view.go:133"
     },
     "module \"{target}\" reports no switch points, cannot be toggled at runtime (a v1 limitation)": {
       "where": "modules/pluginmanager/command.go:277",
@@ -2409,7 +2409,7 @@
       ]
     },
     "no switch point named \"{path}\" — the page is probably stale, reload it": {
-      "where": "modules/pluginmanager/view.go:200",
+      "where": "modules/pluginmanager/view.go:207",
       "args": [
         "path"
       ]
@@ -3204,7 +3204,7 @@
       ]
     },
     "the switches in this request are not readable: {err}": {
-      "where": "modules/pluginmanager/view.go:185",
+      "where": "modules/pluginmanager/view.go:192",
       "args": [
         "err"
       ]
@@ -3325,10 +3325,10 @@
       "where": "modules/gateway/command_probe.go:150"
     },
     "trial in flight": {
-      "where": "modules/breaker/view.go:168"
+      "where": "modules/breaker/view.go:174"
     },
     "tripped": {
-      "where": "modules/breaker/view.go:137"
+      "where": "modules/breaker/view.go:141"
     },
     "troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)": {
       "where": "modules/gateway/forward/forward.go:1687"
@@ -3343,7 +3343,7 @@
       "where": "modules/pluginmanager/command.go:368"
     },
     "type": {
-      "where": "modules/pluginmanager/view.go:127"
+      "where": "modules/pluginmanager/view.go:134"
     },
     "unavailable": {
       "where": "modules/config/commands.go:216"
@@ -3418,17 +3418,17 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:224"
+      "where": "lib/view/view.go:240"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:306",
+      "where": "lib/view/view.go:324",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:298",
+      "where": "lib/view/view.go:316",
       "args": [
         "a",
         "b",
@@ -3436,13 +3436,13 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:303",
+      "where": "lib/view/view.go:321",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:227",
+      "where": "lib/view/view.go:243",
       "args": [
         "source"
       ]
@@ -3636,7 +3636,7 @@
       ]
     },
     "{ms}ms": {
-      "where": "modules/breaker/view.go:107",
+      "where": "modules/breaker/view.go:111",
       "args": [
         "ms"
       ]
@@ -3648,7 +3648,7 @@
       ]
     },
     "{n}": {
-      "where": "modules/pluginmanager/view.go:161",
+      "where": "modules/pluginmanager/view.go:168",
       "args": [
         "n"
       ]
@@ -3692,7 +3692,7 @@
       "other": "{n} entries · {used} / {max} · hits {hits} · misses {misses} · evictions {evictions}"
     },
     "{n} failure": {
-      "where": "modules/breaker/view.go:89",
+      "where": "modules/breaker/view.go:93",
       "other": "{n} failures"
     },
     "{n} message comes from the config dir": {
@@ -3732,7 +3732,7 @@
       "other": "{n} profiles · default {name}"
     },
     "{n} shape error": {
-      "where": "modules/breaker/view.go:91",
+      "where": "modules/breaker/view.go:95",
       "other": "{n} shape errors"
     },
     "{n} shim": {
@@ -3743,7 +3743,7 @@
       "other": "{n} shims"
     },
     "{n} spared": {
-      "where": "modules/breaker/view.go:94",
+      "where": "modules/breaker/view.go:98",
       "other": "{n} spared"
     },
     "{n} stop in the chain": {
@@ -3834,7 +3834,7 @@
       ]
     },
     "{why} — footguns need a time limit; use: newgate plugin {path} on 5m": {
-      "where": "modules/pluginmanager/view.go:102",
+      "where": "modules/pluginmanager/view.go:106",
       "args": [
         "path",
         "why"

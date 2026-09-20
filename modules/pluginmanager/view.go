@@ -89,7 +89,11 @@ func viewConcepts(m Manager) ([]view.Concept, error) {
 		out = append(out, view.Concept{
 			ID: "plugin-manager.switches", Kind: view.KindToggles,
 			Title: i18n.T("Runtime switches", nil),
-			Data:  switchesData{File: file, Base: base, Items: writable},
+			// Live：这些开关**也会被终端拨动**（`newgate plugin … on/off`，以及
+			// TTL 到期那次自动恢复），而读它们只是把 state.json 读一把。停在打开
+			// 页面那一刻，界面就会说一个已经不对的当前值。
+			Live: true,
+			Data: switchesData{File: file, Base: base, Items: writable},
 			Apply: func(edit json.RawMessage, base string) (string, error) {
 				return applySwitches(m, edit, base)
 			},
@@ -105,7 +109,10 @@ func viewConcepts(m Manager) ([]view.Concept, error) {
 		out = append(out, view.Concept{
 			ID: "plugin-manager.footguns", Kind: view.KindToggles,
 			Title: i18n.T("Switches that need a time limit", nil),
-			Data:  switchesData{File: file, Base: base, Items: footguns},
+			// Live 同 .switches：这些值同样会被终端改（而它们带时限，所以更会
+			// **自己**变回去）。
+			Live: true,
+			Data: switchesData{File: file, Base: base, Items: footguns},
 		})
 	}
 	return out, nil

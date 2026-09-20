@@ -250,3 +250,44 @@ func switchConcept(t *testing.T, concepts []view.Concept) view.Concept {
 	t.Fatal("可写的那张开关卡片不见了")
 	return view.Concept{}
 }
+
+// TestViewDeclaresWhichCardsChangeOnTheirOwn 是这几张卡 `Live` 的清单棘轮。
+//
+// 两张开关卡声明：它们的值**会被终端改**（`newgate plugin … on/off`），而带时限的
+// 那些**自己会变回去**（TTL 在读取时判定，见 query.go 的 Remaining——没有任何人
+// 去写 state.json）。页面停在打开那一刻，界面就在说一个已经不对的当前值。
+// 模块清单不声明：那是**这个构建**的事实，编译期就定了。
+//
+// 为什么值得一条断言：`Live` 掉了不会报错，只是那几张卡不再刷新——静默。
+func TestViewDeclaresWhichCardsChangeOnTheirOwn(t *testing.T) {
+	m := start(t)
+	register(t, m, "demo",
+		sw("demo.mode", "safe", false),
+		sw("demo.kill", "footgun", true),
+	)
+	concepts, err := viewConcepts(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"plugin-manager.modules":  false, // 这个构建由哪些模块组成：不会自己变
+		"plugin-manager.switches": true,
+		"plugin-manager.footguns": true,
+	}
+	seen := map[string]bool{}
+	for _, c := range concepts {
+		w, expected := want[c.ID]
+		if !expected {
+			t.Fatalf("多了一张没预期的卡 %s", c.ID)
+		}
+		seen[c.ID] = true
+		if c.Live != w {
+			t.Errorf("%s 的 Live 该是 %v，实际 %v", c.ID, w, c.Live)
+		}
+	}
+	for id := range want {
+		if !seen[id] {
+			t.Errorf("少了 %s——它本该被产出", id)
+		}
+	}
+}

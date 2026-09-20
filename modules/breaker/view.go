@@ -37,6 +37,10 @@ func healthConcepts(table Breaker) ([]view.Concept, error) {
 		Kind:  view.KindTable,
 		Title: i18n.T("Binding health", nil),
 		Data:  healthTable(rows),
+		// Live：这张表的内容**完全由流量决定**（谁在失败、要等多久再试），
+		// 而读它就是内存里一个快照。停在打开页面那一刻的表，说的是一件
+		// 可能早就过去了的事——`untilText` 那几个相对时间尤其如此。
+		Live: true,
 	}}, nil
 }
 
@@ -160,9 +164,11 @@ func ruleText(b Status) string {
 // （60s → 120s → … → 10 分钟），用户看到的数字对不上基准是正常的，所以把试探
 // 状态也放进来。
 //
-// 「多久」是相对时间，网页上会过期（页面开着不动，数字就不对了）。这里仍然按
-// 调用时刻算：这张表**每次请求现生成**（见 healthConcepts），所以数字与快照
-// 同岁。真要停在一个不动的页面上，那需要的是前端自己走秒，不是后端给绝对时刻。
+// 「多久」是相对时间。这里仍然按**调用时刻**算：这张表每次请求现生成（见
+// healthConcepts），所以数字与快照同岁。而快照本身不会停在原地——这张卡声明了
+// `Live`（见 healthConcepts），界面每隔几秒重问一次，数字跟着走；后端因此**不必**
+// 给绝对时刻，前端也不必自己走秒。（2026-09-20 更正：这条注释原来把「页面不动」
+// 当成前提，那个前提在 `Concept.Live` 之后不成立了。）
 func untilText(b Status) (string, string) {
 	if b.Trial {
 		return i18n.T("trial in flight", nil), view.ToneWarn

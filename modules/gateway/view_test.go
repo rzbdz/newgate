@@ -135,6 +135,27 @@ func installFakePlugins(t *testing.T, ps ...special.Plugin) {
 	t.Cleanup(special.InstallDefault(reg))
 }
 
+// TestEverythingGatewayShowsDeclaresItselfLive：这三张卡的数据都会自己变
+// （计数器在涨、日志在写、补丁开关可能在终端被拨），所以它们都声明了 Live。
+//
+// 为什么值得一条断言：Live 掉掉之后**什么都不会报错**——界面只是不再每几秒问
+// 一次，卡片安静地停在打开页面那一刻。那正是这张卡最不该有的样子（一张说着
+// 「现在哪些补丁在动你的请求」的表，答的却是十分钟前的）。
+func TestEverythingGatewayShowsDeclaresItselfLive(t *testing.T) {
+	cs, err := gatewayConcepts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cs) == 0 {
+		t.Fatal("网关一张卡都没有——这条断言等于没跑")
+	}
+	for _, c := range cs {
+		if !c.Live {
+			t.Errorf("%s 没有声明 Live：它读的是内存里的一把，而内容会自己变", c.ID)
+		}
+	}
+}
+
 // specialTableOf 取出那张卡的数据。断言放在**数据**上而不是渲染出来的 HTML 上
 // （与 archmap 那边同一条）：数据是结论，渲染只是它的一种画法。
 func specialTableOf(t *testing.T) view.Table {

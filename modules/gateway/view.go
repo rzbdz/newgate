@@ -57,6 +57,9 @@ func gatewayConcepts() ([]view.Concept, error) {
 		{
 			ID: "gateway.metrics", Kind: view.KindSeries, Title: i18n.T("Counters", nil),
 			Data: seriesGroups(),
+			// 三张都是内存里读一把（计数器快照、日志尾巴、插件表 + state.json），
+			// 所以都声明 Live：界面每隔几秒问一次，看到的就是「现在」。
+			Live: true,
 		},
 		logConcept(),
 		specialConcept(),
@@ -98,6 +101,9 @@ func specialConcept() view.Concept {
 	return view.Concept{
 		ID: "gateway.special", Kind: view.KindTable,
 		Title: i18n.T("Upstream quirk patches", nil),
+		// Live：开关可能在别处被拨动（`newgate st off`、改 state.json），而这张卡
+		// 的价值正是「现在哪些补丁在动我的请求」——停在打开页面那一刻不算回答。
+		Live: true,
 		Data: view.Table{
 			Columns: []view.Column{
 				{ID: "state", Label: i18n.T("State", nil)},
@@ -143,6 +149,7 @@ func logConcept() view.Concept {
 		ID: "gateway.log", Kind: view.KindLog, Title: i18n.T("Proxy log", nil),
 		// 只读：日志是**发生过的事**，不是配置。这个概念没有 Apply。
 		Data: data,
+		Live: true,
 	}
 }
 

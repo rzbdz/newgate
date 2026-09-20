@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/view"
 )
 
@@ -120,6 +122,73 @@ func TestHealthTableIsEmptyWhenNothingIsKnown(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"rows":[]`) {
 		t.Fatalf("空表的 rows 该是 []，实际: %s", raw)
+	}
+}
+
+// TestHealthCardIsLive：这张表声明了 `Live`，界面才会每隔几秒重问一次。
+//
+// 掉掉它**不会有任何东西报错**：页面安静地停在打开那一刻，而这张表说的全是
+// 「现在」——谁在失败、还要等多久。`untilText` 那几个相对时间尤其如此：一个
+// 不动的页面上，「还要等 42s」过一分钟就成了假话。
+func TestHealthCardIsLive(t *testing.T) {
+	b, _ := clocked()
+	concepts, err := healthConcepts(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(concepts) == 0 {
+		t.Fatal("一张卡都没有——这条断言等于没跑")
+	}
+	for _, c := range concepts {
+		if !c.Live {
+			t.Errorf("%s 没有声明 Live：它的内容由流量决定，而读一次只是内存里一把快照", c.ID)
+		}
+	}
+}
+
+// TestPollingTheCardDoesNotAdvanceTheBreaker 是「把这张卡设成 Live」的安全性
+// 那一半：**每隔几秒被问一次的那条路，绝不能推进状态机**。
+//
+// 熔断器有一条会改状态的读路径——`Available`：冷却期满时它顺手把 binding 推进
+// 半开、发放本轮的试探名额（见 state.go 的注释）。那扇门是**数据面**走的：
+// 谁要发请求，谁去领名额。如果这张卡改成调 `Available`，症状会是「有人把界面
+// 开着」就让冷却中的 binding 一轮轮地拿到试探名额——准入决定被一次页面浏览改掉，
+// 而且没有任何东西会红。所以这里把两半都钉住：轮询**不动**它，`Available` 才动。
+func TestPollingTheCardDoesNotAdvanceTheBreaker(t *testing.T) {
+	b, adv := clocked()
+	trip(t, b, "relay", "slow") // 摘牌（trip 内部走的是 Available，那是写路径）
+
+	state := func() view.Cell {
+		t.Helper()
+		concepts, err := healthConcepts(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return concepts[0].Data.(view.Table).Rows[0]["state"]
+	}
+
+	// 冷却期满。此刻表里显示的是**由时钟推导**出来的半开（state(now) 那条判据），
+	// 谁都没写任何东西——要紧的是**名额还在不在**：那才是 Available 会动的东西。
+	adv(24 * time.Hour)
+
+	awaiting := view.Cell{Text: i18n.T("half-open · awaiting trial", nil), Tone: view.ToneWarn}
+	if got := state(); got != awaiting {
+		t.Fatalf("前提不成立：冷却期满该显示「等着试探」，实际 %q/%q", got.Text, got.Tone)
+	}
+	// 界面那一侧：问几次都不许变，而且**一次名额都不许领走**。
+	for i := 0; i < 3; i++ {
+		if got := state(); got != awaiting {
+			t.Fatalf("第 %d 次轮询之后状态变了：%q → %q —— 看一眼界面就推进了状态机",
+				i+1, awaiting.Text, got.Text)
+		}
+	}
+	if !b.Available("relay", "slow") {
+		t.Fatal("轮询把这一轮的试探名额领走了——数据面的准入决定被一次页面浏览改掉")
+	}
+
+	// 对照：真正会动它的是 Available（数据面领名额那条路）——领走之后表里看得出来。
+	if got := state(); got.Text != i18n.T("half-open · trial in flight", nil) {
+		t.Fatalf("Available 领走名额之后该显示「试探在飞」，实际 %q", got.Text)
 	}
 }
 
