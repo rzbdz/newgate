@@ -10,8 +10,8 @@ The `content[].thinking` in the thinking mode must be passed back to the API.
 ```
 
 **这句话不可信。** 它把「这一轮没有新指令」报成了「推理没回传」。实测（打
-真实 `smt-deepseek/deepseek-flash`，每格 3/3，一手数据在
-`go/modules/deepseek/st-reasoning.go` 文件头与本文 §2b）结论是：
+真实 `smt-deepseek/deepseek-flash`，每格 3/3，一手数据在发行版仓库
+`newgate-modules-ext` 的 `modules/deepseek/st-reasoning.go` 文件头与本文 §2b）结论是：
 
 > 这条 400 的**唯一**触发条件是**尾部形状**——**最后一条 `role:"user"` 消息的
 > `content[]` 非空、且里面全是 `tool_result` 块**。
@@ -110,7 +110,24 @@ OpenAI 方言回填 `reasoning_content`。
 
 ### 判据
 
-见 §1 的表。这里只记**怎么测出来的**：
+**两套判据，别混。** §1 那张表是**诊断**判据，回答「这个 400 像不像尾部形状问题」
+（三条：锚在最后一条 `role:user`、那块 `content[]` 全是 `tool_result`、且那条
+`tool_result` 引用了外来 tool call）。`repairTailShape` 实现的是**修复**判据，
+只有两条：
+
+1. 最后一条 `role:"user"` 的 `content[]` 非空、且**全是** `tool_result` 块；
+2. 那条 user 轮之后**没有 `assistant`**（有就不碰，见下「跳过二族」）。
+
+**第三条（外来 tool call 的出身）刻意没实现。** 修复要动的字节在尾部，而「出身」
+得翻整段历史、比对每个 tool call id 是谁产出的，代价和收益不成比例：实测 3426 次
+尾部修复里，修完之后真的撞上 `must be passed back` 的有 **0 次**。两边的代价也不
+对称——**过修一次只花客户端一个「继续」，欠修一次是 400 + 静默沿链转移**（下面
+「曾被删掉一次」那段就是这种静默的样子）。所以线画在**形状**上，不画在**出身**上。
+
+诊断那条留在 §1，是因为它解释「为什么这个 400 看起来偶尔才出现」——
+**诊断宁可多一条，修复宁可少一条**。
+
+这里只记**怎么测出来的**：
 
 - 打真实上游，10 例边界矩阵，每例 3/3；
 - 在一份**真实 Claude Code 抓包**上做 V1–V5 变体（V1 400、V2 400、V3 200、

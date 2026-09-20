@@ -184,7 +184,8 @@ Start: func(_ context.Context, ctx component.Context) error {
 Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 ```
 
-契约要点（DeepSeek 的 `modules/deepseek/shape.go` 是参考实现，它的表测试就是
+契约要点（DeepSeek 的 `shape.go` 是参考实现——**上游怪癖模块不在本仓库**，住在
+发行版仓库 `newgate-modules-ext` 的 `modules/deepseek/`；它的表测试就是
 这条判据的行权点）：
 
 - **core 里不许出现上游专有字符串**。转发路径只读 `Result.Shape` 那个名字
