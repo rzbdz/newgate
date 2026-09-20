@@ -37,8 +37,55 @@ import (
 // 理由是这套东西的正确性而不是性能——每条 `newgate …` 命令都会跑到这里，而其中
 // 绝大多数没有人会打开界面（见 lib/view 的包注释）。
 func registerView(v view.Service) (modules.Release, error) {
+	// 「再建一份档位文件」挂在**栏目**上，不是挂在某张卡上（见 view.Section.Actions）：
+	// 新建出来的那一份此刻还没有概念，所以没有哪张卡能挂这个按钮。挂在栏目上还有一个
+	// 好处——它**永远够得着**，不管你现在正看着哪一张卡。
+	create := view.Action{
+		ID:    "new-profile",
+		Label: func() string { return i18n.T("+ profile", nil) },
+		Run:   newProfileFile,
+	}
 	return v.Register("config",
-		view.Title(func() string { return i18n.T("Configuration", nil) }), concepts)
+		view.Title(func() string { return i18n.T("Configuration", nil) }).Does(create), concepts)
+}
+
+// newProfileFile 建一份空的档位文件，名字自己挑（第一个没被占用的）。
+//
+// 为什么名字由**后端**挑（原来是界面挑的）：只有这里知道哪几个名字已经被占了，
+// 也知道「一份档位可以叫 .kv 也可以叫 .json」（见 store.ListProfiles 的去重）——
+// 界面要挑名字就得把这两条知识各抄一份，而抄来的知识必然漂移。
+//
+// 为什么用 `WriteIfUnchanged(…, "")`（要求「此刻不存在」）：两个标签页同时按下这个
+// 按钮时，后到的那个撞上 StaleError 而不是把前一个建好的覆盖掉——重名撞车是这里
+// 唯一真实的并发场景，而它的代价是「我刚建的那份没了」。
+func newProfileFile() (string, error) {
+	taken := map[string]bool{}
+	for _, n := range profileNames() {
+		taken[n] = true
+	}
+	for i := 1; i <= 100; i++ {
+		name := "new-profile"
+		if i > 1 {
+			name = fmt.Sprintf("new-profile-%d", i)
+		}
+		if taken[name] {
+			continue
+		}
+		file := filepath.Join(paths.Mappings(), name+".kv")
+		body := []byte(store.SerializeProfileKV(&domain.Profile{Name: name}))
+		_, err := store.WriteIfUnchanged(file, "", body)
+		if err == nil {
+			// 交回新卡的名字：界面据此切过去（「新建的下一步一定是去填它」）。
+			return "config.profile." + name, nil
+		}
+		var stale *store.StaleError
+		if !errors.As(err, &stale) {
+			// 写不进去（目录权限之类）——报出来，别拿它当撞名一路重试到 100。
+			return "", i18n.Ef(err, "cannot create {file}: {err}", i18n.A{"file": filepath.Base(file)})
+		}
+		// 名字刚被别人占了：换下一个再试。
+	}
+	return "", i18n.E("could not find a free name for a new profile file", nil)
 }
 
 // concepts 是「此刻配置的样子」：state.json 里归本模块的那几个字段、每个 profile
@@ -186,28 +233,14 @@ func profileConcept(name string, all []string) view.Concept {
 		Apply: func(edit json.RawMessage, base string) (string, error) {
 			return applyProfileRoles(conceptID, file, edit, base)
 		},
-		// Preview：原文那一半的草稿长这样时，这张控件卡该显示成什么样（见
-		// view.Concept.Preview）。
-		//
-		// 为什么这张卡需要它：用户粘一整份档位进原文那一栏、再想用一个下拉框调一档
-		// ——没有 Preview 的话，控件那一栏手里还是**改之前**那份内容，他那一下编辑
-		// 交上去的是整份旧表，刚粘的东西当场没了，而屏幕上一直没显示过它，所以他
-		// 不会觉得自己正在覆盖什么（见 App.svelte 里 lastEdit 那段）。
-		Preview: func(draft []byte) (any, error) {
-			p, err := parseProfileDraft(file, draft)
-			if err != nil {
-				return nil, err
-			}
-			return profileView(name, file, p), nil
-		},
 	}
 }
 
 // profileView 把一份**已经解析好的**档位拼成编辑器要的全部素材。
 //
-// 加载路径与预览路径共用它，理由一条：两条路必须给出**一模一样**的形状。各写一份
-// 的话，「刚敲完原文」与「保存之后」这两个时刻画出来的会是两张慢慢长歪的表，而那种
-// 不一致没有任何测试会红——只有用的人看得出来（两张表里有一张少了某个字段）。
+// 拆成「解析」与「拼素材」两半，是因为解析出来的 *domain.Profile 有两个来源：
+// 盘上那份（下面 profileConcept 走的路），以及解析器自己（测试里直接造一份）。
+// 拼素材这一半与来源无关，所以它只认解析结果。
 func profileView(name, file string, pr *domain.Profile) profileData {
 	// provider 表读不出来不算这张卡片坏掉：档位本身是好的、可以改，只是候选
 	// 下拉框没有素材（providers.json 还没建是全新安装的正常状态）。这条以前是
@@ -239,24 +272,6 @@ func profileView(name, file string, pr *domain.Profile) profileData {
 		data.Roles = append(data.Roles, rd)
 	}
 	return data
-}
-
-// parseProfileDraft 把一份**草稿的字节**按那份文件的格式解析成档位。
-//
-// 与 store.readProfileFile 是同一套分支（.kv 走 KV 解析、.json 走 JSON），但输入
-// 是内存里的草稿而不是磁盘上的文件——预览要的正是这个：**还没落盘**的那一份。
-func parseProfileDraft(file string, draft []byte) (*domain.Profile, error) {
-	if strings.HasSuffix(file, ".kv") {
-		return store.ParseProfileKV(string(draft))
-	}
-	var pr domain.Profile
-	if err := json.Unmarshal(draft, &pr); err != nil {
-		return nil, err
-	}
-	if pr.Roles == nil {
-		pr.Roles = map[string]domain.Candidates{}
-	}
-	return &pr, nil
 }
 
 // roleOrder 是档位的展示顺序：四个标准档位按阶梯先后（重→轻），其余（含 "*" 与
@@ -339,34 +354,9 @@ func applyProfileRoles(conceptID, file string, edit json.RawMessage, base string
 		Extends *string `json:"extends"`
 		Name    *string `json:"name"`
 		Delete  bool    `json:"delete"`
-		// Create 建一份**新**档位文件（内容是空的：描述、档位全空，用户接着在卡片里
-		// 填）。放在这里而不是单开一张「档位文件」卡：一张 kv 卡就是那一份文件的全部，
-		// 「再加一份」从任何一张 kv 卡上都够得着（用户的原话：这些要收进各个 kv 内部）。
-		Create *string `json:"create"`
 	}
 	if err := json.Unmarshal(edit, &patch); err != nil {
 		return "", i18n.Ef(err, "the tier bindings in this request are not readable: {err}", i18n.A{"err": err})
-	}
-
-	if patch.Create != nil {
-		name := strings.TrimSpace(*patch.Create)
-		if name == "" {
-			return "", i18n.E("a profile must have a name — there is nothing to save it as", nil)
-		}
-		if strings.ContainsAny(name, `/\`) || name == "." || name == ".." || strings.Contains(name, "..") {
-			return "", i18n.E("a profile name must not contain path separators or \"..\": {name}", i18n.A{"name": name})
-		}
-		newFile := filepath.Join(paths.Mappings(), name+".kv")
-		if err := profileNameTaken(name); err != nil {
-			return "", err
-		}
-		// 新文件要求「此刻不存在」（base=""）：WriteIfUnchanged 会拦住并发下别人
-		// 刚建好的同一个名字。
-		body := store.SerializeProfileKV(&domain.Profile{Name: name})
-		if _, err := store.WriteIfUnchanged(newFile, "", []byte(body)); err != nil {
-			return "", profileErr("create", newFile, err)
-		}
-		return "", nil
 	}
 
 	if patch.Delete {
@@ -554,17 +544,11 @@ func stateConcept() view.Concept {
 		Apply: func(edit json.RawMessage, base string) (string, error) {
 			return applyStateDefaultProfile("config.state", file, edit, base)
 		},
-		// Preview：见 view.Concept.Preview。这一对（`config.state` 是控件半、
-		// `config.file.state.json` 是原文半）与档位那一对是同一件事，所以少了它
-		// 就会长出同一个 bug：在原文里改完、再拨一下开关，整份盖回去。
-		Preview: func(draft []byte) (any, error) {
-			return stateView(file, parseStateDraft(draft)), nil
-		},
 	}
 }
 
-// stateView 把一份 state 拼成开关卡要的素材。加载与预览共用（理由同 profileView：
-// 两条路必须给出同一个形状）。
+// stateView 把一份 state 拼成开关卡要的素材（理由与 profileView 同：解析与拼素材
+// 分开，拼的这一半不关心那份 state 是从哪儿来的）。
 func stateView(file string, st *domain.State) stateData {
 	active, host := "", ""
 	if st != nil {
@@ -587,18 +571,6 @@ func stateView(file string, st *domain.State) stateData {
 				"Empty = loopback only. Changing it takes effect after a restart.", nil),
 		}},
 	}
-}
-
-// parseStateDraft 把一份 state.json 的草稿解析成 State。
-//
-// 与 store.LoadState 同一套规则（读不出来就零值 + Normalize——那是刻意的 fail-open，
-// 一个手改坏的文件不该让所有 agent 停摆），只是输入是**内存里的草稿**：预览要的正是
-// 还没落盘的那一份。
-func parseStateDraft(draft []byte) *domain.State {
-	s := &domain.State{}
-	_ = json.Unmarshal(draft, s)
-	s.Normalize()
-	return s
 }
 
 func applyStateDefaultProfile(conceptID, file string, edit json.RawMessage, base string) (string, error) {
@@ -930,18 +902,28 @@ type fileData struct {
 	Path     string `json:"path"`
 	Language string `json:"language"`
 	Text     string `json:"text"`
-	// Base 是这份文件加载时的基线（内容哈希，见 store.WriteIfUnchanged）。
-	//
-	// **少了它，原文那一栏根本存不进去**：界面保存时把这份基线一起交回来，没有
-	// 基线就成了「我以为它不存在」，而磁盘上它是存在的——CAS 当场判过期，报
-	// 「这个文件在页面加载之后被别人改过」。用户看到的是「改原文点保存没反应，
-	// 改控件却好好的」（2026-09-20 实测）。
-	Base string `json:"base"`
 	// Redacted：这份内容是**脱敏过**的（凭据被换成了 ***），所以它只读——
 	// 写回去就是把 *** 落盘，那是数据丢失，比不能编辑严重得多。
 	Redacted bool `json:"redacted,omitempty"`
 }
 
+// fileConcepts 报出每一个源文件——**只读**的那一份。
+//
+// # 为什么原文那一半不给写
+//
+// 因为**一份文件只有一个可写的面**，而这里列的每一份文件都已经有结构化的编辑面了
+// （state.json 有开关卡、providers.json 有 provider 表、mappings/* 各有一张档位卡）。
+// 原文这一半的用处因此是**看**：对齐字段名、抄一行出去、确认刚才那一下到底写成了
+// 什么。
+//
+// 两半都可写的代价实测过（2026-09-21 拆掉的那一整套）：同一份文件有两个草稿、两个
+// 基线，于是要判断「谁后改的说了算」、要挤出输的那一半的草稿、还要让输的那一半跟
+// 着显示赢的那一半的内容——为此长出了内核的 Preview 契约、BFF 的 /api/preview、
+// 前端的防抖与预览表。它们没有一个与「配置」有关，全是「两个编辑器」这场架的产物，
+// 而每一个都可能悄悄吃掉用户的改动（实测到两次）。
+//
+// 想整份粘贴一份档位的人走 `newgate profile kv <名字> --write`（或在编辑器里改
+// 文件）再刷新页面——那本来就是编辑器该干的事，不该由配置页兼职。
 func fileConcepts() []view.Concept {
 	var out []view.Concept
 	add := func(path, language string) {
@@ -961,23 +943,7 @@ func fileConcepts() []view.Concept {
 			// 控件半、自己单独露脸」的那种文件用的（比如 providers.json 之外的
 			// 边角文件）。
 			Order: 20,
-			Data: fileData{
-				Path: rel, Language: language, Text: text, Redacted: redacted,
-				// 基线取自**磁盘上那份字节**（不是上面这段 text——text 可能被脱敏
-				// 改写过，用它算出来的哈希与盘上对不上，保存照样会被判过期）。
-				Base: store.Revision(path),
-			},
-		}
-		if !redacted {
-			c.Apply = func(edit json.RawMessage, base string) (string, error) {
-				var patch struct {
-					Text string `json:"text"`
-				}
-				if err := json.Unmarshal(edit, &patch); err != nil {
-					return "", i18n.Ef(err, "the file content in this request is not readable: {err}", i18n.A{"err": err})
-				}
-				return writeThrough(c.ID, path, base, []byte(patch.Text))
-			}
+			Data:  fileData{Path: rel, Language: language, Text: text, Redacted: redacted},
 		}
 		out = append(out, c)
 	}

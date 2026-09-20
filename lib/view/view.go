@@ -214,10 +214,6 @@ const (
 // 返回的新基线供前端续着改——保存一次之后不该逼用户刷新页面。
 type Applier func(edit json.RawMessage, base string) (newBase string, err error)
 
-// Previewer 是「这份文件还没落盘的草稿长这样，我该显示成什么样」——见
-// Concept.Preview。返回的形状必须与 Concept.Data 一致（前端拿它当 data 用）。
-type Previewer func(draft []byte) (any, error)
-
 // Concept 是一个模块贡献给界面的东西。
 type Concept struct {
 	// ID 是**稳定身份**：排序、持久化、以及「这次修改针对谁」都用它。
@@ -259,22 +255,6 @@ type Concept struct {
 	// Apply 为 nil 表示这个概念**只读**（比如带凭据的文件：它的内容是脱敏过的，
 	// 写回去就是把 *** 落盘）。
 	Apply Applier
-	// Preview 是「我这份文件**还没落盘的草稿**长这样时，我该显示成什么样」。
-	//
-	// 一份文件常常有两半：结构化的一半（控件）与原文的一半（`code`）。它们说的是
-	// 同一份文件，而用户可以在任一半上动手。改了原文之后，控件那一半手里还是
-	// 「改之前那份盘上内容」——他看不到自己刚写的东西，接着去动一下控件就会把它
-	// **整个盖回去**（控件的编辑载荷是整份文件，不是那一格）。有了 Preview，界面
-	// 就能拿原文的草稿来问一句，两半于是始终说的是同一份内容。
-	//
-	// 参数是这份文件草稿的**全部字节**（界面从同一份文件的另一半那儿拿到的），
-	// 返回的形状与 Data 完全一样（就是快照里那一个）。可选：返回 error 时界面保持
-	// 原样——**正敲着的那一行本来就解析不了**，那是打字途中的常态，不是故障。
-	//
-	// 为什么放在这里而不是让界面自己解析：那份文件的格式是**贡献者的知识**（KV
-	// 怎么切、哪些键是档位、哪些字段不能碰），界面认识它就等于认识那个模块。
-	// 这也正是 BFF 那条「它不认识任何模块」的规矩在这里的落点。
-	Preview Previewer
 	// Order 是**同一节里谁排前面**（小的在前，同值按 ID 排）。
 	//
 	// 为什么由贡献者说，而不是按 ID 字母序：字母序会把「一次装完就要配的基本项」
@@ -348,6 +328,44 @@ type Section struct {
 	// 更不认识（它只把拿到的标题画出来）。也同样是**只影响排列**，不参与任何身份
 	// ——哪一栏在哪个组里变了，URL、草稿、路由都不受影响（那些按 Source 走）。
 	Group func() string
+	// Actions 是这一栏上的**动作**（可以没有，也可以好几个）。
+	//
+	// 为什么动作挂在栏目上、而不是挂在某一概念上：**新建出来的东西此刻还没有概念**
+	// ——「再加一份档位文件」建出来的那份要等下一次快照才存在，所以没有哪张卡能挂
+	// 这个按钮。它属于**这一节**：那一批数据的拥有者知道「这一节还能长出什么来」，
+	// 而界面不知道（它不认识任何模块）。
+	//
+	// 形状是 `mkdir` 那一类：点一下、干一件事、然后重读快照。所以它**不接参数**
+	// ——界面能提供的只有「用户点了这个按钮」，别的都得由实现者自己看盘上有什么决定
+	// （新档位该叫什么名字就是这样：只有后端知道哪几个名字已经被占了）。
+	Actions []Action
+}
+
+// Action 是栏目上的一个动作。
+type Action struct {
+	// ID 是这一节里唯一的机器标记。前端回传它，**不翻译**。
+	ID string
+	// Label 是按钮上的字（可以翻译、可以改措辞）。与 Title 同一条：闭包，在快照
+	// 那一刻求值——登记发生在各模块的 Start 里，那时候语言层装好没有是没有保证的。
+	Label func() string
+	// Run 干活。成功时返回**该切到哪个概念**（空串 = 留在原地），失败时返回一句
+	// 给人看的话（会原样显示在界面上）。
+	//
+	// 为什么连「切到哪儿」也要交回来：新建出来的东西在快照里叫什么**只有实现者
+	// 知道**（名字是它挑的）。界面拿到之后再去猜一次，就等于把「新档位叫什么名字」
+	// 这条知识抄成了两份，而抄来的那份迟早会漂移。空串是常态（多数动作不产出某个
+	// 具体的东西，比如「重载配置」）。
+	//
+	// 它**不开事务、不碰快照**：写完之后界面自己会重读一遍（与保存那条路一样）。
+	Run func() (focus string, err error)
+}
+
+// Does 给这一栏挂一个动作（可以链多个）。
+//
+//	v.Register("config", view.Title(...).Does(view.Action{ID: "new-profile", …}), concepts)
+func (s Section) Does(a Action) Section {
+	s.Actions = append(s.Actions, a)
+	return s
 }
 
 // In 给这一栏指定它在侧栏里的分组（可选，不写就是不归任何一档）。
@@ -385,6 +403,15 @@ type SectionInfo struct {
 	Title  string `json:"title"`
 	// Group 是这一栏归到哪个标题下（空 = 不归，排在最上面）。见 Section.Group。
 	Group string `json:"group,omitempty"`
+	// Actions 是这一栏上的动作（见 Section.Actions）。Run 是**函数**，端不出去，
+	// 所以这里只给「有哪些按钮」：ID 回传时用，Label 是按钮上的字。
+	Actions []ActionInfo `json:"actions,omitempty"`
+}
+
+// ActionInfo 是栏目动作给界面的那一面（见 Section.Actions）。
+type ActionInfo struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 // Service 是贡献者看到的那一面：登记一个产出函数。
@@ -421,6 +448,7 @@ type source struct {
 	name  string
 	title func() string // Register 拒绝 nil，所以这里一定非空
 	group func() string // 可空：没写就是不分组
+	acts  []Action
 	read  Contributor
 }
 
@@ -447,7 +475,7 @@ func (r *Registry) Register(name string, section Section, read Contributor) (mod
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := source{id: r.next, name: name, title: section.Title, group: section.Group, read: read}
+	s := source{id: r.next, name: name, title: section.Title, group: section.Group, acts: section.Actions, read: read}
 	r.next++
 	r.sources = append(r.sources, s)
 	return func() error {
@@ -494,10 +522,54 @@ func (r *Registry) Sections() []SectionInfo {
 		if s.group != nil {
 			group = s.group()
 		}
-		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group})
+		var acts []ActionInfo
+		for _, a := range s.acts {
+			label := ""
+			if a.Label != nil {
+				label = a.Label()
+			}
+			acts = append(acts, ActionInfo{ID: a.ID, Label: label})
+		}
+		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group, Actions: acts})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Source < out[j].Source })
 	return out
+}
+
+// RunAction 跑一个栏目动作（见 Section.Actions）。
+//
+// 找不到那一栏、或者那一栏没有这个动作时返回 ErrUnknownAction——界面手里的快照
+// 可能已经过期（模块被关掉了），说清楚比装作跑过了强。
+//
+// **它不开事务、不动快照**：跑完由调用方（BFF）告诉界面重读一次。动作与「保存」
+// 走的是两条路，因为它们的形状本来就不同：保存是「把这个概念的这份改动落盘」，
+// 动作是「干一件事，具体是什么只有那一位知道」。
+func (r *Registry) RunAction(source, id string) (string, error) {
+	r.mu.RLock()
+	var found *Action
+	for i := range r.sources {
+		if r.sources[i].name != source {
+			continue
+		}
+		for j := range r.sources[i].acts {
+			if r.sources[i].acts[j].ID == id {
+				found = &r.sources[i].acts[j]
+				break
+			}
+		}
+		if found != nil {
+			break
+		}
+	}
+	r.mu.RUnlock()
+	if found == nil {
+		return "", i18n.E("{source} has no action called {action} — the page is probably stale, reload it",
+			i18n.A{"source": source, "action": id})
+	}
+	if found.Run == nil {
+		return "", i18n.E("{source}.{action} has nothing to run", i18n.A{"source": source, "action": id})
+	}
+	return found.Run()
 }
 
 // Snapshot 问一遍贡献者，返回这一刻的概念（按 Source, ID 排序）。

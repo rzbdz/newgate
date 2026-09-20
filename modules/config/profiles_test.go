@@ -60,25 +60,47 @@ func filepathBase(p string) string {
 	return p
 }
 
-// TestCreateAddsAFile：`{"create":"名字"}` 建一份新档位文件。
-func TestCreateAddsAFile(t *testing.T) {
-	seedDemo(t)
-	if err := edit(t, paths.Mappings()+"/demo.kv", `{"create":"fresh"}`, ""); err != nil {
+// TestTheSectionActionCreatesAProfile：栏目上那个「新建」动作建出一份空的档位文件，
+// 名字自己挑。
+//
+// 它替代的是一条挂在卡片上的 `{"create":"名字"}` 编辑（2026-09-21 拆掉）：新建出来的
+// 那一份此刻**还没有概念**，所以没有哪张卡能挂这个按钮——动作属于**这一节**
+// （见 view.Section.Actions）。挂在栏目上还有一个好处：它永远够得着，不管你现在
+// 正看着哪一张卡。
+//
+// 名字由后端挑的理由也在这条里：连着建三次，三次的名字必须都不一样——而「不一样」
+// 这件事只有看得见盘上有什么的人做得到。
+func TestTheSectionActionCreatesAProfile(t *testing.T) {
+	testkit.Sandbox(t)
+	seedFile(t, "demo.kv", "desc=demo\nnormal=p/m\n")
+
+	// 动作还要交回**它建出来的那张卡**（见 view.Action.Run 的返回值）：界面据此切
+	// 过去，而名字是后端挑的，界面自己拼不出来。
+	wantFocus := []string{
+		"config.profile.new-profile",
+		"config.profile.new-profile-2",
+		"config.profile.new-profile-3",
+	}
+	for i := 1; i <= 3; i++ {
+		focus, err := newProfileFile()
+		if err != nil {
+			t.Fatalf("第 %d 次新建失败: %v", i, err)
+		}
+		if focus != wantFocus[i-1] {
+			t.Errorf("第 %d 次新建该回报 %q，实际 %q", i, wantFocus[i-1], focus)
+		}
+	}
+	want := []string{"demo", "new-profile", "new-profile-2", "new-profile-3"}
+	if got := profileNames(); !slices.Equal(got, want) {
+		t.Errorf("三次新建该长出三个互不重名的档位:\n  想要 %v\n  实际 %v", want, got)
+	}
+	// 建出来的是**白纸**：不是复制了 demo 的内容（那会让人以为新建 = 克隆）。
+	b, err := os.ReadFile(paths.Mappings() + "/new-profile.kv")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(paths.Mappings() + "/fresh.kv"); err != nil {
-		t.Fatalf("新建的档位文件没落盘: %v", err)
-	}
-	// 重名要拦住：那是「把已有的那份覆盖掉」，最危险的一种静默。
-	if err := edit(t, paths.Mappings()+"/demo.kv", `{"create":"demo"}`, ""); err == nil {
-		t.Error("建一份已经存在的档位该被拒绝")
-	}
-	// 越界的名字要拦住（能写到 mappings/ 外面去）。
-	for _, bad := range []string{"../escape", "a/b", ".."} {
-		body := `{"create":"` + bad + `"}`
-		if err := edit(t, paths.Mappings()+"/demo.kv", body, ""); err == nil {
-			t.Errorf("越界的名字该被拒绝: %s", bad)
-		}
+	if strings.Contains(string(b), "normal=") {
+		t.Errorf("新建的该是一份空档位，实际:\n%s", b)
 	}
 }
 
@@ -230,59 +252,6 @@ func TestProfileFamilyTerminatesAndGroups(t *testing.T) {
 	}
 }
 
-// TestPreviewShowsTheDraftNotTheDisk：控件那一半要能拿**还没落盘的**原文草稿问一句
-// 「我该显示成什么样」（见 view.Concept.Preview）。
-//
-// 没有它的话，用户在原文里粘一整份档位、再去动一个下拉框：控件那一半手里还是改之前
-// 那份盘上内容，而它的编辑载荷是**整份文件**——交上去的就是整份旧表，刚粘的东西当场
-// 没了，而屏幕上从头到尾没显示过它。这条锁三件事：
-//
-//   - 预览反映的是**草稿**，磁盘那份一个字节都不动；
-//   - 返回的形状与快照里的 Data 同一个（界面直接拿它当 data 用）；
-//   - 打字的半成品报 error（界面靠它决定「保持上一次的样子」），而不是 panic、
-//     也不是悄悄给一份空表——空表看起来就像「档位全被删了」。
-func TestPreviewShowsTheDraftNotTheDisk(t *testing.T) {
-	testkit.Sandbox(t)
-	disk := seedFile(t, "demo.kv", "desc=盘上那份\nnormal=p/on-disk\n")
-
-	concept := findConcept(t, "config.profile.demo")
-	if concept.Preview == nil {
-		t.Fatal("档位卡没有 Preview——原文改动之后，控件那一半就永远跟不上")
-	}
-
-	data, err := concept.Preview([]byte("desc=草稿\nrole.zzprobe=p/from-draft\n"))
-	if err != nil {
-		t.Fatalf("预览一份合法草稿报错: %v", err)
-	}
-	pv, ok := data.(profileData)
-	if !ok {
-		t.Fatalf("预览回来的不是 profileData 而是 %T——界面拿它当 data 用，形状必须一致", data)
-	}
-	var ids []string
-	for _, r := range pv.Roles {
-		ids = append(ids, r.ID)
-	}
-	if !slices.Contains(ids, "zzprobe") {
-		t.Errorf("草稿里的档位没出现在预览里: %v", ids)
-	}
-	if slices.Contains(ids, "normal") {
-		t.Errorf("预览把盘上那份混进来了——它只该反映草稿: %v", ids)
-	}
-	if pv.Description != "草稿" {
-		t.Errorf("描述该跟着草稿走，实际 %q", pv.Description)
-	}
-
-	// 预览不是保存。
-	if b, _ := os.ReadFile(disk); !strings.Contains(string(b), "on-disk") {
-		t.Errorf("预览把磁盘改了: %q", b)
-	}
-
-	// 半成品（正敲着的那一行）：报错。
-	if _, err := concept.Preview([]byte("desc=打了一半\nrole.zzprobe=")); err == nil {
-		t.Error("半成品草稿该报错——界面靠这个 error 保持上一次的样子")
-	}
-}
-
 // findConcept 按 id 从这一份装配里取一张卡。
 func findConcept(t *testing.T, id string) view.Concept {
 	t.Helper()
@@ -297,47 +266,6 @@ func findConcept(t *testing.T, id string) view.Concept {
 	}
 	t.Fatalf("这份装配里没有 %s", id)
 	return view.Concept{}
-}
-
-// TestPreviewFollowsTheDraftInGlobalSettings：开关那一半也要能跟着原文走。
-//
-// 与档位那一对是同一件事（`config.state` 是控件半、`config.file.state.json` 是原文
-// 半），所以少了 Preview 就会长出同一个 bug：在原文里改完 default_profile、再拨一下
-// 开关，控件交上去的是**整份** state，刚改的那一格当场被盖回去。
-func TestPreviewFollowsTheDraftInGlobalSettings(t *testing.T) {
-	testkit.Sandbox(t)
-	seedFile(t, "demo.kv", "normal=p/m\n")
-	if err := os.WriteFile(paths.StateFile(), []byte(`{"default_profile":"demo","port":8899}`), 0o660); err != nil {
-		t.Fatal(err)
-	}
-
-	c := findConcept(t, "config.state")
-	if c.Preview == nil {
-		t.Fatal("全局设置那张卡没有 Preview——原文改完再拨开关会整份盖回去")
-	}
-	data, err := c.Preview([]byte(`{"default_profile":"别处改的","port":8899}`))
-	if err != nil {
-		t.Fatalf("预览一份合法草稿报错: %v", err)
-	}
-	sd, ok := data.(stateData)
-	if !ok {
-		t.Fatalf("预览回来的不是 stateData 而是 %T（界面拿它当 data 用）", data)
-	}
-	got := map[string]any{}
-	for _, it := range sd.Items {
-		got[it.ID] = it.Value
-	}
-	if got["default_profile"] != "别处改的" {
-		t.Errorf("预览没跟着草稿走: %+v", got)
-	}
-
-	// 半成品（JSON 还缺着右括号）：**fail-open，不报错**。这里与档位那一对刻意
-	// 不同——档位是逐行文本，敲到一半本来就解析不了，报错让界面保持上一次的样子；
-	// 而 state 是整份 JSON，读不出来就是零值，那与「还没写」长得一样，预览不出
-	// 一个错值就够了。区别写在这里，免得以后有人「顺手统一」成一种。
-	if _, err := c.Preview([]byte(`{"default_profile":`)); err != nil {
-		t.Errorf("半成品 JSON 该 fail-open（零值），实际报错: %v", err)
-	}
 }
 
 // TestANameThatIsTakenIsRefusedAsSuch：撞名要**按事实**拒绝，不能留给 CAS 去报
@@ -368,8 +296,6 @@ func TestANameThatIsTakenIsRefusedAsSuch(t *testing.T) {
 			t.Errorf("%s：该按事实说「名字被占了」，而不是留给 CAS 报「别人改过」: %v", why, err)
 		}
 	}
-	refuse(`{"create":"demo"}`, "新建一份已经存在的档位")
-	refuse(`{"create":"other"}`, "新建一个被 .json 占着的名字（否则那份 json 会被静默压掉）")
 	refuse(`{"name":"other"}`, "改名改到一个已被占用的名字")
 
 	// 反过来的那条也要在：改成自己现在的名字是空操作，不该被顺手拦掉。

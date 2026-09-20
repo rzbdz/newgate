@@ -328,6 +328,10 @@
       "text": "（还有 {left}）",
       "reviewed": true
     },
+    "+ profile": {
+      "text": "＋新建档位",
+      "reviewed": true
+    },
     "+ provider": {
       "text": "+ provider",
       "reviewed": true
@@ -1540,6 +1544,10 @@
       "text": "无法 runtime 开关：这个模块没有上报任何开关点",
       "reviewed": true
     },
+    "cannot create {file}: {err}": {
+      "text": "建 {file} 失败：{err}",
+      "reviewed": true
+    },
     "cannot extract the listener fd: {err}": {
       "text": "提取监听 fd 失败: {err}",
       "reviewed": true
@@ -1706,6 +1714,10 @@
     },
     "convert a profile to KV text, list its backups, or bring one back": {
       "text": "把档位转成 KV 文本、列出它的备份、或取回某一版",
+      "reviewed": true
+    },
+    "could not find a free name for a new profile file": {
+      "text": "找不到一个没被占用的名字来新建档位文件",
       "reviewed": true
     },
     "count": {
@@ -2868,10 +2880,6 @@
       "text": "当前 shell 的 PATH 还没生效，重开 shell 或 `exec $SHELL -l`",
       "reviewed": true
     },
-    "the file content in this request is not readable: {err}": {
-      "text": "此请求里的文件内容读不出来：{err}",
-      "reviewed": true
-    },
     "the file is empty": {
       "text": "文件是空的",
       "reviewed": true
@@ -3427,6 +3435,14 @@
     },
     "{route} -> {status}{note}  upstream said: {body}": {
       "text": "{route} -> {status}{note}  上游说: {body}",
+      "reviewed": true
+    },
+    "{source} has no action called {action} — the page is probably stale, reload it": {
+      "text": "{source} 上没有叫 {action} 的动作 —— 页面大概是旧的，重载一下",
+      "reviewed": true
+    },
+    "{source}.{action} has nothing to run": {
+      "text": "{source}.{action} 没有可跑的东西",
       "reviewed": true
     },
     "{stops} stop in the chain; {skipped} skipped ({reasons})   newgate tier normal": {
