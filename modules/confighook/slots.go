@@ -40,12 +40,12 @@ type SlotOverrides struct {
 	// AgentID 是这位客户端的 id，用在给人看的那句话里（「下一次 `newgate on X`
 	// 才生效」）——那句话必须点名，否则用户不知道该让谁重新接管。
 	AgentID string
-	// Slots 是这个客户端此刻的槽位表。
+	// Slots 是这个客户端的槽位表。
 	//
-	// 是个**函数**而不是一份拷进来切片：描述符今天是从 `Agent()` 现取的，而两份
-	// 「当前槽位表」（这里一份、模块里一份）迟早对不上——对不上的症状是界面上
-	// 某个槽位设不了值。
-	Slots func() []Slot
+	// 一份**值**而不是一个取它的函数：构造这个值的人（模块自己的 slotsOf）每次
+	// 都是现取 `Agent().Slots` 的，所以「表变了」表现为「重新构造一次」——再包一层
+	// 闭包只会让读的人多跳一层，而跳的那一层里没有任何东西可替换。
+	Slots []Slot
 }
 
 // Read 读用户改过的槽位映射（槽位名 → 档位）。没配过返回空表。
@@ -84,7 +84,7 @@ func (o SlotOverrides) Read() (ok map[string]string, bad map[string]string) {
 // 不认识的槽位名只给档位：那种条目本来就该被丢掉（多半是界面手里那份快照旧了），
 // 给它开例外等于替一个不存在的槽位背书。
 func (o SlotOverrides) AllowedFor(slot string) []string {
-	for _, s := range o.Slots() {
+	for _, s := range o.Slots {
 		if s.Name == slot {
 			return append(append([]string(nil), domain.Roles...), s.Also...)
 		}
@@ -94,7 +94,7 @@ func (o SlotOverrides) AllowedFor(slot string) []string {
 
 // Default 说出厂设置里这个槽位归哪一档；不认识的槽位返回 false。
 func (o SlotOverrides) Default(slot string) (string, bool) {
-	for _, s := range o.Slots() {
+	for _, s := range o.Slots {
 		if s.Name == slot {
 			return s.Tier, true
 		}
@@ -113,11 +113,6 @@ func (o SlotOverrides) Write(m map[string]string) error {
 				i18n.A{"slot": slot, "tier": tier, "known": o.AllowedFor(slot)})
 		}
 	}
-	s := store.LoadState()
-	if len(m) == 0 {
-		delete(s.ModuleConfig, o.Key)
-		return store.SaveState(s)
-	}
 	// 只留与缺省不同的那些：留下一份「和缺省一样」的条目，会让以后改缺省的人
 	// 发现自己的改动对一部分用户不生效——而那些用户从没配过任何东西。
 	diff := map[string]string{}
@@ -125,6 +120,15 @@ func (o SlotOverrides) Write(m map[string]string) error {
 		if def, known := o.Default(slot); known && def != tier {
 			diff[slot] = tier
 		}
+	}
+	s := store.LoadState()
+	// 传进来就是空的、与**减完之后**是空的，是同一件事：这个客户端此刻全走缺省。
+	// 两条都得删键——只判前一条的话，把最后一行改回缺省会在 state.json 里留下一个
+	// `{}`（实测踩到：codex 只有一个槽位，所以它一路都是这个形状）。那正是上面这句
+	// 要避免的「同值记录」，只是发生在文件层而不是条目层。
+	if len(diff) == 0 {
+		delete(s.ModuleConfig, o.Key)
+		return store.SaveState(s)
 	}
 	raw, err := json.Marshal(diff)
 	if err != nil {

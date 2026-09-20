@@ -1744,7 +1744,7 @@
       ]
     },
     "cannot encode the slot map: {err}": {
-      "where": "modules/confighook/slots.go:131"
+      "where": "modules/confighook/slots.go:135"
     },
     "cannot extract the listener fd: {err}": {
       "where": "modules/runtime/daemon/daemon.go:407"
@@ -3176,7 +3176,7 @@
       "where": "modules/config/store/store.go:439"
     },
     "set in the config: {tier} (the default is {def}) — takes effect the next time {agent} is taken over (newgate on {agent})": {
-      "where": "modules/confighook/slots.go:161",
+      "where": "modules/confighook/slots.go:165",
       "args": [
         "agent",
         "def",
@@ -3350,7 +3350,7 @@
       "where": "modules/confighook/module.go:57"
     },
     "the config says {tier}, which is not a tier — the default is in use": {
-      "where": "modules/confighook/slots.go:153",
+      "where": "modules/confighook/slots.go:157",
       "args": [
         "tier"
       ]
@@ -3783,7 +3783,7 @@
       ]
     },
     "{agent} is not installed on this machine — nothing on this card takes effect yet. Install it with `newgate {agent} -y`.": {
-      "where": "modules/confighook/slots.go:180",
+      "where": "modules/confighook/slots.go:184",
       "args": [
         "agent"
       ]
