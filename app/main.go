@@ -7,6 +7,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/component/entry"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Options 是进程组合根的输入：装哪张图 + 版本三件套。
@@ -55,6 +56,7 @@ func Main(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "newgate: "+why)
 		return 69
 	}
-	modules.Tracef("入口解析：argv0=%q → %s（%s）", p.Argv0, handler.Name(), why)
+	modules.Tracef("%s", i18n.T("entry resolve: argv0=\"{argv0}\" → {name} ({why})",
+		i18n.A{"argv0": p.Argv0, "name": handler.Name(), "why": why}))
 	return handler.Handle(p)
 }

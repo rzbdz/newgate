@@ -2,7 +2,8 @@ package rewrite
 
 import (
 	"encoding/json"
-	"errors"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // ReplaceTopLevelString 在原始 JSON 字节里定位顶层 key 的字符串值，
@@ -436,11 +437,11 @@ func arrayItemSpans(arr []byte) ([][2]int, bool) {
 }
 
 var (
-	errNotObject = errors.New("请求体顶层不是 JSON 对象")
-	errNoKey     = errors.New("顶层找不到该字段")
-	errNotString = errors.New("该字段的值不是字符串")
-	errNotArray  = errors.New("该字段的值不是数组")
-	errDupKey    = errors.New("顶层已经有这个字段了")
+	errNotObject = i18n.E("request body top level is not a JSON object", nil)
+	errNoKey     = i18n.E("no such key at the top level", nil)
+	errNotString = i18n.E("value of the key is not a string", nil)
+	errNotArray  = i18n.E("value of the key is not an array", nil)
+	errDupKey    = i18n.E("the top level already has this key", nil)
 )
 
 // findTopLevelStringValue 同 findTopLevelValue，但要求值是字符串。

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/lib/buildinfo"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 )
 
@@ -27,28 +28,6 @@ import (
 // 与 PlanSections），节内再按 Rank、Usage 排。同 Rank 时靠 Usage 兜底，保证每次
 // 跑出来顺序一致。
 func usageText(service *service) string {
-	var b strings.Builder
-	b.WriteString(style.Bold("newgate") + " — AI CLI 的语义模型层代理\n")
-
-	// 左列按显示宽度补齐（CJK 双宽），右列一律暗色——扫读时先看命令名，
-	// 需要时再看说明。
-	cmd := func(left, right string) {
-		const commandWidth = 38
-		prefix := "  " + style.Cyan(style.Pad(left, commandWidth))
-		if right == "" {
-			b.WriteString(prefix + "\n")
-			return
-		}
-		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-commandWidth)
-		for i, line := range lines {
-			if i == 0 {
-				b.WriteString(prefix + line + "\n")
-			} else {
-				b.WriteString(strings.Repeat(" ", 2+commandWidth) + line + "\n")
-			}
-		}
-	}
-
 	// 收集：谁注入的命令，就由谁声明它在 help 里长什么样、放哪个**槽位**。
 	//
 	// 界面在这里**不认识任何一条命令、任何一个模块**：它只认识一组通用槽位键 +
@@ -72,6 +51,51 @@ func usageText(service *service) string {
 			entries = append(entries, entry{line.Section, line})
 		}
 	}
+	var glossary []GlossaryLine
+	if service != nil {
+		glossary = service.glossaryLines()
+	}
+
+	// 左列的宽度**从数据算**，不再写死（2026-09-20）。
+	//
+	// 上一版是 `commandWidth = 38` / `termWidth = 12`——那两个数字是**英文那一版
+	// 的实测值**（装了什么模块、术语行有多长），换一门语言或装一个新模块就不再
+	// 成立：写窄了右列被挤成一条竖线，写宽了说明被推出版面。所以按实际内容的最宽
+	// 显示宽度取（CJK 双宽，用 style.VisibleWidth），再夹进一个合理区间——区间
+	// 的两端就是上面那两种坏情况，style.MaxColumns 仍是不可越过的硬上限。
+	usages := make([]string, 0, len(entries))
+	for _, e := range entries {
+		usages = append(usages, e.line.Usage)
+	}
+	terms := make([]string, 0, len(glossary))
+	for _, line := range glossary {
+		terms = append(terms, line.Term)
+	}
+	commandWidth := clamp(widest(usages), 24, 40)
+	termWidth := clamp(widest(terms), 8, 18)
+
+	var b strings.Builder
+	b.WriteString(style.Bold("newgate") + " " +
+		i18n.T("— the semantic model layer proxy for AI CLIs", nil) + "\n")
+
+	// 左列按显示宽度补齐（CJK 双宽），右列一律暗色——扫读时先看命令名，
+	// 需要时再看说明。
+	cmd := func(left, right string) {
+		prefix := "  " + style.Cyan(style.Pad(left, commandWidth))
+		if right == "" {
+			b.WriteString(prefix + "\n")
+			return
+		}
+		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-commandWidth)
+		for i, line := range lines {
+			if i == 0 {
+				b.WriteString(prefix + line + "\n")
+			} else {
+				b.WriteString(strings.Repeat(" ", 2+commandWidth) + line + "\n")
+			}
+		}
+	}
+
 	// 规划按**声明顺序**做（= 命令注册顺序），因为自定义节的名额是先到先得的。
 	declared := make([]Section, 0, len(entries))
 	for _, e := range entries {
@@ -97,7 +121,9 @@ func usageText(service *service) string {
 			}
 			return lines[i].Usage < lines[j].Usage
 		})
-		b.WriteString("\n" + style.Bold(slot) + "\n")
+		// 标题是槽位的**显示名**，不是它的键：键是身份（ASCII 稳定标识），
+		// 随语言变的是这一层（见 extension.Section.Display）。
+		b.WriteString("\n" + style.Bold(slot.Display()) + "\n")
 		for _, line := range lines {
 			cmd(line.Usage, line.Summary)
 		}
@@ -111,9 +137,8 @@ func usageText(service *service) string {
 	//
 	// 右列跟着左列一起折行：定义是模块写的，长度不受界面控制，写死一行的版式
 	// 迟早会被某一条长定义顶破 75 列上限（style.MaxColumns）。
-	b.WriteString("\n" + style.Bold("术语") + "\n")
+	b.WriteString("\n" + style.Bold(i18n.T("Glossary", nil)) + "\n")
 	term := func(left, right string) {
-		const termWidth = 12
 		prefix := "  " + style.Pad(style.Cyan(left), termWidth)
 		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-termWidth)
 		for i, line := range lines {
@@ -124,10 +149,8 @@ func usageText(service *service) string {
 			}
 		}
 	}
-	if service != nil {
-		for _, line := range service.glossaryLines() {
-			term(line.Term, line.Definition)
-		}
+	for _, line := range glossary {
+		term(line.Term, line.Definition)
 	}
 	return b.String()
 }
@@ -151,13 +174,13 @@ func run(service *service, args []string) int {
 		case args[i] == "--set-profile" || strings.HasPrefix(args[i], "--set-profile="):
 			name := optValue(args, i, "--set-profile")
 			if name == "" {
-				return die(64, "--set-profile 需要一个 profile 名")
+				return die(64, i18n.T("--set-profile needs a profile name", nil))
 			}
 			// 认得出这个选项的形状（argv 解析是界面的活），但**语义归 config**：
 			// 归一成 config 那条命令认识的形状再交给它。
 			command, ok := service.moduleCommand("--set-profile")
 			if !ok {
-				return die(64, "--set-profile 没有实现（装配缺了 config 模块）")
+				return die(64, i18n.T("--set-profile is not implemented (this assembly has no config module)", nil))
 			}
 			rest := []string{name}
 			if agent := findFlag(args, "--agent", "--tool", "--target"); agent != "" {
@@ -181,7 +204,7 @@ func run(service *service, args []string) int {
 			return command.Run(moduleCLIHost{verb: name}, dropName(args, name))
 		}
 	}
-	return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))
+	return die(64, i18n.T("unknown command {cmd} (see newgate --help)", i18n.A{"cmd": args[0]}))
 }
 
 // VersionLine 是 `newgate version` 的输出（版式与取值都在 lib/buildinfo）。
@@ -234,6 +257,32 @@ func lookupName(args []string) string {
 
 // die 是界面自己的报错出口（版式在 lib/style，各模块共用同一份）。
 func die(code int, msg string) int { return style.Die(code, msg) }
+
+// clamp 把一个宽度夹进 [lo, hi]——`--help` 两列的宽度都从数据算，算出来的值
+// 需要有个合理区间兜着（见 usageText）。
+func clamp(w, lo, hi int) int {
+	if w < lo {
+		return lo
+	}
+	if w > hi {
+		return hi
+	}
+	return w
+}
+
+// widest 一组字符串里最宽的**显示宽度**（CJK 双宽，判据在 lib/style）。
+//
+// 为什么不是 len()：`接管` 的字节数是 6、列宽是 4；按字节算出来的列宽会把版面
+// 撑歪，而那正是「换了语言看起来就不对」的一半来源。
+func widest(ss []string) int {
+	w := 0
+	for _, s := range ss {
+		if v := style.VisibleWidth(s); v > w {
+			w = v
+		}
+	}
+	return w
+}
 
 func optValue(args []string, i int, name string) string {
 	if strings.Contains(args[i], "=") {

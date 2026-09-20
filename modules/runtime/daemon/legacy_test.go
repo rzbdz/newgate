@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rzbdz/newgate/lib/i18n"
 )
 
 // sandbox 把整套路径（含 legacy 的 $HOME 位置）圈进临时目录。
@@ -176,7 +178,8 @@ func TestStopViaHTTPToken(t *testing.T) {
 	t.Run("没有令牌要给出人话", func(t *testing.T) {
 		writeState("")
 		_, err := stopViaHTTP(&Info{PID: 1, Port: 1})
-		if err == nil || !strings.Contains(err.Error(), "控制令牌") {
+		// 断言消息身份（语言无关）：这句话的要点是「没有控制令牌」，不是它用哪种语言说。
+		if err == nil || !strings.Contains(i18n.ID(err), "no control token") {
 			t.Fatalf("应报「没有控制令牌」，实际: %v", err)
 		}
 	})

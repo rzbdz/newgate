@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/lib/buildinfo"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	"github.com/rzbdz/newgate/modules/config/paths"
 )
@@ -44,10 +45,13 @@ func cmdDoctor(service *service) int {
 
 	fmt.Println()
 	if bad == 0 {
-		fmt.Println(style.Green("全部通过"))
+		fmt.Println(style.Green(i18n.T("all checks passed", nil)))
 		return 0
 	}
-	fmt.Printf("%s %d 项异常\n", style.Mark(style.Bad), bad)
+	// 结论行走 N（带数量的消息）：英文有单复数，中文不分——中文那份只写一条即可。
+	// 前面的状态标记留在消息外（它是版式符号，不是文案）。
+	fmt.Println(style.Mark(style.Bad) + " " +
+		i18n.N("{n} check failed", "{n} checks failed", bad, i18n.A{"n": bad}))
 	return 1
 }
 
@@ -63,18 +67,22 @@ func cmdAllLogs(service *service) int {
 	line := func(t string) { fmt.Printf("\n===== %s =====\n", t) }
 
 	// 这一段是界面自己的：它讲的是「这个进程跑在哪、什么版本、什么环境」。
-	line("版本与环境")
+	line(i18n.T("Version and environment", nil))
 	fmt.Println(VersionLine())
-	fmt.Printf("配置目录 %s\n", paths.Config())
-	fmt.Printf("日志     %s\n", paths.LogFile())
+	// 字段标签过目录（它是文案），值不过（那是路径与进程事实）。列宽固定，
+	// 三行才对得齐——`env` 是**机器名**（环境变量的原文段），不翻译。
+	const dumpLabelW = 12
+	field := func(label, value string) { fmt.Println(style.Pad(label, dumpLabelW) + value) }
+	field(i18n.T("Config dir", nil), paths.Config())
+	field(i18n.T("Log file", nil), paths.LogFile())
 	for _, k := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
 		"no_proxy", "NO_PROXY", "NEWGATE_HOME", "NEWGATE_TARGET_DIR", "NEWGATE_DUMP"} {
 		if v := os.Getenv(k); v != "" {
-			fmt.Printf("env      %s=%s\n", k, v)
+			field("env", k+"="+v)
 		}
 	}
 
-	line("状态")
+	line(i18n.T("Status", nil))
 	cmdStatus(service)
 
 	for _, section := range service.dumpSections() {

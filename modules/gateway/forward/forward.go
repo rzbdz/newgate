@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/logx"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/paths"
@@ -192,9 +193,11 @@ func (s *Server) probe(provider, model string) bool {
 	}
 	for i := 0; i < verifyProbeAttempts; i++ {
 		status, latency, err := probe.One(p, model, verifyProbeTimeout)
-		s.logf("[probe] 上闸前诊断 %s/%s 第 %d/%d 次：HTTP %d %v（%s）",
-			provider, model, i+1, verifyProbeAttempts, status, err,
-			latency.Round(time.Millisecond))
+		s.logf("[probe] %s", i18n.T(
+			"pre-gate diagnosis {provider}/{model} attempt {attempt}/{total}: HTTP {status} {err} ({latency})",
+			i18n.A{"provider": provider, "model": model, "attempt": i + 1,
+				"total": verifyProbeAttempts, "status": status, "err": err,
+				"latency": latency.Round(time.Millisecond)}))
 		if err == nil && status == 200 {
 			return true
 		}
@@ -222,7 +225,7 @@ func (s *Server) Start() error {
 	// 否则现象是「重启之后每个上游都要重新撞一次 404/400 才学回来」，
 	// 而原因没人知道。
 	if err := probe.LoadCachedCapabilities(); err != nil {
-		s.logf("[probe] 能力缓存装载失败（本次运行将重新探测）: %v", err)
+		s.logf("[probe] %s", i18n.T("capability cache load failed (will re-probe this run): {err}", i18n.A{"err": err}))
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(controlpath.Status, s.handleStatus)
@@ -241,7 +244,7 @@ func (s *Server) Start() error {
 	s.srv = &http.Server{Handler: mux}
 	s.ln = ln
 	s.signalReady() // 交接进来的进程：告诉父进程「socket 已接上」
-	s.logf("[proxy] 监听 127.0.0.1:%d", s.Port)
+	s.logf("[proxy] %s", i18n.T("listening on 127.0.0.1:{port}", i18n.A{"port": s.Port}))
 	return s.srv.Serve(ln)
 }
 
@@ -254,16 +257,16 @@ func (s *Server) listen() (net.Listener, error) {
 		os.Unsetenv("NEWGATE_LISTENER_FD")
 		fd, err := strconv.Atoi(fdStr)
 		if err != nil {
-			return nil, fmt.Errorf("NEWGATE_LISTENER_FD=%q 不是 fd 号: %w", fdStr, err)
+			return nil, i18n.Ef(err, "NEWGATE_LISTENER_FD={value} is not an fd number", i18n.A{"value": strconv.Quote(fdStr)})
 		}
 		f := os.NewFile(uintptr(fd), "inherited-listener")
 		ln, err := net.FileListener(f)
 		if err != nil {
-			return nil, fmt.Errorf("继承监听 fd %d 失败: %w", fd, err)
+			return nil, i18n.Ef(err, "inheriting listener fd {fd} failed", i18n.A{"fd": fd})
 		}
 		if _, ok := ln.(*net.TCPListener); !ok {
 			ln.Close()
-			return nil, fmt.Errorf("继承的 fd %d 不是 TCP 监听器", fd)
+			return nil, i18n.E("inherited fd {fd} is not a TCP listener", i18n.A{"fd": fd})
 		}
 		// 端口号以真身为准：继承路径下 s.Port 参数可能只是父进程的复述
 		if a, ok := ln.Addr().(*net.TCPAddr); ok {
@@ -273,7 +276,7 @@ func (s *Server) listen() (net.Listener, error) {
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.Port))
 	if err != nil {
-		return nil, fmt.Errorf("监听 127.0.0.1:%d 失败: %w", s.Port, err)
+		return nil, i18n.Ef(err, "listening on 127.0.0.1:{port} failed", i18n.A{"port": s.Port})
 	}
 	return ln, nil
 }
@@ -306,7 +309,7 @@ func (s *Server) Shutdown() {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	snap := s.snap()
 	if snap == nil {
-		s.fail(w, 400, "配置读不出 ← 跑 `newgate doctor`")
+		s.fail(w, 400, i18n.T("cannot read config — run `newgate doctor`", nil))
 		return
 	}
 	st := snap.State
@@ -361,13 +364,13 @@ type probeHealthObservation struct {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": "只接受 POST"})
+		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": i18n.T("only POST is accepted", nil)})
 		return
 	}
 	snap := s.snap()
 	if snap == nil || snap.State.ControlToken == "" ||
 		r.Header.Get("Authorization") != "Bearer "+snap.State.ControlToken {
-		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": "control token 不符"})
+		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": i18n.T("control token mismatch", nil)})
 		return
 	}
 	var req struct {
@@ -375,7 +378,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
 	if err := dec.Decode(&req); err != nil {
-		writeJSON(w, 400, map[string]interface{}{"ok": false, "error": "请求 JSON 无效"})
+		writeJSON(w, 400, map[string]interface{}{"ok": false, "error": i18n.T("invalid request JSON", nil)})
 		return
 	}
 	threshold := snap.State.Timeouts.ClassifierFirstByte()
@@ -423,7 +426,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleControlStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": "只接受 POST"})
+		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": i18n.T("only POST is accepted", nil)})
 		return
 	}
 	tok := ""
@@ -433,11 +436,11 @@ func (s *Server) handleControlStop(w http.ResponseWriter, r *http.Request) {
 	// 常数时间比较：不让本地进程靠响应耗时逐位猜令牌
 	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if tok == "" || subtle.ConstantTimeCompare([]byte(got), []byte(tok)) != 1 {
-		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": "control token 不符"})
+		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": i18n.T("control token mismatch", nil)})
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"ok": true, "bye": true})
-	s.logf("[proxy] 收到控制停机请求（来自 %s），退出", r.RemoteAddr)
+	s.logf("[proxy] %s", i18n.T("control stop requested by {addr}, exiting", i18n.A{"addr": r.RemoteAddr}))
 	// 先让 200 刷出缓冲区，再触发退出
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -458,7 +461,7 @@ func (s *Server) handleControlStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": "只接受 POST"})
+		writeJSON(w, 405, map[string]interface{}{"ok": false, "error": i18n.T("only POST is accepted", nil)})
 		return
 	}
 	tok := ""
@@ -467,11 +470,11 @@ func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if tok == "" || subtle.ConstantTimeCompare([]byte(got), []byte(tok)) != 1 {
-		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": "control token 不符"})
+		writeJSON(w, 403, map[string]interface{}{"ok": false, "error": i18n.T("control token mismatch", nil)})
 		return
 	}
 	if s.ln == nil {
-		writeJSON(w, 503, map[string]interface{}{"ok": false, "error": "监听句柄还没就绪"})
+		writeJSON(w, 503, map[string]interface{}{"ok": false, "error": i18n.T("listener handle not ready yet", nil)})
 		return
 	}
 	info, err := daemon.SpawnHandoff(s.Port, s.ln)
@@ -486,7 +489,7 @@ func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]interface{}{"ok": false, "error": err.Error()})
 		return
 	}
-	s.logf("[proxy] 优雅交接：socket 已移交新进程 pid %d，本进程开始排空在途请求", info.PID)
+	s.logf("[proxy] %s", i18n.T("graceful handoff: socket handed to new process pid {pid}, draining in-flight requests", i18n.A{"pid": info.PID}))
 	writeJSON(w, 200, map[string]interface{}{"ok": true, "new_pid": info.PID})
 	// 排空：等在途请求（含 SSE 流）自然结束，上限 10 分钟，然后退。
 	// 两个关键点：
@@ -504,7 +507,7 @@ func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
 			_ = s.srv.Shutdown(ctx)
 		}
 		s.drainOnce.Do(func() { close(s.drainCh) })
-		s.logf("[proxy] 排空完成，退出（socket 由 pid %d 继续）", info.PID)
+		s.logf("[proxy] %s", i18n.T("drain complete, exiting (socket continues under pid {pid})", i18n.A{"pid": info.PID}))
 		os.Exit(0)
 	}()
 }
@@ -591,7 +594,7 @@ var testChain func(tier string) []resolve.Step
 // 逐轮的真实计数走 /messages 响应里的 usage，不经过这里。
 func (s *Server) handleCountTokens(w http.ResponseWriter, reqID uint64, body []byte) {
 	n := len(body) / 4
-	s.logf("[proxy] #%d count_tokens（%d 字节）→ 本地粗估 %d tokens", reqID, len(body), n)
+	s.logf("[proxy] %s", i18n.T("#{req} count_tokens ({bytes} bytes) -> local rough estimate {n} tokens", i18n.A{"req": reqID, "bytes": len(body), "n": n}))
 	writeJSON(w, 200, map[string]interface{}{"input_tokens": n})
 }
 
@@ -643,7 +646,7 @@ func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
 		if r.Context().Err() == nil {
-			s.logf("[proxy] #%d count_tokens 转发失败（%v），本次退回本地粗估", reqID, err)
+			s.logf("[proxy] %s", i18n.T("#{req} count_tokens forward failed ({err}); falling back to local rough estimate", i18n.A{"req": reqID, "err": err}))
 		}
 		return false
 	}
@@ -651,13 +654,14 @@ func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 	switch {
 	case resp.StatusCode == 404 || resp.StatusCode == 405:
 		if dialect.MarkUnsupported(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens) {
-			s.logf("[proxy] #%d 学到：%s 没有 count_tokens 端点（上游 %d）——退回本地粗估，不再试",
-				reqID, head.Binding, resp.StatusCode)
+			s.logf("[proxy] %s", i18n.T(
+				"#{req} learned {name} has no count_tokens endpoint (upstream {code}); falling back to local rough estimate, no retry",
+				i18n.A{"req": reqID, "name": head.Binding, "code": resp.StatusCode}))
 		}
 		metrics.Default.Inc("count_tokens.probe_404")
 		return false
 	case resp.StatusCode >= 400:
-		s.logf("[proxy] #%d count_tokens 上游 %d，退回本地粗估", reqID, resp.StatusCode)
+		s.logf("[proxy] %s", i18n.T("#{req} count_tokens upstream {code}; falling back to local rough estimate", i18n.A{"req": reqID, "code": resp.StatusCode}))
 		return false
 	}
 	dialect.Mark(head.Binding.Provider, head.Binding.Model, dialect.CapCountTokens)
@@ -668,7 +672,7 @@ func (s *Server) forwardCountTokens(w http.ResponseWriter, r *http.Request,
 	w.Header().Set("X-Newgate-Route", "count_tokens -> "+head.Binding.String())
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(rb)
-	s.logf("[proxy] #%d count_tokens → %s 上游真值: %s", reqID, head.Binding, trim(string(rb)))
+	s.logf("[proxy] %s", i18n.T("#{req} count_tokens -> {name} upstream true value: {value}", i18n.A{"req": reqID, "name": head.Binding, "value": trim(string(rb))}))
 	return true
 }
 
@@ -716,7 +720,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		s.fail(w, 400, "读请求体失败: "+err.Error())
+		s.fail(w, 400, i18n.Ef(err, "cannot read request body: {err}", nil).Error())
 		return
 	}
 	_ = r.Body.Close()
@@ -743,14 +747,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if !ok || inModel == "" {
 		// 带上方法与路径：这一类「形状不认识」的请求，没有路径就没法排查
 		// 是哪个客户端、哪个端点发来的。
-		s.fail(w, 400, fmt.Sprintf("请求体顶层没有 model 字符串字段（%s %s）",
-			r.Method, r.URL.Path))
+		s.fail(w, 400, i18n.T("request body has no top-level model string field ({method} {path})",
+			i18n.A{"method": r.Method, "path": r.URL.Path}))
 		return
 	}
 	norm := protocol.NormalizeRole(inModel)
 	snap := s.snap()
 	if snap == nil {
-		s.fail(w, 400, "配置读不出 ← 跑 `newgate doctor`")
+		s.fail(w, 400, i18n.T("cannot read config — run `newgate doctor`", nil))
 		return
 	}
 	st := snap.State
@@ -759,11 +763,13 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// 进来就记——否则「请求没到」和「到了在等上游」在日志里长得一样。
 	// req= 是客户端请求体字节数：跟上游日志对账（300k compact 这种大输入）时
 	// 靠它定位「同一发请求」，没有它就只剩 reqID 一个数，跨系统对不上。
-	s.logf("[proxy] #%d ← %s stream=%v req=%d字节  开始", reqID, inModel, stream0, len(body))
+	s.logf("[proxy] %s", i18n.T("#{req} <- {model} stream={stream} req={bytes} bytes  start", i18n.A{"req": reqID, "model": inModel, "stream": stream0, "bytes": len(body)}))
 	if gatewaystate.DebugActive(st) {
-		s.logf("[proxy] #%d 客户端请求 %s %s%s\n    body(%d字节): %s",
-			reqID, r.Method, r.URL.Path, headerDump(r.Header), len(body),
-			truncate(string(redact(body)), 4000))
+		s.logf("[proxy] %s", i18n.T(
+			"#{req} client request {method} {path}{headers}\n    body({bytes} bytes): {body}",
+			i18n.A{"req": reqID, "method": r.Method, "path": r.URL.Path,
+				"headers": headerDump(r.Header), "bytes": len(body),
+				"body": truncate(string(redact(body)), 4000)}))
 	}
 
 	// ---- per-agent 路由 + fallback 链 ----
@@ -853,15 +859,15 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(steps) == 0 {
-		s.logf("[proxy] #%d 无可用候选。跳过原因：%s", reqID, fmtSkips(skips))
+		s.logf("[proxy] %s", i18n.T("#{req} no usable candidate; skipped: {skips}", i18n.A{"req": reqID, "skips": fmtSkips(skips)}))
 		if tier == "" {
-			s.fail(w, 404, fmt.Sprintf(
-				"模型 %q 既不是已知档位（%s），也不在任何 profile 的绑定里。跑 `newgate tier` 看可用绑定",
-				norm, strings.Join(domain.Roles, ", ")))
+			s.fail(w, 404, i18n.T(
+				"model {model} is neither a known tier ({tiers}) nor bound in any profile; run `newgate tier` for available bindings",
+				i18n.A{"model": norm, "tiers": strings.Join(domain.Roles, ", ")}))
 		} else {
-			s.fail(w, 404, fmt.Sprintf(
-				"档位 %q 在 profile %q 下没有可用候选（档位：%s）。跑 `newgate tier %s` 看每个候选为什么被跳过",
-				tier, active, strings.Join(domain.Roles, ", "), tier))
+			s.fail(w, 404, i18n.T(
+				"tier {tier} has no usable candidate under profile {profile} (tiers: {tiers}); run `newgate tier {tier}` to see why each candidate was skipped",
+				i18n.A{"tier": tier, "profile": active, "tiers": strings.Join(domain.Roles, ", ")}))
 		}
 		return
 	}
@@ -874,15 +880,15 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		isLast := i == len(steps)-1
 		if i > 0 && time.Now().After(deadline) {
 			metrics.Default.Inc("chain.budget_exhausted")
-			s.logf("[proxy] #%d 链总预算 %dms 用尽，停在第 %d 步",
-				reqID, st.Chain.Budget(), i)
+			s.logf("[proxy] %s", i18n.T("#{req} chain budget {budget} ms exhausted, stopping at step {step}",
+				i18n.A{"req": reqID, "budget": st.Chain.Budget(), "step": i}))
 			trail = append(trail, "budget-exhausted")
 			isLast = true
 		}
 		// 纯字节手术：只替换顶层 model 的值，其余每个字节原样保留
 		newBody, merr := rewrite.ReplaceTopLevelString(body, "model", a.Binding.Model)
 		if merr != nil {
-			s.fail(w, 500, "改写 model 失败: "+merr.Error())
+			s.fail(w, 500, i18n.Ef(merr, "rewriting model failed: {err}", nil).Error())
 			return
 		}
 		if hasToolOrigin {
@@ -915,14 +921,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				repaired, changes, rerr := schema.Repair(toolsRaw)
 				switch {
 				case rerr != nil:
-					s.logf("[proxy] #%d tools 修补跳过（解析失败，按原样发）: %v", reqID, rerr)
+					s.logf("[proxy] %s", i18n.T("#{req} tools repair skipped (parse failed, sending as-is): {err}", i18n.A{"req": reqID, "err": rerr}))
 				case len(changes) > 0:
 					if nb, serr := rewrite.ReplaceTopLevelRaw(newBody, "tools", repaired); serr == nil {
 						newBody = nb
-						s.logf("[proxy] #%d 补了 %d 个 tool 的 \"required\": []（语义无操作，"+
-							"为通过严格校验器）: %v", reqID, len(changes), changes)
+						s.logf("[proxy] %s", i18n.N(
+							"#{req} set \"required\": [] on {n} tool to pass strict validators (semantically a no-op): {changes}",
+							"#{req} set \"required\": [] on {n} tools to pass strict validators (semantically a no-op): {changes}",
+							len(changes), i18n.A{"req": reqID, "changes": changes}))
 					} else {
-						s.logf("[proxy] #%d tools 回写失败，按原样发: %v", reqID, serr)
+						s.logf("[proxy] %s", i18n.T("#{req} tools write-back failed, sending as-is: {err}", i18n.A{"req": reqID, "err": serr}))
 					}
 				}
 			}
@@ -978,9 +986,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		s.dump(reqID, i, body, newBody)
 		if gatewaystate.DebugActive(st) {
-			s.logf("[proxy] #%d 发往上游 %s\n    body(%d字节, 与原文差 %+d): %s",
-				reqID, target, len(newBody), len(newBody)-len(body),
-				truncate(string(redact(newBody)), 4000))
+			s.logf("[proxy] %s", i18n.T(
+				"#{req} sending upstream {target}\n    body({bytes} bytes, delta vs original {delta}): {body}",
+				i18n.A{"req": reqID, "target": target, "bytes": len(newBody),
+					"delta": len(newBody) - len(body),
+					"body":  truncate(string(redact(newBody)), 4000)}))
 		}
 		copyHeaders(req.Header, r.Header)
 		req.Header.Set("Content-Type", "application/json")
@@ -1031,8 +1041,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// 所以：不记失败、不开熔断、不往下走链、也不写 502（对面已经没人了）。
 			if cerr := r.Context().Err(); cerr != nil {
 				metrics.Default.Inc("client.cancel")
-				s.logf("[proxy] #%d %s 客户端在连接阶段就取消了（%v），停止整条链",
-					reqID, routeStr, cerr)
+				s.logf("[proxy] %s", i18n.T("#{req} {route} client cancelled during connect ({err}); stopping the whole chain",
+					i18n.A{"req": reqID, "route": routeStr, "err": cerr}))
 				return
 			}
 			if strings.Contains(derr.Error(), "timeout awaiting response headers") {
@@ -1057,14 +1067,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				if routed && route.FirstByteTimeout > 0 {
 					waitLimit = route.FirstByteTimeout
 				}
-				hint = fmt.Sprintf("  [首字节超过 %v——上游装死或排队]", waitLimit)
+				hint = i18n.T("  (first byte exceeded {limit} — upstream stalling or queued)", i18n.A{"limit": waitLimit})
 			}
-			s.logf("[proxy] #%d %s 连接失败: %v%s%s", reqID, routeStr, derr, v.Note, hint)
-			lastMsg, lastCode = fmt.Sprintf("上游 %s 连接失败: %v", a.Binding.Provider, derr), 502
+			s.logf("[proxy] %s", i18n.T("#{req} {route} connect failed: {err}{note}{hint}", i18n.A{"req": reqID, "route": routeStr, "err": derr, "note": v.Note, "hint": hint}))
+			lastMsg, lastCode = i18n.T("upstream {provider} connect failed: {err}", i18n.A{"provider": a.Binding.Provider, "err": derr}), 502
 			trail = append(trail, fmt.Sprintf("%s(conn)", a.Binding))
 			if advance(o, v) {
 				metrics.Default.Inc("chain.step_failed")
-				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
+				s.logf("[proxy] %s", i18n.T("advancing to next chain step: {step}", i18n.A{"step": steps[i+1]}))
 				continue
 			}
 			s.fail(w, 502, lastMsg)
@@ -1097,9 +1107,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			}
 			s.learnQuirks(reqID, a.Binding.Provider, a.Binding.Model, resp.StatusCode, eb)
 			if advance(o, v) {
-				s.logf("[proxy] %s -> %d%s  上游说: %s", routeStr, resp.StatusCode,
-					v.Note, trim(string(eb)))
-				s.logf("[proxy] → 沿链下一步: %s", steps[i+1])
+				s.logf("[proxy] %s", i18n.T("{route} -> {status}{note}  upstream said: {body}",
+					i18n.A{"route": routeStr, "status": resp.StatusCode, "note": v.Note,
+						"body": trim(string(eb))}))
+				s.logf("[proxy] %s", i18n.T("advancing to next chain step: {step}", i18n.A{"step": steps[i+1]}))
 				metrics.Default.Inc("chain.step_failed")
 				lastMsg, lastCode = trim(string(eb)), resp.StatusCode
 				trail = append(trail, fmt.Sprintf("%s(%d)", a.Binding, resp.StatusCode))
@@ -1108,31 +1119,33 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			base, evErr := s.saveErrEvidence(reqID, resp.StatusCode, body, newBody, eb,
 				r.Header, resp.Header, routeStr)
 			if evErr != nil {
-				s.logf("[proxy] #%d 上游 %d，证据落盘失败（目录建得起来但文件写不进去，"+
-					"查权限/磁盘；CLAUDE.md §3.1 记过这个坑）: %v", reqID, resp.StatusCode, evErr)
+				s.logf("[proxy] %s", i18n.T(
+					"#{req} upstream {code}, writing evidence failed (the directory is creatable but files are not writable; check permissions/disk — CLAUDE.md §3.1 records this trap): {err}",
+					i18n.A{"req": reqID, "code": resp.StatusCode, "err": evErr}))
 			} else {
-				s.logf("[proxy] #%d 上游 %d，完整证据已存 %s.*", reqID, resp.StatusCode, base)
+				s.logf("[proxy] %s", i18n.T("#{req} upstream {code}, full evidence saved to {base}.*", i18n.A{"req": reqID, "code": resp.StatusCode, "base": base}))
 			}
 			if ev := v.Evidence; ev != nil && !advance(o, v) {
 				// 这类结局要能一眼 grep 出来，而且要留一份不被滚动清理挤掉的
 				// 现场。`[shape-400]` 那个字面量与目录前缀**由认领它的策略给**
 				// （见 policy.Evidence）：转发路径不认识任何上游专有字符串，
 				// 也不知道这条 400 是哪家的方言。
-				s.logf("[%s] #%d %s 请求形状错误（判据 %s；证据 %s.*）",
-					ev.Tag, reqID, a.Binding.String(), ev.Subject, filepath.Base(base))
+				s.logf("[%s] %s", ev.Tag, i18n.T("#{req} {binding} request shape rejected (detector {detector}; evidence {base}.*)",
+					i18n.A{"req": reqID, "binding": a.Binding.String(), "detector": ev.Subject,
+						"base": filepath.Base(base)}))
 				if ev.Archive {
 					rdir, shErr := s.saveShapeEvidence(reqID, ev, body, newBody, eb,
 						r.Header, resp.Header, routeStr)
 					if shErr != nil {
-						s.logf("[%s] #%d 现场**没存下来**（查权限/磁盘）: %v", ev.Tag, reqID, shErr)
+						s.logf("[%s] %s", ev.Tag, i18n.T("#{req} scene NOT saved (check permissions/disk): {err}", i18n.A{"req": reqID, "err": shErr}))
 					} else {
-						s.logf("[%s] #%d 现场已存档 %s/", ev.Tag, reqID, rdir)
+						s.logf("[%s] %s", ev.Tag, i18n.T("#{req} scene archived to {dir}/", i18n.A{"req": reqID, "dir": rdir}))
 					}
 				}
 			}
-			s.logf("[proxy] #%d 上游原文: %s", reqID, truncate(string(redact(eb)), 2000))
-			s.logf("[proxy] #%d 我们发出的 body(%d字节): %s", reqID, len(newBody),
-				truncate(string(redact(newBody)), 4000))
+			s.logf("[proxy] %s", i18n.T("#{req} upstream raw: {body}", i18n.A{"req": reqID, "body": truncate(string(redact(eb)), 2000)}))
+			s.logf("[proxy] %s", i18n.T("#{req} body we sent ({bytes} bytes): {body}", i18n.A{"req": reqID,
+				"bytes": len(newBody), "body": truncate(string(redact(newBody)), 4000)}))
 
 			for k, vs := range resp.Header {
 				if respHopHeaders[http.CanonicalHeaderKey(k)] || http.CanonicalHeaderKey(k) == "Content-Length" {
@@ -1161,11 +1174,13 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			metrics.Default.Inc("chain.failover")
 		}
 		if gatewaystate.DebugActive(st) {
-			s.logf("[proxy] #%d 上游响应头 %d%s", reqID, resp.StatusCode, headerDump(resp.Header))
+			s.logf("[proxy] %s", i18n.T("#{req} upstream response headers {code}{headers}", i18n.A{"req": reqID, "code": resp.StatusCode, "headers": headerDump(resp.Header)}))
 		}
-		s.logf("[proxy] #%d %s  %s  %d  首字节%dms  stream=%v  profile=%s%s",
-			reqID, routeStr, suffix, resp.StatusCode, time.Since(start).Milliseconds(),
-			stream, a.Profile, map[bool]string{true: "  (已转移)"}[i > 0])
+		s.logf("[proxy] %s", i18n.T(
+			"#{req} {route}  {path}  {status}  first byte {ms} ms  stream={stream}  profile={profile}{failover}",
+			i18n.A{"req": reqID, "route": routeStr, "path": suffix, "status": resp.StatusCode,
+				"ms": time.Since(start).Milliseconds(), "stream": stream, "profile": a.Profile,
+				"failover": map[bool]string{true: i18n.T("  (failover)", nil)}[i > 0]}))
 
 		for k, vs := range resp.Header {
 			if respHopHeaders[http.CanonicalHeaderKey(k)] {
@@ -1203,8 +1218,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if n > 0 {
 				if _, werr := w.Write(buf[:n]); werr != nil {
 					metrics.Default.Inc("client.cancel")
-					s.logf("[proxy] #%d 客户端断开（已转发 %d 块 / %d 字节）: %v",
-						reqID, chunks, bytesOut, werr)
+					s.logf("[proxy] %s", i18n.T("#{req} client disconnected (forwarded {chunks} chunks / {bytes} bytes): {err}",
+						i18n.A{"req": reqID, "chunks": chunks, "bytes": bytesOut, "err": werr}))
 					return
 				}
 				if stream {
@@ -1232,8 +1247,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 						// **身份**，不是内容——它是把「这一轮存了」和下一轮「这轮
 						// 补上了原文 / 这轮没有原文可补」对起来的唯一线索
 						// （见 st-reasoning.go 的 skipCause）。2026-09-18 加。
-						s.logf("[proxy] #%d 记下本轮推理内容 %d 字节 / %d 个 key %v，"+
-							"下一轮替客户端补回去", reqID, nb, nk, keysForLog(ob.Keys()))
+						s.logf("[proxy] %s", i18n.N(
+							"#{req} recorded {bytes} bytes of reasoning and {n} key {keys} this round; replaying them to the client next round",
+							"#{req} recorded {bytes} bytes of reasoning and {n} keys {keys} this round; replaying them to the client next round",
+							nk, i18n.A{"req": reqID, "bytes": nb, "keys": keysForLog(ob.Keys())}))
 					} else if ntc := ob.ToolCalls(); ntc > 0 {
 						// 有 tool call 却一个字节推理都没有：下一轮这些历史消息
 						// **一条都补不上**（插件不编占位符，见 st-reasoning.go 文件头），
@@ -1246,21 +1263,23 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 						// 的 adaptive（Claude Code 的默认值），收到 adaptive 时一个思考
 						// 块都不吐——请求侧完全合法、日志全绿，只有把这个值打出来才看
 						// 得出「不是缓存坏了，是上游根本没思考」。
-						s.logf("[proxy] #%d 本轮上游没给推理内容（%d 个 tool call，"+
-							"请求 thinking=%s，tool id %v）；线路层：%s。"+
-							"下一轮这些历史消息一条都补不上（不编占位符）",
-							reqID, ntc, thinkingTagOf(newBody), keysForLog(ob.Keys()), ob.Wire())
+						s.logf("[proxy] %s", i18n.N(
+							"#{req} upstream sent no reasoning this round ({n} tool call, request thinking={thinking}, tool id {keys}); wire layer: {wire}. None of these history messages can be replayed next round (no placeholders are fabricated)",
+							"#{req} upstream sent no reasoning this round ({n} tool calls, request thinking={thinking}, tool id {keys}); wire layer: {wire}. None of these history messages can be replayed next round (no placeholders are fabricated)",
+							ntc, i18n.A{"req": reqID, "thinking": thinkingTagOf(newBody),
+								"keys": keysForLog(ob.Keys()), "wire": ob.Wire()}))
 					}
 					if stream {
-						s.logf("[proxy] #%d 流正常结束：%d 块 / %d 字节 / 总 %dms",
-							reqID, chunks, bytesOut, time.Since(start).Milliseconds())
+						s.logf("[proxy] %s", i18n.T("#{req} stream ended normally: {chunks} chunks / {bytes} bytes / {ms} ms total",
+							i18n.A{"req": reqID, "chunks": chunks, "bytes": bytesOut,
+								"ms": time.Since(start).Milliseconds()}))
 					} else {
-						s.logf("[proxy] #%d 非流式响应结束：%d 字节 / 总 %dms",
-							reqID, bytesOut, time.Since(start).Milliseconds())
+						s.logf("[proxy] %s", i18n.T("#{req} non-stream response ended: {bytes} bytes / {ms} ms total",
+							i18n.A{"req": reqID, "bytes": bytesOut, "ms": time.Since(start).Milliseconds()}))
 					}
 				case r.Context().Err() != nil:
 					metrics.Default.Inc("client.cancel")
-					s.logf("[proxy] #%d 客户端取消，已掐断上游（省下后续 token）", reqID)
+					s.logf("[proxy] %s", i18n.T("#{req} client cancelled; upstream cut off (saves the remaining tokens)", i18n.A{"req": reqID}))
 				default:
 					// 响应已经开始往客户端写，中途上游断了。换不了站（写出去的
 					// 东西收不回），但这是实打实的可用性问题——以前这里只打一行
@@ -1275,8 +1294,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					if v.Attribute {
 						atomic.AddUint64(&s.failures, 1)
 					}
-					s.logf("[proxy] #%d 上游断流（已转发 %d 块 / %d 字节）: %v%s",
-						reqID, chunks, bytesOut, rderr, v.Note)
+					s.logf("[proxy] %s", i18n.T("#{req} upstream stream cut (forwarded {chunks} chunks / {bytes} bytes): {err}{note}",
+						i18n.A{"req": reqID, "chunks": chunks, "bytes": bytesOut, "err": rderr, "note": v.Note}))
 				}
 				return
 			}
@@ -1291,8 +1310,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 // 会往他的请求里多加东西。
 func (s *Server) learnQuirks(reqID uint64, provider, model string, status int, body []byte) {
 	for _, what := range quirk.Default.Learn(provider, model, status, body) {
-		s.logf("[proxy] #%d 学到：%s/%s %s —— 下次请求自动补上（newgate st 可关）",
-			reqID, provider, model, what)
+		s.logf("[proxy] %s", i18n.T("#{req} learned {provider}/{model} {what} — applied to later requests automatically (turn off with `newgate st`)",
+			i18n.A{"req": reqID, "provider": provider, "model": model, "what": what}))
 	}
 }
 
@@ -1318,9 +1337,9 @@ func (s *Server) dump(reqID uint64, attempt int, in, out []byte) {
 			errs = append(errs, err)
 		}
 	}
-	same := "改写后与原文长度差 " + fmt.Sprint(len(out)-len(in)) + " 字节"
+	same := i18n.T("length delta vs original after rewrite: {diff} bytes", i18n.A{"diff": len(out) - len(in)})
 	if err := errors.Join(errs...); err != nil {
-		s.logf("[proxy] #%d dump 落盘失败（查权限/磁盘）: %v", reqID, err)
+		s.logf("[proxy] %s", i18n.T("#{req} dump write failed (check permissions/disk): {err}", i18n.A{"req": reqID, "err": err}))
 	} else {
 		s.logf("[proxy] #%d dump → %s.{in,out}.json  (%s)", reqID, base, same)
 	}
@@ -1366,8 +1385,9 @@ func (s *Server) saveErrEvidence(reqID uint64, status int, inBody, outBody, resp
 		return "", err
 	}
 	base := filepath.Join(dir, fmt.Sprintf("err-%03d-req%06d", status, reqID))
-	meta := fmt.Sprintf("route: %s\nstatus: %d\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
-		routeStr, status, headerDump(reqHdr), headerDump(respHdr))
+	meta := i18n.T("route: {route}\nstatus: {status}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n",
+		i18n.A{"route": routeStr, "status": status,
+			"reqHeaders": headerDump(reqHdr), "respHeaders": headerDump(respHdr)})
 	var errs []error
 	for _, f := range []struct {
 		path string
@@ -1414,8 +1434,9 @@ func (s *Server) saveShapeEvidence(reqID uint64, ev *policy.Evidence, inBody, ou
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	meta := fmt.Sprintf("route: %s\nstatus: 400\ntag: %s\ndetector: %s\n\n--- 客户端请求头 ---%s\n\n--- 上游响应头 ---%s\n",
-		routeStr, ev.Tag, ev.Subject, headerDump(reqHdr), headerDump(respHdr))
+	meta := i18n.T("route: {route}\nstatus: 400\ntag: {tag}\ndetector: {detector}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n",
+		i18n.A{"route": routeStr, "tag": ev.Tag, "detector": ev.Subject,
+			"reqHeaders": headerDump(reqHdr), "respHeaders": headerDump(respHdr)})
 	var errs []error
 	for _, f := range []struct {
 		name string
@@ -1542,7 +1563,7 @@ func truncate(s string, n int) string {
 	if len(r) <= n {
 		return s
 	}
-	return string(r[:n]) + fmt.Sprintf("…(截断，共 %d 字符)", len(r))
+	return string(r[:n]) + i18n.T("…(truncated, {n} characters total)", i18n.A{"n": len(r)})
 }
 
 // keysForLog 把 thinkcache 的 key 列表收窄成日志里该出现的那部分。
@@ -1577,7 +1598,7 @@ func keysForLog(keys []string) []string {
 		texts++
 	}
 	if texts > 0 {
-		out = append(out, fmt.Sprintf("+%d 个正文 key", texts))
+		out = append(out, i18n.N("+{n} body key", "+{n} body keys", texts, i18n.A{"n": texts}))
 	}
 	return out
 }
@@ -1592,11 +1613,11 @@ func keysForLog(keys []string) []string {
 func thinkingTagOf(body []byte) string {
 	raw, has := rewrite.TopLevelRaw(body, "thinking")
 	if !has {
-		return "(字段缺席)"
+		return i18n.T("(field absent)", nil)
 	}
 	t, ok := rewrite.TopLevelString(raw, "type")
 	if !ok || t == "" {
-		return "(认不出)"
+		return i18n.T("(unrecognized)", nil)
 	}
 	return t
 }
@@ -1611,13 +1632,13 @@ func trim(s string) string {
 
 func (s *Server) fail(w http.ResponseWriter, code int, msg string) {
 	atomic.AddUint64(&s.failures, 1)
-	s.logf("[proxy] 错误 %d: %s", code, msg)
+	s.logf("[proxy] %s", i18n.T("error {code}: {msg}", i18n.A{"code": code, "msg": msg}))
 	// 错误体里必须带 newgate 字样和排查命令（docs/05-gateway.md）
 	writeJSON(w, code, map[string]interface{}{
 		"error": map[string]interface{}{
 			"type":    "newgate_error",
 			"message": "[newgate] " + msg,
-			"hint":    "排查：newgate status / newgate doctor / newgate stop（一键恢复直连）",
+			"hint":    i18n.T("troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)", nil),
 		},
 	})
 }
@@ -1682,9 +1703,9 @@ func (s *Server) writeShortCircuit(w http.ResponseWriter, _ *http.Request,
 	reqID uint64, plugin string, body []byte, note string) {
 	metrics.Default.Inc("special." + plugin + ".shortcircuit")
 	if note == "" {
-		note = "请求被 special 插件 " + plugin + " 短路（未调用上游）"
+		note = i18n.T("request short-circuited by special plugin {plugin} (no upstream call)", i18n.A{"plugin": plugin})
 	}
-	s.logf("[proxy] #%d %s（%d 字节）", reqID, note, len(body))
+	s.logf("[proxy] %s", i18n.T("#{req} {note} ({bytes} bytes)", i18n.A{"req": reqID, "note": note, "bytes": len(body)}))
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Newgate-Route", "naked:"+plugin)
 	w.Header().Set("X-Newgate-Chain", plugin)

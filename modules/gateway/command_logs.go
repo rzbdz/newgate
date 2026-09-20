@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
@@ -37,7 +38,7 @@ func (logsCommand) Unstyled([]string) bool { return true }
 
 func (logsCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionObserve, Rank: rankObserve,
-		Usage: "logs [N] [-f]", Summary: "代理日志：终端上分页，-f 持续跟随"}
+		Usage: "logs [N] [-f]", Summary: i18n.T("Proxy log: paged in the terminal, -f keeps following", nil)}
 }
 
 func (logsCommand) Run(host cliapi.Host, args []string) int {
@@ -73,11 +74,12 @@ func runLogs(host cliapi.Host, n int, follow bool) int {
 	}
 	b, err := ioutil.ReadFile(paths.LogFile())
 	if err != nil {
-		return host.Die(69, "读不到日志 "+paths.LogFile()+"："+err.Error())
+		return host.Die(69, i18n.T("Cannot read the log {path}: {err}",
+			i18n.A{"path": paths.LogFile(), "err": err.Error()}))
 	}
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	if len(lines) == 1 && lines[0] == "" {
-		fmt.Println(style.Dim("  日志是空的"))
+		fmt.Println(style.Dim(i18n.T("  The log is empty", nil)))
 		return 0
 	}
 	limit := n

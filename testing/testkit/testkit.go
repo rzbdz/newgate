@@ -26,6 +26,7 @@ package testkit
 
 import (
 	"context"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"os"
 	"path/filepath"
 	"sort"
@@ -66,6 +67,9 @@ func Sandbox(t *testing.T) *Env {
 		"NEWGATE_HOME":       env.Home,
 		"NEWGATE_TARGET_DIR": env.Targets,
 		"HOME":               filepath.Join(root, "home"),
+		// 语言**钉住**而不是只清掉：测试会断言渲染出来的文本，钉住「源语言」
+		// （英文）才有稳定的期望值。要测译文的用例自己 t.Setenv 成 zh-Hans。
+		"NEWGATE_LANG": i18n.SourceLang,
 	})
 	unset := clearEnv(
 		// 父会话可能带着这些；不清就会改变被测行为。
@@ -73,6 +77,9 @@ func Sandbox(t *testing.T) *Env {
 		"CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
 		// 优雅交接的 fd 契约：继承到测试进程里会被当成真 socket 用。
 		"NEWGATE_LISTENER_FD", "NEWGATE_READY_FD",
+		// 跑测试的 shell 多半带着 LANG=zh_CN.UTF-8（开发机）或 C（runner）：
+		// 不清的话「默认语言 = 源语言」这类断言会在一个环境绿、另一个红。
+		"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE",
 	)
 	t.Cleanup(func() {
 		unset()

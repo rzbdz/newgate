@@ -3,11 +3,17 @@ package metrics
 import (
 	"strings"
 
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/gateway/special"
 )
 
-// Group 返回计数器归属的组。分组是给人看的锚点——一眼扫过就知道「有没有在
-// 换人」「有没有超时」，不用逐个读计数器名。
+// Group 返回计数器归属的组：**身份**（ASCII 稳定标识）与**说法**（给人看的锚点）。
+//
+// 为什么要分成两样：`newgate metrics` 那张表按组排序，而那个顺序讲的是**一次请求
+// 的生命周期**（请求 → 链 → 超时 → 兜底 → 插件 → 熔断 → 客户端）——顺序本身是
+// 内容，不是版式。排序就得拿一个**与语言无关**的东西去对；拿说法去对，换个语言
+// 顺序就可能跟着变（两门语言里那几个词没有共同的次序），于是中文用户和英文用户
+// 看到的不是同一张表。身份管排序与去重，说法只管印出来。
 //
 // **为什么这张表住在这里而不是 CLI**：这些名字是转发热路径产生的（全部由
 // gateway/forward 里的 metrics.Default.Inc 写下），含义只有数据面知道。CLI 的
@@ -19,22 +25,24 @@ import (
 // 策略账本（policy.Registry.MetricGroup），没人认领才落到这里。`breaker.*`
 // 那三行 2026-09-18 就是这么搬回 modules/breaker 的——熔断器打开意味着什么，
 // 不该由这个包解释。
-func Group(k string) string {
+//
+// 身份也**不翻译**：它是计数器与表格之间那份契约的键，只在本进程内用。
+func Group(k string) (id, label string) {
 	switch {
 	case strings.HasPrefix(k, "requests."):
-		return "请求"
+		return "requests", i18n.T("requests", nil)
 	case strings.HasPrefix(k, "chain."):
-		return "链"
+		return "chain", i18n.T("chain", nil)
 	case strings.HasPrefix(k, "timeout."):
-		return "超时"
+		return "timeout", i18n.T("timeout", nil)
 	case strings.HasPrefix(k, "client."):
-		return "客户端"
+		return "client", i18n.T("client", nil)
 	case strings.HasPrefix(k, "special."):
-		return "插件"
+		return "plugin", i18n.T("plugin", nil)
 	case strings.HasPrefix(k, "count_tokens."):
-		return "兜底"
+		return "fallback", i18n.T("fallback", nil)
 	}
-	return "其他"
+	return "other", i18n.T("other", nil)
 }
 
 // Hint 返回计数器名字的人话注释。没列出的不硬凑——空说明比编一句好。
@@ -45,32 +53,32 @@ func Group(k string) string {
 func Hint(k string) string {
 	switch {
 	case k == "requests.total":
-		return "进入网关的请求"
+		return i18n.T("requests entering the gateway", nil)
 	case k == "count_tokens.forwarded":
-		return "转发上游取真值"
+		return i18n.T("forwarded upstream to get the true value", nil)
 	case k == "count_tokens.local":
-		return "本地粗估兜底（上游无此端点）"
+		return i18n.T("local rough estimate fallback (upstream has no such endpoint)", nil)
 	case k == "count_tokens.probe_404":
-		return "lazy probe 404，记为「上游不支持」"
+		return i18n.T("lazy probe returned 404, recorded as upstream unsupported", nil)
 	case k == "timeout.first_byte.non_stream":
-		return "首字节超时（非流式），沿链下移"
+		return i18n.T("first byte timed out (non-stream), moved down the chain", nil)
 	case k == "timeout.first_byte.stream":
-		return "首字节超时（流式），沿链下移"
+		return i18n.T("first byte timed out (stream), moved down the chain", nil)
 	case strings.HasPrefix(k, "timeout.first_byte"):
-		return "首字节超时，沿链下移"
+		return i18n.T("first byte timed out, moved down the chain", nil)
 	case k == "chain.failover":
-		return "前序候选失败，换到后续候选后成功"
+		return i18n.T("an earlier candidate failed and a later one succeeded", nil)
 	case k == "chain.step_failed":
-		return "链上某站失败（连接 / 可转移错误）"
+		return i18n.T("a chain step failed (connection / transferable error)", nil)
 	case k == "chain.budget_exhausted":
-		return "链总预算用尽"
+		return i18n.T("chain budget exhausted", nil)
 	case k == "client.cancel":
-		return "客户端主动取消"
+		return i18n.T("cancelled by the client", nil)
 	case strings.HasPrefix(k, "special."):
 		if hint, ok := special.MetricHint(k); ok {
 			return hint
 		}
-		return "插件改写了请求（逐条有日志）"
+		return i18n.T("a plugin rewrote the request (each rewrite is logged)", nil)
 	}
 	return ""
 }

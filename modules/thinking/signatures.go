@@ -1,6 +1,7 @@
 package thinking
 
 import (
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/gateway/quirk"
 )
 
@@ -26,6 +27,9 @@ import (
 func signatures() []quirk.Signature {
 	return []quirk.Signature{{
 		Flag: quirk.NoThinkingDisable,
+		// Any 里是**逐字节的上游报错原文**：它们是匹配判据（判据在 quirk 那一侧
+		// 做 bytes.Contains），不是给人看的文案，所以**不走 i18n**——翻掉一条等于
+		// 这条签名永远匹配不上，症状是「quirk 学不到这家」（这个坑在文件头记着）。
 		Any: []string{
 			// 智谱 GLM，code 1210。
 			"不支持关闭思考",
@@ -39,6 +43,6 @@ func signatures() []quirk.Signature {
 			// 上游回这句）。
 			"only type=enabled is allowed",
 		},
-		Label: "该模型始终思考",
+		Label: i18n.T("this model always thinks", nil),
 	}}
 }

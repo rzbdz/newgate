@@ -61,8 +61,9 @@ fallback = kimi/kimi-k3
 		t.Fatalf("fallback 解析错: %v", p.Fallback)
 	}
 
-	// 未知 key 报错——拼错字段名被静默忽略是最坑人的
-	if _, err := ParseProfileKV("midle=x\n"); err == nil || !strings.Contains(err.Error(), "不认识") {
+	// 未知 key 报错——拼错字段名被静默忽略是最坑人的。
+	// 断言英文（源语言）：文案是 i18n 的译文，身份才是这句话本身。
+	if _, err := ParseProfileKV("midle=x\n"); err == nil || !strings.Contains(err.Error(), "unknown key") {
 		t.Fatalf("未知 key 该报错，实际 %v", err)
 	}
 	// 坏布尔不猜
@@ -153,7 +154,7 @@ func TestLoadProfileExtendsCycle(t *testing.T) {
 	dir := kvSandbox(t)
 	writeMapping(t, dir, "a.kv", "extends=b\n")
 	writeMapping(t, dir, "b.kv", "extends=a\n")
-	if _, err := LoadProfile("a"); err == nil || !strings.Contains(err.Error(), "成环") {
+	if _, err := LoadProfile("a"); err == nil || !strings.Contains(err.Error(), "extends cycle") {
 		t.Fatalf("extends 成环该报错，实际 %v", err)
 	}
 	// extends 不存在的 base

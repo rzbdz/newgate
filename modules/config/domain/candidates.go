@@ -2,8 +2,9 @@ package domain
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
+
+	"github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Candidates 一个键的候选列表。接受四种 JSON 写法，内部统一成 list：
@@ -32,7 +33,7 @@ func (c *Candidates) UnmarshalJSON(b []byte) error {
 		for i, r := range raw {
 			bd, err := parseBinding(r)
 			if err != nil {
-				return fmt.Errorf("第 %d 个候选: %w", i+1, err)
+				return i18n.Ef(err, "candidate {n}: {err}", i18n.A{"n": i + 1})
 			}
 			out = append(out, bd)
 		}
@@ -59,7 +60,7 @@ func (c Candidates) MarshalJSON() ([]byte, error) {
 func parseBinding(raw json.RawMessage) (Binding, error) {
 	s := strings.TrimSpace(string(raw))
 	if s == "" {
-		return Binding{}, fmt.Errorf("空绑定")
+		return Binding{}, i18n.E("empty binding", nil)
 	}
 	if s[0] == '"' {
 		var str string
@@ -74,11 +75,13 @@ func parseBinding(raw json.RawMessage) (Binding, error) {
 	}
 	switch {
 	case b.Ref != "" && (b.Provider != "" || b.Model != ""):
-		return Binding{}, fmt.Errorf("引用（ref）与 provider/model 不能混着写: %s", s)
+		return Binding{}, i18n.E("a ref and provider/model cannot be combined: {binding}",
+			i18n.A{"binding": s})
 	case b.Ref != "":
 		return b, nil
 	case b.Provider == "" || b.Model == "":
-		return Binding{}, fmt.Errorf("provider 和 model 都不能为空: %s", s)
+		return Binding{}, i18n.E("provider and model must both be set: {binding}",
+			i18n.A{"binding": s})
 	}
 	return b, nil
 }
@@ -90,16 +93,19 @@ func ParseBindingString(s string) (Binding, error) {
 	if strings.HasPrefix(s, "@") {
 		ref := strings.TrimSpace(s[1:])
 		if ref == "" {
-			return Binding{}, fmt.Errorf("引用要写成 @键名，得到 %q", s)
+			return Binding{}, i18n.E("a ref must name a key, as in @key: {binding}",
+				i18n.A{"binding": s})
 		}
 		if strings.ContainsAny(ref, "/ ") {
-			return Binding{}, fmt.Errorf("引用只写键名，不带 provider/模型：%q", s)
+			return Binding{}, i18n.E("a ref carries the key only, no provider/model: {binding}",
+				i18n.A{"binding": s})
 		}
 		return Binding{Ref: ref}, nil
 	}
 	i := strings.Index(s, "/")
 	if i <= 0 || i == len(s)-1 {
-		return Binding{}, fmt.Errorf("绑定要写成 provider/model，得到 %q", s)
+		return Binding{}, i18n.E("a binding must be provider/model: {binding}",
+			i18n.A{"binding": s})
 	}
 	return Binding{Provider: s[:i], Model: s[i+1:]}, nil
 }

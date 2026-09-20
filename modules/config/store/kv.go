@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 )
 
@@ -46,11 +47,13 @@ func ParseProfileKV(text string) (*domain.Profile, error) {
 		}
 		eq := strings.IndexByte(line, '=')
 		if eq <= 0 {
-			return nil, fmt.Errorf("第 %d 行不像 key=value: %q", ln+1, line)
+			return nil, i18n.E("line {line} is not key=value: {text}",
+				i18n.A{"line": ln + 1, "text": line})
 		}
 		key, val := strings.TrimSpace(line[:eq]), strings.TrimSpace(line[eq+1:])
 		if val == "" {
-			return nil, fmt.Errorf("第 %d 行 %s= 的值是空的", ln+1, key)
+			return nil, i18n.E("line {line}: {key}= has an empty value",
+				i18n.A{"line": ln + 1, "key": key})
 		}
 		var err error
 		switch {
@@ -93,11 +96,12 @@ func ParseProfileKV(text string) (*domain.Profile, error) {
 				p.Roles[key[len("role."):]] = c
 			}
 		default:
-			return nil, fmt.Errorf("第 %d 行不认识的 key %q（写错字会被静默忽略，"+
-				"所以这里宁可报错）", ln+1, key)
+			return nil, i18n.E("line {line}: unknown key {key} (a typo would be silently "+
+				"ignored, so this errors instead)", i18n.A{"line": ln + 1, "key": key})
 		}
 		if err != nil {
-			return nil, fmt.Errorf("第 %d 行 %s=%s: %v", ln+1, key, val, err)
+			return nil, i18n.Ef(err, "line {line}: {key}={value}: {err}",
+				i18n.A{"line": ln + 1, "key": key, "value": val})
 		}
 	}
 	return p, nil
@@ -110,7 +114,7 @@ func parseBool(v string) (bool, error) {
 	case "false", "0":
 		return false, nil
 	}
-	return false, fmt.Errorf("布尔值只认 true/false，不猜")
+	return false, i18n.E("booleans are true/false only, no guessing", nil)
 }
 
 // parseCandidates `provider/model`、`@别的键`（引用）或裸模型名，逗号分隔多个候选。
@@ -138,7 +142,7 @@ func parseCandidates(val string) (domain.Candidates, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("没有有效的候选")
+		return nil, i18n.E("no valid candidate", nil)
 	}
 	return out, nil
 }

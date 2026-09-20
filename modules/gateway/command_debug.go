@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/rzbdz/newgate/lib/durarg"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
@@ -33,8 +35,8 @@ func (debugCommand) Names() []string { return []string{"debug"} }
 func (debugCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
 		Section: cliapi.SectionObserve, Rank: rankObserve,
-		Usage:   "debug on|off [分钟]",
-		Summary: "全量请求日志（默认 30 分钟自动关）",
+		Usage:   i18n.T("debug on|off [minutes]", nil),
+		Summary: i18n.T("Full request log (turns itself off after 30 minutes by default)", nil),
 	}
 }
 
@@ -45,12 +47,13 @@ func (debugCommand) Run(host cliapi.Host, args []string) int {
 	// 成本远高于多敲一个 on/off。
 	switch arg {
 	case "":
-		return host.Die(64, "用法：newgate debug on [分钟] [--forever] | off（不带参数不改任何东西）")
+		return host.Die(64, i18n.T("Usage: newgate debug on [minutes] [--forever] | off (no argument changes anything)", nil))
 	case "on", "off":
 	default:
 		// `newgate debug 30` 是「开 30 分钟」的简写，保留。
 		if _, err := durarg.Parse(arg); err != nil {
-			return host.Die(64, fmt.Sprintf("debug: 不认识的参数 %q（on / off / 分钟数，如 30）", arg))
+			return host.Die(64, i18n.T("debug: unrecognized argument {arg} (on / off / a number of minutes, e.g. 30)",
+				i18n.A{"arg": strconv.Quote(arg)}))
 		}
 	}
 	on := arg != "off"
@@ -80,17 +83,17 @@ func (debugCommand) Run(host cliapi.Host, args []string) int {
 		return 0
 	}
 	if ttl > 0 {
-		fmt.Println(style.Item(style.OK, fmt.Sprintf("debug on · %s 后自动关闭",
-			durarg.Format(int(ttl.Seconds())))))
-		fmt.Println(style.Hint("不设期限：newgate debug on --forever"))
+		fmt.Println(style.Item(style.OK, i18n.T("debug on · turns itself off after {after}",
+			i18n.A{"after": durarg.Format(int(ttl.Seconds()))})))
+		fmt.Println(style.Hint(i18n.T("No expiry: newgate debug on --forever", nil)))
 	} else {
-		fmt.Println(style.Item(style.Warn, "debug on · 不自动关闭"))
-		fmt.Println(style.Hint("记得 newgate debug off"))
+		fmt.Println(style.Item(style.Warn, i18n.T("debug on · does not turn itself off", nil)))
+		fmt.Println(style.Hint(i18n.T("Turn it off with newgate debug off", nil)))
 	}
-	fmt.Println(style.Hint("日志 " + paths.LogFile() + " · 16MB 轮转，保留 4 份"))
+	fmt.Println(style.Hint(i18n.T("Log {path} · 16MB rotation, 4 files kept", i18n.A{"path": paths.LogFile()})))
 	host.NotifyProxy()
 	if host.DaemonRunning() {
-		fmt.Println(style.Hint("即刻生效，无需重启"))
+		fmt.Println(style.Hint(i18n.T("Takes effect immediately, no restart needed", nil)))
 	}
 	return 0
 }

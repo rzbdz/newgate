@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/store"
@@ -30,7 +31,7 @@ func (agentsCommand) Names() []string { return []string{"agents"} }
 
 func (agentsCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
-		Usage: "agents", Summary: "已知 agent 及其模型槽位"}
+		Usage: "agents", Summary: i18n.T("known agents and their model slots", nil)}
 }
 
 func (c agentsCommand) Run(_ cliapi.Host, _ []string) int { return runAgents(c.agents) }
@@ -44,7 +45,7 @@ func runAgents(agents AgentCatalog) int {
 	names := agents.Names()
 	sort.Strings(names)
 
-	fmt.Println(style.Title("newgate agents", fmt.Sprintf("%d 个", len(names))))
+	fmt.Println(style.Title("newgate agents", i18n.T("{n} total", i18n.A{"n": len(names)})))
 	fmt.Println(style.Rule(72))
 
 	for _, n := range names {
@@ -55,16 +56,16 @@ func runAgents(agents AgentCatalog) int {
 		}
 		fmt.Println()
 		fmt.Println("  " + style.Bold(a.ID) +
-			style.Dim("   "+a.Dialect+" 方言") +
+			style.Dim("   "+i18n.T("{dialect} dialect", i18n.A{"dialect": a.Dialect})) +
 			style.Dim("   profile ") + style.Cyan(profile))
 		if a.Notes != "" {
 			fmt.Println(style.Hint(a.Notes))
 		}
 		if len(a.Slots) == 0 {
-			fmt.Println(style.Hint("槽位在启动时从配置文件发现"))
+			fmt.Println(style.Hint(i18n.T("slots are discovered from the config file at startup", nil)))
 			continue
 		}
-		t := style.NewTable("槽位", "档位", "环境变量")
+		t := style.NewTable(i18n.T("Slot", nil), i18n.T("Tier", nil), i18n.T("Env var", nil))
 		for _, s := range a.Slots {
 			t.Row(s.Name, style.Cyan(s.Tier), s.EnvVar)
 		}
@@ -78,7 +79,7 @@ func runAgents(agents AgentCatalog) int {
 	}
 
 	fmt.Println()
-	fmt.Println(style.Hint("只切单个 agent：newgate --set-profile <名> --agent <agent>"))
+	fmt.Println(style.Hint(i18n.T("switch a single agent only: newgate --set-profile <name> --agent <agent>", nil)))
 	return 0
 }
 
@@ -92,12 +93,13 @@ var _ cliapi.Glossarist = glossary{}
 
 func (g glossary) Glossary() []cliapi.GlossaryLine {
 	names := g.agents.Names()
-	list := "（未装配）"
+	list := i18n.T("(not assembled)", nil)
 	switch {
 	case len(names) == 0:
-		list = "（无）"
+		list = i18n.T("(none)", nil)
 	default:
 		list = strings.Join(names, " / ")
 	}
-	return []cliapi.GlossaryLine{{Rank: 10, Term: "agent", Definition: "被接管的 CLI：" + list}}
+	return []cliapi.GlossaryLine{{Rank: 10, Term: "agent",
+		Definition: i18n.T("CLIs taken over: {list}", i18n.A{"list": list})}}
 }

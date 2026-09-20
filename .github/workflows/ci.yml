@@ -84,6 +84,12 @@ jobs:
       - name: 装配清单是否过期
         run: make check-generate
 
+      # 本地化：账本是否过期、译文占位符是否对得上、有没有孤儿键、
+      # 源码里还剩多少中文未迁移。全部离线、不花钱——要调 LLM 的翻译
+      # （tools/i18n sync）只在开发者本地跑，不进 CI。
+      - name: 本地化（账本与目录）
+        run: make check-i18n
+
       # GOPROXY=off 把「内核的构建与测试完全离线」变成 CI 会红的事实，而不是
       # 一句承诺（2026-09-20 起成立：清单只扫本仓库的 modules/，发行版是另一个
       # Go module，不再有构建期 clone）。哪天有人塞回一个构建期外部依赖，

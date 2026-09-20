@@ -1,0 +1,3088 @@
+{
+  "meta": {
+    "language": "zh-Hans",
+    "source": "en",
+    "widths": {
+      "label": 8,
+      "term": 12
+    }
+  },
+  "messages": {
+    "\n  built at {time}": {
+      "text": "\n  构建于 {time}",
+      "reviewed": true
+    },
+    "\n  committed at {time}": {
+      "text": "\n  提交于 {time}",
+      "reviewed": true
+    },
+    "        {mark} waiting: {part}": {
+      "text": "        {mark} 等待中: {part}",
+      "reviewed": true
+    },
+    "      newgate leaves no record of it in its log.": {
+      "text": "      newgate 日志不会留下任何记录。",
+      "reviewed": true
+    },
+    "   Adds an empty array when a tool schema lacks required": {
+      "text": "   工具 schema 缺 required 时补一个空数组",
+      "reviewed": true
+    },
+    "   Requests forwarded unchanged, upstream quirks no longer patched": {
+      "text": "   请求原样转发，上游怪癖不再补",
+      "reviewed": true
+    },
+    "   Tool schemas are forwarded unchanged": {
+      "text": "   工具 schema 原样转发",
+      "reviewed": true
+    },
+    "   old .json → .json.bak": {
+      "text": "   旧 .json → .json.bak",
+      "reviewed": true
+    },
+    "   restore: newgate st on · newgate schema-repair on · newgate debug off": {
+      "text": "   恢复：newgate st on · newgate schema-repair on · newgate debug off",
+      "reviewed": true
+    },
+    "   these bindings are still in the chain": {
+      "text": "   这些 binding 仍然在链上",
+      "reviewed": true
+    },
+    "   ✓ supported  ✗ probed and unsupported  ? not probed": {
+      "text": "   ✓ 支持  ✗ 探过不支持  ? 未探",
+      "reviewed": true
+    },
+    "  (failover)": {
+      "text": "  (已转移)",
+      "reviewed": true
+    },
+    "  (first byte exceeded {limit} — upstream stalling or queued)": {
+      "text": "  (首字节超过 {limit}——上游装死或排队)",
+      "reviewed": true
+    },
+    "  (none; written automatically when the upstream returns 4xx/5xx)": {
+      "text": "  （无。上游报 4xx/5xx 时会自动生成）",
+      "reviewed": true
+    },
+    "  Cannot read: {err}": {
+      "text": "  读不到: {err}",
+      "reviewed": true
+    },
+    "  Diff what we sent against what the client sent:": {
+      "text": "  看「我们发出的」和「客户端发来的」差在哪：",
+      "reviewed": true
+    },
+    "  The log is empty": {
+      "text": "  日志是空的",
+      "reviewed": true
+    },
+    "  [breaker opened: {provider} removed for now]": {
+      "text": "  [熔断器已打开: {provider} 暂时摘掉]",
+      "reviewed": true
+    },
+    "  [diagnostic probe proved {provider} still healthy, not tripped]": {
+      "text": "  [诊断探活证明 {provider} 仍然可用，未摘牌]",
+      "reviewed": true
+    },
+    "  declaration {index}  {desc}": {
+      "text": "  声明 {index}  {desc}",
+      "reviewed": true
+    },
+    "  newgate probe        # change the verdict right now with an active probe, without waiting for the cooldown": {
+      "text": "  newgate probe        # 不等冷却，立刻用一次主动探活改结论",
+      "reviewed": true
+    },
+    "  newgate tier <tier>   # see where this binding ranks in the chain, and whether it is skipped": {
+      "text": "  newgate tier <档位>   # 看这个 binding 在链里排第几、是不是被跳过",
+      "reviewed": true
+    },
+    "  no counters (no requests since the daemon started)": {
+      "text": "  无计数（daemon 启动后尚无请求）",
+      "reviewed": true
+    },
+    "  optional dependency absent: {consumer} needs {provider} — no provider, skipped (no edge, no effect on startup)": {
+      "text": "  弱依赖缺席 {consumer} 需要 {provider} —— 没有提供者，跳过（不建边、不影响启动）",
+      "reviewed": true
+    },
+    "  optional dependency hit: {consumer} needs {provider} — {count} providers, ordering edge added as usual": {
+      "text": "  弱依赖命中 {consumer} 需要 {provider} —— {count} 个提供者，照常建排序边",
+      "reviewed": true
+    },
+    "  {path}  {bytes} bytes": {
+      "text": "  {path}  {bytes} 字节",
+      "reviewed": true
+    },
+    "  {path} reverts automatically in {left}": {
+      "text": "  {path} 还有 {left} 自动恢复",
+      "reviewed": true
+    },
+    " (but the shim dir is not in the current shell's PATH; reopen the shell)": {
+      "text": "（但 shim 目录不在当前 shell 的 PATH 里，重开 shell）",
+      "reviewed": true
+    },
+    " (pidfile corrected)": {
+      "text": "（pidfile 已修正）",
+      "reviewed": true
+    },
+    " ({n} rewrites)": {
+      "text": "（{n} 处改写）",
+      "reviewed": true
+    },
+    " needs=[{list}]": {
+      "text": " 需要=[{list}]",
+      "reviewed": true
+    },
+    " provides=[{list}]": {
+      "text": " 提供=[{list}]",
+      "reviewed": true
+    },
+    "# to write it: newgate profile kv {name} --write": {
+      "text": "# 落盘：newgate profile kv {name} --write",
+      "reviewed": true
+    },
+    "#{req} <- {model} stream={stream} req={bytes} bytes  start": {
+      "text": "#{req} ← {model} stream={stream} req={bytes}字节  开始",
+      "reviewed": true
+    },
+    "#{req} body we sent ({bytes} bytes): {body}": {
+      "text": "#{req} 我们发出的 body({bytes}字节): {body}",
+      "reviewed": true
+    },
+    "#{req} chain budget {budget} ms exhausted, stopping at step {step}": {
+      "text": "#{req} 链总预算 {budget}ms 用尽，停在第 {step} 步",
+      "reviewed": true
+    },
+    "#{req} client cancelled; upstream cut off (saves the remaining tokens)": {
+      "text": "#{req} 客户端取消，已掐断上游（省下后续 token）",
+      "reviewed": true
+    },
+    "#{req} client disconnected (forwarded {chunks} chunks / {bytes} bytes): {err}": {
+      "text": "#{req} 客户端断开（已转发 {chunks} 块 / {bytes} 字节）: {err}",
+      "reviewed": true
+    },
+    "#{req} client request {method} {path}{headers}\n    body({bytes} bytes): {body}": {
+      "text": "#{req} 客户端请求 {method} {path}{headers}\n    body({bytes}字节): {body}",
+      "reviewed": true
+    },
+    "#{req} count_tokens ({bytes} bytes) -> local rough estimate {n} tokens": {
+      "text": "#{req} count_tokens（{bytes} 字节）→ 本地粗估 {n} tokens",
+      "reviewed": true
+    },
+    "#{req} count_tokens -> {name} upstream true value: {value}": {
+      "text": "#{req} count_tokens → {name} 上游真值: {value}",
+      "reviewed": true
+    },
+    "#{req} count_tokens forward failed ({err}); falling back to local rough estimate": {
+      "text": "#{req} count_tokens 转发失败（{err}），本次退回本地粗估",
+      "reviewed": true
+    },
+    "#{req} count_tokens upstream {code}; falling back to local rough estimate": {
+      "text": "#{req} count_tokens 上游 {code}，退回本地粗估",
+      "reviewed": true
+    },
+    "#{req} dump write failed (check permissions/disk): {err}": {
+      "text": "#{req} dump 落盘失败（查权限/磁盘）: {err}",
+      "reviewed": true
+    },
+    "#{req} learned {name} has no count_tokens endpoint (upstream {code}); falling back to local rough estimate, no retry": {
+      "text": "#{req} 学到：{name} 没有 count_tokens 端点（上游 {code}）——退回本地粗估，不再试",
+      "reviewed": true
+    },
+    "#{req} learned {provider}/{model} {what} — applied to later requests automatically (turn off with `newgate st`)": {
+      "text": "#{req} 学到：{provider}/{model} {what} —— 下次请求自动补上（newgate st 可关）",
+      "reviewed": true
+    },
+    "#{req} no usable candidate; skipped: {skips}": {
+      "text": "#{req} 无可用候选。跳过原因：{skips}",
+      "reviewed": true
+    },
+    "#{req} non-stream response ended: {bytes} bytes / {ms} ms total": {
+      "text": "#{req} 非流式响应结束：{bytes} 字节 / 总 {ms}ms",
+      "reviewed": true
+    },
+    "#{req} recorded {bytes} bytes of reasoning and {n} key {keys} this round; replaying them to the client next round": {
+      "text": "#{req} 记下本轮推理内容 {bytes} 字节 / {n} 个 key {keys}，下一轮替客户端补回去",
+      "reviewed": true
+    },
+    "#{req} scene NOT saved (check permissions/disk): {err}": {
+      "text": "#{req} 现场**没存下来**（查权限/磁盘）: {err}",
+      "reviewed": true
+    },
+    "#{req} scene archived to {dir}/": {
+      "text": "#{req} 现场已存档 {dir}/",
+      "reviewed": true
+    },
+    "#{req} sending upstream {target}\n    body({bytes} bytes, delta vs original {delta}): {body}": {
+      "text": "#{req} 发往上游 {target}\n    body({bytes}字节, 与原文差 {delta}): {body}",
+      "reviewed": true
+    },
+    "#{req} set \"required\": [] on {n} tool to pass strict validators (semantically a no-op): {changes}": {
+      "text": "#{req} 补了 {n} 个 tool 的 \"required\": []（语义无操作，为通过严格校验器）: {changes}",
+      "reviewed": true
+    },
+    "#{req} stream ended normally: {chunks} chunks / {bytes} bytes / {ms} ms total": {
+      "text": "#{req} 流正常结束：{chunks} 块 / {bytes} 字节 / 总 {ms}ms",
+      "reviewed": true
+    },
+    "#{req} tools repair skipped (parse failed, sending as-is): {err}": {
+      "text": "#{req} tools 修补跳过（解析失败，按原样发）: {err}",
+      "reviewed": true
+    },
+    "#{req} tools write-back failed, sending as-is: {err}": {
+      "text": "#{req} tools 回写失败，按原样发: {err}",
+      "reviewed": true
+    },
+    "#{req} upstream raw: {body}": {
+      "text": "#{req} 上游原文: {body}",
+      "reviewed": true
+    },
+    "#{req} upstream response headers {code}{headers}": {
+      "text": "#{req} 上游响应头 {code}{headers}",
+      "reviewed": true
+    },
+    "#{req} upstream sent no reasoning this round ({n} tool call, request thinking={thinking}, tool id {keys}); wire layer: {wire}. None of these history messages can be replayed next round (no placeholders are fabricated)": {
+      "text": "#{req} 本轮上游没给推理内容（{n} 个 tool call，请求 thinking={thinking}，tool id {keys}）；线路层：{wire}。下一轮这些历史消息一条都补不上（不编占位符）",
+      "reviewed": true
+    },
+    "#{req} upstream stream cut (forwarded {chunks} chunks / {bytes} bytes): {err}{note}": {
+      "text": "#{req} 上游断流（已转发 {chunks} 块 / {bytes} 字节）: {err}{note}",
+      "reviewed": true
+    },
+    "#{req} upstream {code}, full evidence saved to {base}.*": {
+      "text": "#{req} 上游 {code}，完整证据已存 {base}.*",
+      "reviewed": true
+    },
+    "#{req} upstream {code}, writing evidence failed (the directory is creatable but files are not writable; check permissions/disk — CLAUDE.md §3.1 records this trap): {err}": {
+      "text": "#{req} 上游 {code}，证据落盘失败（目录建得起来但文件写不进去，查权限/磁盘；CLAUDE.md §3.1 记过这个坑）: {err}",
+      "reviewed": true
+    },
+    "#{req} {binding} request shape rejected (detector {detector}; evidence {base}.*)": {
+      "text": "#{req} {binding} 请求形状错误（判据 {detector}；证据 {base}.*）",
+      "reviewed": true
+    },
+    "#{req} {note} ({bytes} bytes)": {
+      "text": "#{req} {note}（{bytes} 字节）",
+      "reviewed": true
+    },
+    "#{req} {route}  {path}  {status}  first byte {ms} ms  stream={stream}  profile={profile}{failover}": {
+      "text": "#{req} {route}  {path}  {status}  首字节{ms}ms  stream={stream}  profile={profile}{failover}",
+      "reviewed": true
+    },
+    "#{req} {route} client cancelled during connect ({err}); stopping the whole chain": {
+      "text": "#{req} {route} 客户端在连接阶段就取消了（{err}），停止整条链",
+      "reviewed": true
+    },
+    "#{req} {route} connect failed: {err}{note}{hint}": {
+      "text": "#{req} {route} 连接失败: {err}{note}{hint}",
+      "reviewed": true
+    },
+    "(already an IP, no lookup needed)": {
+      "text": "（是 IP，无需解析）",
+      "reviewed": true
+    },
+    "(anonymous)": {
+      "text": "(匿名)",
+      "reviewed": true
+    },
+    "(empty)": {
+      "text": "(空)",
+      "reviewed": true
+    },
+    "(field absent)": {
+      "text": "(字段缺席)",
+      "reviewed": true
+    },
+    "(no observer)": {
+      "text": "（没有观测者）",
+      "reviewed": true
+    },
+    "(nobody registered)": {
+      "text": "（无人申报）",
+      "reviewed": true
+    },
+    "(none)": {
+      "text": "（无）",
+      "reviewed": true
+    },
+    "(not assembled)": {
+      "text": "（未装配）",
+      "reviewed": true
+    },
+    "(the anthropic dialect goes to this one)": {
+      "text": "（anthropic 方言走这条）",
+      "reviewed": true
+    },
+    "(too short)": {
+      "text": "(过短)",
+      "reviewed": true
+    },
+    "(unrecognized)": {
+      "text": "(认不出)",
+      "reviewed": true
+    },
+    "(until {until})": {
+      "text": "（到 {until}）",
+      "reviewed": true
+    },
+    "({left} left)": {
+      "text": "（还有 {left}）",
+      "reviewed": true
+    },
+    "+{n} body key": {
+      "text": "+{n} 个正文 key",
+      "reviewed": true
+    },
+    "--- {file} ({n} bytes) ---": {
+      "text": "--- {file} ({n} 字节) ---",
+      "reviewed": true
+    },
+    "--set-profile <name> [--agent <agent>]": {
+      "text": "--set-profile <名> [--agent <agent>]",
+      "reviewed": true
+    },
+    "--set-profile is not implemented (this assembly has no config module)": {
+      "text": "--set-profile 没有实现（装配缺了 config 模块）",
+      "reviewed": true
+    },
+    "--set-profile needs a profile name": {
+      "text": "--set-profile 需要一个 profile 名",
+      "reviewed": true
+    },
+    "; the pidfile could not be corrected: {err}": {
+      "text": "；pidfile 修正失败: {err}",
+      "reviewed": true
+    },
+    "A miss can only be filled with an empty string (for those turns the model cannot see its own previous reasoning); every case is logged": {
+      "text": "未命中只能补空串（那几轮模型看不到自己的上一轮推理）；日志逐条有记",
+      "reviewed": true
+    },
+    "Add an empty array when a tool schema lacks required": {
+      "text": "工具 schema 缺 required 时补空数组",
+      "reviewed": true
+    },
+    "All direct": {
+      "text": "全部直连",
+      "reviewed": true
+    },
+    "All tools are back to direct connections; the PATH line still points at the empty shim dir, which is harmless": {
+      "text": "所有工具已恢复直连；PATH 里那行仍指向空 shim 目录，无害",
+      "reviewed": true
+    },
+    "Already exported in the shell: {names}": {
+      "text": "shell 里已导出 {names}",
+      "reviewed": true
+    },
+    "An agent declares takeover but it is not in effect; rerun newgate start": {
+      "text": "有 agent 声明接管但未生效，重跑 newgate start",
+      "reviewed": true
+    },
+    "Availability": {
+      "text": "可用性",
+      "reviewed": true
+    },
+    "Available": {
+      "text": "可用",
+      "machine": true,
+      "reviewed": true
+    },
+    "Backups": {
+      "text": "备份",
+      "reviewed": true
+    },
+    "Binding": {
+      "text": "绑定",
+      "reviewed": true
+    },
+    "Both profile {first} and {second} were given, and they disagree": {
+      "text": "同时给了 profile {first} 和 {second}，不一致",
+      "reviewed": true
+    },
+    "Breaker": {
+      "text": "熔断",
+      "reviewed": true
+    },
+    "CLIs taken over: {list}": {
+      "text": "被接管的 CLI：{list}",
+      "reviewed": true
+    },
+    "Cannot probe the daemon handoff capability ({err}), falling back to stop+start": {
+      "text": "探测 daemon 交接能力失败（{err}），退回 stop+start",
+      "reviewed": true
+    },
+    "Cannot read the log {path}: {err}": {
+      "text": "读不到日志 {path}：{err}",
+      "reviewed": true
+    },
+    "Cannot send the handoff request ({err}), falling back to stop+start": {
+      "text": "交接请求发不出去（{err}），退回 stop+start",
+      "reviewed": true
+    },
+    "Cannot start the daemon: {err}": {
+      "text": "启动守护进程失败: {err}",
+      "reviewed": true
+    },
+    "Cannot write the control token (a cross-user newgate stop will not work): {err}": {
+      "text": "控制令牌写不出去（跨用户 newgate stop 会不可用）: {err}",
+      "reviewed": true
+    },
+    "Cannot write the control token (cross-user stop unavailable): {err}": {
+      "text": "控制令牌写不出去（跨用户停机不可用）: {err}",
+      "reviewed": true
+    },
+    "Cannot write the language to state.json: {err}": {
+      "text": "无法将语言写入 state.json：{err}",
+      "machine": true,
+      "reviewed": true
+    },
+    "Cannot write the pidfile (status/metrics will not see this process): {err}": {
+      "text": "pidfile 写不出去（status/metrics 会看不到本进程）: {err}",
+      "reviewed": true
+    },
+    "Cannot write the takeover state back to state.json: {err}": {
+      "text": "接管状态写不回 state.json：{err}",
+      "reviewed": true
+    },
+    "Chain": {
+      "text": "链路",
+      "reviewed": true
+    },
+    "Check: newgate doctor    Force takeover: newgate start --force": {
+      "text": "确认：newgate doctor    强行接管：newgate start --force",
+      "reviewed": true
+    },
+    "Checked": {
+      "text": "探活时间",
+      "reviewed": true
+    },
+    "Clients drop the reasoning content the upstream sends; the proxy stores it and puts it back as-is on the next turn": {
+      "text": "客户端会丢弃上游的推理内容，代理代为保存并在下一轮原样补回",
+      "reviewed": true
+    },
+    "Config": {
+      "text": "配置",
+      "reviewed": true
+    },
+    "Config changes hot-reload within 1 second; no restart needed": {
+      "text": "配置改动 1 秒内自动热更新，无需重启",
+      "reviewed": true
+    },
+    "Config dir": {
+      "text": "配置目录",
+      "reviewed": true
+    },
+    "Config is unusable, refusing to take over": {
+      "text": "配置不可用，拒绝接管",
+      "reviewed": true
+    },
+    "Configuration hot-reloaded (generation {gen}): {changes} — running sessions are unaffected": {
+      "text": "配置热更新（第 {gen} 代）：{changes} —— 正在跑的会话不受影响",
+      "reviewed": true
+    },
+    "Configuration reloaded (generation {gen}), no structural change": {
+      "text": "配置已重载（第 {gen} 代），无结构性变化",
+      "reviewed": true
+    },
+    "Consequence: clients hand requests for 127.0.0.1:8899 to the outbound proxy, and a failed connection becomes HTTP 502;": {
+      "text": "后果：客户端把 127.0.0.1:8899 的请求交给出站代理，连不上即 502；",
+      "reviewed": true
+    },
+    "Control endpoint /__newgate/stop is ready (cross-user stop available)": {
+      "text": "控制端点 /__newgate/stop 已就绪（跨用户停机可用）",
+      "reviewed": true
+    },
+    "Control stop (token verified), exiting": {
+      "text": "控制停机（令牌校验通过），退出",
+      "reviewed": true
+    },
+    "Count": {
+      "text": "数量",
+      "reviewed": true
+    },
+    "Created only after a config file has been taken over": {
+      "text": "接管过配置文件之后才会生成",
+      "reviewed": true
+    },
+    "Currently following the system locale; this setting will take effect once LANG/LC_ALL stop overriding it": {
+      "text": "当前跟随系统区域设置；待 LANG/LC_ALL 不再覆盖后此设置才会生效",
+      "machine": true,
+      "reviewed": true
+    },
+    "DNS resolution": {
+      "text": "DNS 解析",
+      "reviewed": true
+    },
+    "Daemon": {
+      "text": "守护进程",
+      "reviewed": true
+    },
+    "Description": {
+      "text": "说明",
+      "reviewed": true
+    },
+    "Disable: newgate st off {name}": {
+      "text": "关闭：newgate st off {name}",
+      "reviewed": true
+    },
+    "Drain complete, the old process is stepping down": {
+      "text": "排空完成，旧进程功成身退",
+      "reviewed": true
+    },
+    "Enable: newgate st on {name}": {
+      "text": "打开：newgate st on {name}",
+      "reviewed": true
+    },
+    "Env var": {
+      "text": "环境变量",
+      "reviewed": true
+    },
+    "Environment": {
+      "text": "环境",
+      "reviewed": true
+    },
+    "Error evidence files": {
+      "text": "错误证据文件",
+      "reviewed": true
+    },
+    "Failed to acquire the lock: {err}": {
+      "text": "抢锁失败: {err}",
+      "reviewed": true
+    },
+    "Failed to load the configuration: {err}": {
+      "text": "配置加载失败: {err}",
+      "reviewed": true
+    },
+    "Failed to parse the gateway section of state.json; every switch fell back to its default (the change may not have taken effect): {err}": {
+      "text": "state.json 的 gateway 段解析失败，开关已全部回退（改动可能没生效）：{err}",
+      "reviewed": true
+    },
+    "Failures": {
+      "text": "连续失败",
+      "reviewed": true
+    },
+    "Files": {
+      "text": "文件",
+      "reviewed": true
+    },
+    "Final": {
+      "text": "最终",
+      "reviewed": true
+    },
+    "First run, initializing the config": {
+      "text": "首次运行，初始化配置",
+      "reviewed": true
+    },
+    "Fix (add to the shell rc, then restart the client):": {
+      "text": "修复（写进 shell rc 后重开客户端）：",
+      "reviewed": true
+    },
+    "Flag": {
+      "text": "标志",
+      "reviewed": true
+    },
+    "Full description: newgate st <plugin> · disable one: newgate st off <plugin> · disable the layer: newgate st off": {
+      "text": "看完整说明 newgate st <插件> · 单独关 newgate st off <插件> · 整层关 newgate st off",
+      "reviewed": true
+    },
+    "Full log": {
+      "text": "日志全文",
+      "reviewed": true
+    },
+    "Full request log (turns itself off after 30 minutes by default)": {
+      "text": "全量请求日志（默认 30 分钟自动关）",
+      "reviewed": true
+    },
+    "Glossary": {
+      "text": "术语",
+      "reviewed": true
+    },
+    "Graceful handover: taking over the listening socket from the parent process": {
+      "text": "优雅交接：接管父进程的监听 socket",
+      "reviewed": true
+    },
+    "Handoff refused (HTTP {code}: {body}), falling back to stop+start": {
+      "text": "交接被拒（HTTP {code}: {body}），退回 stop+start",
+      "reviewed": true
+    },
+    "Handoff sent, but the new process was not in place within 5 seconds · log {log}": {
+      "text": "交接已发出，但新进程 5 秒内没就位 · 日志 {log}",
+      "reviewed": true
+    },
+    "In PATH": {
+      "text": "在 PATH",
+      "reviewed": true
+    },
+    "Installed": {
+      "text": "已装",
+      "reviewed": true
+    },
+    "Interface": {
+      "text": "界面",
+      "reviewed": true
+    },
+    "Just use newgate off {agent}": {
+      "text": "直接用 newgate off {agent} 即可",
+      "reviewed": true
+    },
+    "Just use newgate on {agent}; newgate picks the mechanism itself": {
+      "text": "直接用 newgate on {agent} 即可，机制由 newgate 自行选择",
+      "reviewed": true
+    },
+    "Language": {
+      "text": "语言",
+      "machine": true,
+      "reviewed": true
+    },
+    "Last probe": {
+      "text": "上次 probe",
+      "reviewed": true
+    },
+    "Latency": {
+      "text": "延迟",
+      "reviewed": true
+    },
+    "Ledger": {
+      "text": "账本",
+      "reviewed": true
+    },
+    "Listening socket handed over to the new process, waiting for in-flight requests to drain (up to 10 minutes)": {
+      "text": "监听 socket 已移交新进程，等待在途请求排空（上限 10 分钟）",
+      "reviewed": true
+    },
+    "Log file": {
+      "text": "日志",
+      "reviewed": true
+    },
+    "Log rotation init failed, falling back to stdout: {err}": {
+      "text": "日志轮转初始化失败，退回 stdout: {err}",
+      "reviewed": true
+    },
+    "Log {path} · 16MB rotation, 4 files kept": {
+      "text": "日志 {path} · 16MB 轮转，保留 4 份",
+      "reviewed": true
+    },
+    "Low-level escape hatch; day to day use newgate on|off <agent> · newgate shim uninstall also clears the rc files": {
+      "text": "底层逃生口。日常：newgate on|off <agent> · newgate shim uninstall 连 rc 一起清",
+      "reviewed": true
+    },
+    "Low-level escape hatch; on/off is enough day to day": {
+      "text": "底层逃生口，平时用 on/off 就够了",
+      "reviewed": true
+    },
+    "Maintenance": {
+      "text": "维护",
+      "reviewed": true
+    },
+    "Memory + the thinkcache.bin cold layer; restored automatically after a restart, counts only, never content": {
+      "text": "内存 + thinkcache.bin 冷层；重启后自动装回，只存计数不存内容",
+      "reviewed": true
+    },
+    "Module switches": {
+      "text": "模块开关",
+      "reviewed": true
+    },
+    "Modules": {
+      "text": "模块",
+      "reviewed": true
+    },
+    "Most likely cause: an outbound proxy is hijacking loopback requests. Run newgate doctor": {
+      "text": "最常见原因：出站代理把 loopback 请求劫走了。跑 newgate doctor。",
+      "reviewed": true
+    },
+    "NEWGATE_LISTENER_FD={value} is not an fd number": {
+      "text": "NEWGATE_LISTENER_FD={value} 不是 fd 号",
+      "reviewed": true
+    },
+    "New configuration failed to load, still using the last usable configuration: {err}": {
+      "text": "⚠ 新配置加载失败，**继续使用上一份可用配置**: {err}",
+      "reviewed": true
+    },
+    "No catalog for {lang}": {
+      "text": "没有 {lang} 的目录",
+      "machine": true,
+      "reviewed": true
+    },
+    "No expiry: newgate debug on --forever": {
+      "text": "不设期限：newgate debug on --forever",
+      "reviewed": true
+    },
+    "No file was rewritten": {
+      "text": "无文件被改写",
+      "reviewed": true
+    },
+    "No original backups": {
+      "text": "无原始备份",
+      "reviewed": true
+    },
+    "No outbound proxy variables": {
+      "text": "无出站代理变量",
+      "reviewed": true
+    },
+    "No plugin named {name} (run newgate st for the list)": {
+      "text": "没有叫 {name} 的插件（newgate st 看清单）",
+      "reviewed": true
+    },
+    "No plugin named {name} (run newgate st for the list); switch the whole layer with newgate st on|off": {
+      "text": "没有叫 {name} 的插件（newgate st 看清单）；整层开关用 newgate st on|off",
+      "reviewed": true
+    },
+    "No plugins registered": {
+      "text": "没有注册任何插件",
+      "reviewed": true
+    },
+    "No such language: {tag}. Available: {list}": {
+      "text": "没有叫 {tag} 的语言。可用：{list}",
+      "machine": true,
+      "reviewed": true
+    },
+    "No such profile {profile} (available: {list})": {
+      "text": "profile {profile} 不存在（可用：{list}）",
+      "reviewed": true
+    },
+    "Not in effect now: {source} overrides it in this shell (use NEWGATE_LANG={tag} for one command)": {
+      "text": "当前未生效：此 shell 中 {source} 覆盖了它（单条命令可用 NEWGATE_LANG={tag}）",
+      "machine": true,
+      "reviewed": true
+    },
+    "Not running": {
+      "text": "未运行",
+      "reviewed": true
+    },
+    "Not running (port {port})": {
+      "text": "未运行（端口 {port}）",
+      "reviewed": true
+    },
+    "Not taken over: {names}": {
+      "text": "未接管：{names}",
+      "reviewed": true
+    },
+    "Note": {
+      "text": "说明",
+      "reviewed": true
+    },
+    "Of these, {n} is an assistant message in the request that could not be parsed (not a cache problem, the shape the client sends has changed)": {
+      "text": "其中 {n} 条是请求里的 assistant 消息解析不出来（不是缓存问题，是客户端发来的形态变了）",
+      "reviewed": true
+    },
+    "One-shot (keeps no global state)": {
+      "text": "跑一次（不改全局状态）",
+      "reviewed": true
+    },
+    "Original config backup: {dir}/original/": {
+      "text": "原配置备份 {dir}/original/",
+      "reviewed": true
+    },
+    "Other": {
+      "text": "其它",
+      "reviewed": true
+    },
+    "Outbound proxy set; NO_PROXY already allows loopback": {
+      "text": "有出站代理；NO_PROXY 已放行 loopback",
+      "reviewed": true
+    },
+    "Outbound proxy set; NO_PROXY does not allow 127.0.0.1 / localhost": {
+      "text": "有出站代理；NO_PROXY 未放行 127.0.0.1 / localhost",
+      "reviewed": true
+    },
+    "Overridden by {n} file in the config dir": {
+      "other": "被配置目录中的 {n} 个文件覆盖",
+      "machine": true,
+      "reviewed": true
+    },
+    "PATH line": {
+      "text": "PATH 行",
+      "reviewed": true
+    },
+    "PATH traces are cleared; reopen the shell to take effect": {
+      "text": "PATH 痕迹已清空，重开 shell 生效",
+      "reviewed": true
+    },
+    "Patch switches": {
+      "text": "补丁开关",
+      "reviewed": true
+    },
+    "Plugin": {
+      "text": "插件",
+      "reviewed": true
+    },
+    "Plugin {name} disabled": {
+      "text": "插件 {name} 已关",
+      "reviewed": true
+    },
+    "Plugin {name} enabled": {
+      "text": "插件 {name} 已开",
+      "reviewed": true
+    },
+    "Port not responding": {
+      "text": "端口无响应",
+      "reviewed": true
+    },
+    "Port {port} is listening but the HTTP probe failed; the proxy process is kept": {
+      "text": "端口 {port} 在听但 HTTP 探活失败，代理进程保留。",
+      "reviewed": true
+    },
+    "Priority": {
+      "text": "优先级",
+      "reviewed": true
+    },
+    "Probing and observation": {
+      "text": "探测与观测",
+      "reviewed": true
+    },
+    "Process is healthy but requests cannot reach it; usually an outbound proxy hijacking loopback (see the Environment item).": {
+      "text": "进程正常，请求到不了它；常见于出站代理劫持 loopback（见「环境」一项）。",
+      "reviewed": true
+    },
+    "Provider {name} has no key → {hint}": {
+      "text": "provider {name} 没有 key → {hint}",
+      "reviewed": true
+    },
+    "Provider {name} is not defined": {
+      "text": "provider {name} 未定义",
+      "reviewed": true
+    },
+    "Proxy": {
+      "text": "代理",
+      "reviewed": true
+    },
+    "Proxy already running   pid {pid} · 127.0.0.1:{port}": {
+      "text": "代理已在运行   pid {pid} · 127.0.0.1:{port}",
+      "reviewed": true
+    },
+    "Proxy exiting: {err}": {
+      "text": "代理退出: {err}",
+      "reviewed": true
+    },
+    "Proxy gracefully restarted   pid {old} → {new} · 127.0.0.1:{port}": {
+      "text": "代理已优雅重启   pid {old} → {new} · 127.0.0.1:{port}",
+      "reviewed": true
+    },
+    "Proxy is not running · it takes effect after newgate start": {
+      "text": "代理未运行 · newgate start 之后才生效",
+      "reviewed": true
+    },
+    "Proxy log: paged in the terminal, -f keeps following": {
+      "text": "代理日志：终端上分页，-f 持续跟随",
+      "reviewed": true
+    },
+    "Proxy started   pid {pid} · 127.0.0.1:{port} · profile {profile}": {
+      "text": "代理已启动   pid {pid} · 127.0.0.1:{port} · profile {profile}",
+      "reviewed": true
+    },
+    "Proxy stopped   pid {pid}": {
+      "text": "代理已停止   pid {pid}",
+      "reviewed": true
+    },
+    "Put a key in {file}, or set the matching environment variable": {
+      "text": "填 key 进 {file}，或设对应的环境变量",
+      "reviewed": true
+    },
+    "Rate limit": {
+      "text": "限流",
+      "reviewed": true
+    },
+    "Reason": {
+      "text": "原因",
+      "reviewed": true
+    },
+    "Reasoning cache": {
+      "text": "推理缓存",
+      "reviewed": true
+    },
+    "Received SIGHUP, forcing a configuration reload": {
+      "text": "收到 SIGHUP，强制重载配置",
+      "reviewed": true
+    },
+    "Received a control stop while draining, exiting now (pid/lock untouched)": {
+      "text": "排空期收到控制停机，直接退出（不动 pid/lock）",
+      "reviewed": true
+    },
+    "Received {sig} while draining, exiting now (pid/lock untouched)": {
+      "text": "排空期收到 {sig}，直接退出（不动 pid/lock）",
+      "reviewed": true
+    },
+    "Received {sig}, exiting": {
+      "text": "收到 {sig}，退出",
+      "reviewed": true
+    },
+    "Release just one; later start runs will leave it alone": {
+      "text": "只放开一个，以后 start 也不再管它",
+      "reviewed": true
+    },
+    "Remove it completely: newgate shim uninstall": {
+      "text": "彻底清掉：newgate shim uninstall",
+      "reviewed": true
+    },
+    "Removed the PATH line from {file}": {
+      "text": "从 {file} 删掉 PATH 行",
+      "reviewed": true
+    },
+    "Removed the shim {name}": {
+      "text": "摘掉 shim {name}",
+      "reviewed": true
+    },
+    "Request shape": {
+      "text": "请求形状",
+      "reviewed": true
+    },
+    "Requested {want}, using {got} (no catalog for it)": {
+      "text": "请求了 {want}，改用 {got}（没有它的目录）",
+      "machine": true,
+      "reviewed": true
+    },
+    "Restart the proxy, keeping the takeover scene as it is": {
+      "text": "重启代理，接管现场原样保留",
+      "reviewed": true
+    },
+    "Role": {
+      "text": "档位",
+      "reviewed": true
+    },
+    "Routing and configuration": {
+      "text": "路由与配置",
+      "reviewed": true
+    },
+    "Run once with a given profile": {
+      "text": "用某个 profile 跑一次",
+      "reviewed": true
+    },
+    "Saved to state.json: {tag}": {
+      "text": "已保存到 state.json：{tag}",
+      "machine": true,
+      "reviewed": true
+    },
+    "Shape errors": {
+      "text": "请求形状",
+      "reviewed": true
+    },
+    "Slot": {
+      "text": "槽位",
+      "reviewed": true
+    },
+    "Socket handed over seamlessly: in-flight requests drain in the old process, sessions are not interrupted; takeover state is untouched": {
+      "text": "socket 无缝交接：在途请求由旧进程排空，会话不中断；接管状态未动",
+      "reviewed": true
+    },
+    "Spared": {
+      "text": "救回",
+      "reviewed": true
+    },
+    "Start the proxy + take over every agent": {
+      "text": "起代理 + 接管所有 agent",
+      "reviewed": true
+    },
+    "State": {
+      "text": "状态",
+      "reviewed": true
+    },
+    "Status": {
+      "text": "状态",
+      "reviewed": true
+    },
+    "Stop the proxy + every agent back to a direct connection": {
+      "text": "停代理 + 所有 agent 恢复直连",
+      "reviewed": true
+    },
+    "TCP connection": {
+      "text": "TCP 连接",
+      "reviewed": true
+    },
+    "TLS handshake": {
+      "text": "TLS 握手",
+      "reviewed": true
+    },
+    "Take over just one": {
+      "text": "只接管一个",
+      "reviewed": true
+    },
+    "Takeover": {
+      "text": "接管",
+      "reviewed": true
+    },
+    "Takeover intent": {
+      "text": "接管意愿",
+      "reviewed": true
+    },
+    "Takeover overrides it inside the child process, without affecting newgate; it applies again after off (i.e. back to a direct connection)": {
+      "text": "接管时在子进程内覆盖，不影响 newgate；off 之后重新生效（即回到直连）",
+      "reviewed": true
+    },
+    "Takes effect immediately, no restart needed": {
+      "text": "即刻生效，无需重启",
+      "reviewed": true
+    },
+    "Target files after takeover (newgate-related fragments)": {
+      "text": "接管后的目标文件（newgate 相关片段）",
+      "reviewed": true
+    },
+    "The daemon has no control token (started before the upgrade), falling back to stop+start": {
+      "text": "daemon 没有控制令牌（升级前启动的），退回 stop+start",
+      "reviewed": true
+    },
+    "The lock file currently says pid {pid} (normal within the graceful handoff window, it lines up by itself within milliseconds)": {
+      "text": "锁文件此刻写着 pid {pid}（优雅交接的窗口内正常，几毫秒后自己会对上）",
+      "reviewed": true
+    },
+    "The process the pidfile points at is gone ({what}), and the lock file says the real daemon is pid {pid}": {
+      "text": "pidfile 指向的进程已经不在了（{what}），锁文件说真正的 daemon 是 pid {pid}",
+      "reviewed": true
+    },
+    "The proxy did not come up (nothing is listening on port {port}); see the log {log}": {
+      "text": "代理没起来（端口 {port} 没在听），看日志 {log}",
+      "reviewed": true
+    },
+    "The proxy was not running": {
+      "text": "代理本来没在跑",
+      "reviewed": true
+    },
+    "The running daemon is an old version (no graceful handoff), falling back to stop+start": {
+      "text": "运行中的是旧版 daemon（不支持优雅交接），退回 stop+start",
+      "reviewed": true
+    },
+    "The whole layer is still off; run newgate st on first": {
+      "text": "整层仍处于关闭状态，需要先 newgate st on",
+      "reviewed": true
+    },
+    "This does not change takeover intent: the next newgate start reinstalls it": {
+      "text": "这不改接管意愿：下次 newgate start 会重新装回来",
+      "reviewed": true
+    },
+    "This shell may have cached the path: hash -r (zsh: rehash)": {
+      "text": "当前 shell 可能缓存了路径：hash -r（zsh: rehash）",
+      "reviewed": true
+    },
+    "Tier": {
+      "text": "档位",
+      "reviewed": true
+    },
+    "Tripped ago": {
+      "text": "多久前摘的",
+      "reviewed": true
+    },
+    "Trusting the lock: pid {pid} · 127.0.0.1:{port}": {
+      "text": "已按锁认它：pid {pid} · 127.0.0.1:{port}",
+      "reviewed": true
+    },
+    "Turn it off with newgate debug off": {
+      "text": "记得 newgate debug off",
+      "reviewed": true
+    },
+    "Unknown agent {agent} (known: {list})": {
+      "text": "不认识的 agent {agent}（已知：{list}）",
+      "reviewed": true
+    },
+    "Unknown option {option} (an unknown option before the tool counts as a typo, docs/08-operations.md rule 5)": {
+      "text": "未知选项 {option}（tool 之前出现的未知选项按拼错处理，docs/08-operations.md 规则5）",
+      "reviewed": true
+    },
+    "Upstream quirk patches: they apply only to the upstream that claimed the request, and every change is logged": {
+      "text": "上游怪癖补丁：只对认领本次请求的上游生效，改动逐条写日志",
+      "reviewed": true
+    },
+    "Usage: newgate debug on [minutes] [--forever] | off (no argument changes anything)": {
+      "text": "用法：newgate debug on [分钟] [--forever] | off（不带参数不改任何东西）",
+      "reviewed": true
+    },
+    "Usage: newgate lang <tag>  (see `newgate lang` for the list)": {
+      "text": "用法：newgate lang <tag>（列表见 `newgate lang`）",
+      "machine": true,
+      "reviewed": true
+    },
+    "Usage: newgate schema-repair on|off (no argument changes anything)": {
+      "text": "用法：newgate schema-repair on|off（不带参数不改任何东西）",
+      "reviewed": true
+    },
+    "Usage: newgate shim install <agent> (known: {names})": {
+      "text": "用法：newgate shim install <agent>（已知：{names}）",
+      "reviewed": true
+    },
+    "Usage: newgate shim off <agent> (known: {names})": {
+      "text": "用法：newgate shim off <agent>（已知：{names}）",
+      "reviewed": true
+    },
+    "Version and environment": {
+      "text": "版本与环境",
+      "reviewed": true
+    },
+    "Waiting": {
+      "text": "还要等",
+      "reviewed": true
+    },
+    "Which agent to launch? e.g. newgate claude or newgate run claude": {
+      "text": "要启动哪个 agent？例：newgate claude 或 newgate run claude",
+      "reviewed": true
+    },
+    "Which agent to release? e.g. newgate off claude": {
+      "text": "要释放谁？例：newgate off claude",
+      "reviewed": true
+    },
+    "Which agent to take over? e.g. newgate on claude": {
+      "text": "要接管谁？例：newgate on claude",
+      "reviewed": true
+    },
+    "Why it exists": {
+      "text": "为什么存在",
+      "reviewed": true
+    },
+    "[breaker] health table read/write failed (continuing with in-memory state): {err}": {
+      "text": "[breaker] 健康表读写失败（继续使用内存状态）: {err}",
+      "reviewed": true
+    },
+    "[probe] tripped {provider}/{model}: {grade} (at least 60s, and returning to the chain needs a successful probe)": {
+      "text": "[probe] 熔断 {provider}/{model}：{grade}（至少 60s，之后须 probe 成功才回链）",
+      "reviewed": true
+    },
+    "a binding must be provider/model: {binding}": {
+      "text": "绑定要写成 provider/model，得到 {binding}",
+      "reviewed": true
+    },
+    "a chain step failed (connection / transferable error)": {
+      "text": "链上某站失败（连接 / 可转移错误）",
+      "reviewed": true
+    },
+    "a command cannot be nil": {
+      "text": "命令不能为 nil",
+      "reviewed": true
+    },
+    "a command must declare at least one name (Names)": {
+      "text": "命令必须至少声明一个名字（Names）",
+      "reviewed": true
+    },
+    "a diagnostic provider cannot be nil": {
+      "text": "诊断提供者不能为 nil",
+      "reviewed": true
+    },
+    "a dump provider cannot be nil": {
+      "text": "诊断素材提供者不能为 nil",
+      "reviewed": true
+    },
+    "a dynamic role contributed by a module ({keys}), written like a role": {
+      "text": "模块贡献的动态角色（{keys}），写法同档位",
+      "reviewed": true
+    },
+    "a dynamic role contributed by a module, written like a role": {
+      "text": "模块贡献的动态角色，写法同档位",
+      "reviewed": true
+    },
+    "a glossary provider cannot be nil": {
+      "text": "术语提供者不能为 nil",
+      "reviewed": true
+    },
+    "a plugin rewrote the request (each rewrite is logged)": {
+      "text": "插件改写了请求（逐条有日志）",
+      "reviewed": true
+    },
+    "a ref and provider/model cannot be combined: {binding}": {
+      "text": "引用（ref）与 provider/model 不能混着写: {binding}",
+      "reviewed": true
+    },
+    "a ref carries the key only, no provider/model: {binding}": {
+      "text": "引用只写键名，不带 provider/模型：{binding}",
+      "reviewed": true
+    },
+    "a ref must name a key, as in @key: {binding}": {
+      "text": "引用要写成 @键名，得到 {binding}",
+      "reviewed": true
+    },
+    "a request tries at most the first {limit} stops; the remaining {rest} stay in the chain": {
+      "text": "单次请求最多尝试前 {limit} 站；后续 {rest} 站仍在链中",
+      "reviewed": true
+    },
+    "a request tries at most the first {limit} stops; the remaining {rest} stay in the chain (details: newgate tier normal)": {
+      "text": "单次请求最多尝试前 {limit} 站；后续 {rest} 站仍在链中（newgate tier normal 看明细）",
+      "reviewed": true
+    },
+    "a set of role → provider/model bindings": {
+      "text": "一套「档位 → provider/模型」绑定",
+      "reviewed": true
+    },
+    "a status block provider cannot be nil": {
+      "text": "状态块提供者不能为 nil",
+      "reviewed": true
+    },
+    "a status provider cannot be nil": {
+      "text": "状态提供者不能为 nil",
+      "reviewed": true
+    },
+    "a verbose provider cannot be nil": {
+      "text": "详细模式提供者不能为 nil",
+      "reviewed": true
+    },
+    "active": {
+      "text": "生效",
+      "reviewed": true
+    },
+    "added reasoning_effort:\"low\" (the upstream error asks for low/high/max)": {
+      "text": "补 reasoning_effort:\"low\"（报错原文要求 low/high/max）",
+      "reviewed": true
+    },
+    "advancing to next chain step: {step}": {
+      "text": "沿链下一步: {step}",
+      "reviewed": true
+    },
+    "agent {agent} falls back to the default profile": {
+      "text": "agent {agent} 回落到默认 profile",
+      "reviewed": true
+    },
+    "agent {agent} → profile {profile}": {
+      "text": "agent {agent} → profile {profile}",
+      "reviewed": true
+    },
+    "all checks passed": {
+      "text": "全部通过",
+      "reviewed": true
+    },
+    "all green: {list}": {
+      "text": "全绿的：{list}",
+      "reviewed": true
+    },
+    "all profiles": {
+      "text": "全部 profile",
+      "reviewed": true
+    },
+    "all profiles (priority / flags / overrides)": {
+      "text": "所有 profile（优先级 / 标志 / 覆盖）",
+      "reviewed": true
+    },
+    "an earlier candidate failed and a later one succeeded": {
+      "text": "前序候选失败，换到后续候选后成功",
+      "reviewed": true
+    },
+    "an excluded profile is only used when selected explicitly; it never joins automatic ordering": {
+      "text": "excluded profile 只能被显式选中，不参与自动排序",
+      "reviewed": true
+    },
+    "an external file is still in {dir}: {names} (it shadows newgate's shim)": {
+      "text": "同名外部文件仍在 {dir}：{names}（会遮住 newgate 的 shim）",
+      "reviewed": true
+    },
+    "api_key missing": {
+      "text": "缺 api_key",
+      "reviewed": true
+    },
+    "assembly complete: {count} components, took {took}": {
+      "text": "装配完成：{count} 个组件，用时 {took}",
+      "reviewed": true
+    },
+    "assembly selection: AllCore and Disable were both given ({list}) — the former already contains the latter. Keep only AllCore to have both; leave AllCore out to disable just a few": {
+      "text": "装配选择：AllCore 与 Disable 同时给了（{list}）——前者已经包含后者。两个都要就只留 AllCore；只想关掉其中几个就别写 AllCore",
+      "reviewed": true
+    },
+    "assembly selection: an Extra component has no directory name (component name \"{name}\") — the directory name is what disables it and what names it in errors": {
+      "text": "装配选择：Extra 里有一个没写目录名的组件（组件名 \"{name}\"）——目录名是关掉它、以及报错时说清是谁的凭据",
+      "reviewed": true
+    },
+    "assembly selection: component \"{name}\" is installed twice (from {first} and {second}) — two components with the same name only fail at graph build time": {
+      "text": "装配选择：组件 \"{name}\" 装了两次（{first} 与 {second}）——同名的两个组件会让这次装配在构图期才失败",
+      "reviewed": true
+    },
+    "assembly selection: disable names \"{dir}\" (component {name}), but it provides the port {port} that the composition root itself needs — turn it off and nothing in the process can answer \"who claims this call\". What makes it unremovable is not a list, it is the composition root's own dependency (see compositionRootPorts)": {
+      "text": "装配选择：disable 点名了 \"{dir}\"（组件 {name}），但它提供了组合根自己要用的端口 {port}——关掉它，进程就没有任何东西能回答「这次调用归谁」了。它摘不掉这件事不是一张名单说了算，而是组合根自己的依赖说了算（见 compositionRootPorts）",
+      "reviewed": true
+    },
+    "assembly selection: disable names \"{dir}\", but neither the kernel nor your own table has this module (did you write the directory name? e.g. claudecode_deepseek, not claudecode-deepseek; use AllCore to turn everything off)": {
+      "text": "装配选择：disable 点名了 \"{dir}\"，但内核与自己都没有这个模块（写的是**目录名**吗？比如 claudecode_deepseek 而不是 claudecode-deepseek；要关掉全部请用 AllCore）",
+      "reviewed": true
+    },
+    "assembly selection: disable names \"{dir}\", but that is a module from Extra — Extra is the table you supplied yourself, so leave it out if you do not want it (disable only turns off kernel modules; listing it here has no effect, and you probably think it did)": {
+      "text": "装配选择：disable 点名了 \"{dir}\"，但那是 Extra 里的模块——Extra 是你自己交上来的表，不想装就别把它列进去（disable 只用来关掉内核自带的模块；列在这里是**没有效果**的，而你多半以为它关掉了）",
+      "reviewed": true
+    },
+    "assembly selection: not a single component (did disable turn off every kernel module?) — an empty graph only looks like a broken command": {
+      "text": "装配选择：一个组件都没有（disable 把内核模块全关掉了？）——空图跑起来只会让人以为命令坏了",
+      "reviewed": true
+    },
+    "assembly: graph build failed: {err}": {
+      "text": "装配：构图失败：{err}",
+      "reviewed": true
+    },
+    "assembly: loader {index} failed: {err}": {
+      "text": "装配：第 {index} 个 loader 报错：{err}",
+      "reviewed": true
+    },
+    "assembly: loader {index} handed over {count} components": {
+      "text": "装配：第 {index} 个 loader 交出 {count} 个组件",
+      "reviewed": true
+    },
+    "auth": {
+      "text": "鉴权",
+      "reviewed": true
+    },
+    "average latency": {
+      "text": "平均延迟",
+      "reviewed": true
+    },
+    "binding health table: trips after consecutive failures, releases one half-open trial when the cooldown expires": {
+      "text": "binding 健康表：连续失败到阈值就摘牌，冷却期满放一次半开试探",
+      "reviewed": true
+    },
+    "bindings of all profiles": {
+      "text": "所有 profile 的绑定",
+      "reviewed": true
+    },
+    "booleans are true/false only, no guessing": {
+      "text": "布尔值只认 true/false，不猜",
+      "reviewed": true
+    },
+    "breaker opened, provider removed for now": {
+      "text": "熔断器打开，provider 暂时摘除",
+      "reviewed": true
+    },
+    "cancelled by the client": {
+      "text": "客户端主动取消",
+      "reviewed": true
+    },
+    "candidate {n}: {err}": {
+      "text": "第 {n} 个候选: {err}",
+      "reviewed": true
+    },
+    "cannot acquire the lock: {err}": {
+      "text": "抢锁失败: {err}",
+      "reviewed": true
+    },
+    "cannot be toggled at runtime (v1)": {
+      "text": "无法 runtime 开关（v1）",
+      "reviewed": true
+    },
+    "cannot be toggled at runtime: this module reports no switch points": {
+      "text": "无法 runtime 开关：这个模块没有上报任何开关点",
+      "reviewed": true
+    },
+    "cannot extract the listener fd: {err}": {
+      "text": "提取监听 fd 失败: {err}",
+      "reviewed": true
+    },
+    "cannot find the real {agent}: {err} — the shim will fail to forward, install it first": {
+      "text": "找不到真实的 {agent}：{err}——shim 会转发失败，先把它装好",
+      "reviewed": true
+    },
+    "cannot find {names} in PATH (skipped the shim directory {dir})": {
+      "text": "PATH 里找不到 {names}（已跳过 shim 目录 {dir}）",
+      "reviewed": true
+    },
+    "cannot parse {path}: {err}": {
+      "text": "解析 {path}: {err}",
+      "reviewed": true
+    },
+    "cannot reach proxy 127.0.0.1:{port} (newgate doctor)": {
+      "text": "连不上代理 127.0.0.1:{port}（newgate doctor）",
+      "reviewed": true
+    },
+    "cannot reach the proxy at 127.0.0.1:{port} (newgate doctor)": {
+      "text": "连不上代理 127.0.0.1:{port}（newgate doctor）",
+      "reviewed": true
+    },
+    "cannot read config — run `newgate doctor`": {
+      "text": "配置读不出 ← 跑 `newgate doctor`",
+      "reviewed": true
+    },
+    "cannot read mappings: {err}": {
+      "text": "读不到 mappings：{err}",
+      "reviewed": true
+    },
+    "cannot read providers.json: {err}": {
+      "text": "providers.json 读不出: {err}",
+      "reviewed": true
+    },
+    "cannot read request body: {err}": {
+      "text": "读请求体失败: {err}",
+      "reviewed": true
+    },
+    "cannot read the config, so this run injects no real model names and no window declaration (the proxy still routes by tier name): {err}": {
+      "text": "配置读不出来，本次不注入真实模型名与窗口声明（代理仍按档位名路由）: {err}",
+      "reviewed": true
+    },
+    "cannot read the default profile {name}: {err}": {
+      "text": "默认 profile {name} 读不出: {err}",
+      "reviewed": true
+    },
+    "cannot read the role keys of module {module}: {err}": {
+      "text": "模块 {module} 的角色键读取失败: {err}",
+      "reviewed": true
+    },
+    "cannot read {path}: {err}": {
+      "text": "读 {path}: {err}",
+      "reviewed": true
+    },
+    "cannot read: {err}": {
+      "text": "读不到: {err}",
+      "reviewed": true
+    },
+    "cannot rename the old json (the kv is already written; handle it by hand): {err}": {
+      "text": "旧 json 改名失败（kv 已写入，手动处理）: {err}",
+      "reviewed": true
+    },
+    "cannot resolve extends {name}: {err}": {
+      "text": "extends {name} 解析失败: {err}",
+      "reviewed": true
+    },
+    "cannot send the stop request to the proxy (pid {pid}): {err}": {
+      "text": "向代理 (pid {pid}) 发停机请求失败: {err}",
+      "reviewed": true
+    },
+    "cannot write the control token: {err}": {
+      "text": "写控制令牌: {err}",
+      "reviewed": true
+    },
+    "cannot write {path}: {err}": {
+      "text": "写 {path} 失败: {err}",
+      "reviewed": true
+    },
+    "capability cache could not be read; every target is probed again this round: {err}": {
+      "text": "能力缓存读不出来，本轮将重新探测全部目标: {err}",
+      "reviewed": true
+    },
+    "capability cache could not be saved; the next probe spends tokens again: {err}": {
+      "text": "能力缓存没能落盘，下次探活要重新花 token: {err}",
+      "reviewed": true
+    },
+    "capability cache load failed (will re-probe this run): {err}": {
+      "text": "能力缓存装载失败（本次运行将重新探测）: {err}",
+      "reviewed": true
+    },
+    "chain": {
+      "text": "链",
+      "reviewed": true
+    },
+    "chain budget exhausted": {
+      "text": "链总预算用尽",
+      "reviewed": true
+    },
+    "chain head {head} ({who}) · max attempts {n} · budget {budget}": {
+      "text": "链头 {head}（{who}）· 最大尝试 {n} · 预算 {budget}",
+      "reviewed": true
+    },
+    "chain head {name} is pinned, the chain stops there": {
+      "text": "链头 {name} 是 pinned，不往下掉",
+      "reviewed": true
+    },
+    "change it: newgate plugin {path} {verb} [duration]": {
+      "text": "改它：newgate plugin {path} {verb} [时长]",
+      "reviewed": true
+    },
+    "circuit open": {
+      "text": "熔断中",
+      "reviewed": true
+    },
+    "circuit open ({reason})": {
+      "text": "熔断中（{reason}）",
+      "reviewed": true
+    },
+    "claimed by: {chain}": {
+      "text": "认领者：{chain}",
+      "reviewed": true
+    },
+    "client": {
+      "text": "客户端",
+      "reviewed": true
+    },
+    "command name {name} is already taken": {
+      "text": "命令名 {name} 已被占用",
+      "reviewed": true
+    },
+    "config dir": {
+      "text": "配置目录",
+      "reviewed": true
+    },
+    "config file rewritten → local proxy": {
+      "text": "配置文件已改写 → 本地代理",
+      "reviewed": true
+    },
+    "config files": {
+      "text": "配置文件",
+      "reviewed": true
+    },
+    "consecutive failures reached the threshold, but the pre-trip diagnostic probe proved it healthy, so it was not tripped": {
+      "text": "连续失败到阈值，但上闸前的诊断探活证明它仍然可用，于是不摘牌",
+      "reviewed": true
+    },
+    "consecutive real-traffic failures ({bucket})": {
+      "text": "真实流量连续失败（{bucket}）",
+      "reviewed": true
+    },
+    "consecutive real-traffic failures and the diagnostic probe also failed ({bucket})": {
+      "text": "真实流量连续失败且诊断探活也不通（{bucket}）",
+      "reviewed": true
+    },
+    "control stop requested by {addr}, exiting": {
+      "text": "收到控制停机请求（来自 {addr}），退出",
+      "reviewed": true
+    },
+    "control token mismatch": {
+      "text": "control token 不符",
+      "reviewed": true
+    },
+    "convert a profile to KV text": {
+      "text": "profile 转 KV 文本",
+      "reviewed": true
+    },
+    "count": {
+      "text": "次数",
+      "reviewed": true
+    },
+    "counted only, not tripped": {
+      "text": "只计数、没摘牌",
+      "reviewed": true
+    },
+    "counter": {
+      "text": "计数器",
+      "reviewed": true
+    },
+    "counters reset when the daemon restarts": {
+      "text": "计数随 daemon 重启归零",
+      "reviewed": true
+    },
+    "created {path}": {
+      "text": "创建 {path}",
+      "reviewed": true
+    },
+    "current profile {profile} has {n} tier unavailable": {
+      "text": "当前 profile {profile} 有 {n} 个档位不可用",
+      "reviewed": true
+    },
+    "current profile: {profile}": {
+      "text": "当前 profile：{profile}",
+      "reviewed": true
+    },
+    "daemon is not running": {
+      "text": "daemon 未运行",
+      "reviewed": true
+    },
+    "daemon returned HTTP {status}": {
+      "text": "守护进程返回 HTTP {status}",
+      "reviewed": true
+    },
+    "danger level {level}": {
+      "text": "危险级别 {level}",
+      "reviewed": true
+    },
+    "debug on · does not turn itself off": {
+      "text": "debug on · 不自动关闭",
+      "reviewed": true
+    },
+    "debug on · turns itself off after {after}": {
+      "text": "debug on · {after} 后自动关闭",
+      "reviewed": true
+    },
+    "debug on|off [minutes]": {
+      "text": "debug on|off [分钟]",
+      "reviewed": true
+    },
+    "debug: unrecognized argument {arg} (on / off / a number of minutes, e.g. 30)": {
+      "text": "debug: 不认识的参数 {arg}（on / off / 分钟数，如 30）",
+      "reviewed": true
+    },
+    "debug=expired": {
+      "text": "debug=已过期",
+      "reviewed": true
+    },
+    "declared takeover but not in effect": {
+      "text": "声明接管但未生效",
+      "reviewed": true
+    },
+    "default": {
+      "text": "默认",
+      "reviewed": true
+    },
+    "default profile: {from} → {to}": {
+      "text": "默认 profile: {from} → {to}",
+      "reviewed": true
+    },
+    "description": {
+      "text": "说明",
+      "reviewed": true
+    },
+    "details for lagging and unavailable models: newgate probe": {
+      "text": "卡顿/不可用详情：newgate probe",
+      "reviewed": true
+    },
+    "details: newgate tier <role>": {
+      "text": "明细：newgate tier <role>",
+      "reviewed": true
+    },
+    "diagnostic probes spared {n} bindings in total: real traffic reached the threshold, but an active probe proved it still works, so the counter was cleared and it was not tripped": {
+      "text": "诊断探活累计救回 {n} 次：真实流量数到阈值、但主动探活证明它还通，计数清零未摘牌",
+      "reviewed": true
+    },
+    "dialect capabilities": {
+      "text": "方言能力",
+      "reviewed": true
+    },
+    "direct": {
+      "text": "直连",
+      "reviewed": true
+    },
+    "disabled": {
+      "text": "已禁用",
+      "reviewed": true
+    },
+    "disabled individually": {
+      "text": "已单独关闭",
+      "reviewed": true
+    },
+    "disabled: {why}": {
+      "text": "已禁用：{why}",
+      "reviewed": true
+    },
+    "down": {
+      "text": "挂",
+      "reviewed": true
+    },
+    "drain complete, exiting (socket continues under pid {pid})": {
+      "text": "排空完成，退出（socket 由 pid {pid} 继续）",
+      "reviewed": true
+    },
+    "duplicate": {
+      "text": "去重",
+      "reviewed": true
+    },
+    "duplicate of an earlier candidate in the chain": {
+      "text": "与链上更靠前的候选重复",
+      "reviewed": true
+    },
+    "duplicate of an earlier candidate, deduplicated": {
+      "text": "与链上更前面的重复，已去重",
+      "reviewed": true
+    },
+    "each (provider, model) appears once in the whole chain": {
+      "text": "同 (provider, model) 全链仅一次",
+      "reviewed": true
+    },
+    "empty binding": {
+      "text": "空绑定",
+      "reviewed": true
+    },
+    "entry resolve: argv0=\"{argv0}\" → {name} ({why})": {
+      "text": "入口解析：argv0=\"{argv0}\" → {name}（{why}）",
+      "reviewed": true
+    },
+    "entry: a handler with this name is already registered: {name}": {
+      "text": "entry: 已经有同名的入口申报者: {name}",
+      "reviewed": true
+    },
+    "entry: handler must have a Name()": {
+      "text": "entry: 入口申报者必须有 Name()",
+      "reviewed": true
+    },
+    "entry: handler must not be nil": {
+      "text": "entry: 入口申报者不能为 nil",
+      "reviewed": true
+    },
+    "error {code}: {msg}": {
+      "text": "错误 {code}: {msg}",
+      "reviewed": true
+    },
+    "excluded: explicit selection only": {
+      "text": "excluded：只能显式选中",
+      "reviewed": true
+    },
+    "expand one module:  newgate plugin <module>": {
+      "text": "展开一个模块：newgate plugin <模块>",
+      "reviewed": true
+    },
+    "expired": {
+      "text": "已到期",
+      "reviewed": true
+    },
+    "extends cycle: {name} points back to itself": {
+      "text": "extends 成环：{name} 绕回了自己",
+      "reviewed": true
+    },
+    "fallback": {
+      "text": "兜底",
+      "reviewed": true
+    },
+    "fallback chain   role normal, tried in order": {
+      "text": "fallback 链   normal 档，按序尝试",
+      "reviewed": true
+    },
+    "fallback chain: who is used, what was skipped": {
+      "text": "fallback 链：走谁、跳过了什么",
+      "reviewed": true
+    },
+    "fast": {
+      "text": "流畅",
+      "reviewed": true
+    },
+    "fill in api_key in providers.json": {
+      "text": "在 providers.json 里填 api_key",
+      "reviewed": true
+    },
+    "first byte timed out (non-stream), moved down the chain": {
+      "text": "首字节超时（非流式），沿链下移",
+      "reviewed": true
+    },
+    "first byte timed out (stream), moved down the chain": {
+      "text": "首字节超时（流式），沿链下移",
+      "reviewed": true
+    },
+    "first byte timed out, moved down the chain": {
+      "text": "首字节超时，沿链下移",
+      "reviewed": true
+    },
+    "flush failed for {name}: {err}": {
+      "text": "{name} 落盘失败: {err}",
+      "reviewed": true
+    },
+    "forwarded upstream to get the true value": {
+      "text": "转发上游取真值",
+      "reviewed": true
+    },
+    "four-tier compatibility: a profile that does not write normal behaves like mid": {
+      "text": "四档化（2026-09-16）的向下兼容：没写 normal 的老配置等价于 mid",
+      "reviewed": true
+    },
+    "from config": {
+      "text": "来自配置",
+      "machine": true,
+      "reviewed": true
+    },
+    "from the system locale": {
+      "text": "来自系统区域设置",
+      "machine": true,
+      "reviewed": true
+    },
+    "full diagnostic bundle": {
+      "text": "完整诊断包",
+      "reviewed": true
+    },
+    "global breaker table not updated: {err}": {
+      "text": "全局熔断表未更新：{err}",
+      "reviewed": true
+    },
+    "global breaker table updated: {n} binding among this round's targets is still open (slow threshold {threshold})": {
+      "text": "全局熔断表已更新：本轮目标中仍有 {n} 个 binding 熔断（慢阈值 {threshold}）",
+      "reviewed": true
+    },
+    "global default": {
+      "text": "全局默认",
+      "reviewed": true
+    },
+    "graceful handoff: socket handed to new process pid {pid}, draining in-flight requests": {
+      "text": "优雅交接：socket 已移交新进程 pid {pid}，本进程开始排空在途请求",
+      "reviewed": true
+    },
+    "grade": {
+      "text": "评级",
+      "reviewed": true
+    },
+    "graph: dependency cycle, components still stuck: {names}": {
+      "text": "构图：依赖成环，仍被卡住的组件：{names}",
+      "reviewed": true
+    },
+    "graph: topological order {order}": {
+      "text": "构图：拓扑顺序 {order}",
+      "reviewed": true
+    },
+    "graph: {count} component declarations received, in declaration order below": {
+      "text": "构图：收到 {count} 个组件声明，按声明顺序如下",
+      "reviewed": true
+    },
+    "graph: {count} components, {edges} ordering edges (Need and Optional with a provider; an Optional nobody provides makes no edge)": {
+      "text": "构图：{count} 个组件，{edges} 条排序边（Need 与命中提供者的 Optional；没人提供的 Optional 不成边）",
+      "reviewed": true
+    },
+    "group": {
+      "text": "分组",
+      "reviewed": true
+    },
+    "half-open trial failed ({bucket})": {
+      "text": "半开试探失败（{bucket}）",
+      "reviewed": true
+    },
+    "half-open · awaiting trial": {
+      "text": "半开·待试探",
+      "reviewed": true
+    },
+    "half-open · trial in flight": {
+      "text": "半开·试探中",
+      "reviewed": true
+    },
+    "handoff needs a TCP listener, got {type}": {
+      "text": "交接需要 TCP 监听器，实际 {type}",
+      "reviewed": true
+    },
+    "health check": {
+      "text": "体检",
+      "reviewed": true
+    },
+    "healthy": {
+      "text": "正常",
+      "reviewed": true
+    },
+    "in effect": {
+      "text": "生效",
+      "reviewed": true
+    },
+    "inherited fd {fd} is not a TCP listener": {
+      "text": "继承的 fd {fd} 不是 TCP 监听器",
+      "reviewed": true
+    },
+    "inheriting listener fd {fd} failed": {
+      "text": "继承监听 fd {fd} 失败",
+      "reviewed": true
+    },
+    "injected {patch} ({why})": {
+      "text": "注入 {patch}（{why}）",
+      "reviewed": true
+    },
+    "invalid request JSON": {
+      "text": "请求 JSON 无效",
+      "reviewed": true
+    },
+    "isolated for at least 60s; only a successful probe can restore it afterwards": {
+      "text": "至少隔离 60s；之后仅成功 probe 可以恢复",
+      "reviewed": true
+    },
+    "its config file was not found (not installed?)": {
+      "text": "没找到它的配置文件（没装？）",
+      "reviewed": true
+    },
+    "keep keys in environment variables (never on disk): NEWGATE_KEY_<PROVIDER in upper case, - becomes _>": {
+      "text": "key 建议走环境变量（不落盘）：NEWGATE_KEY_<PROVIDER 大写，- 换 _>",
+      "reviewed": true
+    },
+    "key {key} is registered by both {first} and {second}; keeping the first": {
+      "text": "键 {key} 被 {first} 和 {second} 同时注册，保留先登记的",
+      "reviewed": true
+    },
+    "known agents and their model slots": {
+      "text": "已知 agent 及其模型槽位",
+      "reviewed": true
+    },
+    "laggy": {
+      "text": "卡顿",
+      "reviewed": true
+    },
+    "language": {
+      "text": "语言",
+      "machine": true,
+      "reviewed": true
+    },
+    "lay down the default configuration": {
+      "text": "铺开默认配置",
+      "reviewed": true
+    },
+    "layer off": {
+      "text": "整层关闭",
+      "reviewed": true
+    },
+    "lazy probe returned 404, recorded as upstream unsupported": {
+      "text": "lazy probe 404，记为「上游不支持」",
+      "reviewed": true
+    },
+    "length delta vs original after rewrite: {diff} bytes": {
+      "text": "改写后与原文长度差 {diff} 字节",
+      "reviewed": true
+    },
+    "line {line} is not key=value: {text}": {
+      "text": "第 {line} 行不像 key=value: {text}",
+      "reviewed": true
+    },
+    "line {line}: unknown key {key} (a typo would be silently ignored, so this errors instead)": {
+      "text": "第 {line} 行不认识的 key {key}（写错字会被静默忽略，所以这里宁可报错）",
+      "reviewed": true
+    },
+    "line {line}: {key}= has an empty value": {
+      "text": "第 {line} 行 {key}= 的值是空的",
+      "reviewed": true
+    },
+    "line {line}: {key}={value}: {err}": {
+      "text": "第 {line} 行 {key}={value}: {err}",
+      "reviewed": true
+    },
+    "line {n} is {w} columns wide (limit {max})": {
+      "text": "第 {n} 行：{w} 列（上限 {max}）",
+      "reviewed": true
+    },
+    "list all modules by category; toggle a module or one of its switch points": {
+      "text": "全部模块按分类列出；开关某个模块或某个开关点",
+      "reviewed": true
+    },
+    "listener handle not ready yet": {
+      "text": "监听句柄还没就绪",
+      "reviewed": true
+    },
+    "listening on 127.0.0.1:{port}": {
+      "text": "监听 127.0.0.1:{port}",
+      "reviewed": true
+    },
+    "listening on 127.0.0.1:{port} failed": {
+      "text": "监听 127.0.0.1:{port} 失败",
+      "reviewed": true
+    },
+    "local rough estimate fallback (upstream has no such endpoint)": {
+      "text": "本地粗估兜底（上游无此端点）",
+      "reviewed": true
+    },
+    "log rotation failed: {err}": {
+      "text": "日志轮转失败: {err}",
+      "reviewed": true
+    },
+    "lossy tool loop rebase skipped ({err})": {
+      "text": "有损 tool loop 重建跳过（{err}）",
+      "reviewed": true
+    },
+    "machine-translated, unreviewed: {n}": {
+      "other": "机器翻译、未审校：{n}",
+      "machine": true,
+      "reviewed": true
+    },
+    "main latency": {
+      "text": "主延迟",
+      "reviewed": true
+    },
+    "minimal request took {lat}, over the interactive threshold {threshold}": {
+      "text": "极小请求耗时 {lat}，超过交互阈值 {threshold}",
+      "reviewed": true
+    },
+    "missing: {n}": {
+      "other": "缺失：{n}",
+      "machine": true,
+      "reviewed": true
+    },
+    "mixed dialects": {
+      "text": "两种混着",
+      "reviewed": true
+    },
+    "model health": {
+      "text": "模型健康",
+      "reviewed": true
+    },
+    "model {model} is neither a known tier ({tiers}) nor bound in any profile; run `newgate tier` for available bindings": {
+      "text": "模型 {model} 既不是已知档位（{tiers}），也不在任何 profile 的绑定里。跑 `newgate tier` 看可用绑定",
+      "reviewed": true
+    },
+    "module \"{target}\" reports no switch points, cannot be toggled at runtime (a v1 limitation)": {
+      "text": "模块 \"{target}\" 没有上报任何开关点，无法 runtime 开关（v1 的局限）",
+      "reviewed": true
+    },
+    "module {module} tried to register {key}, which is a built-in role name; ignored": {
+      "text": "模块 {module} 想注册 {key}，但这是内置档位名，已忽略",
+      "reviewed": true
+    },
+    "never probed": {
+      "text": "未探活",
+      "reviewed": true
+    },
+    "newgate init lays down the default configuration": {
+      "text": "newgate init 铺开默认配置",
+      "reviewed": true
+    },
+    "newgate is already running (pid {pid}). Use `newgate restart` or `newgate stop`": {
+      "text": "newgate 已在运行 (pid {pid})。用 `newgate restart` 或 `newgate stop`",
+      "reviewed": true
+    },
+    "newgate {version} (built {built}) started, default profile={profile}, config hot-reload enabled": {
+      "text": "newgate {version} (构建于 {built}) 启动，默认 profile={profile}，配置热更新已开启",
+      "reviewed": true
+    },
+    "newgate's shim dir must come first in PATH so that it can intercept claude and other commands": {
+      "text": "newgate 的 shim 目录必须在 PATH 最前面，才能拦住 claude 等命令。",
+      "reviewed": true
+    },
+    "next: put your upstream keys into {path}": {
+      "text": "下一步：把上游 key 填进 {path}",
+      "reviewed": true
+    },
+    "no": {
+      "text": "否",
+      "reviewed": true
+    },
+    "no all-green profile": {
+      "text": "没有全绿的 profile",
+      "reviewed": true
+    },
+    "no api_key; the actual request is skipped": {
+      "text": "没有 api_key，跳过实际请求",
+      "reviewed": true
+    },
+    "no bindings are in trouble": {
+      "text": "没有出问题的 binding",
+      "reviewed": true
+    },
+    "no entry claimed this call (asked: {chain})": {
+      "text": "没有任何入口认领这次调用（问过：{chain}）",
+      "reviewed": true
+    },
+    "no key": {
+      "text": "没 key",
+      "reviewed": true
+    },
+    "no module named \"{target}\" (see the list with newgate plugin)": {
+      "text": "没有叫 \"{target}\" 的模块（newgate plugin 看清单）",
+      "reviewed": true
+    },
+    "no module or switch point named \"{target}\" (see the list with newgate plugin)": {
+      "text": "没有叫 \"{target}\" 的模块或开关点（newgate plugin 看清单）",
+      "reviewed": true
+    },
+    "no such key at the top level": {
+      "text": "顶层找不到该字段",
+      "reviewed": true
+    },
+    "no such profile: {name} (available: {list})": {
+      "text": "profile {name} 不存在（可用：{list}）",
+      "reviewed": true
+    },
+    "no such role: {name} ({known})": {
+      "text": "未知档位 {name}（{known}）",
+      "reviewed": true
+    },
+    "no switch point named \"{target}\" (see the list with newgate plugin)": {
+      "text": "没有叫 \"{target}\" 的开关点（newgate plugin 看清单）",
+      "reviewed": true
+    },
+    "no usable candidate": {
+      "text": "无可用候选",
+      "reviewed": true
+    },
+    "no usable candidate   newgate tier normal": {
+      "text": "无可用候选   newgate tier normal",
+      "reviewed": true
+    },
+    "no valid candidate": {
+      "text": "没有有效的候选",
+      "reviewed": true
+    },
+    "none": {
+      "text": "无",
+      "reviewed": true
+    },
+    "not bound": {
+      "text": "未绑定",
+      "reviewed": true
+    },
+    "not declared but still installed": {
+      "text": "未声明接管却仍装着",
+      "reviewed": true
+    },
+    "not defined": {
+      "text": "未定义",
+      "reviewed": true
+    },
+    "not taken over": {
+      "text": "未接管",
+      "reviewed": true
+    },
+    "now: {state}": {
+      "text": "现在：{state}",
+      "reviewed": true
+    },
+    "off": {
+      "text": "关",
+      "reviewed": true
+    },
+    "off (whole layer)": {
+      "text": "关（整层）",
+      "reviewed": true
+    },
+    "on": {
+      "text": "开",
+      "reviewed": true
+    },
+    "once the cooldown expires, one real request is let through as a trial: success closes the breaker, failure re-trips it and doubles the cooldown (capped at 10 minutes)": {
+      "text": "冷却到期后会放行一次真实请求作试探：成功即合闸，失败则回闸并把冷却翻倍（上限 10 分钟）",
+      "reviewed": true
+    },
+    "only POST is accepted": {
+      "text": "只接受 POST",
+      "reviewed": true
+    },
+    "other": {
+      "text": "其他",
+      "reviewed": true
+    },
+    "over maxAttempts": {
+      "text": "超出 maxAttempts",
+      "reviewed": true
+    },
+    "own command registration failed (assembly error): {err}": {
+      "text": "自己的命令注册失败（装配期错误）: {err}",
+      "reviewed": true
+    },
+    "parse base_url": {
+      "text": "解析 base_url",
+      "reviewed": true
+    },
+    "parse capability cache {path}: {err}": {
+      "text": "解析能力缓存 {path}: {err}",
+      "reviewed": true
+    },
+    "partially usable": {
+      "text": "部分可用",
+      "reviewed": true
+    },
+    "past maxAttempts={limit}": {
+      "text": "超出 maxAttempts={limit}",
+      "reviewed": true
+    },
+    "pid {pid} is alive, HTTP probe to 127.0.0.1:{port} failed": {
+      "text": "pid {pid} 存活，127.0.0.1:{port} HTTP 探活失败",
+      "reviewed": true
+    },
+    "pid {pid} · 127.0.0.1:{port} · pidfile and lock agree": {
+      "text": "pid {pid} · 127.0.0.1:{port} · pidfile 与锁一致",
+      "reviewed": true
+    },
+    "pid {pid} · {tripped} tripped · {counted} counted only": {
+      "text": "pid {pid} · {tripped} 个被摘牌 · {counted} 个只计数",
+      "reviewed": true
+    },
+    "pidfile is rewritten to the real process; status/metrics recover at once, no manual file editing needed": {
+      "text": "pidfile 已经改回真身，status/metrics 立刻恢复；不用手工改文件",
+      "reviewed": true
+    },
+    "pinned stops at the chain head and is never replaced · excluded is only selected explicitly · ←agent that agent uses this profile alone": {
+      "text": "pinned 停在链首不替换 · excluded 只能被显式选中 · ←agent 该 agent 单独用这个 profile",
+      "reviewed": true
+    },
+    "pinned: the chain ends here; a failure is reported, not replaced": {
+      "text": "pinned：链到此为止，失败直接上报，不再替换候选",
+      "reviewed": true
+    },
+    "plugin": {
+      "text": "插件",
+      "reviewed": true
+    },
+    "plugin [module[.path]] [on|off] [duration]": {
+      "text": "plugin [模块[.路径]] [on|off] [时长]",
+      "reviewed": true
+    },
+    "plugin-manager: module \"{name}\" already reported (each module reports once)": {
+      "text": "plugin-manager: 模块 \"{name}\" 已经上报过（每个模块只报一次）",
+      "reviewed": true
+    },
+    "plugin-manager: module \"{name}\" reported a switch point with an empty Path": {
+      "text": "plugin-manager: 模块 \"{name}\" 报了空 Path 的开关点",
+      "reviewed": true
+    },
+    "plugin-manager: module name must not be empty": {
+      "text": "plugin-manager: 模块名不能为空",
+      "reviewed": true
+    },
+    "plugin-manager: switch point \"{path}\" is a footgun, it must carry a default time limit (TTL > 0)": {
+      "text": "plugin-manager: 开关点 \"{path}\" 是 footgun，必须带默认时限（TTL > 0）",
+      "reviewed": true
+    },
+    "plugin-manager: switch point \"{path}\" is already taken by module \"{module}\"": {
+      "text": "plugin-manager: 开关点 \"{path}\" 已被模块 \"{module}\" 占用",
+      "reviewed": true
+    },
+    "plugin-manager: switch point \"{path}\" must fill in Title (plain words) and Why (what turning it off does)": {
+      "text": "plugin-manager: 开关点 \"{path}\" 必须写清 Title（人话）与 Why（关掉会怎样）",
+      "reviewed": true
+    },
+    "plugin-manager: switch point \"{path}\" must start with the module name \"{name}\" plus a dot ({name}.<path>)": {
+      "text": "plugin-manager: 开关点 \"{path}\" 必须以模块名 \"{name}\" 加一个点开头（{name}.<路径>）",
+      "reviewed": true
+    },
+    "plugin-manager: unknown Danger \"{danger}\" on switch point \"{path}\" (safe/quirk/footgun)": {
+      "text": "plugin-manager: 开关点 \"{path}\" 的 Danger \"{danger}\" 不认识（safe/quirk/footgun）",
+      "reviewed": true
+    },
+    "plugin: serialization failed: {err}": {
+      "text": "plugin: 序列化失败: {err}",
+      "reviewed": true
+    },
+    "plugin: unknown duration \"{value}\" (supported: 30s / 2m / 2min / 1h / forever)": {
+      "text": "plugin: 不认识的时长 \"{value}\"（支持 30s / 2m / 2min / 1h / forever）",
+      "reviewed": true
+    },
+    "plugin: unknown verb \"{verb}\" (usage: newgate plugin <module>[.<path>] on|off [duration])": {
+      "text": "plugin: 不认识的动词 \"{verb}\"（用法：newgate plugin <模块>[.<路径>] on|off [时长]）",
+      "reviewed": true
+    },
+    "plugin: {path} is a footgun, forever is not accepted (give a duration, e.g. 5m)": {
+      "text": "plugin: {path} 是 footgun，不接受 forever（给个时长，如 5m）",
+      "reviewed": true
+    },
+    "points to": {
+      "text": "指向",
+      "reviewed": true
+    },
+    "policy: contributor must have a name": {
+      "text": "policy: 贡献者必须有名字",
+      "reviewed": true
+    },
+    "policy: contributor {name} is already registered": {
+      "text": "policy: 贡献者 {name} 已经注册过了",
+      "reviewed": true
+    },
+    "policy: only one contributor may be an admitter; {name} is already taken by {holder} (it carries side effects, see the Admitter docs)": {
+      "text": "policy: 准入只能有一个贡献者，{name} 已经被 {holder} 占着（它带副作用，见 Admitter 的说明）",
+      "reviewed": true
+    },
+    "policy: state document field {key} is already taken by {owner}": {
+      "text": "policy: 状态文档的字段 {key} 已被 {owner} 占用",
+      "reviewed": true
+    },
+    "pre-gate diagnosis {provider}/{model} attempt {attempt}/{total}: HTTP {status} {err} ({latency})": {
+      "text": "上闸前诊断 {provider}/{model} 第 {attempt}/{total} 次：HTTP {status} {err}（{latency}）",
+      "reviewed": true
+    },
+    "pre-trip diagnostic probe proved it healthy ({bucket} counter cleared)": {
+      "text": "上闸前诊断探活证明可用（{bucket} 计数清零）",
+      "reviewed": true
+    },
+    "prepended {dir} to PATH (written into {file})": {
+      "text": "把 {dir} 前置到 PATH（写进 {file}）",
+      "reviewed": true
+    },
+    "probe HTTP {status}": {
+      "text": "probe HTTP {status}",
+      "reviewed": true
+    },
+    "probe failed: {err}": {
+      "text": "probe 失败：{err}",
+      "reviewed": true
+    },
+    "probe {latency} exceeded {limit}": {
+      "text": "probe {latency} 超过 {limit}",
+      "reviewed": true
+    },
+    "probing {n} targets (concurrency {c}; each (provider, model) is probed once)": {
+      "text": "探测 {n} 个目标（并发 {c}，同 (provider, model) 只打一次）",
+      "reviewed": true
+    },
+    "profile": {
+      "text": "profile",
+      "reviewed": true
+    },
+    "profile kv <name> [--write]": {
+      "text": "profile kv <名> [--write]",
+      "reviewed": true
+    },
+    "profile {name}: {err}": {
+      "text": "profile {name}: {err}",
+      "reviewed": true
+    },
+    "profile {profile} does not exist (available: {names})": {
+      "text": "profile {profile} 不存在（可用：{names}）",
+      "reviewed": true
+    },
+    "profile {profile} role {role}: model is empty": {
+      "text": "profile {profile} 档位 {role}: model 为空",
+      "reviewed": true
+    },
+    "profile {profile} role {role}: provider {provider} is not defined": {
+      "text": "profile {profile} 档位 {role}: provider {provider} 未定义",
+      "reviewed": true
+    },
+    "provider and model must both be set: {binding}": {
+      "text": "provider 和 model 都不能为空: {binding}",
+      "reviewed": true
+    },
+    "provider has no api_key": {
+      "text": "provider 没有 api_key",
+      "reviewed": true
+    },
+    "provider has no api_key, override not applied": {
+      "text": "provider 没有 api_key，覆盖不生效",
+      "reviewed": true
+    },
+    "provider is not defined": {
+      "text": "provider 未定义",
+      "reviewed": true
+    },
+    "provider is not defined, override not applied": {
+      "text": "provider 未定义，覆盖不生效",
+      "reviewed": true
+    },
+    "provider undefined": {
+      "text": "provider 未定义",
+      "reviewed": true
+    },
+    "provider {provider} has no key → {hint}": {
+      "text": "provider {provider} 没有 key → {hint}",
+      "reviewed": true
+    },
+    "providers.json (keys redacted)": {
+      "text": "providers.json（密钥脱敏）",
+      "reviewed": true
+    },
+    "proxy counters: interception / timeouts / failover / rerouting": {
+      "text": "代理计数器：拦截 / 超时 / 转移 / 改道",
+      "reviewed": true
+    },
+    "proxy is not running (newgate start) — counters live in daemon memory": {
+      "text": "代理没在运行（newgate start）——计数器在 daemon 内存里",
+      "reviewed": true
+    },
+    "proxy is not running · newgate start": {
+      "text": "代理未运行 · newgate start",
+      "reviewed": true
+    },
+    "proxy is not running; the configuration is read on the next start": {
+      "text": "代理未运行；配置会在下次启动时读取",
+      "reviewed": true
+    },
+    "proxy notified to re-read the configuration   pid {pid}": {
+      "text": "已通知代理重读配置   pid {pid}",
+      "reviewed": true
+    },
+    "raise state.json chain.max_attempts to widen the actual attempt range": {
+      "text": "调高 state.json chain.max_attempts 可扩大实际尝试范围",
+      "reviewed": true
+    },
+    "rc file": {
+      "text": "rc 文件",
+      "reviewed": true
+    },
+    "re-read the configuration now (normally hot-reloaded within a second)": {
+      "text": "立刻重读配置（平时 1 秒内自动热更新）",
+      "reviewed": true
+    },
+    "reachable": {
+      "text": "通",
+      "reviewed": true
+    },
+    "read capability cache {path}: {err}": {
+      "text": "读能力缓存 {path}: {err}",
+      "reviewed": true
+    },
+    "real {agent}: {path}": {
+      "text": "真实 {agent}: {path}",
+      "reviewed": true
+    },
+    "reasoning_effort not added ({err})": {
+      "text": "reasoning_effort 未补上（{err}）",
+      "reviewed": true
+    },
+    "reference cycle": {
+      "text": "引用成环",
+      "reviewed": true
+    },
+    "reference cycle ({from} → {to}), skipped": {
+      "text": "引用成环（{from} → {to}），已跳过",
+      "reviewed": true
+    },
+    "remove this block (or run newgate shim uninstall) to restore everything": {
+      "text": "删掉这一段（或跑 newgate shim uninstall）即可完全恢复原状。",
+      "reviewed": true
+    },
+    "removed the PATH shim (PATH precedence goes back to the real {agent})": {
+      "text": "摘掉 PATH shim（PATH 优先级回到真实 {agent}）",
+      "reviewed": true
+    },
+    "reopen the shell or exec $SHELL -l": {
+      "text": "重开 shell 或 exec $SHELL -l",
+      "reviewed": true
+    },
+    "request body has no top-level model string field ({method} {path})": {
+      "text": "请求体顶层没有 model 字符串字段（{method} {path}）",
+      "reviewed": true
+    },
+    "request body top level is not a JSON object": {
+      "text": "请求体顶层不是 JSON 对象",
+      "reviewed": true
+    },
+    "request counters": {
+      "text": "请求计数",
+      "reviewed": true
+    },
+    "request shape error (a 400 claimed by a shape detector, e.g. deepseek's reasoning pass-back check), skipped from breaker accounting": {
+      "text": "请求形状错误（400 被某个形状判据认领，如 deepseek 的 reasoning 回传校验），跳过熔断记账",
+      "reviewed": true
+    },
+    "request short-circuited by special plugin {plugin} (no upstream call)": {
+      "text": "请求被 special 插件 {plugin} 短路（未调用上游）",
+      "reviewed": true
+    },
+    "requests": {
+      "text": "请求",
+      "reviewed": true
+    },
+    "requests entering the gateway": {
+      "text": "进入网关的请求",
+      "reviewed": true
+    },
+    "restored {file}": {
+      "text": "还原 {file}",
+      "reviewed": true
+    },
+    "revert it: newgate plugin {target} on": {
+      "text": "恢复：newgate plugin {target} on",
+      "reviewed": true
+    },
+    "rewriting model failed: {err}": {
+      "text": "改写 model 失败: {err}",
+      "reviewed": true
+    },
+    "role bindings   profile {name}": {
+      "text": "档位绑定   profile {name}",
+      "reviewed": true
+    },
+    "role {role} is not defined": {
+      "text": "未定义 {role}",
+      "reviewed": true
+    },
+    "roles {roles}": {
+      "text": "档位 {roles}",
+      "reviewed": true
+    },
+    "roles {roles}, plus {n} dynamic role keys (newgate omo ls)": {
+      "text": "档位 {roles}，另有 {n} 个动态角色键（newgate omo ls）",
+      "reviewed": true
+    },
+    "rotating {from} → {to}.1: {err}": {
+      "text": "轮转 {from} → {to}.1: {err}",
+      "reviewed": true
+    },
+    "rotating {from} → {to}: {err}": {
+      "text": "轮转 {from} → {to}: {err}",
+      "reviewed": true
+    },
+    "route: {route}\nstatus: 400\ntag: {tag}\ndetector: {detector}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n": {
+      "text": "route: {route}\nstatus: 400\ntag: {tag}\ndetector: {detector}\n\n--- 客户端请求头 ---{reqHeaders}\n\n--- 上游响应头 ---{respHeaders}\n",
+      "reviewed": true
+    },
+    "route: {route}\nstatus: {status}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n": {
+      "text": "route: {route}\nstatus: {status}\n\n--- 客户端请求头 ---{reqHeaders}\n\n--- 上游响应头 ---{respHeaders}\n",
+      "reviewed": true
+    },
+    "running {file} through /bin/sh failed too: {err}": {
+      "text": "经 /bin/sh 执行 {file} 也失败: {err}",
+      "reviewed": true
+    },
+    "send real requests to candidates and report their health": {
+      "text": "给候选打真实请求，出健康报告",
+      "reviewed": true
+    },
+    "set api_key in providers.json": {
+      "text": "providers.json 里填 api_key",
+      "reviewed": true
+    },
+    "set the environment variable {env} or fill in api_key": {
+      "text": "设环境变量 {env} 或填 api_key",
+      "reviewed": true
+    },
+    "skipped (you turned it off; newgate on {agent} restores it)": {
+      "text": "跳过（你 off 过它；newgate on {agent} 可恢复）",
+      "reviewed": true
+    },
+    "skipped ({err}); sending the request as-is": {
+      "text": "跳过（{err}），按原样发",
+      "reviewed": true
+    },
+    "skipped {n} candidate: {reasons}": {
+      "text": "跳过 {n} 个候选：{reasons}",
+      "reviewed": true
+    },
+    "slot key": {
+      "text": "槽位键",
+      "reviewed": true
+    },
+    "slots are discovered from the config file at startup": {
+      "text": "槽位在启动时从配置文件发现",
+      "reviewed": true
+    },
+    "some models always think and return a 400 when told to turn thinking off (GLM code 1210)\ngive these models an explicit reasoning_effort=low and change thinking:disabled back to enabled (the fallback half of BestEffortDisableThink)": {
+      "text": "有些模型始终思考，收到「关闭思考」就 400（GLM code 1210）\n给这些模型补显式 reasoning_effort=low，并把 thinking:disabled 改回 enabled（BestEffortDisableThink 的兜底半边）",
+      "reviewed": true
+    },
+    "source": {
+      "text": "来源",
+      "machine": true,
+      "reviewed": true
+    },
+    "special off: {list}": {
+      "text": "special 关了 {list}",
+      "reviewed": true
+    },
+    "special_treatment layer disabled": {
+      "text": "special_treatment 整层已关",
+      "reviewed": true
+    },
+    "special_treatment layer enabled": {
+      "text": "special_treatment 整层已开",
+      "reviewed": true
+    },
+    "special_treatment switches and descriptions": {
+      "text": "special_treatment 开关与说明",
+      "reviewed": true
+    },
+    "special_treatment {layer} · {n} plugin": {
+      "text": "special_treatment {layer} · {n} 个插件",
+      "reviewed": true
+    },
+    "st [on|off] [plugin]": {
+      "text": "st [on|off] [插件]",
+      "reviewed": true
+    },
+    "start {index}/{total} {name} done (took {took})": {
+      "text": "启动 {index}/{total} {name} 完成（用时 {took}）",
+      "reviewed": true
+    },
+    "start {index}/{total} {name} failed (took {took}): {err}": {
+      "text": "启动 {index}/{total} {name} 失败（用时 {took}）：{err}",
+      "reviewed": true
+    },
+    "status": {
+      "text": "状态",
+      "reviewed": true
+    },
+    "stop {index}/{total} {name} done (took {took})": {
+      "text": "停止 {index}/{total} {name} 完成（用时 {took}）",
+      "reviewed": true
+    },
+    "stop {index}/{total} {name} failed (took {took}): {err}": {
+      "text": "停止 {index}/{total} {name} 失败（用时 {took}）：{err}",
+      "reviewed": true
+    },
+    "stop {index}/{total} {name} skipped (no Stop)": {
+      "text": "停止 {index}/{total} {name} 跳过（没有 Stop）",
+      "reviewed": true
+    },
+    "stop: complete": {
+      "text": "停止：完成",
+      "reviewed": true
+    },
+    "stop: releasing {count} components in reverse start order": {
+      "text": "停止：按启动逆序释放 {count} 个组件",
+      "reviewed": true
+    },
+    "summary": {
+      "text": "汇总",
+      "reviewed": true
+    },
+    "switch a single agent only: newgate --set-profile <name> --agent <agent>": {
+      "text": "只切单个 agent：newgate --set-profile <名> --agent <agent>",
+      "reviewed": true
+    },
+    "switch profile; omit --agent to set the global default": {
+      "text": "切 profile；省略 --agent 设全局默认",
+      "reviewed": true
+    },
+    "switched off": {
+      "text": "已关闭",
+      "reviewed": true
+    },
+    "switched on": {
+      "text": "已打开",
+      "reviewed": true
+    },
+    "takes effect immediately; running sessions are unaffected": {
+      "text": "即刻生效；已在运行的会话不受影响",
+      "reviewed": true
+    },
+    "the chain head is fixed; fallbacks follow the predicted TTFT of this context": {
+      "text": "链头固定；fallback 按当前上下文的预测 TTFT 排序",
+      "reviewed": true
+    },
+    "the chain's attempt budget is exhausted — see state.json chain.max_attempts": {
+      "text": "链的尝试次数已用尽，见 state.json chain.max_attempts",
+      "reviewed": true
+    },
+    "the configuration already exists, nothing to initialize (--force overwrites)": {
+      "text": "配置已存在，无需初始化（--force 可覆盖）",
+      "reviewed": true
+    },
+    "the current shell's PATH is not in effect yet; reopen the shell or `exec $SHELL -l`": {
+      "text": "当前 shell 的 PATH 还没生效，重开 shell 或 `exec $SHELL -l`",
+      "reviewed": true
+    },
+    "the file is empty": {
+      "text": "文件是空的",
+      "reviewed": true
+    },
+    "the health score uses the main probe latency only; total time also includes dialect and quirk checks": {
+      "text": "健康评分只用主探活延迟；总耗时还包含方言和 quirk 检查",
+      "reviewed": true
+    },
+    "the new process did not attach to the listening socket within 5 seconds: {err}": {
+      "text": "新进程 5 秒内没接上监听 socket: {err}",
+      "reviewed": true
+    },
+    "the number of profiles changed": {
+      "text": "profile 数量变化",
+      "reviewed": true
+    },
+    "the number of providers changed": {
+      "text": "provider 数量变化",
+      "reviewed": true
+    },
+    "the pidfile holds no pid": {
+      "text": "pidfile 里没有 pid",
+      "reviewed": true
+    },
+    "the pidfile is unreadable": {
+      "text": "读不到 pidfile",
+      "reviewed": true
+    },
+    "the provider has no api_key": {
+      "text": "provider 缺 api_key",
+      "reviewed": true
+    },
+    "the provider was rejected as unavailable — see newgate metrics / probe": {
+      "text": "provider 被熔断摘除，见 newgate metrics / probe",
+      "reviewed": true
+    },
+    "the proxy (pid {pid}) runs as another user and has no control token — ask the user who started it to run `newgate stop` once (after that any group member can stop it)": {
+      "text": "代理 (pid {pid}) 由其他用户运行且没有控制令牌——请让启动它的用户执行一次 `newgate stop`（之后任意组员都能停）",
+      "reviewed": true
+    },
+    "the proxy is not running (newgate start) — the breaker table lives in the daemon's memory": {
+      "text": "代理没在运行（newgate start）——熔断表在 daemon 内存里",
+      "reviewed": true
+    },
+    "the proxy refused the stop request (HTTP {code})": {
+      "text": "代理拒绝了停机请求（HTTP {code}）",
+      "reviewed": true
+    },
+    "the real executable was not found (forwarding will fail)": {
+      "text": "找不到真实可执行文件（转发会失败）",
+      "reviewed": true
+    },
+    "the stop request was accepted, but the proxy (pid {pid}) did not exit within 2 seconds (see the log {log})": {
+      "text": "停机请求已被接受，但代理 (pid {pid}) 2 秒内没有退出（看日志 {log}）",
+      "reviewed": true
+    },
+    "the top level already has this key": {
+      "text": "顶层已经有这个字段了",
+      "reviewed": true
+    },
+    "thinkcache compact lost {lost} records ({unreadable} unreadable, {unwritable} unwritable)": {
+      "text": "thinkcache 压实丢了 {lost} 条记录（读不出 {unreadable}，写不进 {unwritable}）",
+      "reviewed": true
+    },
+    "thinkcache compact: cannot close the temp file (keeping the old file): {err}": {
+      "text": "thinkcache 压实：关闭临时文件失败（保留旧文件）: {err}",
+      "reviewed": true
+    },
+    "thinkcache compact: cannot open the temp file (still using the old file): {err}": {
+      "text": "thinkcache 压实：开临时文件失败（继续用旧文件）: {err}",
+      "reviewed": true
+    },
+    "thinkcache compact: cannot replace the file (keeping the old file): {err}": {
+      "text": "thinkcache 压实：替换失败（保留旧文件）: {err}",
+      "reviewed": true
+    },
+    "thinkcache compact: cannot write the file header (still using the old file): {err}": {
+      "text": "thinkcache 压实：写文件头失败（继续用旧文件）: {err}",
+      "reviewed": true
+    },
+    "thinkcache compact: fsync failed (keeping the old file): {err}": {
+      "text": "thinkcache 压实：刷盘失败（保留旧文件）: {err}",
+      "reviewed": true
+    },
+    "thinkcache disk layer disabled (memory-only): {err}": {
+      "text": "thinkcache 落盘关闭（继续纯内存）: {err}",
+      "reviewed": true
+    },
+    "thinkcache disk tier disabled (reopen failed; cached reasoning content will not be recoverable after a restart): {err}": {
+      "text": "thinkcache 冷层停用（重开失败，重启后推理内容将无法找回）: {err}",
+      "reviewed": true
+    },
+    "thinkcache disk write failed (this record is not persisted): {err}": {
+      "text": "thinkcache 冷层写入失败（本条不落盘）: {err}",
+      "reviewed": true
+    },
+    "thinkcache: cannot parse an assistant message in the request; this round is treated as a miss (empty string filled in) — a JSON shape problem on the client side, not a cache problem (first 200 bytes: {snippet})": {
+      "text": "thinkcache: 请求里的 assistant 消息解析不出来，本轮按未命中处理（补空串）——这是客户端发来的 JSON 形态问题，不是缓存问题（前 200 字节: {snippet}）",
+      "reviewed": true
+    },
+    "thinking cannot be disabled (an explicit reasoning_effort is required)": {
+      "text": "不支持关闭思考（必须给显式 reasoning_effort）",
+      "reviewed": true
+    },
+    "thinking left unchanged ({err})": {
+      "text": "thinking 未改动（{err}）",
+      "reviewed": true
+    },
+    "thinking not injected ({err})": {
+      "text": "thinking 未注入（{err}）",
+      "reviewed": true
+    },
+    "thinking:disabled → enabled (this model cannot turn thinking off)": {
+      "text": "thinking:disabled → enabled（该模型不支持关闭思考）",
+      "reviewed": true
+    },
+    "this call does not want to think (best effort)": {
+      "text": "这次调用不想思考（best effort）",
+      "reviewed": true
+    },
+    "this is a footgun: turning it on/off needs a time limit, forever is not accepted": {
+      "text": "这是 footgun：打开/关闭必须带时限，不接受 forever",
+      "reviewed": true
+    },
+    "this model always thinks": {
+      "text": "该模型始终思考",
+      "reviewed": true
+    },
+    "this profile does not define this role (sparse layer, expected)": {
+      "text": "该 profile 未定义此档位（稀疏层，正常）",
+      "reviewed": true
+    },
+    "this screen": {
+      "text": "这一屏",
+      "reviewed": true
+    },
+    "tier": {
+      "text": "档位",
+      "reviewed": true
+    },
+    "tier [role]": {
+      "text": "tier [档位]",
+      "reviewed": true
+    },
+    "tier {tier} has no usable candidate under profile {profile} (tiers: {tiers}); run `newgate tier {tier}` to see why each candidate was skipped": {
+      "text": "档位 {tier} 在 profile {profile} 下没有可用候选（档位：{tiers}）。跑 `newgate tier {tier}` 看每个候选为什么被跳过",
+      "reviewed": true
+    },
+    "timeout": {
+      "text": "超时",
+      "reviewed": true
+    },
+    "toggle one point:   newgate plugin <module>.<path> on|off [5m|forever]": {
+      "text": "开关一个点：  newgate plugin <模块>.<路径> on|off [5m|forever]",
+      "reviewed": true
+    },
+    "toggle the whole module: newgate plugin {name} off": {
+      "text": "开关整个模块：newgate plugin {name} off",
+      "reviewed": true
+    },
+    "tools is not an array: {err}": {
+      "text": "tools 不是数组: {err}",
+      "reviewed": true
+    },
+    "total time": {
+      "text": "总耗时",
+      "reviewed": true
+    },
+    "trial in flight": {
+      "text": "试探在飞",
+      "reviewed": true
+    },
+    "tripped": {
+      "text": "摘牌中",
+      "reviewed": true
+    },
+    "troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)": {
+      "text": "排查：newgate status / newgate doctor / newgate stop（一键恢复直连）",
+      "reviewed": true
+    },
+    "turned off": {
+      "text": "已关",
+      "reviewed": true
+    },
+    "turned on": {
+      "text": "已开",
+      "reviewed": true
+    },
+    "unavailable": {
+      "text": "不可用",
+      "reviewed": true
+    },
+    "unbound": {
+      "text": "未绑定",
+      "reviewed": true
+    },
+    "unknown": {
+      "text": "未知",
+      "reviewed": true
+    },
+    "unknown agent": {
+      "text": "未知 agent",
+      "reviewed": true
+    },
+    "unknown agent {agent} (known: {list})": {
+      "text": "不认识的 agent {agent}（已知：{list}）",
+      "reviewed": true
+    },
+    "unknown command {cmd} (see newgate --help)": {
+      "text": "未知命令 {cmd}（newgate --help）",
+      "reviewed": true
+    },
+    "unknown dialect": {
+      "text": "未知方言",
+      "reviewed": true
+    },
+    "unknown tool {tool} (known: {list})": {
+      "text": "不认识的工具 {tool}（已知：{list}）",
+      "reviewed": true
+    },
+    "unprobed": {
+      "text": "未探",
+      "reviewed": true
+    },
+    "unrated": {
+      "text": "未评分",
+      "reviewed": true
+    },
+    "upstream {provider} connect failed: {err}": {
+      "text": "上游 {provider} 连接失败: {err}",
+      "reviewed": true
+    },
+    "upstream/model": {
+      "text": "上游/模型",
+      "reviewed": true
+    },
+    "usable": {
+      "text": "可用",
+      "reviewed": true
+    },
+    "usage: newgate profile kv <name> [--write]": {
+      "text": "用法：newgate profile kv <name> [--write]",
+      "reviewed": true
+    },
+    "v1 only covers switches a module reports itself; a module that reports none cannot be toggled at runtime": {
+      "text": "v1 只做「模块自己上报」的开关；没上报的模块不能被运行期开关",
+      "reviewed": true
+    },
+    "value of the key is not a string": {
+      "text": "该字段的值不是字符串",
+      "reviewed": true
+    },
+    "value of the key is not an array": {
+      "text": "该字段的值不是数组",
+      "reviewed": true
+    },
+    "verdict": {
+      "text": "结论",
+      "reviewed": true
+    },
+    "was not taken over in the first place": {
+      "text": "本来就没被接管",
+      "reviewed": true
+    },
+    "what is written is placeholders — replace them with your own provider, endpoint and model names": {
+      "text": "默认写入的是占位符，必须改成你自己的 provider / endpoint / 模型名。",
+      "reviewed": true
+    },
+    "what turning it off does: {why}": {
+      "text": "关掉会发生什么：{why}",
+      "reviewed": true
+    },
+    "which bindings are tripped, why, and for how long": {
+      "text": "哪些 binding 被摘牌了、为什么、多久了",
+      "reviewed": true
+    },
+    "which message catalog the interface reads — see `newgate lang`": {
+      "text": "界面读的是哪份消息目录 —— 见 `newgate lang`",
+      "machine": true,
+      "reviewed": true
+    },
+    "who is going through newgate, with which profile": {
+      "text": "谁在走 newgate、用哪个 profile",
+      "reviewed": true
+    },
+    "yes": {
+      "text": "是",
+      "reviewed": true
+    },
+    "you rarely need this command: configuration changes apply within a second": {
+      "text": "平时不需要这个命令：配置改动 1 秒内自动生效",
+      "reviewed": true
+    },
+    "{agent} is back to a direct connection; newgate start will no longer take it over (newgate on {agent} restores it)": {
+      "text": "{agent} 已恢复直连；newgate start 不再接管它（newgate on {agent} 恢复）",
+      "reviewed": true
+    },
+    "{ago} ago": {
+      "text": "{ago} 前",
+      "reviewed": true
+    },
+    "{bucket} {latency}/{n} sample": {
+      "text": "{bucket} {latency}/{n}次",
+      "reviewed": true
+    },
+    "{dialect} dialect": {
+      "text": "{dialect} 方言",
+      "reviewed": true
+    },
+    "{dialect} {chunks} chunks / {reasoning} reasoning deltas / {text} text deltas": {
+      "text": "{dialect} {chunks} 块 / 推理增量 {reasoning} / 正文增量 {text}",
+      "reviewed": true
+    },
+    "{dialect} {chunks} chunks / {reasoning} reasoning deltas / {text} text deltas / **{bad} chunks unparsable**": {
+      "text": "{dialect} {chunks} 块 / 推理增量 {reasoning} / 正文增量 {text} / **{bad} 块解析不了**",
+      "reviewed": true
+    },
+    "{err}\n      ↳ certificate problem / MITM proxy in the middle / wrong clock": {
+      "text": "{err}\n      ↳ 证书问题 / 中间有 MITM 代理 / 时钟不对",
+      "reviewed": true
+    },
+    "{err}\n      ↳ the port may be blocked; an outbound proxy may be required (newgate does not read HTTPS_PROXY today)": {
+      "text": "{err}\n      ↳ 端口被墙？需要出站代理？（newgate 目前不读 HTTPS_PROXY）",
+      "reviewed": true
+    },
+    "{err}\n      ↳ the static build uses the pure Go resolver; if the dynamic build resolves but this one does not, the host DNS config is non-standard (/etc/nsswitch.conf lists sss/mdns or similar)": {
+      "text": "{err}\n      ↳ 静态版用纯 Go 解析器；若动态版能解析而这里不行，说明本机 DNS 配置非标准（/etc/nsswitch.conf 里有 sss/mdns 之类）",
+      "reviewed": true
+    },
+    "{files} missing": {
+      "text": "{files} 不存在",
+      "reviewed": true
+    },
+    "{file} (skipped: {why})": {
+      "text": "{file}（跳过: {why}）",
+      "reviewed": true
+    },
+    "{file} ({err})": {
+      "text": "{file}（{err}）",
+      "reviewed": true
+    },
+    "{file} has a begin marker but no end marker; not editing it automatically, please delete the lines after {mark} by hand": {
+      "text": "{file} 里有起始标记但没有结束标记，不敢自动改，请手工删除 {mark} 之后的那几行",
+      "reviewed": true
+    },
+    "{file} has {n} spots that missed the exact rules and landed in the middle tier; worth a review": {
+      "text": "{file} 里有 {n} 处没命中精确规则，归到了中档，建议核对",
+      "reviewed": true
+    },
+    "{head} · {n} target · {elapsed}": {
+      "text": "{head} · {n} 目标 · {elapsed}",
+      "reviewed": true
+    },
+    "{lang} (source language) · {total} messages": {
+      "text": "{lang}（源语言）· {total} 条消息",
+      "machine": true,
+      "reviewed": true
+    },
+    "{lang} · {pct}% translated ({done}/{total}), {machine} machine, {missing} missing": {
+      "text": "{lang} · 已翻译 {pct}%（{done}/{total}），{machine} 条机器翻译，{missing} 条缺失",
+      "machine": true,
+      "reviewed": true
+    },
+    "{lang} · {total} messages, all translated": {
+      "text": "{lang} · {total} 条消息，全部已翻译",
+      "machine": true,
+      "reviewed": true
+    },
+    "{link} is not a link newgate installed, left untouched": {
+      "text": "{link} 不是 newgate 装的链接，没动它",
+      "reviewed": true
+    },
+    "{mark} {target} {status} main {main}ms total {total}ms{msg}": {
+      "text": "{mark} {target} {status} 主{main}ms 总{total}ms{msg}",
+      "reviewed": true
+    },
+    "{modules} modules · {switches} runtime switch points": {
+      "text": "{modules} 个模块 · {switches} 个可运行期开关点",
+      "reviewed": true
+    },
+    "{name} did not claim": {
+      "text": "{name} 未认领",
+      "reviewed": true
+    },
+    "{n} candidate skipped": {
+      "text": "{n} 个候选被跳过",
+      "reviewed": true
+    },
+    "{n} chars": {
+      "text": "{n} 字符",
+      "reviewed": true
+    },
+    "{n} check failed": {
+      "text": "{n} 项异常",
+      "reviewed": true
+    },
+    "{n} configuration problem": {
+      "text": "{n} 处配置问题",
+      "reviewed": true
+    },
+    "{n} entry · {used} / {max} · hits {hits} · misses {misses} · evictions {evictions}": {
+      "text": "{n} 条 · {used} / {max} · 命中 {hits} · 未命中 {misses} · 淘汰 {evictions}",
+      "reviewed": true
+    },
+    "{n} message comes from the config dir": {
+      "other": "{n} 条消息来自 config 目录",
+      "machine": true,
+      "text": "{n} 条消息来自配置目录",
+      "reviewed": true
+    },
+    "{n} original config · newgate stop can restore it": {
+      "text": "{n} 份原配置 · newgate stop 可还原",
+      "reviewed": true
+    },
+    "{n} profile": {
+      "text": "{n} 个 profile",
+      "reviewed": true
+    },
+    "{n} profile has usable providers and keys": {
+      "text": "{n} 个 profile 的 provider 与 key 均可用",
+      "reviewed": true
+    },
+    "{n} profile · default {name}": {
+      "text": "{n} 个 · 默认 {name}",
+      "reviewed": true
+    },
+    "{n} shim": {
+      "text": "{n} 个",
+      "reviewed": true
+    },
+    "{n} stop in the chain": {
+      "text": "链上 {n} 站",
+      "reviewed": true
+    },
+    "{n} time": {
+      "other": "{n} 次",
+      "reviewed": true
+    },
+    "{n} total": {
+      "text": "{n} 个",
+      "reviewed": true
+    },
+    "{option} needs a profile name": {
+      "text": "{option} 需要一个 profile 名",
+      "reviewed": true
+    },
+    "{provider}/{model}: HTTP {status} · {err}": {
+      "text": "{provider}/{model}：HTTP {status} · {err}",
+      "reviewed": true
+    },
+    "{req}req/{err}err · counters reset when the daemon restarts": {
+      "text": "{req}req/{err}err · 计数随 daemon 重启归零",
+      "reviewed": true
+    },
+    "{route} -> {status}{note}  upstream said: {body}": {
+      "text": "{route} -> {status}{note}  上游说: {body}",
+      "reviewed": true
+    },
+    "{stops} stop in the chain; {skipped} skipped ({reasons})   newgate tier normal": {
+      "text": "链上 {stops} 站；跳过 {skipped}（{reasons}）   newgate tier normal",
+      "reviewed": true
+    },
+    "{target} learned upstream quirks: {quirks}": {
+      "text": "{target}: 学到上游毛病 —— {quirks}",
+      "reviewed": true
+    },
+    "{tool} is not a known agent, left untouched (the rest of the shim dir does not belong to newgate)": {
+      "text": "{tool} 不是已知 agent，没动它（shim 目录里的其他东西不属于 newgate）",
+      "reviewed": true
+    },
+    "{url} is not a valid URL": {
+      "text": "{url} 不是合法 URL",
+      "reviewed": true
+    },
+    "{usable} usable ({fast} fast · {ok} usable · {unrated} unrated) · {laggy} laggy · {down} unavailable": {
+      "text": "可用 {usable}（流畅 {fast} · 可用 {ok} · 未评分 {unrated}）· 卡顿 {laggy} · 不可用 {down}",
+      "reviewed": true
+    },
+    "{why}, override not applied": {
+      "text": "{why}，覆盖不生效",
+      "reviewed": true
+    },
+    "— the semantic model layer proxy for AI CLIs": {
+      "text": "— AI CLI 的语义模型层代理",
+      "reviewed": true
+    },
+    "… and {n} more": {
+      "other": "… 还有 {n} 条",
+      "machine": true,
+      "reviewed": true
+    },
+    "…(truncated, {n} characters total)": {
+      "text": "…(截断，共 {n} 字符)",
+      "reviewed": true
+    },
+    "≤4K {ms}ms/{n} sample": {
+      "text": "≤4K {ms}ms/{n}次",
+      "reviewed": true
+    },
+    "● Running": {
+      "text": "● 运行中",
+      "reviewed": true
+    }
+  }
+}

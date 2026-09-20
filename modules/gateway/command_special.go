@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/domain"
@@ -45,8 +47,8 @@ func (specialCommand) Names() []string {
 func (specialCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
 		Section: cliapi.SectionObserve, Rank: rankObserve,
-		Usage:   "st [on|off] [插件]",
-		Summary: "special_treatment 开关与说明",
+		Usage:   i18n.T("st [on|off] [plugin]", nil),
+		Summary: i18n.T("special_treatment switches and descriptions", nil),
 	}
 }
 
@@ -65,8 +67,8 @@ func (specialCommand) Run(host cliapi.Host, args []string) int {
 	}
 
 	if sub != "on" && sub != "off" {
-		return host.Die(64, fmt.Sprintf(
-			"没有叫 %q 的插件（newgate st 看清单）；整层开关用 newgate st on|off", sub))
+		return host.Die(64, i18n.T("No plugin named {name} (run newgate st for the list); switch the whole layer with newgate st on|off",
+			i18n.A{"name": strconv.Quote(sub)}))
 	}
 	on := sub == "on"
 
@@ -75,28 +77,29 @@ func (specialCommand) Run(host cliapi.Host, args []string) int {
 			return host.Die(70, err.Error())
 		}
 		if on {
-			fmt.Println(style.Item(style.OK, "special_treatment 整层已开"))
+			fmt.Println(style.Item(style.OK, i18n.T("special_treatment layer enabled", nil)))
 		} else {
-			fmt.Println(style.Item(style.Skip, "special_treatment 整层已关") +
-				style.Dim("   请求原样转发，上游怪癖不再补"))
+			fmt.Println(style.Item(style.Skip, i18n.T("special_treatment layer disabled", nil)) +
+				style.Dim(i18n.T("   Requests forwarded unchanged, upstream quirks no longer patched", nil)))
 		}
 		host.NotifyProxy()
 		return 0
 	}
 
 	if findPlugin(name) == nil {
-		return host.Die(65, fmt.Sprintf("没有叫 %q 的插件（newgate st 看清单）", name))
+		return host.Die(65, i18n.T("No plugin named {name} (run newgate st for the list)",
+			i18n.A{"name": strconv.Quote(name)}))
 	}
 	if err := gatewaystate.SetSpecialPlugin(name, on); err != nil {
 		return host.Die(70, err.Error())
 	}
 	if on {
-		fmt.Println(style.Item(style.OK, "插件 "+name+" 已开"))
+		fmt.Println(style.Item(style.OK, i18n.T("Plugin {name} enabled", i18n.A{"name": name})))
 	} else {
-		fmt.Println(style.Item(style.Skip, "插件 "+name+" 已关"))
+		fmt.Println(style.Item(style.Skip, i18n.T("Plugin {name} disabled", i18n.A{"name": name})))
 	}
 	if !gatewaystate.SpecialEnabled(st) {
-		fmt.Println(style.Hint("整层仍处于关闭状态，需要先 newgate st on"))
+		fmt.Println(style.Hint(i18n.T("The whole layer is still off; run newgate st on first", nil)))
 	}
 	host.NotifyProxy()
 	return 0
@@ -115,34 +118,35 @@ func findPlugin(name string) special.Plugin {
 func specialState(st *domain.State, name string) (mark, word string) {
 	switch {
 	case !gatewaystate.SpecialEnabled(st):
-		return style.Skip, "整层关闭"
+		return style.Skip, i18n.T("layer off", nil)
 	case gatewaystate.PluginOff(st, name):
-		return style.Bad, "已单独关闭"
+		return style.Bad, i18n.T("disabled individually", nil)
 	}
-	return style.OK, "生效"
+	return style.OK, i18n.T("active", nil)
 }
 
 func specialList(host cliapi.Host, st *domain.State) int {
 	ps := special.Plugins()
-	layer := style.Green("开")
+	layer := style.Green(i18n.T("on", nil))
 	if !gatewaystate.SpecialEnabled(st) {
-		layer = style.Yellow("关（整层）")
+		layer = style.Yellow(i18n.T("off (whole layer)", nil))
 	}
-	fmt.Println(style.Title("newgate st", fmt.Sprintf("special_treatment %s · %d 个插件", layer, len(ps))))
+	fmt.Println(style.Title("newgate st", i18n.N("special_treatment {layer} · {n} plugin",
+		"special_treatment {layer} · {n} plugins", len(ps), i18n.A{"layer": layer})))
 	fmt.Println(style.Rule(72))
 	if len(ps) == 0 {
-		fmt.Println(style.Hint("没有注册任何插件"))
+		fmt.Println(style.Hint(i18n.T("No plugins registered", nil)))
 		return 0
 	}
-	t := style.NewTable("状态", "插件", "为什么存在")
+	t := style.NewTable(i18n.T("State", nil), i18n.T("Plugin", nil), i18n.T("Why it exists", nil))
 	for _, p := range ps {
 		mark, _ := specialState(st, p.Name())
 		why := strings.SplitN(p.Why(), "\n", 2)[0]
 		t.Row(style.Mark(mark), p.Name(), style.Dim(why))
 	}
 	fmt.Print(t.String())
-	fmt.Println(style.Hint("上游怪癖补丁：只对认领本次请求的上游生效，改动逐条写日志"))
-	fmt.Println(style.Hint("看完整说明 newgate st <插件> · 单独关 newgate st off <插件> · 整层关 newgate st off"))
+	fmt.Println(style.Hint(i18n.T("Upstream quirk patches: they apply only to the upstream that claimed the request, and every change is logged", nil)))
+	fmt.Println(style.Hint(i18n.T("Full description: newgate st <plugin> · disable one: newgate st off <plugin> · disable the layer: newgate st off", nil)))
 	// 推理缓存的计数也归本模块报（见 thinkcache_status.go）：以前它经
 	// cliapi.Host 的口子绕一圈回界面渲染，那条口子的名字（PrintThinkCache）
 	// 本身就是「界面认识了一个模块概念」的证据。
@@ -158,9 +162,9 @@ func specialExplain(host cliapi.Host, st *domain.State, name string) int {
 	fmt.Println(style.Item(mark, p.Why()))
 	fmt.Println()
 	if gatewaystate.PluginOff(st, name) {
-		fmt.Println(style.Hint("打开：newgate st on " + name))
+		fmt.Println(style.Hint(i18n.T("Enable: newgate st on {name}", i18n.A{"name": name})))
 	} else {
-		fmt.Println(style.Hint("关闭：newgate st off " + name))
+		fmt.Println(style.Hint(i18n.T("Disable: newgate st off {name}", i18n.A{"name": name})))
 	}
 	return 0
 }

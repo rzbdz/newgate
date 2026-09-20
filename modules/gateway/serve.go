@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/lib/buildinfo"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/logx"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
@@ -93,7 +94,7 @@ func Serve(filters *policy.Registry, port int) int {
 	var lg *log.Logger
 	if rerr != nil {
 		lg = log.New(os.Stdout, "", log.LstdFlags)
-		lg.Printf("日志轮转初始化失败，退回 stdout: %v", rerr)
+		lg.Printf("%s", i18n.T("Log rotation init failed, falling back to stdout: {err}", i18n.A{"err": rerr}))
 	} else {
 		defer rot.Close()
 		lg = log.New(rot, "", log.LstdFlags)
@@ -104,7 +105,7 @@ func Serve(filters *policy.Registry, port int) int {
 	inherited := os.Getenv("NEWGATE_LISTENER_FD") != ""
 	if !inherited {
 		if err := daemon.AcquireLock(); err != nil {
-			lg.Printf("抢锁失败: %v", err)
+			lg.Printf("%s", i18n.T("Failed to acquire the lock: {err}", i18n.A{"err": err}))
 			return 69
 		}
 		defer daemon.RemoveLock()
@@ -114,10 +115,10 @@ func Serve(filters *policy.Registry, port int) int {
 		// daemon.WriteOwn。写不出去只警告：代理照常服务，只是 status/metrics
 		// 会看不到它（那时候 doctor 的「守护进程」一项会说出来）。
 		if err := daemon.WriteOwn(port); err != nil {
-			lg.Printf("pidfile 写不出去（status/metrics 会看不到本进程）: %v", err)
+			lg.Printf("%s", i18n.T("Cannot write the pidfile (status/metrics will not see this process): {err}", i18n.A{"err": err}))
 		}
 	} else {
-		lg.Printf("优雅交接：接管父进程的监听 socket")
+		lg.Printf("%s", i18n.T("Graceful handover: taking over the listening socket from the parent process", nil))
 	}
 
 	// 控制令牌必须先于 watcher 落盘：别的用户 `newgate stop` 发不出信号，
@@ -125,29 +126,31 @@ func Serve(filters *policy.Registry, port int) int {
 	// （cmdStart / launch.Launch 在 Spawn 前已经各兜一次，正常早就有）。
 	if st, err := store.EnsureControlToken(); err != nil {
 		// daemon 照常起：没有令牌只是跨用户停机不可用，不该拦下整个代理。
-		lg.Printf("控制令牌写不出去（跨用户停机不可用）: %v", err)
+		lg.Printf("%s", i18n.T("Cannot write the control token (cross-user stop unavailable): {err}", i18n.A{"err": err}))
 	} else if st.ControlToken != "" {
-		lg.Printf("控制端点 /__newgate/stop 已就绪（跨用户停机可用）")
+		lg.Printf("%s", i18n.T("Control endpoint /__newgate/stop is ready (cross-user stop available)", nil))
 	}
 
 	watcher, err := store.NewWatcher(time.Second)
 	if err != nil {
-		lg.Printf("配置加载失败: %v", err)
+		lg.Printf("%s", i18n.T("Failed to load the configuration: {err}", i18n.A{"err": err}))
 		return 65
 	}
 	watcher.OnChange(func(old, nw *store.Snapshot) {
 		changes := store.DiffSummary(old, nw)
 		if len(changes) == 0 {
-			lg.Printf("[config] 配置已重载（第 %d 代），无结构性变化", watcher.Generation())
+			lg.Printf("[config] %s", i18n.T("Configuration reloaded (generation {gen}), no structural change",
+				i18n.A{"gen": watcher.Generation()}))
 			return
 		}
-		lg.Printf("[config] 配置热更新（第 %d 代）：%v —— 正在跑的会话不受影响",
-			watcher.Generation(), changes)
+		lg.Printf("[config] %s", i18n.T("Configuration hot-reloaded (generation {gen}): {changes} — running sessions are unaffected",
+			i18n.A{"gen": watcher.Generation(), "changes": changes}))
 	})
 	watcher.OnError(func(e error) {
 		// 关键：坏配置不替换快照。宁可用旧配置继续跑，也不能因为一次
 		// 手误让所有 agent 同时失效。
-		lg.Printf("[config] ⚠ 新配置加载失败，**继续使用上一份可用配置**: %v", e)
+		lg.Printf("[config] %s", i18n.T("New configuration failed to load, still using the last usable configuration: {err}",
+			i18n.A{"err": e}))
 	})
 	watcher.Start()
 	defer watcher.Close()
@@ -158,7 +161,7 @@ func Serve(filters *policy.Registry, port int) int {
 	// thinkcache 落盘冷层：daemon 重启后找回上一进程的推理内容。失败就降级
 	// 纯内存（重启前那几轮的原文找不回来了），落盘永远不反过来搞挂代理。
 	if err := thinkcache.AttachDisk(paths.ThinkCacheFile(), 100<<20); err != nil {
-		lg.Printf("thinkcache 落盘关闭（继续纯内存）: %v", err)
+		lg.Printf("%s", i18n.T("thinkcache disk layer disabled (memory-only): {err}", i18n.A{"err": err}))
 	}
 	// 冷层跑起来之后的失败（压实丢记录、刷盘失败、冷层停用）必须说出来：
 	// 用户能观察到的现象是「重启后推理找不回来了」，而那正是最难反推原因的一类。
@@ -184,16 +187,17 @@ func Serve(filters *policy.Registry, port int) int {
 		for s := range sig {
 			if s == syscall.SIGHUP {
 				// SIGHUP 是「重读配置」的传统语义
-				lg.Printf("收到 SIGHUP，强制重载配置")
+				lg.Printf("%s", i18n.T("Received SIGHUP, forcing a configuration reload", nil))
 				watcher.Reload(true)
 				continue
 			}
 			if srv.Draining() {
 				// 排空期被信号打断：pid/lock 已是新进程的，清不得
-				lg.Printf("排空期收到 %v，直接退出（不动 pid/lock）", s)
+				lg.Printf("%s", i18n.T("Received {sig} while draining, exiting now (pid/lock untouched)",
+					i18n.A{"sig": s}))
 				os.Exit(0)
 			}
-			lg.Printf("收到 %v，退出", s)
+			lg.Printf("%s", i18n.T("Received {sig}, exiting", i18n.A{"sig": s}))
 			atomic.StoreInt32(&requested, 1)
 			srv.Shutdown()
 			return
@@ -206,27 +210,28 @@ func Serve(filters *policy.Registry, port int) int {
 		<-srv.StopRequested()
 		if srv.Draining() {
 			// 排空期收到停机：同样不许动新进程的 pid/lock
-			lg.Printf("排空期收到控制停机，直接退出（不动 pid/lock）")
+			lg.Printf("%s", i18n.T("Received a control stop while draining, exiting now (pid/lock untouched)", nil))
 			os.Exit(0)
 		}
-		lg.Printf("控制停机（令牌校验通过），退出")
+		lg.Printf("%s", i18n.T("Control stop (token verified), exiting", nil))
 		atomic.StoreInt32(&requested, 1)
 		srv.Shutdown()
 	}()
 
-	lg.Printf("newgate %s (构建于 %s) 启动，默认 profile=%s，配置热更新已开启",
-		buildinfo.Version(), buildinfo.BuildTimeDisplay(), watcher.Current().State.DefaultProfile)
+	lg.Printf("%s", i18n.T("newgate {version} (built {built}) started, default profile={profile}, config hot-reload enabled",
+		i18n.A{"version": buildinfo.Version(), "built": buildinfo.BuildTimeDisplay(),
+			"profile": watcher.Current().State.DefaultProfile}))
 	if err := srv.Start(); err != nil {
 		// 优雅交接的排空：listener 已移交新进程，Serve 因此返回——但这
 		// 不是退出的时候。等在途请求流完（Drained），再直接退（os.Exit
 		// 跳过 defer 的 RemoveLock：pid/lock 已是 新进程的）。
 		if srv.Draining() {
-			lg.Printf("监听 socket 已移交新进程，等待在途请求排空（上限 10 分钟）")
+			lg.Printf("%s", i18n.T("Listening socket handed over to the new process, waiting for in-flight requests to drain (up to 10 minutes)", nil))
 			<-srv.Drained()
-			lg.Printf("排空完成，旧进程功成身退")
+			lg.Printf("%s", i18n.T("Drain complete, the old process is stepping down", nil))
 			os.Exit(0)
 		}
-		lg.Printf("代理退出: %v", err)
+		lg.Printf("%s", i18n.T("Proxy exiting: {err}", i18n.A{"err": err}))
 		// 唯一出口：进程要走了，pid/lock 是它自己的，必须一起带走。
 		// defer 的 RemoveLock 只管 lock，pid 得在这里补上。
 		daemon.RemoveLock()

@@ -1,11 +1,11 @@
 package pluginmanager
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // reported 是一个模块上报的自己。分类（Type）不在这里——它跟着组件定义走在
@@ -31,7 +31,7 @@ var _ Manager = (*service)(nil)
 // RegisterSelf 见 Manager 的注释。这是模块**自愿**参与运行期开关的唯一入口。
 func (s *service) RegisterSelf(name string, switches []Switch) (modules.Release, error) {
 	if name == "" {
-		return nil, fmt.Errorf("plugin-manager: 模块名不能为空")
+		return nil, i18n.E("plugin-manager: module name must not be empty", nil)
 	}
 	// 先校验这条自己合不合法（不需要看别人的），再进查重。
 	if err := validateSwitches(name, switches); err != nil {
@@ -40,14 +40,18 @@ func (s *service) RegisterSelf(name string, switches []Switch) (modules.Release,
 	return s.byName.Register(reported{name: name, switches: switches}, func(existing []reported) error {
 		for _, e := range existing {
 			if e.name == name {
-				return fmt.Errorf("plugin-manager: 模块 %q 已经上报过（每个模块只报一次）", name)
+				return i18n.E(
+					"plugin-manager: module \"{name}\" already reported (each module reports once)",
+					i18n.A{"name": name})
 			}
 		}
 		for _, e := range existing {
 			for _, have := range e.switches {
 				for _, want := range switches {
 					if have.Path == want.Path {
-						return fmt.Errorf("plugin-manager: 开关点 %q 已被模块 %q 占用", want.Path, e.name)
+						return i18n.E(
+							"plugin-manager: switch point \"{path}\" is already taken by module \"{module}\"",
+							i18n.A{"path": want.Path, "module": e.name})
 					}
 				}
 			}
@@ -60,16 +64,19 @@ func (s *service) RegisterSelf(name string, switches []Switch) (modules.Release,
 func validateSwitches(name string, switches []Switch) error {
 	for _, sw := range switches {
 		if sw.Path == "" {
-			return fmt.Errorf("plugin-manager: 模块 %q 报了空 Path 的开关点", name)
+			return i18n.E(
+				"plugin-manager: module \"{name}\" reported a switch point with an empty Path",
+				i18n.A{"name": name})
 		}
 		// 前缀规则：路径必须长在模块名底下，这样「这个开关属于谁」不用查表就看得出来。
 		if !strings.HasPrefix(sw.Path, name+".") {
-			return fmt.Errorf("plugin-manager: 开关点 %q 必须以模块名 %q 加一个点开头（%s.<路径>）",
-				sw.Path, name, name)
+			return i18n.E("plugin-manager: switch point \"{path}\" must start with the "+
+				"module name \"{name}\" plus a dot ({name}.<path>)",
+				i18n.A{"path": sw.Path, "name": name})
 		}
 		if sw.Title == "" || sw.Why == "" {
-			return fmt.Errorf("plugin-manager: 开关点 %q 必须写清 Title（人话）与 Why（关掉会怎样）",
-				sw.Path)
+			return i18n.E("plugin-manager: switch point \"{path}\" must fill in Title "+
+				"(plain words) and Why (what turning it off does)", i18n.A{"path": sw.Path})
 		}
 		switch sw.Danger {
 		case DangerSafe, DangerQuirk:
@@ -77,11 +84,13 @@ func validateSwitches(name string, switches []Switch) error {
 			// 「不给无限期的 footgun」在这里做成结构性保证，而不是靠纪律：
 			// 一个会破坏正确性的开关，注册不出来「永久开着」这种形态。
 			if sw.TTL <= 0 {
-				return fmt.Errorf("plugin-manager: 开关点 %q 是 footgun，必须带默认时限（TTL > 0）", sw.Path)
+				return i18n.E("plugin-manager: switch point \"{path}\" is a footgun, "+
+					"it must carry a default time limit (TTL > 0)", i18n.A{"path": sw.Path})
 			}
 		default:
-			return fmt.Errorf("plugin-manager: 开关点 %q 的 Danger %q 不认识（safe/quirk/footgun）",
-				sw.Path, sw.Danger)
+			return i18n.E("plugin-manager: unknown Danger \"{danger}\" on switch point "+
+				"\"{path}\" (safe/quirk/footgun)",
+				i18n.A{"path": sw.Path, "danger": sw.Danger})
 		}
 	}
 	return nil

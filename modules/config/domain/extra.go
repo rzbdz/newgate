@@ -3,6 +3,8 @@ package domain
 import (
 	"strings"
 	"sync/atomic"
+
+	"github.com/rzbdz/newgate/lib/i18n"
 )
 
 // ExtraRole 框架之外的**动态角色键**——由模块贡献，core 不认识具体是谁。
@@ -35,10 +37,25 @@ type ExtraRole struct {
 
 // builtinAliases 内置的角色等价关系。机制与模块贡献的 ExtraRole 完全一样，
 // 只是来源写在代码里——这样「四档化的向下兼容」不需要第二条代码路径。
+//
+// 它的 Meta（给人看的那句「为什么」）不写在这里，由 builtinAliasMeta 现挂：
+// 这是**包级变量**，初始化时求值——那会儿 modules/locale 还没把语言装上，
+// 写进来会永远停在源语言。
 var builtinAliases = []ExtraRole{{
 	Key: "normal", Source: "builtin", Default: "mid",
-	Meta: map[string]string{"why": "四档化（2026-09-16）的向下兼容：没写 normal 的老配置等价于 mid"},
 }}
+
+// builtinAliasMeta 内置别名要挂在 Meta 上的说明（没有就返回 nil）。
+//
+// 只有给人看的那个出口（ExtraRoles）需要它：ExtraRoleOf 在请求热路径上
+// （每个带动态角色键的请求都要过一次），那里连一次 map 分配都不该多。
+func builtinAliasMeta(key string) map[string]string {
+	if key != "normal" {
+		return nil
+	}
+	return map[string]string{"why": i18n.T(
+		"four-tier compatibility: a profile that does not write normal behaves like mid", nil)}
+}
 
 // extraRoles 模块贡献的动态角色键，**原子换页**。
 //
@@ -84,7 +101,12 @@ func contributedRoles() []ExtraRole {
 func ExtraRoles() []ExtraRole {
 	mods := contributedRoles()
 	out := make([]ExtraRole, 0, len(builtinAliases)+len(mods))
-	out = append(out, builtinAliases...)
+	for _, r := range builtinAliases {
+		// 说明现挂（见 builtinAliasMeta）：拷一份结构体再挂，绝不写进那个
+		// 共享的包级变量——它是只读的。
+		r.Meta = builtinAliasMeta(r.Key)
+		out = append(out, r)
+	}
 	// 模块那份已经在 Refresh 里排过序了，这里不再排——但它是共享的只读切片，
 	// 所以**必须**拷出来，不能直接 append 给调用方。
 	out = append(out, mods...)

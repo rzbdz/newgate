@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/config/roleprov"
@@ -133,7 +134,7 @@ func LoadProfile(name string) (*domain.Profile, error) {
 
 func loadProfile(name string, loading map[string]bool) (*domain.Profile, error) {
 	if loading[name] {
-		return nil, fmt.Errorf("extends 成环：%s 绕回了自己", name)
+		return nil, i18n.E("extends cycle: {name} points back to itself", i18n.A{"name": name})
 	}
 	pr, err := readProfileFile(name)
 	if err != nil {
@@ -149,7 +150,7 @@ func loadProfile(name string, loading map[string]bool) (*domain.Profile, error) 
 	base, err := loadProfile(pr.Extends, loading)
 	delete(loading, name)
 	if err != nil {
-		return nil, fmt.Errorf("extends %q 解析失败: %w", pr.Extends, err)
+		return nil, i18n.Ef(err, "cannot resolve extends {name}: {err}", i18n.A{"name": pr.Extends})
 	}
 	pr.MergeFrom(base)
 	pr.Extends = "" // 已合并，解析后的视图不再背 extends 声明
@@ -239,7 +240,7 @@ func ValidateState() error {
 		return err
 	}
 	if len(probe) == 0 {
-		return fmt.Errorf("文件是空的")
+		return i18n.E("the file is empty", nil)
 	}
 	// 顶层能解析还不够：真正要的是它能填进 domain.State（字段类型对得上）。
 	var st domain.State
@@ -323,7 +324,7 @@ func EnsureControlToken() (*domain.State, error) {
 	}
 	s.ControlToken = NewControlToken()
 	if err := SaveState(s); err != nil {
-		return s, fmt.Errorf("写控制令牌: %w", err)
+		return s, i18n.Ef(err, "cannot write the control token: {err}", nil)
 	}
 	return s, nil
 }
@@ -334,7 +335,8 @@ func EnsureControlToken() (*domain.State, error) {
 func SetActiveProfile(agent, profile string) error {
 	if _, err := LoadProfile(profile); err != nil {
 		avail, _ := ListProfiles()
-		return fmt.Errorf("profile %q 不存在（可用：%s）", profile, strings.Join(avail, ", "))
+		return i18n.E("no such profile: {name} (available: {list})",
+			i18n.A{"name": profile, "list": strings.Join(avail, ", ")})
 	}
 	s := LoadState()
 	if agent == "" {
@@ -381,34 +383,38 @@ func Validate() []string {
 	var problems []string
 	provs, err := LoadProviders()
 	if err != nil {
-		return []string{"providers.json 读不出: " + err.Error()}
+		return []string{i18n.T("cannot read providers.json: {err}", i18n.A{"err": err.Error()})}
 	}
 	names, _ := ListProfiles()
 	for _, n := range names {
 		pr, err := LoadProfile(n)
 		if err != nil {
-			problems = append(problems, fmt.Sprintf("profile %s: %v", n, err))
+			problems = append(problems,
+				i18n.T("profile {name}: {err}", i18n.A{"name": n, "err": err.Error()}))
 			continue
 		}
 		for tier, cands := range pr.Roles {
 			for _, b := range cands {
 				p, ok := provs.Providers[b.Provider]
 				if !ok {
-					problems = append(problems,
-						fmt.Sprintf("profile %s 档位 %s: provider %q 未定义", n, tier, b.Provider))
+					problems = append(problems, i18n.T(
+						"profile {profile} role {role}: provider {provider} is not defined",
+						i18n.A{"profile": n, "role": tier, "provider": b.Provider}))
 					continue
 				}
 				if p.Key() == "" {
-					hint := "providers.json 里填 api_key"
+					hint := i18n.T("set api_key in providers.json", nil)
 					if p.APIKeyEnv != "" {
-						hint = "设环境变量 " + p.APIKeyEnv + " 或填 api_key"
+						hint = i18n.T("set the environment variable {env} or fill in api_key",
+							i18n.A{"env": p.APIKeyEnv})
 					}
-					problems = append(problems,
-						fmt.Sprintf("provider %s 没有 key → %s", b.Provider, hint))
+					problems = append(problems, i18n.T("provider {provider} has no key → {hint}",
+						i18n.A{"provider": b.Provider, "hint": hint}))
 				}
 				if b.Model == "" {
 					problems = append(problems,
-						fmt.Sprintf("profile %s 档位 %s: model 为空", n, tier))
+						i18n.T("profile {profile} role {role}: model is empty",
+							i18n.A{"profile": n, "role": tier}))
 				}
 			}
 		}

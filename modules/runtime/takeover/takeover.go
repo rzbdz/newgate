@@ -29,6 +29,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/store"
 	agentapi "github.com/rzbdz/newgate/modules/confighook"
 	"github.com/rzbdz/newgate/modules/runtime/agentstate"
@@ -107,10 +108,10 @@ func List() []Status {
 			if s.Active {
 				s.Detail = fmt.Sprintf("%s/%s → newgate", injection.Dir(), id)
 				if !injection.InPath() {
-					s.Detail += "（但 shim 目录不在当前 shell 的 PATH 里，重开 shell）"
+					s.Detail += i18n.T(" (but the shim dir is not in the current shell's PATH; reopen the shell)", nil)
 				}
 			} else {
-				s.Detail = "直连"
+				s.Detail = i18n.T("direct", nil)
 			}
 		case MechConfig:
 			for _, t := range a.Config.Targets() {
@@ -123,11 +124,11 @@ func List() []Status {
 				}
 			}
 			if s.Active {
-				s.Detail = "配置文件已改写 → 本地代理"
+				s.Detail = i18n.T("config file rewritten → local proxy", nil)
 			} else if len(s.Files) == 0 {
-				s.Detail = "没找到它的配置文件（没装？）"
+				s.Detail = i18n.T("its config file was not found (not installed?)", nil)
 			} else {
-				s.Detail = "直连"
+				s.Detail = i18n.T("direct", nil)
 			}
 		}
 		out = append(out, s)
@@ -173,7 +174,8 @@ func OnAll(port int) []Result {
 		}
 		if !st.TakeoverWanted(id) {
 			out = append(out, Result{Agent: id, Mechanism: mechanismOf(a), Skipped: true,
-				Lines: []string{"跳过（你 off 过它；newgate on " + id + " 可恢复）"}})
+				Lines: []string{i18n.T("skipped (you turned it off; newgate on {agent} restores it)",
+					i18n.A{"agent": id})}})
 			continue
 		}
 		out = append(out, apply(a, port))
@@ -217,17 +219,18 @@ func apply(a *agentapi.Agent, port int) Result {
 				continue
 			}
 			if changed {
-				res.Lines = append(res.Lines, "把 "+injection.Dir()+" 前置到 PATH（写进 "+rc+"）")
+				res.Lines = append(res.Lines, i18n.T("prepended {dir} to PATH (written into {file})",
+					i18n.A{"dir": injection.Dir(), "file": rc}))
 			}
 		}
 		if real, err := a.FindReal(injection.Dir()); err == nil {
-			res.Lines = append(res.Lines, "真实 "+a.ID+": "+real)
+			res.Lines = append(res.Lines, i18n.T("real {agent}: {path}", i18n.A{"agent": a.ID, "path": real}))
 		} else {
-			res.Warn = append(res.Warn, "找不到真实的 "+a.ID+"："+err.Error()+
-				"——shim 会转发失败，先把它装好")
+			res.Warn = append(res.Warn, i18n.T("cannot find the real {agent}: {err} — the shim will fail to forward, install it first",
+				i18n.A{"agent": a.ID, "err": err}))
 		}
 		if !injection.InPath() {
-			res.Warn = append(res.Warn, "当前 shell 的 PATH 还没生效，重开 shell 或 `exec $SHELL -l`")
+			res.Warn = append(res.Warn, i18n.T("the current shell's PATH is not in effect yet; reopen the shell or `exec $SHELL -l`", nil))
 		}
 
 	case MechConfig:
@@ -238,17 +241,19 @@ func apply(a *agentapi.Agent, port int) Result {
 		}
 		for _, rep := range reps {
 			if rep.Skipped != "" {
-				res.Lines = append(res.Lines, rep.File+"（跳过: "+rep.Skipped+"）")
+				res.Lines = append(res.Lines, i18n.T("{file} (skipped: {why})",
+					i18n.A{"file": rep.File, "why": rep.Skipped}))
 				continue
 			}
 			line := rep.File
 			if n := len(rep.Rewrites); n > 0 {
-				line += fmt.Sprintf("（%d 处改写）", n)
+				line += i18n.T(" ({n} rewrites)", i18n.A{"n": n})
 			}
 			res.Lines = append(res.Lines, line)
 			if rep.Fuzzy > 0 {
-				res.Warn = append(res.Warn, fmt.Sprintf(
-					"%s 里有 %d 处没命中精确规则，归到了中档，建议核对", rep.File, rep.Fuzzy))
+				res.Warn = append(res.Warn, i18n.T(
+					"{file} has {n} spots that missed the exact rules and landed in the middle tier; worth a review",
+					i18n.A{"file": rep.File, "n": rep.Fuzzy}))
 			}
 		}
 	}
@@ -272,8 +277,8 @@ func release(a *agentapi.Agent) Result {
 			res.Err = err
 			return res
 		}
-		res.Lines = append(res.Lines, fmt.Sprintf(
-			"摘掉 PATH shim（PATH 优先级回到真实 %s）", a.ID))
+		res.Lines = append(res.Lines, i18n.T(
+			"removed the PATH shim (PATH precedence goes back to the real {agent})", i18n.A{"agent": a.ID}))
 
 	case MechConfig:
 		restored, err := a.Config.Restore()
@@ -282,12 +287,12 @@ func release(a *agentapi.Agent) Result {
 			return res
 		}
 		for _, f := range restored {
-			res.Lines = append(res.Lines, "还原 "+f)
+			res.Lines = append(res.Lines, i18n.T("restored {file}", i18n.A{"file": f}))
 		}
 	}
 	return res
 }
 
 func unknown(agent string) error {
-	return fmt.Errorf("不认识的 agent %q（已知：%v）", agent, Agents())
+	return i18n.E("unknown agent {agent} (known: {list})", i18n.A{"agent": agent, "list": Agents()})
 }

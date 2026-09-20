@@ -1,5 +1,7 @@
 package breaker
 
+import i18n "github.com/rzbdz/newgate/lib/i18n"
+
 // Kind 是「上游这一发到底怎么了」的归类，由调用方从实际发生的事构造。
 //
 // 这里只有**事实**，没有判断：数据面说「连接失败了」「上游回了 500」
@@ -40,17 +42,36 @@ const (
 	BucketShape
 )
 
-// ruleName 给日志和 `newgate breaker` 看的中文名。
+// ruleToken 是这本账在 wire 与磁盘上的名字：`Status.Rule`、`health.json`。
+//
+// 它是**机器标记**，所以不翻（见 lib/i18n 的包注释与 tools/i18n/check 的 forbidden）：
+// 这个值会被 persist.bucketFromName 读回来对账，一旦跟着语言变，用户在 zh 下写的
+// health.json 到了 en 下就认不出来了——存的是一份数据，不是一句话。
+func (b Bucket) ruleToken() string {
+	switch b {
+	case BucketAvailability:
+		return "availability"
+	case BucketRateLimit:
+		return "rate limit"
+	case BucketConfig:
+		return "config"
+	case BucketShape:
+		return "request shape"
+	}
+	return ""
+}
+
+// ruleName 是给人看的名字：表格的「账本」列、以及摘牌原因里的那一句。
 func (b Bucket) ruleName() string {
 	switch b {
 	case BucketAvailability:
-		return "可用性"
+		return i18n.T("Availability", nil)
 	case BucketRateLimit:
-		return "限流"
+		return i18n.T("Rate limit", nil)
 	case BucketConfig:
-		return "配置"
+		return i18n.T("Config", nil)
 	case BucketShape:
-		return "请求形状"
+		return i18n.T("Request shape", nil)
 	}
 	return ""
 }

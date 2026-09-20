@@ -121,8 +121,18 @@ clean:
 e2e: build
 	@bash mock/e2e_claude.sh
 
+## check-i18n: 账本是否过期 + 本地化静态检查（不出网、不花钱，CI 里跑的就是它）
+check-i18n:
+	@go run ./tools/i18n extract -check
+	@go run ./tools/i18n check
+
+## i18n-sync: 把缺的译文补齐（调本机网关跑 LLM）。**开发者本地跑**，绝不进 CI——
+## 翻译要花钱、要一台在跑的网关，那不是 push 该付的代价。
+i18n-sync:
+	@go run ./tools/i18n sync --lang zh-Hans
+
 ## check: 换版本之前跑这个。全绿才有资格谈上线。
-check: check-generate check-fmt vet test e2e
+check: check-generate check-fmt vet check-i18n test e2e
 	@echo
 	@echo "✓ 全绿：静态检查 + 单测 + 零 token 端到端（机制面）"
 
@@ -146,6 +156,7 @@ ci:
 	$(MAKE) --no-print-directory check-fmt && \
 	$(MAKE) --no-print-directory vet && \
 	$(MAKE) --no-print-directory check-generate && \
+	$(MAKE) --no-print-directory check-i18n && \
 	echo "── static: 单测" && go test ./... && \
 	echo "── race: 竞态检测" && go test -race ./... && \
 	echo "── e2e: 零 token 端到端" && \
@@ -155,4 +166,4 @@ ci:
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
 	@echo "  build / install / test / test-race / fmt / vet / clean"
-	@echo "  e2e / check / ci / generate / check-generate"
+	@echo "  e2e / check / ci / generate / check-generate / check-i18n / i18n-sync"

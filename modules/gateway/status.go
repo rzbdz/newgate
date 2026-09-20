@@ -3,6 +3,7 @@ package gateway
 import (
 	"strings"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/store"
@@ -49,17 +50,18 @@ func (switchStatus) Status() []cliapi.StatusLine {
 	// 不报的话，用户关掉的补丁可能正被静默打开，而这一屏看起来一切正常
 	// （它读的是同一个 Parse）——见 gatewaystate.Parse 的说明。
 	if cfg := gatewaystate.Parse(st); cfg.ParseErr != nil {
-		parts = append(parts, style.Red("state.json 的 gateway 段解析失败，开关已全部回退（改动可能没生效）："+cfg.ParseErr.Error()))
+		parts = append(parts, style.Red(i18n.T("Failed to parse the gateway section of state.json; every switch fell back to its default (the change may not have taken effect): {err}",
+			i18n.A{"err": cfg.ParseErr.Error()})))
 	}
 	switch {
 	case gatewaystate.DebugActive(st):
 		s := "debug=on"
 		if until := gatewaystate.DebugUntilDisplay(st); until != "" {
-			s += "（到 " + until + "）"
+			s += " " + i18n.T("(until {until})", i18n.A{"until": until})
 		}
 		parts = append(parts, s)
 	case gatewaystate.Parse(st).Debug != nil && *gatewaystate.Parse(st).Debug:
-		parts = append(parts, "debug=已过期")
+		parts = append(parts, i18n.T("debug=expired", nil))
 	}
 	if !gatewaystate.RepairEnabled(st) {
 		parts = append(parts, "schema-repair=off")
@@ -68,13 +70,14 @@ func (switchStatus) Status() []cliapi.StatusLine {
 	case !gatewaystate.SpecialEnabled(st):
 		parts = append(parts, "special_treatment=off")
 	case len(gatewaystate.Parse(st).SpecialOff) > 0:
-		parts = append(parts, "special 关了 "+strings.Join(gatewaystate.Parse(st).SpecialOff, ","))
+		parts = append(parts, i18n.T("special off: {list}", i18n.A{"list": strings.Join(gatewaystate.Parse(st).SpecialOff, ",")}))
 	}
 	if len(parts) > 0 {
 		out = append(out, cliapi.StatusLine{
 			Rank:  rankStatusPatch,
-			Label: "补丁开关",
-			Value: strings.Join(parts, "   ") + "   恢复：newgate st on · newgate schema-repair on · newgate debug off",
+			Label: i18n.T("Patch switches", nil),
+			Value: strings.Join(parts, "   ") +
+				i18n.T("   restore: newgate st on · newgate schema-repair on · newgate debug off", nil),
 		})
 	}
 	return out

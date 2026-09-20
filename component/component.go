@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // capabilitySpec 是 Capability 的运行时身份。泛型保证调用点类型安全，
@@ -249,15 +251,17 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 	for i, loader := range loaders {
 		loaded, err := loader.Load()
 		if err != nil {
-			tracef("装配：第 %d 个 loader 报错：%v", i+1, err)
+			tracef("%s", i18n.T("assembly: loader {index} failed: {err}",
+				i18n.A{"index": i + 1, "err": err}))
 			return nil, err
 		}
-		tracef("装配：第 %d 个 loader 交出 %d 个组件", i+1, len(loaded))
+		tracef("%s", i18n.T("assembly: loader {index} handed over {count} components",
+			i18n.A{"index": i + 1, "count": len(loaded)}))
 		components = append(components, loaded...)
 	}
 	ordered, values, err := resolve(components)
 	if err != nil {
-		tracef("装配：构图失败：%v", err)
+		tracef("%s", i18n.T("assembly: graph build failed: {err}", i18n.A{"err": err}))
 		return nil, err
 	}
 	manager := &Manager{
@@ -272,9 +276,10 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 				// Start 可能在报错前已经注册扩展或占用资源，因此失败节点也进入
 				// 回滚范围；组件的 Stop 必须能处理部分初始化。
 				manager.started = i + 1
-				tracef("启动 %d/%d %s 失败（用时 %s）：%v",
-					i+1, len(manager.components), component.Name,
-					time.Since(began).Round(time.Microsecond), err)
+				tracef("%s", i18n.T("start {index}/{total} {name} failed (took {took}): {err}",
+					i18n.A{"index": i + 1, "total": len(manager.components),
+						"name": component.Name,
+						"took": time.Since(began).Round(time.Microsecond), "err": err}))
 				rollbackErr := manager.Stop(ctx)
 				if rollbackErr != nil {
 					return nil, fmt.Errorf("start component %s: %w; rollback: %v",
@@ -284,12 +289,14 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 			}
 		}
 		manager.started = i + 1
-		tracef("启动 %d/%d %s 完成（用时 %s）",
-			i+1, len(manager.components), component.Name,
-			time.Since(began).Round(time.Microsecond))
+		tracef("%s", i18n.T("start {index}/{total} {name} done (took {took})",
+			i18n.A{"index": i + 1, "total": len(manager.components),
+				"name": component.Name,
+				"took": time.Since(began).Round(time.Microsecond)}))
 	}
-	tracef("装配完成：%d 个组件，用时 %s", len(manager.components),
-		time.Since(assembledAt).Round(time.Millisecond))
+	tracef("%s", i18n.T("assembly complete: {count} components, took {took}",
+		i18n.A{"count": len(manager.components),
+			"took": time.Since(assembledAt).Round(time.Millisecond)}))
 	// 名单的交付在**所有 Start 返回之后**：谁想知道图里有谁，此刻才拿得到完整答案。
 	// 这一步只读、不启动——见 CatalogAware 与 docs/02 的三段法则。
 	manager.deliverCatalog()
@@ -336,28 +343,30 @@ func (m *Manager) Components() []Component {
 func (m *Manager) Stop(ctx context.Context) error {
 	var first error
 	m.stopOnce.Do(func() {
-		tracef("停止：按启动逆序释放 %d 个组件", m.started)
+		tracef("%s", i18n.T("stop: releasing {count} components in reverse start order",
+			i18n.A{"count": m.started}))
 		for i := m.started - 1; i >= 0; i-- {
 			component := m.components[i]
 			if component.Stop == nil {
-				tracef("停止 %d/%d %s 跳过（没有 Stop）", i+1, m.started, component.Name)
+				tracef("%s", i18n.T("stop {index}/{total} {name} skipped (no Stop)",
+					i18n.A{"index": i + 1, "total": m.started, "name": component.Name}))
 				continue
 			}
 			began := time.Now()
 			if err := component.Stop(ctx); err != nil {
-				tracef("停止 %d/%d %s 失败（用时 %s）：%v",
-					i+1, m.started, component.Name,
-					time.Since(began).Round(time.Microsecond), err)
+				tracef("%s", i18n.T("stop {index}/{total} {name} failed (took {took}): {err}",
+					i18n.A{"index": i + 1, "total": m.started, "name": component.Name,
+						"took": time.Since(began).Round(time.Microsecond), "err": err}))
 				if first == nil {
 					first = fmt.Errorf("stop component %s: %w", component.Name, err)
 				}
 				continue
 			}
-			tracef("停止 %d/%d %s 完成（用时 %s）",
-				i+1, m.started, component.Name,
-				time.Since(began).Round(time.Microsecond))
+			tracef("%s", i18n.T("stop {index}/{total} {name} done (took {took})",
+				i18n.A{"index": i + 1, "total": m.started, "name": component.Name,
+					"took": time.Since(began).Round(time.Microsecond)}))
 		}
-		tracef("停止：完成")
+		tracef("%s", i18n.T("stop: complete", nil))
 	})
 	return first
 }
@@ -373,7 +382,8 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 	specs := make(map[string]capabilitySpec)
 	providers := make(map[string][]int)
 	values := make(map[string][]any)
-	tracef("构图：收到 %d 个组件声明，按声明顺序如下", len(components))
+	tracef("%s", i18n.T("graph: {count} component declarations received, in declaration order below",
+		i18n.A{"count": len(components)}))
 	for i, component := range components {
 		if component.Name == "" {
 			return nil, nil, fmt.Errorf("component name is required")
@@ -387,7 +397,8 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 			return nil, nil, fmt.Errorf("duplicate component %s", component.Name)
 		}
 		byName[component.Name] = i
-		tracef("  声明 %2d  %s", i+1, describeComponent(component))
+		tracef("%s", i18n.T("  declaration {index}  {desc}", i18n.A{
+			"index": fmt.Sprintf("%2d", i+1), "desc": describeComponent(component)}))
 		for _, provision := range component.Provides {
 			if err := validateSpec(specs, provision.spec); err != nil {
 				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
@@ -422,13 +433,16 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 				// 弱依赖缺席：**不建边，也不报错**。这条是「你存在就有依赖，你不
 				// 存在就没依赖」的落点，所以要明说，否则和下一条（真的建了边）
 				// 在日志里长得一样。
-				tracef("  弱依赖缺席 %s 需要 %s —— 没有提供者，跳过（不建边、不影响启动）",
-					component.Name, requirement.spec.name)
+				tracef("%s", i18n.T("  optional dependency absent: {consumer} needs {provider} "+
+					"— no provider, skipped (no edge, no effect on startup)",
+					i18n.A{"consumer": component.Name, "provider": requirement.spec.name}))
 				continue
 			}
 			if requirement.optional {
-				tracef("  弱依赖命中 %s 需要 %s —— %d 个提供者，照常建排序边",
-					component.Name, requirement.spec.name, len(indexes))
+				tracef("%s", i18n.T("  optional dependency hit: {consumer} needs {provider} "+
+					"— {count} providers, ordering edge added as usual",
+					i18n.A{"consumer": component.Name, "provider": requirement.spec.name,
+						"count": len(indexes)}))
 			}
 			for _, provider := range indexes {
 				if provider == consumer {
@@ -445,8 +459,9 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 			}
 		}
 	}
-	tracef("构图：%d 个组件，%d 条排序边（Need 与命中提供者的 Optional；没人提供的 Optional 不成边）",
-		len(components), edgeTotal)
+	tracef("%s", i18n.T("graph: {count} components, {edges} ordering edges "+
+		"(Need and Optional with a provider; an Optional nobody provides makes no edge)",
+		i18n.A{"count": len(components), "edges": edgeTotal}))
 
 	var ready []int
 	for i := range components {
@@ -482,7 +497,8 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 			}
 		}
 		sort.Strings(stuck)
-		tracef("构图：依赖成环，仍被卡住的组件：%s", strings.Join(stuck, " "))
+		tracef("%s", i18n.T("graph: dependency cycle, components still stuck: {names}",
+			i18n.A{"names": strings.Join(stuck, " ")}))
 		return nil, nil, fmt.Errorf("component capability dependency cycle")
 	}
 
@@ -490,7 +506,7 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 	for _, component := range ordered {
 		order = append(order, component.Name)
 	}
-	tracef("构图：拓扑顺序 %s", strings.Join(order, " → "))
+	tracef("%s", i18n.T("graph: topological order {order}", i18n.A{"order": strings.Join(order, " → ")}))
 	return ordered, values, nil
 }
 

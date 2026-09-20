@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // UseFile 让 daemon 的健康表跨优雅重启存活。只有 daemon 写这个文件；
@@ -23,12 +25,15 @@ func (b *table) UseFile(path string) error {
 		return nil
 	}
 	if err != nil {
-		b.loadErr = fmt.Errorf("读 %s: %w", path, err)
+		// `{err}` 不能省：Ef 把底层错误塞进实参，但**只有消息里写了 {err}
+		// 才会显示出来**——省掉它，那些「读不了 health.json」的现场就只剩
+		// 一句「读不了」，底层原因当场丢掉。
+		b.loadErr = i18n.Ef(err, "cannot read {path}: {err}", i18n.A{"path": path})
 		return b.loadErr
 	}
 	var entries []Status
 	if err := json.Unmarshal(raw, &entries); err != nil {
-		b.loadErr = fmt.Errorf("解析 %s: %w", path, err)
+		b.loadErr = i18n.Ef(err, "cannot parse {path}: {err}", i18n.A{"path": path})
 		return b.loadErr
 	}
 	for _, s := range entries {
@@ -100,7 +105,7 @@ func bucketOr(b Bucket) Bucket {
 
 func bucketFromName(name string) Bucket {
 	for _, b := range []Bucket{BucketAvailability, BucketRateLimit, BucketConfig, BucketShape} {
-		if b.ruleName() == name {
+		if b.ruleToken() == name {
 			return b
 		}
 	}
@@ -119,7 +124,7 @@ func (b *table) persistLocked() {
 		s := Status{Provider: provider, Model: model}
 		if r != nil {
 			s.Fails = r.fails
-			s.Rule = r.bucket.ruleName()
+			s.Rule = r.bucket.ruleToken()
 			s.ShapeSkips = r.shapeSkips
 			s.Spared = r.spared
 			s.CooldownMs = r.cooldown.Milliseconds()

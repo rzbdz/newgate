@@ -8,10 +8,12 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/store"
 	"github.com/rzbdz/newgate/modules/gateway/dialect"
@@ -105,7 +107,8 @@ func Run(o Options) ([]Result, error) {
 	cache, cacheErr := loadCapabilityCache()
 	if cacheErr != nil {
 		// 读不出来 = 这一轮要重新探（花 token）。继续跑，但说出来。
-		o.note("能力缓存读不出来，本轮将重新探测全部目标: %v", cacheErr)
+		o.note("%s", i18n.T("capability cache could not be read; every target is probed again this round: {err}",
+			i18n.A{"err": cacheErr}))
 	}
 
 	provs, err := store.LoadProviders()
@@ -124,7 +127,10 @@ func Run(o Options) ([]Result, error) {
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("profile %q 不存在（可用：%s）", o.Only, strings.Join(names, ", "))
+			return nil, i18n.E("profile {profile} does not exist (available: {names})", i18n.A{
+				"profile": strconv.Quote(o.Only),
+				"names":   strings.Join(names, ", "),
+			})
 		}
 		names = []string{o.Only}
 	}
@@ -141,12 +147,12 @@ func Run(o Options) ([]Result, error) {
 		for _, role := range domain.Roles {
 			b, ok := pr.Resolve(role)
 			if !ok {
-				results = append(results, Result{Profile: n, Role: role, Err: "未绑定"})
+				results = append(results, Result{Profile: n, Role: role, Err: i18n.T("not bound", nil)})
 				continue
 			}
 			r := Result{Profile: n, Role: role, Provider: b.Provider, Model: b.Model}
 			if _, ok := provs.Providers[b.Provider]; !ok {
-				r.Err = "provider 未定义"
+				r.Err = i18n.T("provider undefined", nil)
 				results = append(results, r)
 				continue
 			}
@@ -217,8 +223,8 @@ func Run(o Options) ([]Result, error) {
 				return One(p, t.Model, o.Timeout)
 			})
 			if err == nil && st == http.StatusOK && o.SlowAfter > 0 && lat > o.SlowAfter {
-				err = fmt.Errorf("极小请求耗时 %s，超过交互阈值 %s",
-					lat.Round(time.Millisecond), o.SlowAfter)
+				err = i18n.E("minimal request took {lat}, over the interactive threshold {threshold}",
+					i18n.A{"lat": lat.Round(time.Millisecond), "threshold": o.SlowAfter})
 			}
 
 			if err == nil && st < 400 {
@@ -228,7 +234,8 @@ func Run(o Options) ([]Result, error) {
 					// 只在被动路径（转发撞 400）才打日志，主动敲 probe 的人反而
 					// 不知道自己刚发现了什么。现在都经 OnNote 说出来。
 					if learned := CheckQuirks(t.Provider, p, t.Model, o.Timeout); len(learned) > 0 {
-						o.note("%s: 学到上游毛病 —— %s", t, strings.Join(learned, "；"))
+						o.note("%s", i18n.T("{target} learned upstream quirks: {quirks}",
+							i18n.A{"target": t, "quirks": strings.Join(learned, ", ")}))
 					}
 					CheckDialects(t.Provider, p, t.Model, o.Timeout)
 					cache.capture(t)
@@ -252,7 +259,8 @@ func Run(o Options) ([]Result, error) {
 	// （Marshal/MkdirAll/WriteFile/Chmod/Rename）每一步都在报错，以前调用点
 	// `_ =` 掉了——那五步检查一次都没用上。
 	if err := cache.save(); err != nil {
-		o.note("能力缓存没能落盘，下次探活要重新花 token: %v", err)
+		o.note("%s", i18n.T("capability cache could not be saved; the next probe spends tokens again: {err}",
+			i18n.A{"err": err}))
 	}
 
 	// 回填

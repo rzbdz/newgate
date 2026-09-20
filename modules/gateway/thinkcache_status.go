@@ -3,6 +3,7 @@ package gateway
 import (
 	"fmt"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	"github.com/rzbdz/newgate/modules/gateway/controlplane"
 )
@@ -28,21 +29,25 @@ func printThinkCache() {
 	}
 	t := ps.Think
 	fmt.Println()
-	fmt.Println(style.Field("推理缓存", fmt.Sprintf("%d 条 · %s / %s · 命中 %d · 未命中 %d · 淘汰 %d",
-		t.Entries, humanBytes(t.Bytes), humanBytes(t.MaxBytes), t.Hits, t.Misses, t.Evictions)))
-	fmt.Println(style.Hint("客户端会丢弃上游的推理内容，代理代为保存并在下一轮原样补回"))
+	fmt.Println(style.Field(i18n.T("Reasoning cache", nil), i18n.N(
+		"{n} entry · {used} / {max} · hits {hits} · misses {misses} · evictions {evictions}",
+		"{n} entries · {used} / {max} · hits {hits} · misses {misses} · evictions {evictions}",
+		t.Entries, i18n.A{"used": humanBytes(t.Bytes), "max": humanBytes(t.MaxBytes),
+			"hits": t.Hits, "misses": t.Misses, "evictions": t.Evictions})))
+	fmt.Println(style.Hint(i18n.T("Clients drop the reasoning content the upstream sends; the proxy stores it and puts it back as-is on the next turn", nil)))
 	if t.Misses > 0 {
-		fmt.Println(style.Hint("未命中只能补空串（那几轮模型看不到自己的上一轮推理）；日志逐条有记"))
+		fmt.Println(style.Hint(i18n.T("A miss can only be filled with an empty string (for those turns the model cannot see its own previous reasoning); every case is logged", nil)))
 	}
 	// 解析不出来的那些和「未命中」在结果上一样（都补空串），但处置完全不同：
 	// 前者是客户端发来的 JSON 形态我们不认识，后者是缓存里真没有。混在一起报
 	// 会把人引到错的地方，所以单独一行。
 	if t.Unparsable > 0 {
-		fmt.Println(style.Item(style.Warn, fmt.Sprintf(
-			"其中 %d 条是请求里的 assistant 消息解析不出来（不是缓存问题，是客户端发来的形态变了）",
-			t.Unparsable)))
+		fmt.Println(style.Item(style.Warn, i18n.N(
+			"Of these, {n} is an assistant message in the request that could not be parsed (not a cache problem, the shape the client sends has changed)",
+			"Of these, {n} are assistant messages in the request that could not be parsed (not a cache problem, the shape the client sends has changed)",
+			int(t.Unparsable), nil)))
 	}
-	fmt.Println(style.Hint("内存 + thinkcache.bin 冷层；重启后自动装回，只存计数不存内容"))
+	fmt.Println(style.Hint(i18n.T("Memory + the thinkcache.bin cold layer; restored automatically after a restart, counts only, never content", nil)))
 }
 
 // humanBytes 把字节数写成 KB/MB。

@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/lib/durarg"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	"github.com/rzbdz/newgate/modules/breaker/status"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
@@ -47,7 +48,7 @@ func (metricsCommand) Names() []string { return []string{"metrics", "stat"} }
 
 func (metricsCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionObserve, Rank: rankObserve,
-		Usage: "metrics", Summary: "代理计数器：拦截 / 超时 / 转移 / 改道"}
+		Usage: "metrics", Summary: i18n.T("proxy counters: interception / timeouts / failover / rerouting", nil)}
 }
 
 func (metricsCommand) Run(host cliapi.Host, _ []string) int { return runMetrics(host) }
@@ -60,26 +61,28 @@ func (metricsCommand) Run(host cliapi.Host, _ []string) int { return runMetrics(
 func runMetrics(host cliapi.Host) int {
 	info, ps := controlplane.State()
 	if info == nil {
-		return host.Die(69, "代理没在运行（newgate start）——计数器在 daemon 内存里")
+		return host.Die(69, i18n.T("proxy is not running (newgate start) — counters live in daemon memory", nil))
 	}
 	counter, uptime, ok := controlplane.Metrics(info.Port)
 	if !ok {
-		return host.Die(69, fmt.Sprintf("连不上代理 127.0.0.1:%d（newgate doctor）", info.Port))
+		return host.Die(69, i18n.T("cannot reach proxy 127.0.0.1:{port} (newgate doctor)", i18n.A{"port": info.Port}))
 	}
 	fmt.Println(style.Title("newgate metrics",
 		fmt.Sprintf("pid %d · %s", info.PID, durarg.Format(uptime))))
 	if ps != nil {
-		fmt.Println(style.Hint(fmt.Sprintf("%dreq/%derr · 计数随 daemon 重启归零", ps.Requests, ps.Failures)))
+		fmt.Println(style.Hint(i18n.T("{req}req/{err}err · counters reset when the daemon restarts",
+			i18n.A{"req": ps.Requests, "err": ps.Failures})))
 	} else {
-		fmt.Println(style.Hint("计数随 daemon 重启归零"))
+		fmt.Println(style.Hint(i18n.T("counters reset when the daemon restarts", nil)))
 	}
 	printModelHealth(ps)
 
 	if len(counter) == 0 {
-		fmt.Print(style.Section("请求计数") + "\n")
-		fmt.Println(style.Dim("  无计数（daemon 启动后尚无请求）"))
+		fmt.Print(style.Section(i18n.T("request counters", nil)) + "\n")
+		fmt.Println(style.Dim(i18n.T("  no counters (no requests since the daemon started)", nil)))
 	} else {
-		t := style.NewTable("分组", "计数器", "次数", "说明")
+		t := style.NewTable(i18n.T("group", nil), i18n.T("counter", nil),
+			i18n.T("count", nil), i18n.T("description", nil))
 		t.AlignRight(2)
 		keys := metrics.SortedKeys(counter)
 		// 按**组**排，组内再按名字。不加这一步的话字母序会让「链」和「超时」
@@ -91,17 +94,18 @@ func runMetrics(host cliapi.Host) int {
 			}
 			return keys[i] < keys[j]
 		})
+		// 去重看**身份**、印出来看**说法**：同一个组的行只在第一行标组名。
 		lastGroup := ""
 		for _, k := range keys {
-			g := metricGroup(k)
-			label := style.Dim(g)
-			if g == lastGroup {
-				label = ""
+			id, label := metricGroup(k)
+			cell := style.Dim(label)
+			if id == lastGroup {
+				cell = ""
 			}
-			lastGroup = g
-			t.Row(label, k, fmt.Sprintf("%d", counter[k]), style.Dim(metricHint(k)))
+			lastGroup = id
+			t.Row(cell, k, fmt.Sprintf("%d", counter[k]), style.Dim(metricHint(k)))
 		}
-		fmt.Print(style.Section("请求计数") + "\n")
+		fmt.Print(style.Section(i18n.T("request counters", nil)) + "\n")
 		fmt.Print(t.String())
 	}
 	return 0
@@ -110,7 +114,10 @@ func runMetrics(host cliapi.Host) int {
 // metricOrder 组的显示顺序：先「请求」，再按一次请求会依次遇到的
 // 链 → 超时 → 兜底 → 插件，最后是熔断与客户端。这个顺序本身在讲请求的
 // 生命周期，比字母序有用。
-var metricOrder = []string{"请求", "链", "超时", "兜底", "插件", "熔断", "客户端", "其他"}
+//
+// 表里是**身份**（各贡献者自报的 ASCII 标识），不是印出来的说法——理由见
+// metricRank。不认识的组排最后。
+var metricOrder = []string{"requests", "chain", "timeout", "fallback", "plugin", "breaker", "client", "other"}
 
 func printModelHealth(ps *controlplane.Doc) {
 	if ps == nil {
@@ -165,33 +172,34 @@ func printModelHealth(ps *controlplane.Doc) {
 		state := modelHealthState(h)
 		counts[state]++
 	}
-	blocked := counts["卡顿"] + counts["不可用"]
-	fmt.Print(style.Section("模型健康") + "\n")
-	fmt.Println(style.Hint(fmt.Sprintf(
-		"可用 %d（流畅 %d · 可用 %d · 未评分 %d）· 卡顿 %d · 不可用 %d",
-		len(names)-blocked, counts["流畅"], counts["可用"], counts["未评分"],
-		counts["卡顿"], counts["不可用"])))
+	blocked := counts[healthLaggy] + counts[healthUnavailable]
+	fmt.Print(style.Section(i18n.T("model health", nil)) + "\n")
+	fmt.Println(style.Hint(i18n.T(
+		"{usable} usable ({fast} fast · {ok} usable · {unrated} unrated) · {laggy} laggy · {down} unavailable",
+		i18n.A{"usable": len(names) - blocked, "fast": counts[healthFast],
+			"ok": counts[healthUsable], "unrated": counts[healthUnrated],
+			"laggy": counts[healthLaggy], "down": counts[healthUnavailable]})))
 	for _, name := range names {
 		h := statuses[name]
 		state := modelHealthState(h)
-		if state == "卡顿" || state == "不可用" {
+		if state == healthLaggy || state == healthUnavailable {
 			continue
 		}
 		fmt.Println(style.Item(style.Skip, name))
 		fmt.Println(style.Hint("    " + modelScoreLine(h)))
 	}
 	if blocked > 0 {
-		fmt.Println(style.Hint("卡顿/不可用详情：newgate probe"))
+		fmt.Println(style.Hint(i18n.T("details for lagging and unavailable models: newgate probe", nil)))
 	}
 }
 
 func healthDisplayRank(h status.Status) int {
 	switch modelHealthState(h) {
-	case "流畅":
+	case healthFast:
 		return 0
-	case "未评分":
+	case healthUnrated:
 		return 1
-	case "可用":
+	case healthUsable:
 		return 2
 	default:
 		return 3
@@ -205,16 +213,55 @@ func healthDisplayRank(h status.Status) int {
 //
 // 档位名与阈值来自 breaker/status（**只有一份**，2026-09-18）：这里曾经自己
 // 抄了一份 3000/12000，与 breaker 的排序阈值各自演化。
+// 健康档位的**身份**：比较、计数、排序都用它，显示时过 healthLabel。
+//
+// 为什么不用 status.Latency.String() 当判据：那是一个**说法**（它跟着语言变，
+// 见 breaker/status 的说明），拿它进 switch 就等于让这一屏的走向取决于当前
+// 语言。身份留在这里，说法在 healthLabel 里给。
+const (
+	healthFast        = "fast"        // 流畅
+	healthUsable      = "usable"      // 可用
+	healthLaggy       = "laggy"       // 卡顿
+	healthUnavailable = "unavailable" // 不可用
+	healthUnrated     = "unrated"     // 未评分
+)
+
+// healthLabel 把一个档位身份翻成给人看的说法。
+func healthLabel(state string) string {
+	switch state {
+	case healthFast:
+		return i18n.T("fast", nil)
+	case healthUsable:
+		return i18n.T("usable", nil)
+	case healthLaggy:
+		return i18n.T("laggy", nil)
+	case healthUnavailable:
+		return i18n.T("unavailable", nil)
+	case healthUnrated:
+		return i18n.T("unrated", nil)
+	}
+	return state
+}
+
 func modelHealthState(h status.Status) string {
 	if h.Open {
 		score, sampled := modelDisplayScore(h)
 		if h.Grade == status.ProbeLaggy || status.Grade(score, sampled) == status.LatencySlow {
-			return "卡顿"
+			return healthLaggy
 		}
-		return "不可用"
+		return healthUnavailable
 	}
 	score, sampled := modelDisplayScore(h)
-	return status.Grade(score, sampled).String()
+	switch status.Grade(score, sampled) {
+	case status.LatencyFast:
+		return healthFast
+	case status.LatencyOK:
+		return healthUsable
+	case status.LatencySlow:
+		return healthLaggy
+	default:
+		return healthUnrated
+	}
 }
 
 func modelScoreLine(h status.Status) string {
@@ -227,7 +274,9 @@ func modelScoreLine(h status.Status) string {
 			if h.Scores[i] == 0 {
 				latency = "<1ms"
 			}
-			scores = append(scores, fmt.Sprintf("%s %s/%d次", names[i], latency, n))
+			scores = append(scores, i18n.N("{bucket} {latency}/{n} sample",
+				"{bucket} {latency}/{n} samples", n,
+				i18n.A{"bucket": names[i], "latency": latency, "n": n}))
 		}
 	}
 	if len(scores) == 0 && h.ScoreMs > 0 {
@@ -235,12 +284,13 @@ func modelScoreLine(h status.Status) string {
 		if samples < 1 {
 			samples = 1
 		}
-		scores = append(scores, fmt.Sprintf("≤4K %dms/%d次", h.ScoreMs, samples))
+		scores = append(scores, i18n.N("≤4K {ms}ms/{n} sample", "≤4K {ms}ms/{n} samples",
+			samples, i18n.A{"ms": h.ScoreMs, "n": samples}))
 	}
 	if len(scores) == 0 {
-		return "未评分"
+		return healthLabel(healthUnrated)
 	}
-	return modelHealthState(h) + " · " + strings.Join(scores, " · ")
+	return healthLabel(modelHealthState(h)) + " · " + strings.Join(scores, " · ")
 }
 
 func modelDisplayScore(h status.Status) (int, bool) {
@@ -264,9 +314,9 @@ func modelDisplayScore(h status.Status) (int, bool) {
 //
 // 这里问的是**本进程**装出来的那本账（policy.Default()）。CLI 的进程里组件图
 // 是照常装配的（命令是分派器在 Serve 期调的），所以 breaker 已经在账本上了。
-func metricGroup(k string) string {
-	if g := policy.Default().MetricGroup(k); g != "" {
-		return g
+func metricGroup(k string) (id, label string) {
+	if id, label := policy.Default().MetricGroup(k); id != "" {
+		return id, label
 	}
 	return metrics.Group(k)
 }
@@ -281,10 +331,14 @@ func metricHint(k string) string {
 
 // metricRank 表格里的分组顺序。**顺序**是排版决定，留在 CLI；**归属**是数据面
 // 知识，归 modules/gateway/metrics（见那边的 Group）。
+//
+// 对的是**身份**，不是说法：这张表的顺序在讲一次请求的生命周期，换个语言顺序
+// 就该原样保留；拿译文去对，两门语言里那几个词没有共同的次序，中文用户与英文
+// 用户看到的就不是同一张表。身份还有个好处——它是个字面量，比对时不必翻译。
 func metricRank(k string) int {
-	g := metricGroup(k)
+	id, _ := metricGroup(k)
 	for i, name := range metricOrder {
-		if name == g {
+		if name == id {
 			return i
 		}
 	}

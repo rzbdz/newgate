@@ -1,9 +1,10 @@
 package breaker
 
 import (
-	"strconv"
 	"sync"
 	"time"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 type probeResult struct {
@@ -196,7 +197,8 @@ func (b *table) Report(provider, model string, in Input) Result {
 		// 没装诊断：照旧直接开闸。行为与 2026-09-17 之前完全一致，
 		// 装配里没接探活能力时不会因此少摘一条坏 binding。
 		b.openLocked(r, b.policy.rule(v.Bucket), now,
-			"真实流量连续失败（"+v.Bucket.ruleName()+"）")
+			i18n.T("consecutive real-traffic failures ({bucket})",
+				i18n.A{"bucket": v.Bucket.ruleName()}))
 		b.mu.Unlock()
 		return Result{Verdict: v, Opened: true}
 	}
@@ -220,12 +222,14 @@ func (b *table) Report(provider, model string, in Input) Result {
 		r.fails = 0
 		r.bucket = BucketNone
 		r.spared++
-		r.reason = "上闸前诊断探活证明可用（" + v.Bucket.ruleName() + " 计数清零）"
+		r.reason = i18n.T("pre-trip diagnostic probe proved it healthy ({bucket} counter cleared)",
+			i18n.A{"bucket": v.Bucket.ruleName()})
 		b.persistLocked()
 		return Result{Verdict: v, Spared: true}
 	}
 	b.openLocked(r, b.policy.rule(v.Bucket), b.now(),
-		"真实流量连续失败且诊断探活也不通（"+v.Bucket.ruleName()+"）")
+		i18n.T("consecutive real-traffic failures and the diagnostic probe also failed ({bucket})",
+			i18n.A{"bucket": v.Bucket.ruleName()}))
 	return Result{Verdict: v, Opened: true}
 }
 
@@ -267,7 +271,8 @@ func (b *table) failLocked(r *record, bucket Bucket, now time.Time) (bool, bool)
 		// 冷却已过（半开）：这一次失败就是试探的结论，立刻回闸并退避。
 		// 不重新数阈值——试探本身就是那一票。
 		r.halfOpenAt = time.Time{}
-		b.openLocked(r, rule, now, "半开试探失败（"+bucket.ruleName()+"）")
+		b.openLocked(r, rule, now,
+			i18n.T("half-open trial failed ({bucket})", i18n.A{"bucket": bucket.ruleName()}))
 		return true, false
 	}
 	if r.bucket != bucket {
@@ -325,12 +330,14 @@ func (b *table) RecordProbe(provider, model string, status, contextBytes int,
 	reason := ""
 	switch {
 	case status == 200 && latency > slowAfter:
-		grade, reason = ProbeLaggy,
-			"probe "+latency.Round(time.Millisecond).String()+" 超过 "+slowAfter.String()
+		grade, reason = ProbeLaggy, i18n.T("probe {latency} exceeded {limit}",
+			i18n.A{"latency": latency.Round(time.Millisecond).String(), "limit": slowAfter.String()})
 	case probeErr != "":
-		grade, reason = ProbeUnavailable, "probe 失败："+probeErr
+		grade, reason = ProbeUnavailable,
+			i18n.T("probe failed: {err}", i18n.A{"err": probeErr})
 	case status != 200:
-		grade, reason = ProbeUnavailable, "probe HTTP "+strconv.Itoa(status)
+		grade, reason = ProbeUnavailable,
+			i18n.T("probe HTTP {status}", i18n.A{"status": status})
 	case latency >= 3*time.Second:
 		grade = ProbeUsable
 	}
@@ -422,7 +429,7 @@ func (b *table) Snapshot() []Status {
 		s := Status{Provider: provider, Model: model}
 		if r != nil {
 			s.Fails = r.fails
-			s.Rule = r.bucket.ruleName()
+			s.Rule = r.bucket.ruleToken()
 			s.ShapeSkips = r.shapeSkips
 			s.Spared = r.spared
 			s.CooldownMs = r.cooldown.Milliseconds()

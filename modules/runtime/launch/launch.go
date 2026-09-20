@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/lib/httpx"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/resolve"
 	"github.com/rzbdz/newgate/modules/config/store"
@@ -61,7 +62,9 @@ func Launch(a *agentapi.Agent, args []string, o Options) int {
 		// 写不出去只警告不拦：用户此刻要的是「把客户端拉起来」，为一行令牌
 		// 拒绝启动更糟。但后果要说清楚——那个 daemon 没法被别人停。
 		if _, err := store.EnsureControlToken(); err != nil {
-			fmt.Fprintf(os.Stderr, "newgate: 控制令牌写不出去（跨用户 newgate stop 会不可用）: %v\n", err)
+			fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T(
+				"Cannot write the control token (a cross-user newgate stop will not work): {err}",
+				i18n.A{"err": err.Error()}))
 		}
 		fmt.Fprintf(os.Stderr, "newgate: proxy not running, starting…\n")
 		if _, err := daemon.Spawn(st.Port); err != nil {
@@ -116,8 +119,9 @@ func buildInject(a *agentapi.Agent, st *domain.State, active, explicit string) (
 	var warns []string
 
 	if snap, err := store.Load(); err != nil {
-		warns = append(warns, fmt.Sprintf(
-			"配置读不出来，本次不注入真实模型名与窗口声明（代理仍按档位名路由）: %v", err))
+		warns = append(warns, i18n.T(
+			"cannot read the config, so this run injects no real model names and no window declaration (the proxy still routes by tier name): {err}",
+			i18n.A{"err": err}))
 	} else {
 		// 钉死模式：槽位换成该 profile 链头的真实模型名。解析不出就保留
 		// 档位名（fail-open，docs/05-gateway.md）：代理仍能按档位路由。
@@ -204,7 +208,9 @@ func execReal(a *agentapi.Agent, args []string, inject map[string]string) int {
 		if errors.Is(err, syscall.ENOEXEC) {
 			shArgs := append([]string{"/bin/sh", real}, args...)
 			if err2 := syscall.Exec("/bin/sh", shArgs, env); err2 != nil {
-				fmt.Fprintf(os.Stderr, "newgate: 经 /bin/sh 执行 %s 也失败: %v\n", real, err2)
+				fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T(
+					"running {file} through /bin/sh failed too: {err}",
+					i18n.A{"file": real, "err": err2}))
 				return 70
 			}
 			return 0 // 不会走到这里：Exec 成功则不返回

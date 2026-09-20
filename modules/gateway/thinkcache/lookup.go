@@ -3,6 +3,8 @@ package thinkcache
 import (
 	"encoding/json"
 	"fmt"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // KeysForAssistantMessage 从**请求里**一条 assistant 消息算出候选 key，
@@ -94,8 +96,11 @@ func (c *Cache) Lookup(item []byte) ([]byte, bool) {
 		c.mu.Lock()
 		c.unparsable++
 		c.mu.Unlock()
-		c.fail(fmt.Errorf("thinkcache: 请求里的 assistant 消息解析不出来，本轮按未命中处理"+
-			"（补空串）——这是客户端发来的 JSON 形态问题，不是缓存问题（前 200 字节: %.200s）", item))
+		// 前 200 字节仍按字节截断（%.200s），与加 i18n 之前逐字节相同。
+		// 消息必须是**单个字面量**（tools/i18n/scan 只认一个 BasicLit）——拼接
+		// 出来的句子扫不到，账本里就会少一条。
+		c.fail(i18n.E("thinkcache: cannot parse an assistant message in the request; this round is treated as a miss (empty string filled in) — a JSON shape problem on the client side, not a cache problem (first 200 bytes: {snippet})",
+			i18n.A{"snippet": fmt.Sprintf("%.200s", item)}))
 	}
 	for _, k := range keys {
 		if blob, ok := c.Get(k); ok {

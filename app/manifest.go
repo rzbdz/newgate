@@ -1,10 +1,9 @@
 package app
 
 import (
-	"fmt"
-
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/component/entry"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Entry 是一个组件在**装配清单里的身份**：目录名 + 组件定义。
@@ -78,8 +77,9 @@ func (s Selection) Load() ([]modules.Component, error) {
 	extra := make(map[string]bool, len(s.Extra))
 	for _, e := range s.Extra {
 		if e.Dir == "" {
-			return nil, fmt.Errorf("装配选择：Extra 里有一个没写目录名的组件（组件名 %q）——"+
-				"目录名是关掉它、以及报错时说清是谁的凭据", e.Component.Name)
+			return nil, i18n.E("assembly selection: an Extra component has no directory "+
+				"name (component name \"{name}\") — the directory name is what disables "+
+				"it and what names it in errors", i18n.A{"name": e.Component.Name})
 		}
 		extra[e.Dir] = true
 	}
@@ -89,8 +89,9 @@ func (s Selection) Load() ([]modules.Component, error) {
 		// 两个说法说同一件事时必须报错，不能取并集：那样 `AllCore` 与一长串
 		// Disable 会同时存在，而后者是前者的过时副本——正是这个字段要消掉的东西。
 		if len(s.Disable) > 0 {
-			return nil, fmt.Errorf("装配选择：AllCore 与 Disable 同时给了（%v）——"+
-				"前者已经包含后者。两个都要就只留 AllCore；只想关掉其中几个就别写 AllCore", s.Disable)
+			return nil, i18n.E("assembly selection: AllCore and Disable were both given "+
+				"({list}) — the former already contains the latter. Keep only AllCore to "+
+				"have both; leave AllCore out to disable just a few", i18n.A{"list": s.Disable})
 		}
 		for _, e := range core {
 			if _, serves := servesCompositionRoot(e.Component); serves {
@@ -103,19 +104,24 @@ func (s Selection) Load() ([]modules.Component, error) {
 		e, isCore := known[dir]
 		if !isCore {
 			if extra[dir] {
-				return nil, fmt.Errorf("装配选择：disable 点名了 %q，但那是 Extra 里的模块——"+
-					"Extra 是你自己交上来的表，不想装就别把它列进去"+
-					"（disable 只用来关掉内核自带的模块；列在这里是**没有效果**的，而你多半以为它关掉了）", dir)
+				return nil, i18n.E("assembly selection: disable names \"{dir}\", but that is "+
+					"a module from Extra — Extra is the table you supplied yourself, so leave "+
+					"it out if you do not want it (disable only turns off kernel modules; "+
+					"listing it here has no effect, and you probably think it did)",
+					i18n.A{"dir": dir})
 			}
-			return nil, fmt.Errorf("装配选择：disable 点名了 %q，但内核与自己都没有这个模块"+
-				"（写的是**目录名**吗？比如 claudecode_deepseek 而不是 claudecode-deepseek；"+
-				"要关掉全部请用 AllCore）", dir)
+			return nil, i18n.E("assembly selection: disable names \"{dir}\", but neither the "+
+				"kernel nor your own table has this module (did you write the directory "+
+				"name? e.g. claudecode_deepseek, not claudecode-deepseek; use AllCore to "+
+				"turn everything off)", i18n.A{"dir": dir})
 		}
 		if port, serves := servesCompositionRoot(e.Component); serves {
-			return nil, fmt.Errorf("装配选择：disable 点名了 %q（组件 %s），但它提供了组合根自己要用的端口 %q——"+
-				"关掉它，进程就没有任何东西能回答「这次调用归谁」了。"+
-				"它摘不掉这件事不是一张名单说了算，而是组合根自己的依赖说了算（见 compositionRootPorts）",
-				dir, e.Component.Name, port)
+			return nil, i18n.E("assembly selection: disable names \"{dir}\" (component "+
+				"{name}), but it provides the port {port} that the composition root itself "+
+				"needs — turn it off and nothing in the process can answer \"who claims this "+
+				"call\". What makes it unremovable is not a list, it is the composition "+
+				"root's own dependency (see compositionRootPorts)",
+				i18n.A{"dir": dir, "name": e.Component.Name, "port": port})
 		}
 		off[dir] = true
 	}
@@ -125,8 +131,10 @@ func (s Selection) Load() ([]modules.Component, error) {
 	owner := make(map[string]string, len(core)+len(s.Extra))
 	add := func(dir string, c modules.Component) error {
 		if prev, dup := owner[c.Name]; dup {
-			return fmt.Errorf("装配选择：组件 %q 装了两次（%s 与 %s）——"+
-				"同名的两个组件会让这次装配在构图期才失败", c.Name, prev, dir)
+			return i18n.E("assembly selection: component \"{name}\" is installed twice "+
+				"(from {first} and {second}) — two components with the same name only fail "+
+				"at graph build time",
+				i18n.A{"name": c.Name, "first": prev, "second": dir})
 		}
 		owner[c.Name] = dir
 		out = append(out, c)
@@ -146,8 +154,8 @@ func (s Selection) Load() ([]modules.Component, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("装配选择：一个组件都没有" +
-			"（disable 把内核模块全关掉了？）——空图跑起来只会让人以为命令坏了")
+		return nil, i18n.E("assembly selection: not a single component (did disable turn "+
+			"off every kernel module?) — an empty graph only looks like a broken command", nil)
 	}
 	return out, nil
 }

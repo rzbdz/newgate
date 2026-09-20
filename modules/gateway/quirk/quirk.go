@@ -35,6 +35,7 @@ import (
 	"sync"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Flag 一个已知毛病。用位掩码，一个 (provider, model) 可以同时有好几个。
@@ -47,9 +48,9 @@ const (
 
 func (f Flag) String() string {
 	if f&NoThinkingDisable != 0 {
-		return "不支持关闭思考（必须给显式 reasoning_effort）"
+		return i18n.T("thinking cannot be disabled (an explicit reasoning_effort is required)", nil)
 	}
-	return "未知"
+	return i18n.T("unknown", nil)
 }
 
 // AllFlags 全部已知的毛病位，按定义顺序。

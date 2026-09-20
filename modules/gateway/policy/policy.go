@@ -41,12 +41,13 @@ package policy
 
 import (
 	"encoding/json"
-	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Filter 是一个贡献者的身份。
@@ -271,8 +272,10 @@ type EnvBinder interface {
 // 为什么不放在 Controller 里：观测面的命名与状态文档的字段是两件事，而且
 // 将来可能有只产生计数器、不产生状态节的贡献者。
 type MetricNamer interface {
-	// MetricGroup 这个计数器归哪一组（给人看的锚点）；不认识给空串。
-	MetricGroup(key string) string
+	// MetricGroup 这个计数器归哪一组：身份（ASCII 稳定标识，排序/去重用）与
+	// 说法（给人看的锚点）；不认识给两个空串。身份与说法分开的理由见
+	// modules/gateway/metrics.Group——排序必须与语言无关。
+	MetricGroup(key string) (id, label string)
 	// MetricHint 这个计数器的人话说明；不认识给空串。
 	MetricHint(key string) string
 }
@@ -355,7 +358,7 @@ func InstallDefault(r *Registry) func() {
 // 看不出来）。
 func (r *Registry) Register(f Filter) (modules.Release, error) {
 	if f == nil || f.Name() == "" {
-		return nil, fmt.Errorf("policy: 贡献者必须有名字")
+		return nil, i18n.E("policy: contributor must have a name", nil)
 	}
 	if err := r.validate(f); err != nil {
 		return nil, err
@@ -365,15 +368,16 @@ func (r *Registry) Register(f Filter) (modules.Release, error) {
 	defer r.mu.Unlock()
 	for _, existing := range r.filters {
 		if existing.Name() == f.Name() {
-			return nil, fmt.Errorf("policy: 贡献者 %q 已经注册过了", f.Name())
+			return nil, i18n.E("policy: contributor {name} is already registered",
+				i18n.A{"name": strconv.Quote(f.Name())})
 		}
 	}
 	if _, is := f.(Admitter); is {
 		for _, existing := range r.filters {
 			if _, taken := existing.(Admitter); taken {
-				return nil, fmt.Errorf(
-					"policy: 准入只能有一个贡献者，%q 已经被 %q 占着（它带副作用，见 Admitter 的说明）",
-					f.Name(), existing.Name())
+				return nil, i18n.E(
+					"policy: only one contributor may be an admitter; {name} is already taken by {holder} (it carries side effects, see the Admitter docs)",
+					i18n.A{"name": strconv.Quote(f.Name()), "holder": strconv.Quote(existing.Name())})
 			}
 		}
 	}
@@ -432,7 +436,8 @@ func (r *Registry) validate(f Filter) error {
 	for _, o := range others {
 		for _, key := range o.keys {
 			if _, clash := mine[key]; clash {
-				return fmt.Errorf("policy: 状态文档的字段 %q 已被 %q 占用", key, o.name)
+				return i18n.E("policy: state document field {key} is already taken by {owner}",
+					i18n.A{"key": strconv.Quote(key), "owner": strconv.Quote(o.name)})
 			}
 		}
 	}
@@ -588,15 +593,15 @@ func (r *Registry) ObserveProbes(obs []ProbeObservation) []ProbeAck {
 }
 
 // MetricGroup / MetricHint 问观测面的命名；没人认识就给空串，由调用方兜底。
-func (r *Registry) MetricGroup(key string) string {
+func (r *Registry) MetricGroup(key string) (id, label string) {
 	for _, f := range r.Filters() {
 		if namer, ok := f.(MetricNamer); ok {
-			if group := namer.MetricGroup(key); group != "" {
-				return group
+			if id, label := namer.MetricGroup(key); id != "" {
+				return id, label
 			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 func (r *Registry) MetricHint(key string) string {
@@ -620,7 +625,7 @@ func (r *Registry) Flush(logf func(string, ...any)) {
 			continue
 		}
 		if err := flusher.Flush(); err != nil && logf != nil {
-			logf("[policy] %s 落盘失败: %v", f.Name(), err)
+			logf("[policy] %s", i18n.T("flush failed for {name}: {err}", i18n.A{"name": f.Name(), "err": err}))
 		}
 	}
 }

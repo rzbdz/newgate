@@ -336,6 +336,27 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
   gateway/direction_test.go` 那条棘轮测试守着方向：它拒「名字」也拒 `import`
   策略包本身，只有 `…/breaker/status` 那种 wire 叶子除外）。一个都不装时网关是
   最小系统，照常转发。见 `docs/09-extension-guide.md` §7。
+- **用户可见的文本一律走目录表**（2026-09-20 起）。源码里写**英文**：
+  `i18n.T("unknown command {cmd}", i18n.A{"cmd": args[0]})`；中文、以及将来任何语言，
+  都活在 `lib/i18n/catalogs/<tag>.json` 里。判据一句话——**非测试 Go 源码里不许出现
+  中文字符串字面量**（注释不算：注释是设计记录，本来就该是中文）。`app/i18n_test.go`
+  与 `make check-i18n` 守着它；迁移期的豁免列在 `tools/i18n/allowlist.json` 里，
+  **只减不增**，终点是空文件。细则：
+  - **键就是那句英文**（gettext 的 msgid 传统）：没有「消息 ID」这层间接，也就没有
+    「键写错了」这回事。代价是改措辞会让旧译文变孤儿——`tools/i18n check` 会报出来。
+  - **机器标记留在消息外面**：`[proxy]`/`[shape-400]` 这类 tag、metrics 计数器名、
+    `ok/warn/bad/skip`、落盘 JSON 字段名、命令名、flag 名、路径。它们是 grep 的锚点
+    与协议的字段，翻译它们等于改协议。
+  - **占位符用具名** `{dir}`（不是 `%s`）：译文要能重排语序。带数量的句子用
+    `i18n.N("1 file", "{n} files", n, …)`——键用**单数**形式，中文只写 `other`。
+  - **错误**用 `i18n.E(...)` / `i18n.Ef(err, ...)`；测试断言用 `i18n.ID(err)`
+    （语言无关的身份），别断言渲染出来的那句话。
+  - 写完新文案跑 `go run ./tools/i18n extract` 重建账本；`make check-i18n` 会告诉你
+    还缺什么。补译文用 `make i18n-sync`——**它调本机网关跑 LLM，只在开发者本地跑，
+    绝不进 CI**（CI 只跑不花钱的 `check`）。机翻条目标着 `machine`，人工复核后改成
+    `reviewed`；发版前 `check -strict` 会拦住没复核的。
+  - 语言解析次序（`NEWGATE_LANG` > 配置 > `LC_ALL`/`LC_MESSAGES`/`LANG` > 源语言）见
+    `modules/locale/resolve.go`；用户机上要钉中文：`newgate lang zh-Hans`。
 
 ---
 

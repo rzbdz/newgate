@@ -2,11 +2,12 @@ package thinkcache
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"os"
 	"sync"
 	"time"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // diskMagic 文件头：认出这是 thinkcache 的落盘文件。换记录格式时改这个
@@ -153,7 +154,7 @@ func (d *DiskStore) appendKeys(keys []string, blob []byte, at time.Time) {
 		if _, err := d.f.Write(buf); err != nil {
 			// 跳过这一条（best-effort，内存热层还在），但说出来：连续写不进去
 			// 就是「这轮推理重启后找不回来」的原因。
-			d.fail(fmt.Errorf("thinkcache 冷层写入失败（本条不落盘）: %w", err))
+			d.fail(i18n.Ef(err, "thinkcache disk write failed (this record is not persisted): {err}", nil))
 			continue
 		}
 		d.index[k] = rec{off: d.size, at: at}
@@ -240,13 +241,13 @@ func (d *DiskStore) compactLocked() {
 	tmp := d.path + ".tmp"
 	nf, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o660)
 	if err != nil {
-		d.fail(fmt.Errorf("thinkcache 压实：开临时文件失败（继续用旧文件）: %w", err))
+		d.fail(i18n.Ef(err, "thinkcache compact: cannot open the temp file (still using the old file): {err}", nil))
 		return
 	}
 	if _, err := nf.Write(diskMagic); err != nil {
 		_ = nf.Close()
 		_ = os.Remove(tmp)
-		d.fail(fmt.Errorf("thinkcache 压实：写文件头失败（继续用旧文件）: %w", err))
+		d.fail(i18n.Ef(err, "thinkcache compact: cannot write the file header (still using the old file): {err}", nil))
 		return
 	}
 	// 压实会**丢记录**，所以每一条丢掉的都要有账。两种丢法：
@@ -271,22 +272,22 @@ func (d *DiskStore) compactLocked() {
 	if err := nf.Sync(); err != nil {
 		_ = nf.Close()
 		_ = os.Remove(tmp)
-		d.fail(fmt.Errorf("thinkcache 压实：刷盘失败（保留旧文件）: %w", err))
+		d.fail(i18n.Ef(err, "thinkcache compact: fsync failed (keeping the old file): {err}", nil))
 		return
 	}
 	if err := nf.Close(); err != nil {
 		_ = os.Remove(tmp)
-		d.fail(fmt.Errorf("thinkcache 压实：关闭临时文件失败（保留旧文件）: %w", err))
+		d.fail(i18n.Ef(err, "thinkcache compact: cannot close the temp file (keeping the old file): {err}", nil))
 		return
 	}
 	if err := os.Rename(tmp, d.path); err != nil {
 		_ = os.Remove(tmp)
-		d.fail(fmt.Errorf("thinkcache 压实：替换失败（保留旧文件）: %w", err))
+		d.fail(i18n.Ef(err, "thinkcache compact: cannot replace the file (keeping the old file): {err}", nil))
 		return
 	}
 	if unreadable > 0 || unwritable > 0 {
-		d.fail(fmt.Errorf("thinkcache 压实丢了 %d 条记录（读不出 %d，写不进 %d）",
-			unreadable+unwritable, unreadable, unwritable))
+		d.fail(i18n.E("thinkcache compact lost {lost} records ({unreadable} unreadable, {unwritable} unwritable)",
+			i18n.A{"lost": unreadable + unwritable, "unreadable": unreadable, "unwritable": unwritable}))
 	}
 	_ = d.f.Close()
 	nf2, err := os.OpenFile(d.path, os.O_RDWR|os.O_APPEND, 0o660)
@@ -298,7 +299,7 @@ func (d *DiskStore) compactLocked() {
 		d.f = nil
 		d.index = map[string]rec{}
 		d.size = 0
-		d.fail(fmt.Errorf("thinkcache 冷层停用（重开失败，重启后推理内容将无法找回）: %w", err))
+		d.fail(i18n.Ef(err, "thinkcache disk tier disabled (reopen failed; cached reasoning content will not be recoverable after a restart): {err}", nil))
 		return
 	}
 	d.f = nf2

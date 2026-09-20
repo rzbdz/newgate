@@ -23,9 +23,9 @@ package breaker
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	gwpolicy "github.com/rzbdz/newgate/modules/gateway/policy"
 )
 
@@ -50,7 +50,8 @@ var (
 func (p plane) Name() string { return "breaker" }
 
 func (p plane) Why() string {
-	return "binding 健康表：连续失败到阈值就摘牌，冷却期满放一次半开试探"
+	return i18n.T("binding health table: trips after consecutive failures, "+
+		"releases one half-open trial when the cooldown expires", nil)
 }
 
 // --- A 阶段：建链准入 -----------------------------------------------------
@@ -69,7 +70,12 @@ func (p plane) Admit(provider, model string) (bool, string) {
 	if p.t.Available(provider, model) {
 		return true, ""
 	}
-	return false, "熔断中"
+	// 这句话会被 resolve 原样带进 Skip.Reason，于是它同时是**给人看的理由**与
+	// `newgate tier` 那一栏的内容。所以它可以翻——但**只有它可以翻**：那一栏的
+	// 归类（modules/config 的 skipKind）认的是 resolve 打的机器类目 Kind，不是
+	// 这句话的措辞。2026-09-20 之前它认的是措辞（strings.Contains "熔断"），
+	// 那让「换个语言就少一栏」成了一个随时会发生的故障。
+	return false, i18n.T("circuit open", nil)
 }
 
 func (p plane) Rank(provider, model string, contextBytes int) int {
@@ -158,11 +164,13 @@ func input(o gwpolicy.Outcome) Input {
 func note(res Result, provider string) string {
 	switch {
 	case res.Opened:
-		return fmt.Sprintf("  [熔断器已打开: %s 暂时摘掉]", provider)
+		return i18n.T("  [breaker opened: {provider} removed for now]",
+			i18n.A{"provider": provider})
 	case res.Spared:
 		// 差一点摘、被诊断探活拦下来。必须打出来：这解释了「日志里有失败、
 		// newgate breaker 里却没有它」这个会让人查错方向的组合。
-		return fmt.Sprintf("  [诊断探活证明 %s 仍然可用，未摘牌]", provider)
+		return i18n.T("  [diagnostic probe proved {provider} still healthy, not tripped]",
+			i18n.A{"provider": provider})
 	}
 	return ""
 }
@@ -209,8 +217,10 @@ func (p plane) ObserveProbes(obs []gwpolicy.ProbeObservation) []gwpolicy.ProbeAc
 			o.Latency, o.SlowAfter, o.Error)
 		ack := gwpolicy.ProbeAck{Opened: opened}
 		if opened {
-			ack.Note = fmt.Sprintf("[probe] 熔断 %s/%s：%s（至少 60s，之后须 probe 成功才回链）",
-				o.Provider, o.Model, grade)
+			ack.Note = i18n.T(
+				"[probe] tripped {provider}/{model}: {grade} (at least 60s, "+
+					"and returning to the chain needs a successful probe)",
+				i18n.A{"provider": o.Provider, "model": o.Model, "grade": grade})
 		}
 		out = append(out, ack)
 	}
@@ -240,7 +250,9 @@ func (p plane) Flush() error {
 //     没澄清的铁证，现在它归数据面所有、借给策略（policy.Env.Probe）。
 func (p plane) BindEnv(env gwpolicy.Env) {
 	p.t.SetErrorHandler(func(err error) {
-		env.Logf("[breaker] 健康表读写失败（继续使用内存状态）: %v", err)
+		// 格式化由 i18n.T 做，所以这里用 `%s`：译文里出现一个 `%` 不该让这行日志变形。
+		env.Logf("%s", i18n.T("[breaker] health table read/write failed "+
+			"(continuing with in-memory state): {err}", i18n.A{"err": err}))
 	})
 	p.t.SetVerifier(env.Probe)
 }
@@ -253,21 +265,26 @@ func (p plane) BindEnv(env gwpolicy.Env) {
 // 以前它们硬编码在 modules/gateway/metrics/hints.go 里（`breaker.opened` /
 // `breaker.spared` / `breaker.skipped.shape_error` 三个字面量）——那是把「熔断
 // 器打开」这件事的解释权放在了不认识熔断器的包里。
-func (p plane) MetricGroup(key string) string {
+//
+// 身份（"breaker"）与说法（`Breaker` 的译文）分开给：那张表按组排序，而排序
+// 必须与语言无关——理由写在 modules/gateway/metrics.Group 的注释里。
+func (p plane) MetricGroup(key string) (id, label string) {
 	if strings.HasPrefix(key, "breaker.") {
-		return "熔断"
+		return "breaker", i18n.T("Breaker", nil)
 	}
-	return ""
+	return "", ""
 }
 
 func (p plane) MetricHint(key string) string {
 	switch key {
 	case "breaker.opened":
-		return "熔断器打开，provider 暂时摘除"
+		return i18n.T("breaker opened, provider removed for now", nil)
 	case "breaker.spared":
-		return "连续失败到阈值，但上闸前的诊断探活证明它仍然可用，于是不摘牌"
+		return i18n.T("consecutive failures reached the threshold, but the pre-trip "+
+			"diagnostic probe proved it healthy, so it was not tripped", nil)
 	case "breaker.skipped.shape_error":
-		return "请求形状错误（400 被某个形状判据认领，如 deepseek 的 reasoning 回传校验），跳过熔断记账"
+		return i18n.T("request shape error (a 400 claimed by a shape detector, "+
+			"e.g. deepseek's reasoning pass-back check), skipped from breaker accounting", nil)
 	}
 	return ""
 }

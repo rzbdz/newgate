@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/lib/durarg"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/store"
@@ -45,7 +46,10 @@ func (c *command) Status() []cliapi.StatusLine {
 	if len(parts) == 0 {
 		return nil
 	}
-	return []cliapi.StatusLine{{Label: "模块开关", Value: strings.Join(parts, "   ")}}
+	return []cliapi.StatusLine{{
+		Label: i18n.T("Module switches", nil),
+		Value: strings.Join(parts, "   "),
+	}}
 }
 
 // switchEnabled 一条开关点现在是不是开着的。极性由出厂态决定：

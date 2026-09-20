@@ -188,29 +188,44 @@ func TestClassifyBucketOnlyForKnownCauses(t *testing.T) {
 	}
 }
 
-// TestBucketRuleNames：账本的名字既是 UI 文案也是落盘字段（health.json 的
-// `rule`），不能随手改——known-good 二进制读同一份文件。
+// TestBucketRuleNames：账本有**两个**名字，各有各的用处，都不能随手改：
+//
+//   - ruleToken 落盘（health.json 与 /__newgate/status 的 `rule`），是**机器标记**，
+//     与语言无关——known-good 二进制读同一份文件，换个语言重启也得认得回来；
+//   - ruleName 是给人看的（表格的「账本」列、摘牌原因里那一句），走 i18n。
 func TestBucketRuleNames(t *testing.T) {
-	want := map[Bucket]string{
+	tokens := map[Bucket]string{
 		BucketNone:         "",
-		BucketAvailability: "可用性",
-		BucketRateLimit:    "限流",
-		BucketConfig:       "配置",
-		BucketShape:        "请求形状",
+		BucketAvailability: "availability",
+		BucketRateLimit:    "rate limit",
+		BucketConfig:       "config",
+		BucketShape:        "request shape",
 	}
-	for b, name := range want {
-		if got := b.ruleName(); got != name {
-			t.Errorf("Bucket(%d).ruleName() = %q, want %q", b, got, name)
+	for b, token := range tokens {
+		if got := b.ruleToken(); got != token {
+			t.Errorf("Bucket(%d).ruleToken() = %q, want %q", b, got, token)
 		}
-		if name == "" {
+		if token == "" {
 			continue
 		}
-		if got := bucketFromName(name); got != b {
-			t.Errorf("bucketFromName(%q) = %d, want %d", name, got, b)
+		if got := bucketFromName(token); got != b {
+			t.Errorf("bucketFromName(%q) = %d, want %d", token, got, b)
 		}
 	}
 	if got := bucketFromName("没有这本账"); got != BucketNone {
 		t.Errorf("未知账本名应折成 BucketNone，得到 %d", got)
+	}
+	// 没装译文表时 i18n.T 走恒等路径，所以这里读到的就是英文原文。
+	names := map[Bucket]string{
+		BucketAvailability: "Availability",
+		BucketRateLimit:    "Rate limit",
+		BucketConfig:       "Config",
+		BucketShape:        "Request shape",
+	}
+	for b, name := range names {
+		if got := b.ruleName(); got != name {
+			t.Errorf("Bucket(%d).ruleName() = %q, want %q", b, got, name)
+		}
 	}
 }
 

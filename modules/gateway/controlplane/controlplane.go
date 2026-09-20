@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/lib/httpx"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/breaker/status"
 	"github.com/rzbdz/newgate/modules/gateway/controlpath"
 	"github.com/rzbdz/newgate/modules/runtime/daemon"
@@ -134,7 +135,7 @@ func Post(port int, path, token string, body, out interface{}) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("守护进程返回 HTTP %d", resp.StatusCode)
+		return i18n.E("daemon returned HTTP {status}", i18n.A{"status": resp.StatusCode})
 	}
 	if out == nil {
 		return nil
@@ -179,9 +180,9 @@ func (d *Doc) Available() func(provider, model string) (bool, string) {
 	if d != nil {
 		for _, b := range d.Breakers {
 			if b.Open {
-				reason := "熔断中"
+				reason := i18n.T("circuit open", nil)
 				if b.Reason != "" {
-					reason += "（" + b.Reason + "）"
+					reason = i18n.T("circuit open ({reason})", i18n.A{"reason": b.Reason})
 				}
 				blocked[b.Provider+"/"+b.Model] = reason
 			}

@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/rzbdz/newgate/lib/durarg"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
@@ -58,14 +59,14 @@ func (gatewayReporter) Status() []cliapi.StatusLine {
 	var value string
 	switch {
 	case info == nil:
-		value = style.Dim("未运行") + "    newgate start"
+		value = style.Dim(i18n.T("Not running", nil)) + "    newgate start"
 	case doc == nil:
-		value = style.Yellow("端口无响应") + fmt.Sprintf("   pid %d · 127.0.0.1:%d", info.PID, info.Port)
+		value = style.Yellow(i18n.T("Port not responding", nil)) + fmt.Sprintf("   pid %d · 127.0.0.1:%d", info.PID, info.Port)
 	default:
-		value = style.Green("● 运行中") + fmt.Sprintf("   pid %d · 127.0.0.1:%d · %s · %dreq/%derr",
+		value = style.Green(i18n.T("● Running", nil)) + fmt.Sprintf("   pid %d · 127.0.0.1:%d · %s · %dreq/%derr",
 			info.PID, info.Port, durarg.Format(doc.UptimeS), doc.Requests, doc.Failures)
 	}
-	return []cliapi.StatusLine{{Rank: rankStatusProxy, Label: "代理", Value: value}}
+	return []cliapi.StatusLine{{Rank: rankStatusProxy, Label: i18n.T("Proxy", nil), Value: value}}
 }
 
 // checkEnv 出站代理会不会把 loopback 请求劫走。
@@ -73,11 +74,11 @@ func (gatewayReporter) Status() []cliapi.StatusLine {
 // 这是最隐蔽的一类故障：newgate 日志里一条请求都没有，因为请求根本没到我们
 // 这——客户端发给了 http_proxy，代理连不上 127.0.0.1 就回 502。
 func checkEnv() cliapi.Diagnostic {
-	d := cliapi.Diagnostic{Rank: rankCheckEnv, Label: "环境"}
+	d := cliapi.Diagnostic{Rank: rankCheckEnv, Label: i18n.T("Environment", nil)}
 	set := proxyEnvSet()
 	if len(set) == 0 {
 		d.State = "ok"
-		d.Line = "无出站代理变量"
+		d.Line = i18n.T("No outbound proxy variables", nil)
 		return d
 	}
 	noProxy := os.Getenv("no_proxy") + "," + os.Getenv("NO_PROXY")
@@ -89,17 +90,17 @@ func checkEnv() cliapi.Diagnostic {
 	}
 	if covered == 2 {
 		d.State = "ok"
-		d.Line = "有出站代理；NO_PROXY 已放行 loopback"
+		d.Line = i18n.T("Outbound proxy set; NO_PROXY already allows loopback", nil)
 		d.Details = append(d.Details, set...)
 		return d
 	}
 	d.State = "bad"
-	d.Line = "有出站代理；NO_PROXY 未放行 127.0.0.1 / localhost"
+	d.Line = i18n.T("Outbound proxy set; NO_PROXY does not allow 127.0.0.1 / localhost", nil)
 	d.Details = append(d.Details, set...)
 	d.Details = append(d.Details,
-		"后果：客户端把 127.0.0.1:8899 的请求交给出站代理，连不上即 502；",
-		"      newgate 日志不会留下任何记录。",
-		"修复（写进 shell rc 后重开客户端）：",
+		i18n.T("Consequence: clients hand requests for 127.0.0.1:8899 to the outbound proxy, and a failed connection becomes HTTP 502;", nil),
+		i18n.T("      newgate leaves no record of it in its log.", nil),
+		i18n.T("Fix (add to the shell rc, then restart the client):", nil),
 		`  export NO_PROXY="127.0.0.1,localhost,::1,$NO_PROXY"`,
 		`  export no_proxy="$NO_PROXY"`)
 	return d
@@ -119,22 +120,23 @@ func proxyEnvSet() []string {
 // checkProxy 代理进程与端口的两种失败要分开说：进程死了可以重启，
 // 端口在听却探不通是环境问题，重启一百次也没用。
 func checkProxy() cliapi.Diagnostic {
-	d := cliapi.Diagnostic{Rank: rankCheckProxy, Label: "代理"}
+	d := cliapi.Diagnostic{Rank: rankCheckProxy, Label: i18n.T("Proxy", nil)}
 	st := store.LoadState()
 	info, doc := controlplane.State()
 	switch {
 	case info == nil:
 		d.State = "skip"
-		d.Line = fmt.Sprintf("未运行（端口 %d）", st.Port)
+		d.Line = i18n.T("Not running (port {port})", i18n.A{"port": st.Port})
 		d.Details = append(d.Details, "newgate start")
 	case doc != nil:
 		d.State = "ok"
 		d.Line = fmt.Sprintf("pid %d · 127.0.0.1:%d · %s", info.PID, info.Port, durarg.Format(doc.UptimeS))
 	default:
 		d.State = "bad"
-		d.Line = fmt.Sprintf("pid %d 存活，127.0.0.1:%d HTTP 探活失败", info.PID, info.Port)
+		d.Line = i18n.T("pid {pid} is alive, HTTP probe to 127.0.0.1:{port} failed",
+			i18n.A{"pid": info.PID, "port": info.Port})
 		d.Details = append(d.Details,
-			"进程正常，请求到不了它；常见于出站代理劫持 loopback（见「环境」一项）。")
+			i18n.T("Process is healthy but requests cannot reach it; usually an outbound proxy hijacking loopback (see the Environment item).", nil))
 	}
 	return d
 }
@@ -150,11 +152,11 @@ func (gatewayReporter) Dump() []cliapi.DumpSection {
 // 它是排查「是不是代理改坏了请求」唯一能拿出手的东西（docs/11），所以连用法
 // 一起写进诊断包——拿到包的人不必再去翻文档。
 func dumpEvidence() cliapi.DumpSection {
-	s := cliapi.DumpSection{Rank: rankDumpEvidence, Title: "错误证据文件"}
+	s := cliapi.DumpSection{Rank: rankDumpEvidence, Title: i18n.T("Error evidence files", nil)}
 	dir := filepath.Join(paths.Config(), "dump")
 	ents, err := os.ReadDir(dir)
 	if err != nil || len(ents) == 0 {
-		s.Lines = append(s.Lines, "  （无。上游报 4xx/5xx 时会自动生成）")
+		s.Lines = append(s.Lines, i18n.T("  (none; written automatically when the upstream returns 4xx/5xx)", nil))
 		return s
 	}
 	for _, e := range ents {
@@ -163,11 +165,12 @@ func dumpEvidence() cliapi.DumpSection {
 		if ierr == nil {
 			size = info.Size()
 		}
-		s.Lines = append(s.Lines, fmt.Sprintf("  %s  %d 字节", filepath.Join(dir, e.Name()), size))
+		s.Lines = append(s.Lines, i18n.T("  {path}  {bytes} bytes",
+			i18n.A{"path": filepath.Join(dir, e.Name()), "bytes": size}))
 	}
 	s.Lines = append(s.Lines,
 		"",
-		"  看「我们发出的」和「客户端发来的」差在哪：",
+		i18n.T("  Diff what we sent against what the client sent:", nil),
 		fmt.Sprintf("    diff <(jq -S . %s/err-*.client-sent.json) \\", dir),
 		fmt.Sprintf("         <(jq -S . %s/err-*.we-sent.json)", dir))
 	return s
@@ -175,10 +178,10 @@ func dumpEvidence() cliapi.DumpSection {
 
 // dumpLogTail 日志全文。诊断包就是要原文，所以不做截断——它由用户自己决定怎么用。
 func dumpLogTail() cliapi.DumpSection {
-	s := cliapi.DumpSection{Rank: rankDumpLog, Title: "日志全文"}
+	s := cliapi.DumpSection{Rank: rankDumpLog, Title: i18n.T("Full log", nil)}
 	b, err := os.ReadFile(paths.LogFile())
 	if err != nil {
-		s.Lines = append(s.Lines, "  读不到: "+err.Error())
+		s.Lines = append(s.Lines, i18n.T("  Cannot read: {err}", i18n.A{"err": err.Error()}))
 		return s
 	}
 	s.Lines = append(s.Lines, strings.Split(strings.TrimRight(string(b), "\n"), "\n")...)

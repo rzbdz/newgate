@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
@@ -59,7 +60,7 @@ func (r runtimeReporter) Diagnostics() []cliapi.Diagnostic {
 //
 // 「没在跑」是 skip 不是 bad：那是正常状态，不是故障。
 func checkDaemon() cliapi.Diagnostic {
-	d := cliapi.Diagnostic{Rank: rankCheckDaemon, Label: "守护进程"}
+	d := cliapi.Diagnostic{Rank: rankCheckDaemon, Label: i18n.T("Daemon", nil)}
 	info, notes := daemon.Reconcile()
 	if len(notes) == 0 {
 		// 排在前面的检查（链路、代理）都会读 Running()，它们可能已经先把
@@ -75,22 +76,25 @@ func checkDaemon() cliapi.Diagnostic {
 		d.Details = append(d.Details, notes[1:]...)
 		if info != nil {
 			d.Details = append(d.Details,
-				fmt.Sprintf("已按锁认它：pid %d · 127.0.0.1:%d", info.PID, info.Port),
-				"pidfile 已经改回真身，status/metrics 立刻恢复；不用手工改文件")
+				i18n.T("Trusting the lock: pid {pid} · 127.0.0.1:{port}",
+					i18n.A{"pid": info.PID, "port": info.Port}),
+				i18n.T("pidfile is rewritten to the real process; status/metrics recover at once, no manual file editing needed", nil))
 		}
 	case info == nil:
 		d.State = "skip"
-		d.Line = "未运行"
+		d.Line = i18n.T("Not running", nil)
 		d.Details = append(d.Details, "newgate start")
 	default:
 		d.State = "ok"
-		d.Line = fmt.Sprintf("pid %d · 127.0.0.1:%d · pidfile 与锁一致", info.PID, info.Port)
+		d.Line = i18n.T("pid {pid} · 127.0.0.1:{port} · pidfile and lock agree",
+			i18n.A{"pid": info.PID, "port": info.Port})
 		// 优雅交接的那一瞬间 pidfile 已是新进程、锁还是旧进程（AdoptRuntime
 		// 先写 pidfile 再改锁）。两个都活着却不同号时，只有这一种解释，说出来
 		// 免得看到的人以为又坏了。
 		if pid := daemon.LockHolder(); pid > 0 && pid != info.PID && daemon.Alive(pid) {
-			d.Details = append(d.Details, fmt.Sprintf(
-				"锁文件此刻写着 pid %d（优雅交接的窗口内正常，几毫秒后自己会对上）", pid))
+			d.Details = append(d.Details, i18n.T(
+				"The lock file currently says pid {pid} (normal within the graceful handoff window, it lines up by itself within milliseconds)",
+				i18n.A{"pid": pid}))
 		}
 	}
 	return d
@@ -121,14 +125,14 @@ func (r runtimeReporter) Status() []cliapi.StatusLine {
 	// 代理在跑却有 agent 想接管没接管上：start/build 之后漏了一步，不补的话
 	// 那个工具会静默直连。
 	if _, doc := controlplane.State(); doc != nil && active < wanted {
-		line += "\n" + style.Hint(style.Yellow("有 agent 声明接管但未生效，重跑 newgate start"))
+		line += "\n" + style.Hint(style.Yellow(i18n.T("An agent declares takeover but it is not in effect; rerun newgate start", nil)))
 	}
-	return []cliapi.StatusLine{{Rank: rankStatusTakeover, Label: "接管", Value: line}}
+	return []cliapi.StatusLine{{Rank: rankStatusTakeover, Label: i18n.T("Takeover", nil), Value: line}}
 }
 
 func takeoverLine(on, off []string) string {
 	if len(on) == 0 {
-		line := style.Dim("全部直连")
+		line := style.Dim(i18n.T("All direct", nil))
 		if len(off) > 0 {
 			line += "   " + style.Dim("newgate start / on <agent>")
 		}
@@ -143,7 +147,7 @@ func takeoverLine(on, off []string) string {
 
 // checkTakeover 被改写的目标文件。
 func (r runtimeReporter) checkTakeover() cliapi.Diagnostic {
-	d := cliapi.Diagnostic{Rank: rankCheckTakeover, Label: "接管"}
+	d := cliapi.Diagnostic{Rank: rankCheckTakeover, Label: i18n.T("Takeover", nil)}
 	var on, off []string
 	for _, id := range r.agents.Names() {
 		agent, ok := r.agents.Get(id)
@@ -163,26 +167,26 @@ func (r runtimeReporter) checkTakeover() cliapi.Diagnostic {
 	}
 	if len(on) == 0 {
 		d.State = "skip"
-		d.Line = "无文件被改写"
+		d.Line = i18n.T("No file was rewritten", nil)
 		return d
 	}
 	d.State = "ok"
 	d.Line = strings.Join(on, " · ")
 	if len(off) > 0 {
-		d.Details = append(d.Details, "未接管："+strings.Join(off, " · "))
+		d.Details = append(d.Details, i18n.T("Not taken over: {names}", i18n.A{"names": strings.Join(off, " · ")}))
 	}
 	return d
 }
 
 // checkBackups 逃生舱有没有准备好：original/ 里有东西，`newgate stop` 才还原得回去。
 func checkBackups() cliapi.Diagnostic {
-	d := cliapi.Diagnostic{Rank: rankCheckBackups, Label: "备份"}
+	d := cliapi.Diagnostic{Rank: rankCheckBackups, Label: i18n.T("Backups", nil)}
 	orig := filepath.Join(paths.BackupDir(), "original")
 	ents, err := os.ReadDir(orig)
 	if err != nil || len(ents) == 0 {
 		d.State = "skip"
-		d.Line = "无原始备份"
-		d.Details = append(d.Details, "接管过配置文件之后才会生成")
+		d.Line = i18n.T("No original backups", nil)
+		d.Details = append(d.Details, i18n.T("Created only after a config file has been taken over", nil))
 		return d
 	}
 	var names []string
@@ -190,7 +194,8 @@ func checkBackups() cliapi.Diagnostic {
 		names = append(names, e.Name())
 	}
 	d.State = "ok"
-	d.Line = fmt.Sprintf("%d 份原配置 · newgate stop 可还原", len(ents))
+	d.Line = i18n.N("{n} original config · newgate stop can restore it",
+		"{n} original configs · newgate stop can restore them", len(ents), i18n.A{"n": len(ents)})
 	d.Details = append(d.Details, "backups/original/ "+strings.Join(names, " · "))
 	return d
 }
@@ -202,7 +207,7 @@ func checkBackups() cliapi.Diagnostic {
 // 只挑含 "newgate" 的行：目标是「用户原本的配置」，全文可能几百行且与问题无关，
 // 而诊断包要能贴进 issue。原文（不做 JSON 解析）——坏掉的 JSON 恰恰是要看的东西。
 func (r runtimeReporter) Dump() []cliapi.DumpSection {
-	s := cliapi.DumpSection{Rank: rankDumpTargets, Title: "接管后的目标文件（newgate 相关片段）"}
+	s := cliapi.DumpSection{Rank: rankDumpTargets, Title: i18n.T("Target files after takeover (newgate-related fragments)", nil)}
 	runtimeDump := s
 	var targets []string
 	for _, id := range r.agents.Names() {
@@ -219,7 +224,7 @@ func (r runtimeReporter) Dump() []cliapi.DumpSection {
 			s.Lines = append(s.Lines, fmt.Sprintf("  %s : %v", t, err))
 			continue
 		}
-		s.Lines = append(s.Lines, fmt.Sprintf("  --- %s (%d 字节) ---", t, len(b)))
+		s.Lines = append(s.Lines, "  "+i18n.T("--- {file} ({n} bytes) ---", i18n.A{"file": t, "n": len(b)}))
 		for _, ln := range strings.Split(string(b), "\n") {
 			if strings.Contains(ln, "newgate") {
 				s.Lines = append(s.Lines, "    "+strings.TrimSpace(ln))

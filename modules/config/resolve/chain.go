@@ -5,9 +5,9 @@
 package resolve
 
 import (
-	"fmt"
 	"sort"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 )
 
@@ -27,8 +27,47 @@ func (s Step) String() string { return s.Profile + ":" + s.Binding.String() }
 type Skip struct {
 	Profile string
 	Target  string // provider/model；空表示整个 profile 被跳过
-	Reason  string
+	// Reason 给用户看的那句话，已经过 i18n.T。
+	Reason string
+	// Kind 这条跳过的**类目**：机器标记，不随语言变（见下面那组常量）。
+	//
+	// 为什么要跟 Reason 分开：显示层要按类目分组（`newgate tier` 的「跳过 N 个
+	// 候选」按原因计数、状态块尾行也一样），而分组判据不能是那句给人看的话——
+	// 话是翻过的，中文下拿英文子串去匹配只会把每一类都落进「其他」。类目在建链
+	// 时（这里）就定下来，措辞由显示层按类目查表。
+	Kind string
 }
+
+// Skip.Kind 的取值。它们是**机器标记**：分组、计数、排序的判据；给人看的措辞
+// 由显示层按类目查表（见 modules/config 的 skipLabel / skipDetail），一个字都
+// 不在这一层。
+//
+// 为什么这一层分得清：拒绝这条候选的是**哪一道关**在这里是明确的（role 没定义 /
+// provider 没定义 / 没 key / 被禁用 / 健康表说不可用 / 超出 maxAttempts / 重复 /
+// 成环），而**为什么**不能用（准入回调返回的那句话）属于提供判据的人。两件事分开
+// 正是因为这个：resolve 只认形状，不认任何一家的词汇（见 Opts.Available）。
+const (
+	// SkipExcluded profile 标了 excluded：不自动进链，只能被显式选中。
+	SkipExcluded = "excluded"
+	// SkipUndefined 这一层没提供这个 role；也用于「候选的 provider 未定义」
+	// （两者原先归在同一栏，文案不同而已）。
+	SkipUndefined = "undefined"
+	// SkipNoKey provider 没有 api_key。
+	SkipNoKey = "no-key"
+	// SkipUnavailable 准入回调（健康表等）说这条候选现在不能用。
+	SkipUnavailable = "unavailable"
+	// SkipDisabled 被显式禁用。
+	SkipDisabled = "disabled"
+	// SkipMaxSteps 链长超过 maxAttempts，尾部落选。
+	SkipMaxSteps = "max-attempts"
+	// SkipDuplicate 与链上更靠前的候选重复。
+	SkipDuplicate = "duplicate"
+	// SkipCycle 引用成环，已跳过。
+	SkipCycle = "cycle"
+	// SkipOther 兜底：显示层的类目表里没有这一栏（如「链头 pinned，不往下掉」——
+	// 那一类今天没有单独的栏位，见 modules/config 的 skipKindOrder）。
+	SkipOther = "other"
+)
 
 // Opts 构建链需要的外部输入。全部以函数形式注入，保持 BuildChain 纯净。
 type Opts struct {
@@ -89,8 +128,9 @@ func BuildChain(key string, profiles []*domain.Profile, provs *domain.Providers,
 	}
 	if o.MaxSteps > 0 && len(b.steps) > o.MaxSteps {
 		for _, s := range b.steps[o.MaxSteps:] {
-			b.skips = append(b.skips, Skip{s.Profile, s.Binding.String(),
-				fmt.Sprintf("超出 maxAttempts=%d", o.MaxSteps)})
+			b.skips = append(b.skips, Skip{Profile: s.Profile, Target: s.Binding.String(),
+				Kind:   SkipMaxSteps,
+				Reason: i18n.T("past maxAttempts={limit}", i18n.A{"limit": o.MaxSteps})})
 		}
 		b.steps = b.steps[:o.MaxSteps]
 	}
@@ -112,14 +152,17 @@ func (b *chainBuilder) expand(key string) {
 	for _, p := range b.profiles {
 		cands := p.CandidatesFor(key)
 		if len(cands) == 0 {
-			b.skips = append(b.skips, Skip{p.Name, "", "未定义 " + key})
+			b.skips = append(b.skips, Skip{Profile: p.Name, Kind: SkipUndefined,
+				Reason: i18n.T("role {role} is not defined", i18n.A{"role": key})})
 			continue
 		}
 		for _, bd := range cands {
 			if bd.IsRef() {
 				if b.visiting[bd.Ref] {
-					b.skips = append(b.skips, Skip{p.Name, bd.String(),
-						"引用成环（" + key + " → " + bd.Ref + "），已跳过"})
+					b.skips = append(b.skips, Skip{Profile: p.Name, Target: bd.String(),
+						Kind: SkipCycle,
+						Reason: i18n.T("reference cycle ({from} → {to}), skipped",
+							i18n.A{"from": key, "to": bd.Ref})})
 					continue
 				}
 				b.visiting[bd.Ref] = true
@@ -136,28 +179,35 @@ func (b *chainBuilder) expand(key string) {
 func (b *chainBuilder) add(p *domain.Profile, key string, bd domain.Binding) {
 	k := bd.String()
 	if b.seen[k] {
-		b.skips = append(b.skips, Skip{p.Name, k, "与链上更前面的重复，已去重"})
+		b.skips = append(b.skips, Skip{Profile: p.Name, Target: k, Kind: SkipDuplicate,
+			Reason: i18n.T("duplicate of an earlier candidate, deduplicated", nil)})
 		return
 	}
 
 	prov, ok := b.provs.Providers[bd.Provider]
 	if !ok {
-		b.skips = append(b.skips, Skip{p.Name, k, "provider 未定义"})
+		b.skips = append(b.skips, Skip{Profile: p.Name, Target: k, Kind: SkipUndefined,
+			Reason: i18n.T("provider is not defined", nil)})
 		return
 	}
 	if prov.Key() == "" {
-		b.skips = append(b.skips, Skip{p.Name, k, "provider 没有 api_key"})
+		b.skips = append(b.skips, Skip{Profile: p.Name, Target: k, Kind: SkipNoKey,
+			Reason: i18n.T("provider has no api_key", nil)})
 		return
 	}
 	if b.o.Disabled != nil {
 		if yes, why := b.o.Disabled(key, k); yes {
-			b.skips = append(b.skips, Skip{p.Name, k, "已禁用：" + why})
+			b.skips = append(b.skips, Skip{Profile: p.Name, Target: k, Kind: SkipDisabled,
+				Reason: i18n.T("disabled: {why}", i18n.A{"why": why})})
 			return
 		}
 	}
 	if b.o.Available != nil {
 		if ok, why := b.o.Available(bd.Provider, bd.Model); !ok {
-			b.skips = append(b.skips, Skip{p.Name, k, why})
+			// 理由（why）原样透传：它属于提供判据的人，措辞不归这里。
+			// 类目归这里——「这一关拒绝了它」是本层的知识。
+			b.skips = append(b.skips, Skip{Profile: p.Name, Target: k,
+				Kind: SkipUnavailable, Reason: why})
 			return
 		}
 	}
@@ -191,15 +241,18 @@ func OverrideChain(source string, override domain.Binding, tier string, profiles
 	prov, ok := provs.Providers[override.Provider]
 	switch {
 	case !ok:
-		skips = append(skips, Skip{source, override.String(), "provider 未定义，覆盖不生效"})
+		skips = append(skips, Skip{Profile: source, Target: override.String(), Kind: SkipUndefined,
+			Reason: i18n.T("provider is not defined, override not applied", nil)})
 		return steps, skips, false
 	case prov.Key() == "":
-		skips = append(skips, Skip{source, override.String(), "provider 没有 api_key，覆盖不生效"})
+		skips = append(skips, Skip{Profile: source, Target: override.String(), Kind: SkipNoKey,
+			Reason: i18n.T("provider has no api_key, override not applied", nil)})
 		return steps, skips, false
 	}
 	if o.Disabled != nil {
 		if yes, why := o.Disabled(tier, override.String()); yes {
-			skips = append(skips, Skip{source, override.String(), "已禁用：" + why})
+			skips = append(skips, Skip{Profile: source, Target: override.String(), Kind: SkipDisabled,
+				Reason: i18n.T("disabled: {why}", i18n.A{"why": why})})
 			return steps, skips, false
 		}
 	}
@@ -207,7 +260,9 @@ func OverrideChain(source string, override domain.Binding, tier string, profiles
 	// 上链（那样「点名的那个挂了」会绕过 fallback 保护，直接撞上去）。
 	if o.Available != nil {
 		if ok, why := o.Available(override.Provider, override.Model); !ok {
-			skips = append(skips, Skip{source, override.String(), why + "，覆盖不生效"})
+			skips = append(skips, Skip{Profile: source, Target: override.String(),
+				Kind:   SkipUnavailable,
+				Reason: i18n.T("{why}, override not applied", i18n.A{"why": why})})
 			return steps, skips, false
 		}
 	}
@@ -248,15 +303,20 @@ func orderProfiles(profiles []*domain.Profile, active string) ([]*domain.Profile
 		out = append(out, head) // 显式选中优先，excluded 挡不住链头
 		if head.Pinned {
 			for _, p := range rest {
-				skips = append(skips, Skip{p.Name, "",
-					fmt.Sprintf("链头 %s 是 pinned，不往下掉", head.Name)})
+				// 类目是「其他」：显示层的类目表里没有给 pinned 单开一栏
+				// （`newgate tier` 的跳过汇总按那张表分组），这里不擅自加一栏
+				// ——加一栏是产品决定，不是翻译。
+				skips = append(skips, Skip{Profile: p.Name, Kind: SkipOther,
+					Reason: i18n.T("chain head {name} is pinned, the chain stops there",
+						i18n.A{"name": head.Name})})
 			}
 			return out, skips
 		}
 	}
 	for _, p := range rest {
 		if p.Excluded {
-			skips = append(skips, Skip{p.Name, "", "excluded：只能显式选中"})
+			skips = append(skips, Skip{Profile: p.Name, Kind: SkipExcluded,
+				Reason: i18n.T("excluded: explicit selection only", nil)})
 			continue
 		}
 		out = append(out, p)

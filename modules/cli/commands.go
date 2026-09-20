@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+
+	"github.com/rzbdz/newgate/lib/i18n"
 )
 
 // 本文件把界面**自己的**那批命令也做成 Command，注册进同一个账本。
@@ -35,7 +37,7 @@ type statusCommand struct{ s *service }
 func (statusCommand) Names() []string { return []string{"status"} }
 func (statusCommand) Help() HelpLine {
 	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
-		Usage: "status", Summary: "谁在走 newgate、用哪个 profile"}
+		Usage: "status", Summary: i18n.T("who is going through newgate, with which profile", nil)}
 }
 func (c statusCommand) Run(_ Host, _ []string) int { return cmdStatus(c.s) }
 
@@ -46,7 +48,7 @@ type doctorCommand struct{ s *service }
 func (doctorCommand) Names() []string { return []string{"doctor"} }
 func (doctorCommand) Help() HelpLine {
 	return HelpLine{Section: SectionObserve, Rank: rankObserve,
-		Usage: "doctor", Summary: "体检"}
+		Usage: "doctor", Summary: i18n.T("health check", nil)}
 }
 func (c doctorCommand) Run(_ Host, _ []string) int { return cmdDoctor(c.s) }
 
@@ -58,7 +60,7 @@ func (allLogsCommand) Names() []string { return []string{"alllogs", "all-logs"} 
 func (allLogsCommand) Unstyled([]string) bool { return true }
 func (allLogsCommand) Help() HelpLine {
 	return HelpLine{Section: SectionObserve, Rank: rankObserve,
-		Usage: "alllogs", Summary: "完整诊断包"}
+		Usage: "alllogs", Summary: i18n.T("full diagnostic bundle", nil)}
 }
 func (c allLogsCommand) Run(_ Host, _ []string) int { return cmdAllLogs(c.s) }
 
@@ -83,7 +85,7 @@ type helpCommand struct{ s *service }
 func (helpCommand) Names() []string { return []string{"help", "--help", "-h"} }
 func (helpCommand) Help() HelpLine {
 	return HelpLine{Section: SectionUI, Rank: rankSystem,
-		Usage: "help", Summary: "这一屏"}
+		Usage: "help", Summary: i18n.T("this screen", nil)}
 }
 func (c helpCommand) Run(_ Host, _ []string) int {
 	fmt.Print(usageText(c.s))

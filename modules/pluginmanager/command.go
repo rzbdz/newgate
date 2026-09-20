@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/lib/durarg"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/domain"
@@ -40,8 +41,8 @@ func (c *command) Names() []string { return []string{"plugin", "plugins"} }
 func (c *command) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
 		Section: cliapi.SectionModules,
-		Usage:   "plugin [模块[.路径]] [on|off] [时长]",
-		Summary: "全部模块按分类列出；开关某个模块或某个开关点",
+		Usage:   i18n.T("plugin [module[.path]] [on|off] [duration]", nil),
+		Summary: i18n.T("list all modules by category; toggle a module or one of its switch points", nil),
 	}
 }
 
@@ -67,8 +68,9 @@ func (c *command) Run(host cliapi.Host, args []string) int {
 		return c.explain(host, sub)
 	}
 	if action != "on" && action != "off" {
-		return host.Die(64, fmt.Sprintf(
-			"plugin: 不认识的动词 %q（用法：newgate plugin <模块>[.<路径>] on|off [时长]）", action))
+		return host.Die(64, i18n.T(
+			"plugin: unknown verb \"{verb}\" (usage: newgate plugin <module>[.<path>] on|off [duration])",
+			i18n.A{"verb": action}))
 	}
 	return c.toggle(host, sub, action == "on", cliapi.Positional(args, 2))
 }
@@ -90,7 +92,8 @@ func (c *command) list() int {
 		}
 	}
 	fmt.Println(style.Title("newgate plugin",
-		fmt.Sprintf("%d 个模块 · %d 个可运行期开关点", total, switchPoints)))
+		i18n.T("{modules} modules · {switches} runtime switch points", i18n.A{
+			"modules": total, "switches": switchPoints})))
 
 	for _, typ := range DisplayOrder() {
 		var group []Module
@@ -114,8 +117,8 @@ func (c *command) list() int {
 	}
 
 	fmt.Println()
-	fmt.Println(style.Hint("展开一个模块：newgate plugin <模块>"))
-	fmt.Println(style.Hint("开关一个点：  newgate plugin <模块>.<路径> on|off [5m|forever]"))
+	fmt.Println(style.Hint(i18n.T("expand one module:  newgate plugin <module>", nil)))
+	fmt.Println(style.Hint(i18n.T("toggle one point:   newgate plugin <module>.<path> on|off [5m|forever]", nil)))
 	return 0
 }
 
@@ -123,7 +126,7 @@ func (c *command) list() int {
 func printModuleLine(st *domain.State, m Module, nameW int) {
 	name := style.Pad(m.Name, nameW) + " "
 	if len(m.Switches) == 0 {
-		fmt.Println("  " + name + style.Dim("无法 runtime 开关（v1）"))
+		fmt.Println("  " + name + style.Dim(i18n.T("cannot be toggled at runtime (v1)", nil)))
 		return
 	}
 	var parts []string
@@ -147,13 +150,17 @@ func (c *command) explain(host cliapi.Host, target string) int {
 
 	m, ok := findModule(c.manager, target)
 	if !ok {
-		return host.Die(65, fmt.Sprintf("没有叫 %q 的模块或开关点（newgate plugin 看清单）", target))
+		return host.Die(65, i18n.T(
+			"no module or switch point named \"{target}\" (see the list with newgate plugin)",
+			i18n.A{"target": target}))
 	}
 	if len(m.Switches) == 0 {
 		fmt.Println(style.Title("newgate plugin "+m.Name, string(m.Type)))
 		fmt.Println(style.Rule(72))
-		fmt.Println(style.Item(style.Skip, "无法 runtime 开关：这个模块没有上报任何开关点"))
-		fmt.Println(style.Hint("v1 只做「模块自己上报」的开关；没上报的模块不能被运行期开关"))
+		fmt.Println(style.Item(style.Skip,
+			i18n.T("cannot be toggled at runtime: this module reports no switch points", nil)))
+		fmt.Println(style.Hint(i18n.T("v1 only covers switches a module reports itself; "+
+			"a module that reports none cannot be toggled at runtime", nil)))
 		return 0
 	}
 	fmt.Println(style.Title("newgate plugin "+m.Name, string(m.Type)))
@@ -161,13 +168,15 @@ func (c *command) explain(host cliapi.Host, target string) int {
 	for _, sw := range m.Switches {
 		fmt.Println(style.Item(style.OK, style.Bold(sw.Path)+"  "+switchState(st, sw)))
 		fmt.Println("    " + style.Dim(sw.Title))
-		fmt.Println("    " + style.Dim("关掉会发生什么："+sw.Why))
+		fmt.Println("    " + style.Dim(i18n.T("what turning it off does: {why}", i18n.A{"why": sw.Why})))
 		if sw.Danger != DangerSafe {
-			fmt.Println("    " + dangerColor(sw.Danger)(fmt.Sprintf("危险级别 %s", sw.Danger)))
+			fmt.Println("    " + dangerColor(sw.Danger)(
+				i18n.T("danger level {level}", i18n.A{"level": sw.Danger})))
 		}
 	}
 	fmt.Println()
-	fmt.Println(style.Hint("开关整个模块：newgate plugin " + m.Name + " off"))
+	fmt.Println(style.Hint(i18n.T("toggle the whole module: newgate plugin {name} off",
+		i18n.A{"name": m.Name})))
 	return 0
 }
 
@@ -175,17 +184,19 @@ func explainSwitch(host cliapi.Host, st *domain.State, sw Switch) int {
 	fmt.Println(style.Title("newgate plugin "+sw.Path, string(sw.Danger)))
 	fmt.Println(style.Rule(72))
 	fmt.Println(style.Item(style.OK, sw.Title))
-	fmt.Println(style.Item(style.Skip, "现在："+switchState(st, sw)))
-	fmt.Println(style.Item(style.Skip, "关掉会发生什么："+sw.Why))
+	fmt.Println(style.Item(style.Skip, i18n.T("now: {state}", i18n.A{"state": switchState(st, sw)})))
+	fmt.Println(style.Item(style.Skip, i18n.T("what turning it off does: {why}", i18n.A{"why": sw.Why})))
 	if sw.Danger == DangerFootgun {
-		fmt.Println(style.Item(style.Bad, "这是 footgun：打开/关闭必须带时限，不接受 forever"))
+		fmt.Println(style.Item(style.Bad,
+			i18n.T("this is a footgun: turning it on/off needs a time limit, forever is not accepted", nil)))
 	}
 	verb := "off"
 	if !sw.Default {
 		verb = "on"
 	}
 	fmt.Println()
-	fmt.Println(style.Hint("改它：newgate plugin " + sw.Path + " " + verb + " [时长]"))
+	fmt.Println(style.Hint(i18n.T("change it: newgate plugin {path} {verb} [duration]",
+		i18n.A{"path": sw.Path, "verb": verb})))
 	return 0
 }
 
@@ -209,8 +220,9 @@ func (c *command) toggle(host cliapi.Host, target string, on bool, dur string) i
 		// footgun 不接受「永久」：这是结构性保证的一半（另一半在注册期——
 		// footgun 必须声明 TTL > 0，所以哪怕不给时长也有兜底时限）。
 		if sw.Danger == DangerFootgun && forever {
-			return host.Die(64, fmt.Sprintf(
-				"plugin: %s 是 footgun，不接受 forever（给个时长，如 5m）", sw.Path))
+			return host.Die(64, i18n.T(
+				"plugin: {path} is a footgun, forever is not accepted (give a duration, e.g. 5m)",
+				i18n.A{"path": sw.Path}))
 		}
 		// 出厂态决定这条走哪张表：Default=true 是 kill switch（写 Off 表），
 		// Default=false 是 mode（写 On 表）。用户的动作可能等于出厂态（比如
@@ -231,7 +243,7 @@ func (c *command) toggle(host cliapi.Host, target string, on bool, dur string) i
 
 	raw, merr := cfg.Marshal()
 	if merr != nil {
-		return host.Die(70, "plugin: 序列化失败: "+merr.Error())
+		return host.Die(70, i18n.T("plugin: serialization failed: {err}", i18n.A{"err": merr}))
 	}
 	if st.ModuleConfig == nil {
 		st.ModuleConfig = map[string][]byte{}
@@ -242,20 +254,24 @@ func (c *command) toggle(host cliapi.Host, target string, on bool, dur string) i
 	}
 	host.NotifyProxy()
 
-	mark, word := style.OK, "已打开"
+	// 这里的「已打开/已关闭」与 switchState 那组（已开/开/已关/关）是**两句话**：
+	// 键 = 原文，两个位置的中文不同就必须写两句英文，否则译文只能二选一。
+	mark, word := style.OK, i18n.T("switched on", nil)
 	if !on {
-		mark, word = style.Warn, "已关闭"
+		mark, word = style.Warn, i18n.T("switched off", nil)
 	}
 	fmt.Println(style.Item(mark, fmt.Sprintf("%s %s", word, strings.Join(changed, ", "))))
 	after := store.LoadState()
 	for _, sw := range switches {
 		if until := Remaining(after, sw.Path); !until.IsZero() {
-			fmt.Println(style.Hint(fmt.Sprintf("  %s 还有 %s 自动恢复",
-				sw.Path, durarg.Format(int(time.Until(until).Seconds())))))
+			fmt.Println(style.Hint(i18n.T("  {path} reverts automatically in {left}", i18n.A{
+				"path": sw.Path,
+				"left": durarg.Format(int(time.Until(until).Seconds()))})))
 		}
 	}
 	if !on {
-		fmt.Println(style.Hint("恢复：newgate plugin " + target + " on"))
+		fmt.Println(style.Hint(i18n.T("revert it: newgate plugin {target} on",
+			i18n.A{"target": target})))
 	}
 	return 0
 }
@@ -266,16 +282,22 @@ func (c *command) targetsOf(target string) ([]Switch, error) {
 	if strings.Contains(target, ".") {
 		sw, ok := c.manager.Lookup(target)
 		if !ok {
-			return nil, fmt.Errorf("没有叫 %q 的开关点（newgate plugin 看清单）", target)
+			return nil, i18n.E(
+				"no switch point named \"{target}\" (see the list with newgate plugin)",
+				i18n.A{"target": target})
 		}
 		return []Switch{sw}, nil
 	}
 	m, ok := findModule(c.manager, target)
 	if !ok {
-		return nil, fmt.Errorf("没有叫 %q 的模块（newgate plugin 看清单）", target)
+		return nil, i18n.E(
+			"no module named \"{target}\" (see the list with newgate plugin)",
+			i18n.A{"target": target})
 	}
 	if len(m.Switches) == 0 {
-		return nil, fmt.Errorf("模块 %q 没有上报任何开关点，无法 runtime 开关（v1 的局限）", target)
+		return nil, i18n.E(
+			"module \"{target}\" reports no switch points, cannot be toggled at runtime (a v1 limitation)",
+			i18n.A{"target": target})
 	}
 	return m.Switches, nil
 }
@@ -299,8 +321,9 @@ func switchTTL(s string) (time.Duration, bool, error) {
 	}
 	d, err := durarg.Parse(s)
 	if err != nil {
-		return 0, false, fmt.Errorf(
-			"plugin: 不认识的时长 %q（支持 30s / 2m / 2min / 1h / forever）", s)
+		return 0, false, i18n.E(
+			"plugin: unknown duration \"{value}\" (supported: 30s / 2m / 2min / 1h / forever)",
+			i18n.A{"value": s})
 	}
 	return d, false, nil
 }
@@ -365,19 +388,21 @@ func switchState(st *domain.State, sw Switch) string {
 	until := Remaining(st, sw.Path)
 	suffix := ""
 	if !until.IsZero() {
-		suffix = style.Dim(fmt.Sprintf("（还有 %s）",
-			durarg.Format(int(time.Until(until).Seconds()))))
+		suffix = style.Dim(i18n.T("({left} left)",
+			i18n.A{"left": durarg.Format(int(time.Until(until).Seconds()))}))
 	}
+	// 「已关/开」与「已开/关」：出厂开着的是 kill switch（写 Off 表），出厂关着
+	// 的是 mode（写 On 表）。英文用 turned off/on 与 on/off 保住这层区别。
 	if sw.Default {
 		if Off(st, sw.Path) {
-			return dangerColor(sw.Danger)("已关") + suffix
+			return dangerColor(sw.Danger)(i18n.T("turned off", nil)) + suffix
 		}
-		return style.Dim("开") + suffix
+		return style.Dim(i18n.T("on", nil)) + suffix
 	}
 	if On(st, sw.Path) {
-		return dangerColor(sw.Danger)("已开") + suffix
+		return dangerColor(sw.Danger)(i18n.T("turned on", nil)) + suffix
 	}
-	return style.Dim("关") + suffix
+	return style.Dim(i18n.T("off", nil)) + suffix
 }
 
 func dangerColor(d Danger) func(string) string {

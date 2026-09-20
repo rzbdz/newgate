@@ -33,6 +33,7 @@ import (
 
 	"github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/lib/buildinfo"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // 申报用的三个 rank。小的先被问，**不是魔法数字**，读作优先级区间：
@@ -109,10 +110,10 @@ func NewTable() *Table { return &Table{} }
 
 func (t *Table) Register(h Handler, rank int) (component.Release, error) {
 	if h == nil {
-		return nil, errNilHandler
+		return nil, errNilHandler()
 	}
 	if h.Name() == "" {
-		return nil, errEmptyName
+		return nil, errEmptyName()
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -154,11 +155,13 @@ func (t *Table) Resolve(p Process) (Handler, string, bool) {
 	asked := make([]string, 0, len(snapshot))
 	for _, r := range snapshot {
 		if r.handler.Claims(p) {
-			return r.handler, "认领者：" + joinAsked(asked, r.handler.Name()), true
+			return r.handler, i18n.T("claimed by: {chain}",
+				i18n.A{"chain": joinAsked(asked, r.handler.Name())}), true
 		}
 		asked = append(asked, r.handler.Name())
 	}
-	return nil, "没有任何入口认领这次调用（问过：" + joinAsked(asked, "") + "）", false
+	return nil, i18n.T("no entry claimed this call (asked: {chain})",
+		i18n.A{"chain": joinAsked(asked, "")}), false
 }
 
 func (t *Table) Handlers() []Handler {
@@ -177,7 +180,7 @@ func joinAsked(asked []string, winner string) string {
 		if i > 0 {
 			out += " → "
 		}
-		out += name + " 未认领"
+		out += i18n.T("{name} did not claim", i18n.A{"name": name})
 	}
 	if winner != "" {
 		if out != "" {
@@ -186,7 +189,7 @@ func joinAsked(asked []string, winner string) string {
 		out += winner
 	}
 	if out == "" {
-		return "（无人申报）"
+		return i18n.T("(nobody registered)", nil)
 	}
 	return out
 }
@@ -200,19 +203,22 @@ var Capability = component.NewCapability[Registry]("entry")
 //
 // 它们在这里而不是调用点：申报是**模块自己的编程错误**（重名、空名、nil），
 // 必须当场返回错误让那个模块的 Start 失败并回滚，而不是等到分派时才炸。
-
-type entryError string
-
-func (e entryError) Error() string { return string(e) }
-
+//
+// 三条都写成**函数**而不是包级变量：包级变量在 init 期求值，而 i18n 的译文是
+// 装配期才装上的（modules/locale 在 Start 里 Install），init 期取到的永远是
+// 源语言那一句——一个只在非英文环境下才显形的 bug。
 func errDuplicate(name string) error {
-	return entryError("entry: 已经有同名的入口申报者: " + name)
+	return i18n.E("entry: a handler with this name is already registered: {name}",
+		i18n.A{"name": name})
 }
 
-const (
-	errNilHandler = entryError("entry: 入口申报者不能为 nil")
-	errEmptyName  = entryError("entry: 入口申报者必须有 Name()")
-)
+func errNilHandler() error {
+	return i18n.E("entry: handler must not be nil", nil)
+}
+
+func errEmptyName() error {
+	return i18n.E("entry: handler must have a Name()", nil)
+}
 
 // MakeProcess 把「进程是怎么被调起来的」装成一个 Process，并把链接期版本信息
 // 落到 buildinfo 叶子上（守护进程的启动日志、doctor 的版本行都读它）。

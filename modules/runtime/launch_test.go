@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	agentapi "github.com/rzbdz/newgate/modules/confighook"
 	"github.com/rzbdz/newgate/modules/runtime/agentstate"
@@ -17,7 +18,7 @@ func TestSplitLaunch(t *testing.T) {
 		profile     string
 		passthrough string
 		wantErr     bool
-		errHas      string
+		errID       string
 	}{
 		{"bare agent", []string{"claude"}, "claude", "", "", false, ""},
 		{"profile after agent, eq form", []string{"claude", "--profile=ds"}, "claude", "ds", "", false, ""},
@@ -27,11 +28,16 @@ func TestSplitLaunch(t *testing.T) {
 		{"passthrough flags", []string{"claude", "--resume", "abc"}, "claude", "", "--resume|abc", false, ""},
 		{"passthrough after profile", []string{"claude", "--profile", "ds", "-p", "hi"}, "claude", "ds", "-p|hi", false, ""},
 		{"preset alias", []string{"--preset", "toy", "claude"}, "claude", "toy", "", false, ""},
-		{"unknown flag before agent", []string{"--bogus", "claude"}, "", "", "", true, "未知选项"},
-		{"no agent", []string{"--profile", "ds"}, "", "", "", true, "要启动哪个 agent"},
-		{"unknown agent", []string{"nope", "--profile=ds"}, "", "", "", true, "不认识的 agent"},
-		{"conflicting profile", []string{"claude", "--profile=ds", "--preset=glm"}, "", "", "", true, "不一致"},
-		{"profile missing value", []string{"claude", "--profile"}, "", "", "", true, "需要一个 profile 名"},
+		{"unknown flag before agent", []string{"--bogus", "claude"}, "", "", "", true,
+			"Unknown option {option} (an unknown option before the tool counts as a typo, docs/08-operations.md rule 5)"},
+		{"no agent", []string{"--profile", "ds"}, "", "", "", true,
+			"Which agent to launch? e.g. newgate claude or newgate run claude"},
+		{"unknown agent", []string{"nope", "--profile=ds"}, "", "", "", true,
+			"Unknown agent {agent} (known: {list})"},
+		{"conflicting profile", []string{"claude", "--profile=ds", "--preset=glm"}, "", "", "", true,
+			"Both profile {first} and {second} were given, and they disagree"},
+		{"profile missing value", []string{"claude", "--profile"}, "", "", "", true,
+			"{option} needs a profile name"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -40,8 +46,12 @@ func TestSplitLaunch(t *testing.T) {
 				if err == nil {
 					t.Fatalf("期望报错，却成功了（agent=%q profile=%q）", agent, profile)
 				}
-				if c.errHas != "" && !strings.Contains(err.Error(), c.errHas) {
-					t.Fatalf("报错 %q 应包含 %q", err, c.errHas)
+				// 断言**消息身份**（语言无关）：换语言或改措辞时，这里该红的是措辞
+				// 变了这件事，而不是「译文没跟上」。
+				if c.errID != "" {
+					if got := i18n.ID(err); got != c.errID {
+						t.Fatalf("报错身份 = %q，应为 %q（渲染出来是 %q）", got, c.errID, err)
+					}
 				}
 				return
 			}

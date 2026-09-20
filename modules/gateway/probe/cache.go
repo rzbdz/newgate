@@ -2,12 +2,12 @@ package probe
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/gateway/dialect"
 	"github.com/rzbdz/newgate/modules/gateway/quirk"
@@ -37,10 +37,12 @@ func loadCapabilityCache() (*capabilityCache, error) {
 		if os.IsNotExist(err) {
 			return c, nil // 没探过，很正常
 		}
-		return c, fmt.Errorf("读能力缓存 %s: %w", paths.ProbeCacheFile(), err)
+		return c, i18n.Ef(err, "read capability cache {path}: {err}",
+			i18n.A{"path": paths.ProbeCacheFile()})
 	}
 	if err := json.Unmarshal(raw, c); err != nil {
-		return c, fmt.Errorf("解析能力缓存 %s: %w", paths.ProbeCacheFile(), err)
+		return c, i18n.Ef(err, "parse capability cache {path}: {err}",
+			i18n.A{"path": paths.ProbeCacheFile()})
 	}
 	if c.Targets == nil {
 		c.Targets = map[string]capabilityEntry{}

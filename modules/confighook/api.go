@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // ConfigHooks 是客户端模块写入配置扩展的所有权端口。
@@ -132,8 +133,8 @@ func (a *Agent) FindReal(skipDir string) (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("PATH 里找不到 %s（已跳过 shim 目录 %s）",
-		strings.Join(a.Bin, "/"), skipDir)
+	return "", i18n.E("cannot find {names} in PATH (skipped the shim directory {dir})",
+		i18n.A{"names": strings.Join(a.Bin, "/"), "dir": skipDir})
 }
 
 func isExec(path string) bool {

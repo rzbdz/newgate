@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/config/roleprov"
 )
@@ -197,23 +198,26 @@ func DiffSummary(old, new *Snapshot) []string {
 		return out
 	}
 	if old.State.DefaultProfile != new.State.DefaultProfile {
-		out = append(out, "默认 profile: "+old.State.DefaultProfile+" → "+new.State.DefaultProfile)
+		out = append(out, i18n.T("default profile: {from} → {to}", i18n.A{
+			"from": old.State.DefaultProfile, "to": new.State.DefaultProfile}))
 	}
 	for agent, p := range new.State.Active {
 		if old.State.Active[agent] != p {
-			out = append(out, "agent "+agent+" → profile "+p)
+			out = append(out, i18n.T("agent {agent} → profile {profile}",
+				i18n.A{"agent": agent, "profile": p}))
 		}
 	}
 	for agent := range old.State.Active {
 		if _, still := new.State.Active[agent]; !still {
-			out = append(out, "agent "+agent+" 回落到默认 profile")
+			out = append(out, i18n.T("agent {agent} falls back to the default profile",
+				i18n.A{"agent": agent}))
 		}
 	}
 	if len(old.Profiles) != len(new.Profiles) {
-		out = append(out, "profile 数量变化")
+		out = append(out, i18n.T("the number of profiles changed", nil))
 	}
 	if len(old.Providers.Providers) != len(new.Providers.Providers) {
-		out = append(out, "provider 数量变化")
+		out = append(out, i18n.T("the number of providers changed", nil))
 	}
 	return out
 }

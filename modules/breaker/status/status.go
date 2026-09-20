@@ -10,7 +10,11 @@
 // 版本），所以下面那条「只能加字段，不能改字段」是硬要求。
 package status
 
-import "time"
+import (
+	"time"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
+)
 
 // ProbeGrade 把探活结果归一为少量稳定档位，供路由排序和 UI 共同解释。
 type ProbeGrade string
@@ -111,16 +115,17 @@ func Grade(scoreMs int, sampled bool) Latency {
 	}
 }
 
-// String 是这几个档位给人看的说法。
+// String 是这几个档位给人看的说法。档位本身（LatencyFast 那些常量）才是判据，
+// 它不落盘、不过线，所以这里翻的是**说法**，不是判据。
 func (l Latency) String() string {
 	switch l {
 	case LatencyFast:
-		return "流畅"
+		return i18n.T("fast", nil)
 	case LatencyOK:
-		return "可用"
+		return i18n.T("usable", nil)
 	case LatencySlow:
-		return "卡顿"
+		return i18n.T("laggy", nil)
 	default:
-		return "未评分"
+		return i18n.T("unrated", nil)
 	}
 }

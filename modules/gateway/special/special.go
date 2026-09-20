@@ -35,6 +35,7 @@ import (
 	"time"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/gateway/gatewaystate"
 	"github.com/rzbdz/newgate/modules/gateway/quirk"
@@ -559,7 +560,7 @@ func RebaseToolLoop(body []byte, originProvider, originModel string, candidate *
 		}
 		out, note, err := migrator.RebaseToolLoop(body, candidate)
 		if err != nil {
-			note := "有损 tool loop 重建跳过（" + err.Error() + "）"
+			note := i18n.T("lossy tool loop rebase skipped ({err})", i18n.A{"err": err.Error()})
 			res.Notes = []string{p.Name() + ": " + note}
 			return res
 		}
@@ -617,7 +618,7 @@ func Apply(body []byte, r *Request, off func(name string) bool) Result {
 		}
 		out, notes, err := p.Apply(res.Body, r)
 		if err != nil {
-			note := "跳过（" + err.Error() + "），按原样发"
+			note := i18n.T("skipped ({err}); sending the request as-is", i18n.A{"err": err.Error()})
 			res.Notes = append(res.Notes, p.Name()+": "+note)
 			continue
 		}

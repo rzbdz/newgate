@@ -17,6 +17,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/component/entry"
+	"github.com/rzbdz/newgate/lib/i18n"
 )
 
 // service 是**界面**：分派与排版。
@@ -51,18 +52,19 @@ var _ CLI = (*service)(nil)
 // 行为（那样「谁占了这个名字」在清单里看不出来）。
 func (s *service) RegisterCommand(command Command) (modules.Release, error) {
 	if command == nil {
-		return nil, fmt.Errorf("cli: 命令不能为 nil")
+		return nil, errCLI(i18n.E("a command cannot be nil", nil))
 	}
 	names := command.Names()
 	if len(names) == 0 {
-		return nil, fmt.Errorf("cli: 命令必须至少声明一个名字（Names）")
+		return nil, errCLI(i18n.E("a command must declare at least one name (Names)", nil))
 	}
 	return s.commands.Register(command, func(existing []Command) error {
 		for _, other := range existing {
 			for _, have := range other.Names() {
 				for _, want := range names {
 					if have == want {
-						return fmt.Errorf("cli: 命令名 %q 已被占用", want)
+						return errCLI(i18n.E("command name {name} is already taken",
+							i18n.A{"name": want}))
 					}
 				}
 			}
@@ -71,10 +73,17 @@ func (s *service) RegisterCommand(command Command) (modules.Release, error) {
 	})
 }
 
+// errCLI 给装配期错误加上 `cli:` 前缀。
+//
+// 前缀是**机器标记**（组件名），按本地化的规矩留在消息外面：能翻译的是后面那句
+// 陈述。用 %w 而不是字符串拼接，是为了让 i18n.ID 仍能从这条错误里取出消息身份
+// ——测试断言的是身份（语言无关），不是渲染出来的那句话。
+func errCLI(err error) error { return fmt.Errorf("cli: %w", err) }
+
 // RegisterDiagnostics 注入一组 doctor 输出。诊断可叠加，不查重。
 func (s *service) RegisterDiagnostics(provider DiagnosticProvider) (modules.Release, error) {
 	if provider == nil {
-		return nil, fmt.Errorf("cli: 诊断提供者不能为 nil")
+		return nil, errCLI(i18n.E("a diagnostic provider cannot be nil", nil))
 	}
 	return s.diagnostics.Register(provider, nil)
 }
@@ -85,7 +94,7 @@ func (s *service) RegisterDiagnostics(provider DiagnosticProvider) (modules.Rele
 // 状态，而那份状态归各自模块。谁的状态谁自己报——界面只负责循环调用与排版。
 func (s *service) RegisterStatus(provider StatusProvider) (modules.Release, error) {
 	if provider == nil {
-		return nil, fmt.Errorf("cli: 状态提供者不能为 nil")
+		return nil, errCLI(i18n.E("a status provider cannot be nil", nil))
 	}
 	return s.statuses.Register(provider, nil)
 }
@@ -93,7 +102,7 @@ func (s *service) RegisterStatus(provider StatusProvider) (modules.Release, erro
 // RegisterStatusBlocks 注入 `newgate status` 里的成块内容（表格等）。
 func (s *service) RegisterStatusBlocks(provider BlockProvider) (modules.Release, error) {
 	if provider == nil {
-		return nil, fmt.Errorf("cli: 状态块提供者不能为 nil")
+		return nil, errCLI(i18n.E("a status block provider cannot be nil", nil))
 	}
 	return s.blocks.Register(provider, nil)
 }
@@ -101,7 +110,7 @@ func (s *service) RegisterStatusBlocks(provider BlockProvider) (modules.Release,
 // RegisterDump 注入诊断包里的原始素材。理由同 RegisterDiagnostics。
 func (s *service) RegisterDump(dumper Dumper) (modules.Release, error) {
 	if dumper == nil {
-		return nil, fmt.Errorf("cli: 诊断素材提供者不能为 nil")
+		return nil, errCLI(i18n.E("a dump provider cannot be nil", nil))
 	}
 	return s.dumps.Register(dumper, nil)
 }
@@ -109,7 +118,7 @@ func (s *service) RegisterDump(dumper Dumper) (modules.Release, error) {
 // RegisterGlossary 注入帮助屏术语表里属于自己的一行。理由同 RegisterDiagnostics。
 func (s *service) RegisterGlossary(g Glossarist) (modules.Release, error) {
 	if g == nil {
-		return nil, fmt.Errorf("cli: 术语提供者不能为 nil")
+		return nil, errCLI(i18n.E("a glossary provider cannot be nil", nil))
 	}
 	return s.glossary.Register(g, nil)
 }
@@ -117,7 +126,7 @@ func (s *service) RegisterGlossary(g Glossarist) (modules.Release, error) {
 // RegisterVerbose 上报「我的详细模式开着」。理由同 RegisterDiagnostics。
 func (s *service) RegisterVerbose(v Verbose) (modules.Release, error) {
 	if v == nil {
-		return nil, fmt.Errorf("cli: 详细模式提供者不能为 nil")
+		return nil, errCLI(i18n.E("a verbose provider cannot be nil", nil))
 	}
 	return s.verboses.Register(v, nil)
 }
@@ -255,7 +264,8 @@ func New() modules.Component {
 	// 界面自己的命令也走同一个账本（见 commands.go）：查重、分派、help 组装
 	// 只有一条路，run() 于是只剩编排。
 	if err := service.registerOwnCommands(); err != nil {
-		panic("cli: 自己的命令注册失败（装配期错误）: " + err.Error())
+		panic("cli: " + i18n.T("own command registration failed (assembly error): {err}",
+			i18n.A{"err": err.Error()}))
 	}
 	return modules.Component{
 		Name: "cli",

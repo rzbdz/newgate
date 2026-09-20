@@ -1,6 +1,7 @@
 package thinking
 
 import (
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/gateway/quirk"
 	"github.com/rzbdz/newgate/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/modules/gateway/special"
@@ -30,7 +31,7 @@ func Treatments() []special.Plugin { return []special.Plugin{alwaysThinks{}} }
 // disabled 和「带 tools 没写 thinking」的 1210 形态，两边共用同一个翻译
 // 核心（noDisableTranslate），语义只有一份。
 func BestEffortDisableThink(body []byte, r *special.Request) ([]byte, []string, error) {
-	const why = "这次调用不想思考（best effort）"
+	why := i18n.T("this call does not want to think (best effort)", nil)
 	var notes []string
 	out := body
 
@@ -48,10 +49,14 @@ func BestEffortDisableThink(body []byte, r *special.Request) ([]byte, []string, 
 	if _, has := rewrite.TopLevelRaw(out, "thinking"); !has {
 		nb, err := rewrite.InsertTopLevelRaw(out, "thinking", []byte(`{"type":"disabled"}`))
 		if err != nil {
-			notes = append(notes, "thinking 未注入（"+err.Error()+"）")
+			notes = append(notes, i18n.T("thinking not injected ({err})", i18n.A{"err": err}))
 		} else {
 			out = nb
-			notes = append(notes, `注入 thinking:{"type":"disabled"}（`+why+`）`)
+			// 注入的那段 JSON 走实参而不是留在消息里：`{...}` 是占位符语法，
+			// 留在消息里会被当成一个叫 `"type":"disabled"` 的占位符（tools/i18n
+			// 的 check 会报「调用点没有对应实参」）。
+			notes = append(notes, i18n.T("injected {patch} ({why})", i18n.A{
+				"patch": `thinking:{"type":"disabled"}`, "why": why}))
 		}
 	}
 
@@ -98,19 +103,19 @@ func noDisableTranslate(body []byte) (out []byte, translated bool, notes []strin
 	if rerr != nil {
 		return body, false, nil, rerr
 	}
-	notes = append(notes, `thinking:disabled → enabled（该模型不支持关闭思考）`)
+	notes = append(notes, i18n.T("thinking:disabled → enabled (this model cannot turn thinking off)", nil))
 
 	// effort 跟着补上（已有了就不动——客户端设过强度就尊重）
 	if _, has := rewrite.TopLevelRaw(nb, "reasoning_effort"); !has {
 		if nb2, ierr := rewrite.InsertTopLevelRaw(nb, "reasoning_effort", []byte(`"low"`)); ierr == nil {
 			nb = nb2
-			notes = append(notes, `补 reasoning_effort:"low"（报错原文要求 low/high/max）`)
+			notes = append(notes, i18n.T(`added reasoning_effort:"low" (the upstream error asks for low/high/max)`, nil))
 		} else {
 			// 补不上要说出来，不能只留着上面那个「thinking 翻过去了」的
 			// 好消息：工具形态下恰恰是这一手在盖过聚合器的隐式 disable，
 			// 少了它这一发还是会 400（同文件 tools 形态那条路径就是这么报的，
 			// 两条路不该两种态度）。
-			notes = append(notes, "reasoning_effort 未补上（"+ierr.Error()+"）")
+			notes = append(notes, i18n.T("reasoning_effort not added ({err})", i18n.A{"err": ierr}))
 		}
 	}
 	return nb, true, notes, nil
@@ -148,9 +153,9 @@ func (alwaysThinks) Before() []string { return nil }
 func (alwaysThinks) After() []string  { return nil }
 
 func (alwaysThinks) Why() string {
-	return "有些模型始终思考，收到「关闭思考」就 400（GLM code 1210）\n" +
-		"给这些模型补显式 reasoning_effort=low，并把 thinking:disabled 改回 enabled" +
-		"（BestEffortDisableThink 的兜底半边）"
+	return i18n.T("some models always think and return a 400 when told to turn thinking off "+
+		"(GLM code 1210)\ngive these models an explicit reasoning_effort=low and change "+
+		"thinking:disabled back to enabled (the fallback half of BestEffortDisableThink)", nil)
 }
 
 func (alwaysThinks) Match(r *special.Request) bool {
@@ -191,7 +196,7 @@ func (alwaysThinks) Apply(body []byte, r *special.Request) ([]byte, []string, er
 	if _, hasThinking := rewrite.TopLevelRaw(out, "thinking"); hasThinking {
 		// disabled → 翻译（与 BestEffortDisableThink 共用同一份核心）
 		if nb, translated, ns, err := noDisableTranslate(out); err != nil {
-			notes = append(notes, "thinking 未改动（"+err.Error()+"）")
+			notes = append(notes, i18n.T("thinking left unchanged ({err})", i18n.A{"err": err}))
 		} else if translated {
 			out = nb
 			notes = append(notes, ns...)
@@ -207,10 +212,11 @@ func (alwaysThinks) Apply(body []byte, r *special.Request) ([]byte, []string, er
 	if needEffort {
 		if _, has := rewrite.TopLevelRaw(out, "reasoning_effort"); !has {
 			if nb, err := rewrite.InsertTopLevelRaw(out, "reasoning_effort", []byte(`"low"`)); err != nil {
-				notes = append(notes, "reasoning_effort 未补上（"+err.Error()+"）")
+				notes = append(notes, i18n.T("reasoning_effort not added ({err})", i18n.A{"err": err}))
 			} else {
 				out = nb
-				notes = append(notes, `补 reasoning_effort:"low"（报错原文要求 low/high/max）`)
+				notes = append(notes, i18n.T(
+					`added reasoning_effort:"low" (the upstream error asks for low/high/max)`, nil))
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 )
 
@@ -74,8 +75,13 @@ func auditLayout(args []string, run func() int) int {
 		violations = append(violations, batch...)
 	}
 	for _, v := range violations {
-		fmt.Fprintf(stderr, "[layout] %s %s 第 %d 行：%d 列（上限 %d）: %s\n",
-			command, v.stream, v.line, v.width, style.MaxColumns, v.text)
+		// `[layout]`、命令名、流名（stdout/stderr）与那一行原文都是**机器标记**
+		// 与原文，留在消息外面：能翻译的只有中间那句陈述。
+		fmt.Fprintf(stderr, "[layout] %s %s %s: %s\n",
+			command, v.stream,
+			i18n.T("line {n} is {w} columns wide (limit {max})",
+				i18n.A{"n": v.line, "w": v.width, "max": style.MaxColumns}),
+			v.text)
 	}
 	return code
 }

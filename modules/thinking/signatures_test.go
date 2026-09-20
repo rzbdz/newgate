@@ -56,7 +56,9 @@ func TestLearnRecognizesEverySignature(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			table.Reset()
 			got := table.Learn("prov", "model-x", 400, []byte(tt.body))
-			if len(got) != 1 || got[0] != "该模型始终思考" {
+			// 断言的是 Label 的**源语言原文**：判据本身是 Any 里那些上游报错原文，
+			// 它们不翻译（见 signatures.go）。
+			if len(got) != 1 || got[0] != "this model always thinks" {
 				t.Fatalf("没学到（%s）: %v", tt.reason, got)
 			}
 			if !table.Has("prov", "model-x", quirk.NoThinkingDisable) {

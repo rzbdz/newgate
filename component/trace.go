@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Trace 是**构图期事件**的出口：内核把「扫到几个组件、每个声明了什么、谁排在
@@ -72,9 +74,10 @@ func describeComponent(c Component) string {
 	}
 	sort.Strings(provided)
 	sort.Strings(needed)
+	// `type=` / `~` 是机器标记（构图期的判据与字段名），留在消息外面。
 	return pad(c.Name, 20) + " type=" + pad(string(c.Type), 9) +
-		" 提供=[" + strings.Join(provided, " ") + "]" +
-		" 需要=[" + strings.Join(needed, " ") + "]"
+		i18n.T(" provides=[{list}]", i18n.A{"list": strings.Join(provided, " ")}) +
+		i18n.T(" needs=[{list}]", i18n.A{"list": strings.Join(needed, " ")})
 }
 
 // pad 按显示宽度右侧补空格。组件名是 ASCII（目录名），所以这里不必处理

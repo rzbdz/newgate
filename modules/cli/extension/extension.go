@@ -42,6 +42,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/component/entry"
+	"github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Diagnostic 是模块交给 CLI 展示的一组结构化状态，
@@ -187,21 +188,62 @@ type Command interface {
 //
 // 上一版界面反过来维护一张「哪几节是我自己的」的名字清单（coreSection 里那个
 // switch）——**界面因为别人的节名而需要被修改**，那正是这一轮要拆掉的东西。
-type Section = string
+//
+// # 键是身份，不是文案（2026-09-20 本地化）
+//
+// 槽位名过去直接写中文（`SectionTakeover = "接管"`），于是它同时充当了两个角色：
+// 分组的**键**（plan.slot 的判据）与屏幕上的**标题**。加了 i18n 之后这两个角色
+// 必须分开——键是身份，不该随语言变（变了之后「同一节的中文名与英文名」就是两个
+// 不同的槽位，自定义名额、排序、others 兜底全会错位），标题才是文案。
+//
+// 所以键一律是 ASCII 稳定标识（`"takeover"`），给人看的名字走 Display() 查目录。
+// 自定义槽位是模块自己起的键，没有目录条目，Display() 原样返回它本身。
+type Section string
 
 // 通用槽位键。界面发布它们，模块选用；顺序即显示顺序（见 PlanSections）。
+//
+// 取值是**稳定标识**，不是文案：改这里的字面量等于改协议（自定义名额与排序都按
+// 键比对），所以它们不随语言变、也不该被翻译。
 const (
-	SectionTakeover    Section = "接管"
-	SectionRunOnce     Section = "跑一次（不改全局状态）"
-	SectionRouting     Section = "路由与配置"
-	SectionObserve     Section = "探测与观测"
-	SectionMaintenance Section = "维护"
-	SectionModules     Section = "模块"
-	SectionUI          Section = "界面"
+	SectionTakeover    Section = "takeover"
+	SectionRunOnce     Section = "once"
+	SectionRouting     Section = "routing"
+	SectionObserve     Section = "observe"
+	SectionMaintenance Section = "maintenance"
+	SectionModules     Section = "modules"
+	SectionUI          Section = "ui"
 
 	// SectionOthers 是**兜底槽位**：抢不到名额的、没起名字的都落这里。
-	SectionOthers Section = "其它"
+	SectionOthers Section = "others"
 )
+
+// Display 是这个槽位**给人看**的名字（键是身份，显示名随语言变）。
+//
+// 查不到目录（源语言、或这门语言还没翻）时 i18n.T 返回的就是这里写的那句英文，
+// 所以默认路径不依赖任何数据文件。自定义槽位落进 default：它的键是模块自己起的，
+// 界面不认识它，也就没有对应的显示名——原样显示那个键是**正确的降级**，不是错误
+// （它与 PlanSections 把陌生节名收进 others 是同一条 fail-open）。
+func (s Section) Display() string {
+	switch s {
+	case SectionTakeover:
+		return i18n.T("Takeover", nil)
+	case SectionRunOnce:
+		return i18n.T("One-shot (keeps no global state)", nil)
+	case SectionRouting:
+		return i18n.T("Routing and configuration", nil)
+	case SectionObserve:
+		return i18n.T("Probing and observation", nil)
+	case SectionMaintenance:
+		return i18n.T("Maintenance", nil)
+	case SectionModules:
+		return i18n.T("Modules", nil)
+	case SectionUI:
+		return i18n.T("Interface", nil)
+	case SectionOthers:
+		return i18n.T("Other", nil)
+	}
+	return string(s) // 自定义槽位：模块自己起的键，显示它本身
+}
 
 // generalSections 是界面发布的通用槽位，顺序即显示顺序。SectionOthers 永远最后。
 var generalSections = []Section{

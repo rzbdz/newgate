@@ -13,9 +13,9 @@ package runtime
 // 命令——那条命令就是下面的 launchCommand，名字由它自己声明（各 agent 一个）。
 
 import (
-	"fmt"
 	"strings"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/store"
@@ -69,7 +69,7 @@ func (c launchCommand) Names() []string {
 // 注册期就得知道全部 agent（见上面的说明）。一条命令之后，一行就是一行。
 func (c launchCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRunOnce, Rank: 20,
-		Usage: "run <agent> [args…]", Summary: "用某个 profile 跑一次"}
+		Usage: "run <agent> [args…]", Summary: i18n.T("Run once with a given profile", nil)}
 }
 
 func (c launchCommand) Run(host cliapi.Host, args []string) int {
@@ -110,8 +110,8 @@ func runLaunch(rt Runtime, agents confighookapi.AgentCatalog, args []string) int
 	if profile != "" {
 		if _, err := store.LoadProfile(profile); err != nil {
 			avail, _ := store.ListProfiles()
-			return style.Die(65, fmt.Sprintf("profile %q 不存在（可用：%s）",
-				profile, strings.Join(avail, ", ")))
+			return style.Die(65, i18n.T("No such profile {profile} (available: {list})",
+				i18n.A{"profile": profile, "list": strings.Join(avail, ", ")}))
 		}
 	}
 
@@ -150,10 +150,11 @@ func splitLaunch(agents confighookapi.AgentCatalog, args []string) (agent, profi
 				i++
 			}
 			if v == "" {
-				return "", "", nil, fmt.Errorf("%s 需要一个 profile 名", a)
+				return "", "", nil, i18n.E("{option} needs a profile name", i18n.A{"option": a})
 			}
 			if profile != "" && profile != v {
-				return "", "", nil, fmt.Errorf("同时给了 profile %q 和 %q，不一致", profile, v)
+				return "", "", nil, i18n.E("Both profile {first} and {second} were given, and they disagree",
+					i18n.A{"first": profile, "second": v})
 			}
 			profile = v
 			continue
@@ -161,8 +162,9 @@ func splitLaunch(agents confighookapi.AgentCatalog, args []string) (agent, profi
 
 		if strings.HasPrefix(a, "-") {
 			if !agentKnown {
-				return "", "", nil, fmt.Errorf(
-					"未知选项 %q（tool 之前出现的未知选项按拼错处理，docs/08-operations.md 规则5）", a)
+				return "", "", nil, i18n.E(
+					"Unknown option {option} (an unknown option before the tool counts as a typo, docs/08-operations.md rule 5)",
+					i18n.A{"option": a})
 			}
 			rest = append(rest, a)
 			continue
@@ -177,11 +179,11 @@ func splitLaunch(agents confighookapi.AgentCatalog, args []string) (agent, profi
 	}
 
 	if agent == "" {
-		return "", "", nil, fmt.Errorf("要启动哪个 agent？例：newgate claude 或 newgate run claude")
+		return "", "", nil, i18n.E("Which agent to launch? e.g. newgate claude or newgate run claude", nil)
 	}
 	if _, ok := agents.Get(agent); !ok {
-		return "", "", nil, fmt.Errorf("不认识的 agent %q（已知：%s）",
-			agent, strings.Join(agents.Names(), ", "))
+		return "", "", nil, i18n.E("Unknown agent {agent} (known: {list})",
+			i18n.A{"agent": agent, "list": strings.Join(agents.Names(), ", ")})
 	}
 	return agent, profile, rest, nil
 }

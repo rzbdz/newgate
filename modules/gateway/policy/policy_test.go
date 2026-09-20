@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // --- 桩 -------------------------------------------------------------------
@@ -86,15 +88,16 @@ func (f *flusher) Flush() error {
 type namer struct {
 	named
 	prefix string
-	group  string
+	group  string // 身份：ASCII 稳定标识（排序/去重用）
+	label  string // 说法：给人看的锚点
 	hint   string
 }
 
-func (n namer) MetricGroup(key string) string {
+func (n namer) MetricGroup(key string) (string, string) {
 	if strings.HasPrefix(key, n.prefix) {
-		return n.group
+		return n.group, n.label
 	}
-	return ""
+	return "", ""
 }
 
 func (n namer) MetricHint(key string) string {
@@ -150,8 +153,11 @@ func TestEmptyRegistryIsTheMinimalSystem(t *testing.T) {
 	if acks := r.ObserveProbes([]ProbeObservation{{Provider: "p"}}); acks != nil {
 		t.Errorf("最小系统：探活结论收下但没有回应, got %v", acks)
 	}
-	if g, h := r.MetricGroup("anything"), r.MetricHint("anything"); g != "" || h != "" {
-		t.Errorf("最小系统：不认领任何计数器, got (%q, %q)", g, h)
+	if id, label := r.MetricGroup("anything"); id != "" || label != "" {
+		t.Errorf("最小系统：不认领任何计数器, got (%q, %q)", id, label)
+	}
+	if h := r.MetricHint("anything"); h != "" {
+		t.Errorf("最小系统：不给任何说明, got %q", h)
 	}
 	r.Flush(nil) // 没有 Flusher，不该 panic
 	r.BindEnv(&envrec{})
@@ -176,7 +182,7 @@ func TestRegisterRejectsAnonymousAndDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := r.Register(named{name: "a"})
-	if err == nil || !strings.Contains(err.Error(), "已经注册过") {
+	if err == nil || i18n.ID(err) != "policy: contributor {name} is already registered" {
 		t.Errorf("同名重复注册应该被拒并说清原因, got %v", err)
 	}
 }
@@ -193,7 +199,7 @@ func TestRegisterRejectsSecondAdmitter(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := r.Register(&admitter{named: named{name: "second"}})
-	if err == nil || !strings.Contains(err.Error(), "准入只能有一个") {
+	if err == nil || i18n.ID(err) != "policy: only one contributor may be an admitter; {name} is already taken by {holder} (it carries side effects, see the Admitter docs)" {
 		t.Fatalf("第二个准入者应该被拒, got %v", err)
 	}
 	// 拒绝之后账本得干净：不能被半个注册留下痕迹。
@@ -217,7 +223,7 @@ func TestRegisterRejectsDocKeyCollision(t *testing.T) {
 	second := &controller{named: named{name: "b"}, doc: map[string]json.RawMessage{
 		"breakers": json.RawMessage(`[]`)}}
 	_, err := r.Register(second)
-	if err == nil || !strings.Contains(err.Error(), "已被") {
+	if err == nil || i18n.ID(err) != "policy: state document field {key} is already taken by {owner}" {
 		t.Fatalf("同一个状态字段被两家占用应该被拒, got %v", err)
 	}
 	// 不撞车的能进来。
@@ -393,21 +399,26 @@ func TestObserveProbesFansOut(t *testing.T) {
 func TestMetricNamingTakesTheFirstClaim(t *testing.T) {
 	r := New()
 	for _, n := range []namer{
-		{named: named{name: "a"}, prefix: "breaker.", group: "熔断", hint: "熔断器打开"},
-		{named: named{name: "b"}, prefix: "breaker.", group: "别的", hint: "别的说明"},
+		{named: named{name: "a"}, prefix: "breaker.", group: "breaker", label: "熔断", hint: "熔断器打开"},
+		{named: named{name: "b"}, prefix: "breaker.", group: "other", label: "别的", hint: "别的说明"},
 	} {
 		if _, err := r.Register(n); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if g := r.MetricGroup("breaker.opened"); g != "熔断" {
-		t.Errorf("分组取第一位认领的, got %q", g)
+	// 断言**身份**：它是语言无关的那一半，也是排序用的那一半。说法跟着语言走，
+	// 在这里钉住它只会让翻译一改测试就红。
+	if id, label := r.MetricGroup("breaker.opened"); id != "breaker" || label != "熔断" {
+		t.Errorf("分组取第一位认领的, got (%q, %q)", id, label)
 	}
 	if h := r.MetricHint("breaker.opened"); h != "熔断器打开" {
 		t.Errorf("说明取第一位认领的, got %q", h)
 	}
-	if g, h := r.MetricGroup("chain.failover"), r.MetricHint("chain.failover"); g != "" || h != "" {
-		t.Errorf("没人认领的该给空串（调用方兜底）, got (%q, %q)", g, h)
+	if id, label := r.MetricGroup("chain.failover"); id != "" || label != "" {
+		t.Errorf("没人认领的该给空串（调用方兜底）, got (%q, %q)", id, label)
+	}
+	if h := r.MetricHint("chain.failover"); h != "" {
+		t.Errorf("没人认领的说明该给空串（调用方兜底）, got %q", h)
 	}
 }
 

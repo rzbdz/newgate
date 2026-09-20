@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/lib/httpx"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/config/store"
 )
@@ -175,7 +176,8 @@ func AcquireLock() error {
 		if b, err := ioutil.ReadFile(f); err == nil {
 			pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
 			if Alive(pid) {
-				return fmt.Errorf("newgate 已在运行 (pid %d)。用 `newgate restart` 或 `newgate stop`", pid)
+				return i18n.E("newgate is already running (pid {pid}). Use `newgate restart` or `newgate stop`",
+					i18n.A{"pid": pid})
 			}
 			// 陈旧锁
 			RemoveLock()
@@ -184,7 +186,7 @@ func AcquireLock() error {
 	}
 	f, err := os.OpenFile(paths.LockFile(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o660)
 	if err != nil {
-		return fmt.Errorf("抢锁失败: %w", err)
+		return i18n.Ef(err, "cannot acquire the lock: {err}", nil)
 	}
 	defer f.Close()
 	_, err = f.WriteString(strconv.Itoa(os.Getpid()) + "\n")
@@ -242,12 +244,12 @@ func Reconcile() (*Info, []string) {
 	if t := procStartTime(pid); !t.IsZero() {
 		healed.StartedAt = t.Format(time.RFC3339)
 	}
-	note := fmt.Sprintf("pidfile 指向的进程已经不在了（%s），锁文件说真正的 daemon 是 pid %d",
-		describePid(i, err), pid)
+	note := i18n.T("The process the pidfile points at is gone ({what}), and the lock file says the real daemon is pid {pid}",
+		i18n.A{"what": describePid(i, err), "pid": pid})
 	if werr := WritePid(healed); werr != nil {
-		note += "；pidfile 修正失败: " + werr.Error()
+		note += i18n.T("; the pidfile could not be corrected: {err}", i18n.A{"err": werr.Error()})
 	} else {
-		note += "（pidfile 已修正）"
+		note += i18n.T(" (pidfile corrected)", nil)
 		healMu.Lock()
 		healNote = note
 		healMu.Unlock()
@@ -259,9 +261,9 @@ func Reconcile() (*Info, []string) {
 func describePid(i *Info, err error) string {
 	switch {
 	case err != nil || i == nil:
-		return "读不到 pidfile"
+		return i18n.T("the pidfile is unreadable", nil)
 	case i.PID <= 0:
-		return "pidfile 里没有 pid"
+		return i18n.T("the pidfile holds no pid", nil)
 	default:
 		return fmt.Sprintf("pid %d", i.PID)
 	}
@@ -394,13 +396,14 @@ func SpawnHandoff(port int, ln net.Listener) (*Info, error) {
 	}
 	tcp, ok := ln.(*net.TCPListener)
 	if !ok {
-		return nil, fmt.Errorf("交接需要 TCP 监听器，实际 %T", ln)
+		return nil, i18n.E("handoff needs a TCP listener, got {type}",
+			i18n.A{"type": fmt.Sprintf("%T", ln)})
 	}
 	// File() 返回 dup 出来的新 fd——父进程自己的 listener 不受影响，
 	// 之后的 Shutdown 关的是父进程那份。
 	listenerFile, err := tcp.File()
 	if err != nil {
-		return nil, fmt.Errorf("提取监听 fd 失败: %w", err)
+		return nil, i18n.Ef(err, "cannot extract the listener fd: {err}", nil)
 	}
 	defer listenerFile.Close()
 
@@ -439,7 +442,8 @@ func SpawnHandoff(port int, ln net.Listener) (*Info, error) {
 	if _, err := io.ReadFull(readyR, b[:]); err != nil {
 		// 新进程没接上：杀掉它，本进程继续独占 socket，服务未受任何影响
 		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("新进程 5 秒内没接上监听 socket: %v", err)
+		return nil, i18n.E("the new process did not attach to the listening socket within 5 seconds: {err}",
+			i18n.A{"err": err})
 	}
 	info := &Info{PID: cmd.Process.Pid, Port: port,
 		StartedAt: time.Now().Format(time.RFC3339), Exe: exe}
@@ -498,8 +502,8 @@ func Stop() (int, error) {
 func stopViaHTTP(i *Info) (int, error) {
 	st := store.LoadState()
 	if st.ControlToken == "" {
-		return 0, fmt.Errorf("代理 (pid %d) 由其他用户运行且没有控制令牌——"+
-			"请让启动它的用户执行一次 `newgate stop`（之后任意组员都能停）", i.PID)
+		return 0, i18n.E("the proxy (pid {pid}) runs as another user and has no control token — ask the user who started it to run `newgate stop` once (after that any group member can stop it)",
+			i18n.A{"pid": i.PID})
 	}
 	port := i.Port
 	if port <= 0 {
@@ -513,11 +517,12 @@ func stopViaHTTP(i *Info) (int, error) {
 	req.Header.Set("Authorization", "Bearer "+st.ControlToken)
 	resp, err := httpx.LocalClient(3 * time.Second).Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("向代理 (pid %d) 发停机请求失败: %w", i.PID, err)
+		return 0, i18n.Ef(err, "cannot send the stop request to the proxy (pid {pid}): {err}",
+			i18n.A{"pid": i.PID})
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return 0, fmt.Errorf("代理拒绝了停机请求（HTTP %d）", resp.StatusCode)
+		return 0, i18n.E("the proxy refused the stop request (HTTP {code})", i18n.A{"code": resp.StatusCode})
 	}
 	for k := 0; k < 40; k++ { // 最多等 2s
 		if !Alive(i.PID) {
@@ -527,6 +532,6 @@ func stopViaHTTP(i *Info) (int, error) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return 0, fmt.Errorf("停机请求已被接受，但代理 (pid %d) 2 秒内没有退出（看日志 %s）",
-		i.PID, paths.LogFile())
+	return 0, i18n.E("the stop request was accepted, but the proxy (pid {pid}) did not exit within 2 seconds (see the log {log})",
+		i18n.A{"pid": i.PID, "log": paths.LogFile()})
 }

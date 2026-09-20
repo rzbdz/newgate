@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/runtime/agentstate"
 )
@@ -28,8 +29,8 @@ func Dir() string { return filepath.Join(paths.Config(), "bin") }
 func Install(toolID string) (string, error) {
 	agents := agentstate.Catalog()
 	if _, ok := agents.Get(toolID); !ok {
-		return "", fmt.Errorf("不认识的工具 %q（已知：%s）",
-			toolID, strings.Join(agents.Names(), ", "))
+		return "", i18n.E("unknown tool {tool} (known: {list})",
+			i18n.A{"tool": toolID, "list": strings.Join(agents.Names(), ", ")})
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -52,14 +53,15 @@ func Install(toolID string) (string, error) {
 func Uninstall(toolID string) error {
 	agents := agentstate.Catalog()
 	if _, ok := agents.Get(toolID); !ok {
-		return fmt.Errorf("%q 不是已知 agent，没动它（shim 目录里的其他东西不属于 newgate）", toolID)
+		return i18n.E("{tool} is not a known agent, left untouched (the rest of the shim dir does not belong to newgate)",
+			i18n.A{"tool": toolID})
 	}
 	link := filepath.Join(Dir(), toolID)
 	if _, err := os.Lstat(link); err != nil {
 		return err
 	}
 	if !isOurs(link) {
-		return fmt.Errorf("%s 不是 newgate 装的链接，没动它", link)
+		return i18n.E("{link} is not a link newgate installed, left untouched", i18n.A{"link": link})
 	}
 	return os.Remove(link)
 }
@@ -167,9 +169,11 @@ func RCFiles() []string {
 }
 
 func block() string {
-	return fmt.Sprintf("%s\n# newgate 的 shim 目录必须在 PATH 最前面，才能拦住 claude 等命令。\n"+
-		"# 删掉这一段（或跑 newgate shim uninstall）即可完全恢复原状。\n"+
-		"export PATH=\"%s:$PATH\"\n%s\n", beginMark, Dir(), endMark)
+	return fmt.Sprintf("%s\n# %s\n# %s\nexport PATH=\"%s:$PATH\"\n%s\n",
+		beginMark,
+		i18n.T("newgate's shim dir must come first in PATH so that it can intercept claude and other commands", nil),
+		i18n.T("remove this block (or run newgate shim uninstall) to restore everything", nil),
+		Dir(), endMark)
 }
 
 // HasBlock 该 rc 文件里有没有我们的块。
@@ -213,8 +217,8 @@ func RemoveFromRC(path string) (changed bool, err error) {
 	}
 	j := strings.Index(s[i:], endMark)
 	if j < 0 {
-		return false, fmt.Errorf("%s 里有起始标记但没有结束标记，不敢自动改，请手工删除 %s 之后的那几行",
-			path, beginMark)
+		return false, i18n.E("{file} has a begin marker but no end marker; not editing it automatically, please delete the lines after {mark} by hand",
+			i18n.A{"file": path, "mark": beginMark})
 	}
 	end := i + j + len(endMark)
 	// 连带吃掉紧随其后的换行

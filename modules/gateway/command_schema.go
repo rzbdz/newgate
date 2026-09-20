@@ -3,6 +3,7 @@ package gateway
 import (
 	"fmt"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/gateway/gatewaystate"
@@ -30,7 +31,7 @@ func (schemaRepairCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{
 		Section: cliapi.SectionMaintenance, Rank: rankMaintenance,
 		Usage:   "schema-repair on|off",
-		Summary: "工具 schema 缺 required 时补空数组",
+		Summary: i18n.T("Add an empty array when a tool schema lacks required", nil),
 	}
 }
 
@@ -41,7 +42,7 @@ func (schemaRepairCommand) Run(host cliapi.Host, args []string) int {
 	// （一个验证循环里裸跑了这条命令），而且直到 `newgate status` 打出
 	// schema-repair=off 才发现。默认动作必须是「什么都不做」。
 	if arg == "" {
-		return host.Die(64, "用法：newgate schema-repair on|off（不带参数不改任何东西）")
+		return host.Die(64, i18n.T("Usage: newgate schema-repair on|off (no argument changes anything)", nil))
 	}
 	on := truthy(arg)
 	if err := gatewaystate.SetSchemaRepair(on); err != nil {
@@ -49,10 +50,10 @@ func (schemaRepairCommand) Run(host cliapi.Host, args []string) int {
 	}
 	if on {
 		fmt.Println(style.Item(style.OK, "schema repair on") +
-			style.Dim("   工具 schema 缺 required 时补一个空数组"))
+			style.Dim(i18n.T("   Adds an empty array when a tool schema lacks required", nil)))
 	} else {
 		fmt.Println(style.Item(style.Skip, "schema repair off") +
-			style.Dim("   工具 schema 原样转发"))
+			style.Dim(i18n.T("   Tool schemas are forwarded unchanged", nil)))
 	}
 	host.NotifyProxy()
 	return 0

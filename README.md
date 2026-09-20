@@ -96,6 +96,7 @@ name list — it is the composition root's own dependency, and
 | `modules/confighook` | the runtime catalog of *which clients newgate can take over* |
 | `modules/runtime` | daemon, process launch, PATH shim, takeover |
 | `modules/cli` | the local control plane: dispatch, rendering, exit codes |
+| `modules/locale` | which language this process speaks, and the `newgate lang` command |
 | `modules/thinking` | model-agnostic thinking-mode policy |
 | `modules/pluginmanager` | the runtime on/off ledger and module vocabulary |
 | `modules/wrapper` | the policy behind PATH-shim takeover |
@@ -113,7 +114,7 @@ out of the kernel.
 The kernel builds and tests itself with **no network and no second repository**:
 
 ```bash
-make build          # → bin/newgate — the composition root + all 10 kernel modules
+make build          # → bin/newgate — the composition root + all 11 kernel modules
 make check          # generate-check + gofmt + vet + tests + zero-token e2e
 make static         # fully static binary for the host platform (verified with ldd)
 ```
@@ -146,13 +147,36 @@ make e2e                    # real binary + a byte-exact fake upstream: zero tok
 distribution's end-to-end scripts reuse that same file rather than copying it,
 because a copy drifts and a drifted copy is a green test that proves nothing.
 
+## Language
+
+The CLI speaks English (the source language) and follows your system locale:
+
+```
+NEWGATE_LANG  >  ~/.config/newgate/state.json  >  LC_ALL / LC_MESSAGES / LANG  >  English
+```
+
+Configurable settings beat the system locale on purpose: plenty of people run an
+English box and still want to read Chinese. To pin it:
+
+```bash
+newgate lang            # what is in effect, where it came from, coverage per language
+newgate lang zh-Hans    # persist; says so loudly if this shell's LANG overrides it
+NEWGATE_LANG=zh-Hans newgate status   # one-off override
+```
+
+The kernel carries English plus Simplified Chinese. Translations live in
+`lib/i18n/catalogs/` — a flat JSON map from the English source sentence to its
+translation, with `machine`/`reviewed` marks on every entry. No message IDs, no
+third-party i18n library; `make check-i18n` is the ratchet and
+`docs/13-i18n.md` is the rationale.
+
 ## Layout
 
 ```text
 component/     capability graph + lifecycle
 app/           composition root (manifest, Main, ratchets)
 lib/           stateless helpers
-modules/       the 10 kernel modules — `ls modules/` and the table above agree
+modules/       the 11 kernel modules — `ls modules/` and the table above agree
 cmd/newgate/   the kernel's own binary (mechanism harness, not a product)
 testing/       in-process harness for graph/system tests
 mock/          fake upstream + zero-token end-to-end

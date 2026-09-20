@@ -152,7 +152,8 @@ func TestChainSparseProfileIsSkipped(t *testing.T) {
 	eq(t, names(steps), "full:pB/haiku")
 	found := false
 	for _, sk := range skips {
-		if sk.Profile == "onlyheavy" && strings.Contains(sk.Reason, "未定义") {
+		// 断言**类目**（机器标记）而不是那句话：文案是给人看的，随语言变。
+		if sk.Profile == "onlyheavy" && sk.Kind == SkipUndefined {
 			found = true
 		}
 	}
@@ -176,7 +177,7 @@ func TestNormalFallbackToMidStaysWithinEachProfile(t *testing.T) {
 
 	var duplicateSkips int
 	for _, skip := range skips {
-		if strings.Contains(skip.Reason, "重复") {
+		if skip.Kind == SkipDuplicate {
 			duplicateSkips++
 		}
 	}
@@ -241,14 +242,18 @@ func TestUnavailableFilterFiltersStep(t *testing.T) {
 		Active: "a",
 		Available: func(p, _ string) (bool, string) {
 			if p == "pA" {
-				return false, "熔断中"
+				// 理由的措辞属于提供判据的人：今天 controlplane 给的就是这句。
+				return false, "circuit open"
 			}
 			return true, ""
 		},
 	})
 	eq(t, names(steps), "a:pB/m2")
-	if len(skips) == 0 || !strings.Contains(skips[0].Reason, "熔断") {
-		t.Errorf("应记录熔断跳过，得到 %+v", skips)
+	// 类目归 resolve（这一关拒绝了它），理由原样透传（它属于提供判据的人，
+	// 今天就是 controlplane 的那句 i18n.T("circuit open")）。
+	if len(skips) == 0 || skips[0].Kind != SkipUnavailable ||
+		!strings.Contains(skips[0].Reason, "circuit open") {
+		t.Errorf("应记录「不可用」的跳过与它给的理由，得到 %+v", skips)
 	}
 }
 
@@ -257,11 +262,12 @@ func TestDisabledFiltersStep(t *testing.T) {
 	steps, skips := BuildChain("h", ps, mkProvs("pA", "pB"), Opts{
 		Active: "a",
 		Disabled: func(role, target string) (bool, string) {
-			return target == "pA/m1", "你 2h 前禁的"
+			return target == "pA/m1", "you disabled it 2h ago"
 		},
 	})
 	eq(t, names(steps), "a:pB/m2")
-	if len(skips) == 0 || !strings.Contains(skips[0].Reason, "2h 前") {
+	if len(skips) == 0 || skips[0].Kind != SkipDisabled ||
+		!strings.Contains(skips[0].Reason, "2h ago") {
 		t.Errorf("应带上禁用原因，得到 %+v", skips)
 	}
 }
@@ -357,7 +363,7 @@ func TestOverrideChainFallsBackOnUnknownProvider(t *testing.T) {
 	}
 	found := false
 	for _, sk := range skips {
-		if sk.Profile == "(classifier_override)" && strings.Contains(sk.Reason, "provider 未定义") {
+		if sk.Profile == "(classifier_override)" && sk.Kind == SkipUndefined {
 			found = true
 		}
 	}
@@ -389,7 +395,7 @@ func TestOverrideChainFallsBackWhenUnavailable(t *testing.T) {
 			Active: "a",
 			Available: func(p, _ string) (bool, string) {
 				if p == "pC" {
-					return false, "熔断中"
+					return false, "circuit open"
 				}
 				return true, ""
 			},

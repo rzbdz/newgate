@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	modules "github.com/rzbdz/newgate/component"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 )
 
@@ -156,7 +157,8 @@ func Refresh() []error {
 	for _, p := range ps {
 		roles, err := p.Roles()
 		if err != nil {
-			errs = append(errs, fmt.Errorf("模块 %s 的角色键读取失败: %w", p.Source(), err))
+			errs = append(errs, i18n.Ef(err, "cannot read the role keys of module {module}: {err}",
+				i18n.A{"module": p.Source()}))
 			continue
 		}
 		for _, r := range roles {
@@ -166,11 +168,13 @@ func Refresh() []error {
 			// 阶梯档位是框架的，模块不许覆盖——那会让「heavy 是什么意思」
 			// 取决于装了哪个插件，排查时无从下手。
 			if domain.IsRole(r.Key) {
-				errs = append(errs, fmt.Errorf("模块 %s 想注册 %q，但这是内置档位名，已忽略", p.Source(), r.Key))
+				errs = append(errs, i18n.E("module {module} tried to register {key}, which is a built-in role name; ignored",
+					i18n.A{"module": p.Source(), "key": r.Key}))
 				continue
 			}
 			if who, dup := seen[r.Key]; dup {
-				errs = append(errs, fmt.Errorf("键 %q 被 %s 和 %s 同时注册，保留先登记的", r.Key, who, p.Source()))
+				errs = append(errs, i18n.E("key {key} is registered by both {first} and {second}; keeping the first",
+					i18n.A{"key": r.Key, "first": who, "second": p.Source()}))
 				continue
 			}
 			seen[r.Key] = p.Source()

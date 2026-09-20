@@ -3,12 +3,12 @@ package probe
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net"
 	"net/url"
 	"strings"
 	"time"
 
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/store"
 )
@@ -34,7 +34,8 @@ func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 
 	u, err := url.Parse(p.BaseURL)
 	if err != nil || u.Host == "" {
-		nc.Steps = append(nc.Steps, Step{"解析 base_url", false, p.BaseURL + " 不是合法 URL", 0})
+		nc.Steps = append(nc.Steps, Step{i18n.T("parse base_url", nil), false,
+			i18n.T("{url} is not a valid URL", i18n.A{"url": p.BaseURL}), 0})
 		return nc
 	}
 	nc.Host = u.Host
@@ -57,15 +58,15 @@ func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 	cancel()
 	d := time.Since(t0)
 	if err != nil {
-		nc.Steps = append(nc.Steps, Step{"DNS 解析", false,
-			fmt.Sprintf("%v\n      ↳ 静态版用纯 Go 解析器；若动态版能解析而这里不行，"+
-				"说明本机 DNS 配置非标准（/etc/nsswitch.conf 里有 sss/mdns 之类）", err), d})
+		nc.Steps = append(nc.Steps, Step{i18n.T("DNS resolution", nil), false,
+			i18n.T("{err}\n      ↳ the static build uses the pure Go resolver; if the dynamic build resolves but this one does not, the host DNS config is non-standard (/etc/nsswitch.conf lists sss/mdns or similar)", i18n.A{"err": err}), d})
 		return nc
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		nc.Steps = append(nc.Steps, Step{"DNS 解析", true, "（是 IP，无需解析）", 0})
+		nc.Steps = append(nc.Steps, Step{i18n.T("DNS resolution", nil), true,
+			i18n.T("(already an IP, no lookup needed)", nil), 0})
 	} else {
-		nc.Steps = append(nc.Steps, Step{"DNS 解析", true, strings.Join(ips, ", "), d})
+		nc.Steps = append(nc.Steps, Step{i18n.T("DNS resolution", nil), true, strings.Join(ips, ", "), d})
 	}
 
 	// 2. TCP
@@ -74,11 +75,11 @@ func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	d = time.Since(t0)
 	if err != nil {
-		nc.Steps = append(nc.Steps, Step{"TCP 连接", false,
-			fmt.Sprintf("%v\n      ↳ 端口被墙？需要出站代理？（newgate 目前不读 HTTPS_PROXY）", err), d})
+		nc.Steps = append(nc.Steps, Step{i18n.T("TCP connection", nil), false,
+			i18n.T("{err}\n      ↳ the port may be blocked; an outbound proxy may be required (newgate does not read HTTPS_PROXY today)", i18n.A{"err": err}), d})
 		return nc
 	}
-	nc.Steps = append(nc.Steps, Step{"TCP 连接", true, addr, d})
+	nc.Steps = append(nc.Steps, Step{i18n.T("TCP connection", nil), true, addr, d})
 
 	// 3. TLS
 	if u.Scheme == "https" {
@@ -88,12 +89,13 @@ func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 		err = tc.Handshake()
 		d = time.Since(t0)
 		if err != nil {
-			nc.Steps = append(nc.Steps, Step{"TLS 握手", false,
-				fmt.Sprintf("%v\n      ↳ 证书问题 / 中间有 MITM 代理 / 时钟不对", err), d})
+			nc.Steps = append(nc.Steps, Step{i18n.T("TLS handshake", nil), false,
+				i18n.T("{err}\n      ↳ certificate problem / MITM proxy in the middle / wrong clock",
+					i18n.A{"err": err}), d})
 			_ = conn.Close()
 			return nc
 		}
-		nc.Steps = append(nc.Steps, Step{"TLS 握手", true,
+		nc.Steps = append(nc.Steps, Step{i18n.T("TLS handshake", nil), true,
 			tc.ConnectionState().PeerCertificates[0].Subject.CommonName, d})
 		_ = tc.Close()
 	} else {
@@ -102,7 +104,8 @@ func CheckNet(name string, p domain.Provider, timeout time.Duration) NetCheck {
 
 	// 4. 鉴权 + 模型可用性
 	if p.Key() == "" {
-		nc.Steps = append(nc.Steps, Step{"鉴权", false, "没有 api_key，跳过实际请求", 0})
+		nc.Steps = append(nc.Steps, Step{i18n.T("auth", nil), false,
+			i18n.T("no api_key; the actual request is skipped", nil), 0})
 		return nc
 	}
 	return nc

@@ -433,10 +433,12 @@ func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
 	// 在有两家同时报 400 时毫无用处。转发路径不认识那些字符串，名字是它唯一的
 	// 线索——所以它只能原样打出来。
 	logs := logBuf.String()
-	if !strings.Contains(logs, "[shape-400]") || !strings.Contains(logs, "判据 test-shape") {
+	if !strings.Contains(logs, "[shape-400]") || !strings.Contains(logs, "test-shape") {
 		t.Errorf("日志没有说清是被哪条判据认下的:\n%s", logs)
 	}
-	if !strings.Contains(logs, "现场已存档") {
+	// 存档那一行的机器标记是证据目录名 `shape-400-<判据>`：文案会跟着语言走，
+	// 目录名不会（这才是排障时 grep 得动的东西）。
+	if !strings.Contains(logs, "shape-400-") {
 		t.Errorf("证据没落盘（这类 400 偶发又致命，丢了就复现不了）:\n%s", logs)
 	}
 
@@ -537,7 +539,9 @@ func TestOtherClientErrorDoesNotBlameTheProvider(t *testing.T) {
 	if n := atomic.LoadUint64(&srv.failures); n != 0 {
 		t.Errorf("最小系统把 %d 发 400 记成了上游失败——没有策略就没有判决，内核默认不记账", n)
 	}
-	if logs := logBuf.String(); strings.Contains(logs, "现场已存档") {
+	// 没人要现场，存档那一行就不该出现。断言的是**源语言原文**（源语言在运行时
+	// 是恒等路径，CI 上 LANG=C 稳定），不是译文。
+	if logs := logBuf.String(); strings.Contains(logs, "scene archived to") {
 		t.Errorf("没人要现场，数据面却存了：\n%s", logs)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	"github.com/rzbdz/newgate/modules/breaker/status"
 	"github.com/rzbdz/newgate/modules/config/domain"
@@ -38,7 +39,7 @@ func cmdSetProfile(agent, name string) int {
 	if err := store.SetActiveProfile(agent, name); err != nil {
 		return style.Die(65, err.Error())
 	}
-	scope := "全局默认"
+	scope := i18n.T("global default", nil)
 	if agent != "" {
 		scope = "agent " + agent
 	}
@@ -49,9 +50,9 @@ func cmdSetProfile(agent, name string) int {
 			fmt.Println(style.Hint(pr.Description))
 		}
 		if pr.Pinned {
-			fmt.Println(style.Hint("pinned：链到此为止，失败直接上报，不再替换候选"))
+			fmt.Println(style.Hint(i18n.T("pinned: the chain ends here; a failure is reported, not replaced", nil)))
 		}
-		t := style.NewTable("档位", "绑定")
+		t := style.NewTable(i18n.T("Role", nil), i18n.T("Binding", nil))
 		for _, tier := range domain.Roles {
 			if b, ok := pr.Resolve(tier); ok {
 				t.Row(style.Cyan(tier), b.String())
@@ -65,9 +66,9 @@ func cmdSetProfile(agent, name string) int {
 	controlplane.Notify()
 	fmt.Println()
 	if daemon.Running() != nil {
-		fmt.Println(style.Hint("即刻生效；已在运行的会话不受影响"))
+		fmt.Println(style.Hint(i18n.T("takes effect immediately; running sessions are unaffected", nil)))
 	} else {
-		fmt.Println(style.Hint("代理未运行 · newgate start"))
+		fmt.Println(style.Hint(i18n.T("proxy is not running · newgate start", nil)))
 	}
 	return 0
 }
@@ -80,7 +81,7 @@ func cmdSetProfile(agent, name string) int {
 func cmdProfiles() int {
 	names, err := store.ListProfiles()
 	if err != nil {
-		return style.Die(65, "cannot read mappings: "+err.Error())
+		return style.Die(65, i18n.T("cannot read mappings: {err}", i18n.A{"err": err.Error()}))
 	}
 	st := store.LoadState()
 	var ps []*domain.Profile
@@ -97,10 +98,11 @@ func cmdProfiles() int {
 	})
 
 	fmt.Println(style.Title("newgate profiles",
-		fmt.Sprintf("%d 个 · 默认 %s", len(ps), st.DefaultProfile)))
+		i18n.N("{n} profile · default {name}", "{n} profiles · default {name}",
+			len(ps), i18n.A{"n": len(ps), "name": st.DefaultProfile})))
 	fmt.Println(style.Rule(72))
 
-	t := style.NewTable("优先级", "profile", "标志", "说明")
+	t := style.NewTable(i18n.T("Priority", nil), "profile", i18n.T("Flag", nil), i18n.T("Description", nil))
 	t.AlignRight(0)
 	for _, p := range ps {
 		var flags []string
@@ -126,7 +128,7 @@ func cmdProfiles() int {
 			style.Dim(p.Description))
 	}
 	fmt.Print(t.String())
-	fmt.Println(style.Hint("pinned 停在链首不替换 · excluded 只能被显式选中 · ←agent 该 agent 单独用这个 profile"))
+	fmt.Println(style.Hint(i18n.T("pinned stops at the chain head and is never replaced · excluded is only selected explicitly · ←agent that agent uses this profile alone", nil)))
 	return 0
 }
 
@@ -137,7 +139,7 @@ func cmdProfiles() int {
 // 会永远被压着，退役比并存干净）。
 func cmdProfileKV(args []string) int {
 	if len(args) < 1 || args[0] == "" {
-		return style.Die(64, "用法：newgate profile kv <名> [--write]")
+		return style.Die(64, i18n.T("usage: newgate profile kv <name> [--write]", nil))
 	}
 	name := args[0]
 	raw, err := store.LoadProfileRaw(name)
@@ -148,19 +150,22 @@ func cmdProfileKV(args []string) int {
 
 	if len(args) < 2 || args[1] != "--write" {
 		fmt.Print(text)
-		fmt.Println(style.Dim("# 落盘：newgate profile kv " + name + " --write"))
+		fmt.Println(style.Dim(i18n.T("# to write it: newgate profile kv {name} --write",
+			i18n.A{"name": name})))
 		return 0
 	}
 	kvPath := filepath.Join(paths.Mappings(), name+".kv")
 	if err := os.WriteFile(kvPath, []byte(text), 0o660); err != nil {
-		return style.Die(70, "写 "+kvPath+" 失败: "+err.Error())
+		return style.Die(70, i18n.T("cannot write {path}: {err}",
+			i18n.A{"path": kvPath, "err": err.Error()}))
 	}
 	jsonPath := filepath.Join(paths.Mappings(), name+".json")
 	if _, err := os.Stat(jsonPath); err == nil {
 		if err := os.Rename(jsonPath, jsonPath+".bak"); err != nil {
-			return style.Die(70, "旧 json 改名失败（kv 已写入，手动处理）: "+err.Error())
+			return style.Die(70, i18n.T("cannot rename the old json (the kv is already written; handle it by hand): {err}",
+				i18n.A{"err": err.Error()}))
 		}
-		fmt.Println(style.Item(style.OK, kvPath+style.Dim("   旧 .json → .json.bak")))
+		fmt.Println(style.Item(style.OK, kvPath+style.Dim(i18n.T("   old .json → .json.bak", nil))))
 	} else {
 		fmt.Println(style.Item(style.OK, kvPath))
 	}
@@ -175,9 +180,51 @@ type tierView struct {
 	skips []resolve.Skip
 }
 
-// skipKinds 类目顺序固定：数字对不上时，两次输出可以直接比。
-var skipKinds = []string{"excluded", "未定义", "没 key", "熔断", "已禁用",
-	"超出 maxAttempts", "去重", "引用成环", "其他"}
+// skipKindOrder 类目顺序固定：数字对不上时，两次输出可以直接比。
+//
+// 表里放的是 resolve 建链时打的**机器标记**（resolve.Skip.Kind），不是给人看的
+// 话——显示名由 skipLabel 现查。所以「翻译改了措辞、汇总就少一栏」这种事不可能
+// 发生：分组认的是标记，标记不随语言变。
+var skipKindOrder = []string{
+	resolve.SkipExcluded, resolve.SkipUndefined, resolve.SkipNoKey,
+	resolve.SkipUnavailable, resolve.SkipDisabled, resolve.SkipMaxSteps,
+	resolve.SkipDuplicate, resolve.SkipCycle, resolve.SkipOther,
+}
+
+// skipKind 取一条 skip 的类目。建链时就打好了（见 resolve.Skip.Kind）；
+// 没打标记的（今天没有，将来也只可能是外面手搓的 Skip）归「其他」。
+func skipKind(s resolve.Skip) string {
+	if s.Kind != "" {
+		return s.Kind
+	}
+	return resolve.SkipOther
+}
+
+// skipLabel 类目的显示名——只有这里过 i18n，类目本身是机器标记。
+//
+// 为什么是函数而不是一张包级 map：i18n.T 要等 modules/locale 在 Start 里把语言
+// 装上才认得译文，包级变量在初始化时求值会永远停在源语言。
+func skipLabel(kind string) string {
+	switch kind {
+	case resolve.SkipExcluded:
+		return "excluded" // profile 的标志名，机器标记，不翻
+	case resolve.SkipUndefined:
+		return i18n.T("not defined", nil)
+	case resolve.SkipNoKey:
+		return i18n.T("no key", nil)
+	case resolve.SkipUnavailable:
+		return i18n.T("unavailable", nil)
+	case resolve.SkipDisabled:
+		return i18n.T("disabled", nil)
+	case resolve.SkipMaxSteps:
+		return i18n.T("over maxAttempts", nil)
+	case resolve.SkipDuplicate:
+		return i18n.T("duplicate", nil)
+	case resolve.SkipCycle:
+		return i18n.T("reference cycle", nil)
+	}
+	return i18n.T("other", nil)
+}
 
 // cmdTier 展示 fallback 链——这是整套配置的**接口**：一眼要能回答
 // 「这次请求会走谁」和「为什么不是我想的那个」。
@@ -208,10 +255,10 @@ func cmdTier(args []string) int {
 // 错误信息冲成一堵墙，只给数量与查询入口。
 func knownRolesLine() string {
 	if n := len(domain.ExtraRoles()); n > 0 {
-		return fmt.Sprintf("档位 %s，另有 %d 个动态角色键（newgate omo ls）",
-			strings.Join(domain.Roles, "/"), n)
+		return i18n.T("roles {roles}, plus {n} dynamic role keys (newgate omo ls)",
+			i18n.A{"roles": strings.Join(domain.Roles, "/"), "n": n})
 	}
-	return "档位 " + strings.Join(domain.Roles, "/")
+	return i18n.T("roles {roles}", i18n.A{"roles": strings.Join(domain.Roles, "/")})
 }
 
 func matchTier(s string) string {
@@ -239,12 +286,13 @@ func tierReport(which string) int {
 		if full := matchTier(which); full != "" {
 			which = full
 		} else if !domain.IsKnownRole(which) {
-			return style.Die(64, fmt.Sprintf("未知档位 %q（%s）", which, knownRolesLine()))
+			return style.Die(64, i18n.T("no such role: {name} ({known})",
+				i18n.A{"name": which, "known": knownRolesLine()}))
 		}
 	}
 
 	// 链头可能不止一个（claude 和 opencode 可以各挂一个 profile）。
-	heads := map[string][]string{st.DefaultProfile: {"默认"}}
+	heads := map[string][]string{st.DefaultProfile: {i18n.T("default", nil)}}
 	for agent, p := range st.Active {
 		heads[p] = append(heads[p], agent)
 	}
@@ -266,9 +314,9 @@ func tierReport(which string) int {
 	for _, head := range headNames {
 		sort.Strings(heads[head])
 		fmt.Println(style.Title("newgate tier",
-			fmt.Sprintf("链头 %s（%s）· 最大尝试 %d · 预算 %s",
-				head, strings.Join(heads[head], ", "),
-				st.Chain.Attempts(), prettyMs(st.Chain.Budget()))))
+			i18n.T("chain head {head} ({who}) · max attempts {n} · budget {budget}", i18n.A{
+				"head": head, "who": strings.Join(heads[head], ", "),
+				"n": st.Chain.Attempts(), "budget": prettyMs(st.Chain.Budget())})))
 		fmt.Println(style.Rule(72))
 
 		var rows []tierView
@@ -289,28 +337,30 @@ func tierReport(which string) int {
 			// 概览：链一样的档位合并成 `= <先出现的那个>`
 			fmt.Print(tierOverview(rows))
 			if n := countSkips(rows); n > 0 {
-				fmt.Println(style.Hint(fmt.Sprintf("跳过 %d 个候选：%s", n, skipSummary(rows))))
-				fmt.Println(style.Hint("明细：newgate tier <档位>"))
+				fmt.Println(style.Hint(i18n.N("skipped {n} candidate: {reasons}",
+					"skipped {n} candidates: {reasons}", n,
+					i18n.A{"n": n, "reasons": skipSummary(rows)})))
+				fmt.Println(style.Hint(i18n.T("details: newgate tier <role>", nil)))
 			}
 			continue
 		}
 
 		r := rows[0]
 		if len(r.steps) == 0 {
-			fmt.Println(style.Item(style.Bad, "无可用候选"))
+			fmt.Println(style.Item(style.Bad, i18n.T("no usable candidate", nil)))
 		} else {
-			fmt.Println(style.Field("最终", style.Cyan(r.steps[0].Binding.String())))
+			fmt.Println(style.Field(i18n.T("Final", nil), style.Cyan(r.steps[0].Binding.String())))
 			fmt.Println()
 			fmt.Print(numberedBindingChain(r.steps, func(step resolve.Step) string {
 				return bindingHealthLabel(liveHealth[step.Binding.String()])
 			}))
-			fmt.Println(style.Hint("链头固定；fallback 按当前上下文的预测 TTFT 排序"))
-			fmt.Println(style.Hint("同 (provider, model) 全链仅一次"))
+			fmt.Println(style.Hint(i18n.T("the chain head is fixed; fallbacks follow the predicted TTFT of this context", nil)))
+			fmt.Println(style.Hint(i18n.T("each (provider, model) appears once in the whole chain", nil)))
 			if limit := st.Chain.Attempts(); limit < len(r.steps) {
-				fmt.Println(style.Hint(fmt.Sprintf(
-					"单次请求最多尝试前 %d 站；后续 %d 站仍在链中",
-					limit, len(r.steps)-limit)))
-				fmt.Println(style.Hint("调高 state.json chain.max_attempts 可扩大实际尝试范围"))
+				fmt.Println(style.Hint(i18n.T(
+					"a request tries at most the first {limit} stops; the remaining {rest} stay in the chain",
+					i18n.A{"limit": limit, "rest": len(r.steps) - limit})))
+				fmt.Println(style.Hint(i18n.T("raise state.json chain.max_attempts to widen the actual attempt range", nil)))
 			}
 		}
 		if len(r.skips) > 0 {
@@ -327,14 +377,14 @@ func tierReport(which string) int {
 // 3000/12000，于是 daemon 改口径这一屏不会跟着变。
 func bindingHealthLabel(h status.Status) string {
 	if h.Open {
-		return style.Red("熔断")
+		return style.Red(i18n.T("circuit open", nil))
 	}
 	grade := status.Grade(h.ScoreMs, h.ScoreMs > 0)
 	switch {
 	case grade == status.LatencyUnknown && h.Grade == status.ProbeUnavailable:
-		return style.Red("不可用")
+		return style.Red(i18n.T("unavailable", nil))
 	case grade == status.LatencyUnknown:
-		return style.Dim("未探")
+		return style.Dim(i18n.T("unprobed", nil))
 	}
 	label := fmt.Sprintf("%s %dms", grade, h.ScoreMs)
 	switch grade {
@@ -390,13 +440,13 @@ func numberedBindingChain(steps []resolve.Step, extra func(resolve.Step) string)
 
 func tierOverview(rows []tierView) string {
 	var out strings.Builder
-	out.WriteString("  " + style.Dim(style.Pad("档位", 6)) + "  " + style.Dim("链") + "\n")
+	out.WriteString("  " + style.Dim(style.Pad(i18n.T("Role", nil), 6)) + "  " + style.Dim(i18n.T("Chain", nil)) + "\n")
 	firstOf := map[string]string{}
 	for _, row := range rows {
 		prefix := "  " + style.Cyan(style.Pad(row.name, 6)) + "  "
 		switch {
 		case len(row.steps) == 0:
-			out.WriteString(prefix + style.Red("无可用候选") + "\n")
+			out.WriteString(prefix + style.Red(i18n.T("no usable candidate", nil)) + "\n")
 		case firstOf[chainSig(row.steps)] != "":
 			out.WriteString(prefix + style.Dim("= "+firstOf[chainSig(row.steps)]) + "\n")
 		default:
@@ -427,13 +477,13 @@ func skipSummary(rows []tierView) string {
 	reasons := map[string]int{}
 	for _, r := range rows {
 		for _, s := range r.skips {
-			reasons[skipKind(s.Reason)]++
+			reasons[skipKind(s)]++
 		}
 	}
 	var parts []string
-	for _, k := range skipKinds {
+	for _, k := range skipKindOrder {
 		if n := reasons[k]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%s %d", k, n))
+			parts = append(parts, fmt.Sprintf("%s %d", skipLabel(k), n))
 		}
 	}
 	return strings.Join(parts, " · ")
@@ -444,29 +494,7 @@ func skipSummary(rows []tierView) string {
 //
 // 需要一个个看的时候有别的口子：newgate profiles 看标志、doctor 看链路、
 // metrics / probe 看熔断，那些才是可操作的信息。
-// skipKind 把 skip 的自由文本归成几个可数的类目。
-func skipKind(reason string) string {
-	switch {
-	case strings.Contains(reason, "excluded"):
-		return "excluded"
-	case strings.Contains(reason, "熔断"):
-		return "熔断"
-	case strings.Contains(reason, "maxAttempts"):
-		return "超出 maxAttempts"
-	case strings.Contains(reason, "重复") || strings.Contains(reason, "去重"):
-		return "去重"
-	case strings.Contains(reason, "未定义"):
-		return "未定义"
-	case strings.Contains(reason, "api_key"):
-		return "没 key"
-	case strings.Contains(reason, "已禁用"):
-		return "已禁用"
-	case strings.Contains(reason, "成环"):
-		return "引用成环"
-	}
-	return "其他"
-}
-
+//
 // healthFromProxy 把 daemon 的熔断表按 "provider/model" 索引成一次命令内的快照。
 // daemon 不在线时是空表——诊断退化为只看静态配置，不凭空判坏。
 func healthFromProxy(ps *controlplane.Doc) map[string]status.Status {
@@ -493,41 +521,47 @@ func PrintSkips(skips []resolve.Skip) { printSkips(skips) }
 func printSkips(skips []resolve.Skip) {
 	reasons := map[string][]resolve.Skip{}
 	for _, s := range skips {
-		k := skipKind(s.Reason)
+		k := skipKind(s)
 		reasons[k] = append(reasons[k], s)
 	}
-	fmt.Println(style.Item(style.Skip, fmt.Sprintf("%d 个候选被跳过", len(skips))))
+	n := len(skips)
+	fmt.Println(style.Item(style.Skip,
+		i18n.N("{n} candidate skipped", "{n} candidates skipped", n, i18n.A{"n": n})))
 
-	t := style.NewTable("原因", "数量", "说明")
+	t := style.NewTable(i18n.T("Reason", nil), i18n.T("Count", nil), i18n.T("Note", nil))
 	t.AlignRight(1)
-	for _, k := range skipKinds {
+	for _, k := range skipKindOrder {
 		group := reasons[k]
 		if len(group) == 0 {
 			continue
 		}
-		t.Row(k, fmt.Sprintf("%d", len(group)), style.Dim(skipDetail(group[0])))
+		t.Row(skipLabel(k), fmt.Sprintf("%d", len(group)), style.Dim(skipDetail(group[0])))
 	}
 	fmt.Print(t.String())
 }
 
 // skipDetail 给整组配一句「所以呢」——光有类目名，用户还是不知道要改什么。
+//
+// 按类目给的那几句是本模块自己的话，过 i18n；两处直接回 s.Reason 的（已禁用 /
+// 引用成环）是**别处来的话**：禁用理由是判据提供者说的，成环那句已经写清了
+// 环长什么样（`a → b`），再包一层只会把信息压掉。
 func skipDetail(s resolve.Skip) string {
-	switch skipKind(s.Reason) {
-	case "excluded":
-		return "excluded profile 只能被显式选中，不参与自动排序"
-	case "未定义":
-		return "该 profile 未定义此档位（稀疏层，正常）"
-	case "没 key":
-		return "provider 缺 api_key"
-	case "熔断":
-		return "provider 被熔断摘除，见 newgate metrics / probe"
-	case "已禁用":
+	switch skipKind(s) {
+	case resolve.SkipExcluded:
+		return i18n.T("an excluded profile is only used when selected explicitly; it never joins automatic ordering", nil)
+	case resolve.SkipUndefined:
+		return i18n.T("this profile does not define this role (sparse layer, expected)", nil)
+	case resolve.SkipNoKey:
+		return i18n.T("the provider has no api_key", nil)
+	case resolve.SkipUnavailable:
+		return i18n.T("the provider was rejected as unavailable — see newgate metrics / probe", nil)
+	case resolve.SkipDisabled:
 		return s.Reason
-	case "超出 maxAttempts":
-		return "链的尝试次数已用尽，见 state.json chain.max_attempts"
-	case "去重":
-		return "与链上更靠前的候选重复"
-	case "引用成环":
+	case resolve.SkipMaxSteps:
+		return i18n.T("the chain's attempt budget is exhausted — see state.json chain.max_attempts", nil)
+	case resolve.SkipDuplicate:
+		return i18n.T("duplicate of an earlier candidate in the chain", nil)
+	case resolve.SkipCycle:
 		return s.Reason
 	}
 	return s.Reason
@@ -541,7 +575,7 @@ func (initCommand) Names() []string { return []string{"init"} }
 
 func (initCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionMaintenance, Rank: 50,
-		Usage: "init [--force]", Summary: "铺开默认配置"}
+		Usage: "init [--force]", Summary: i18n.T("lay down the default configuration", nil)}
 }
 
 func (initCommand) Run(_ cliapi.Host, args []string) int {
@@ -556,15 +590,16 @@ func runInit(force bool) int {
 		return style.Die(70, err.Error())
 	}
 	if len(created) == 0 {
-		fmt.Println("配置已存在，无需初始化（--force 可覆盖）")
+		fmt.Println(i18n.T("the configuration already exists, nothing to initialize (--force overwrites)", nil))
 	} else {
 		for _, c := range created {
-			fmt.Println("创建 " + c)
+			fmt.Println(i18n.T("created {path}", i18n.A{"path": c}))
 		}
 	}
-	fmt.Printf("\n下一步：把上游 key 填进 %s\n", paths.ProvidersFile())
-	fmt.Println("默认写入的是占位符，必须改成你自己的 provider / endpoint / 模型名。")
-	fmt.Println("key 建议走环境变量（不落盘）：NEWGATE_KEY_<PROVIDER 大写，- 换 _>")
+	fmt.Println()
+	fmt.Println(i18n.T("next: put your upstream keys into {path}", i18n.A{"path": paths.ProvidersFile()}))
+	fmt.Println(i18n.T("what is written is placeholders — replace them with your own provider, endpoint and model names", nil))
+	fmt.Println(i18n.T("keep keys in environment variables (never on disk): NEWGATE_KEY_<PROVIDER in upper case, - becomes _>", nil))
 	return 0
 }
 
@@ -574,18 +609,19 @@ func (reloadCommand) Names() []string { return []string{"reload"} }
 
 func (reloadCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionMaintenance, Rank: 50,
-		Usage: "reload", Summary: "立刻重读配置（平时 1 秒内自动热更新）"}
+		Usage: "reload", Summary: i18n.T("re-read the configuration now (normally hot-reloaded within a second)", nil)}
 }
 
 func (reloadCommand) Run(_ cliapi.Host, _ []string) int {
 	info, _ := controlplane.State()
 	if info == nil {
-		fmt.Println(style.Item(style.Skip, "代理未运行；配置会在下次启动时读取"))
+		fmt.Println(style.Item(style.Skip, i18n.T("proxy is not running; the configuration is read on the next start", nil)))
 		return 0
 	}
 	controlplane.Notify()
-	fmt.Println(style.Item(style.OK, fmt.Sprintf("已通知代理重读配置   pid %d", info.PID)))
-	fmt.Println(style.Hint("平时不需要这个命令：配置改动 1 秒内自动生效"))
+	fmt.Println(style.Item(style.OK, i18n.T("proxy notified to re-read the configuration   pid {pid}",
+		i18n.A{"pid": info.PID})))
+	fmt.Println(style.Hint(i18n.T("you rarely need this command: configuration changes apply within a second", nil)))
 	return 0
 }
 
@@ -605,7 +641,7 @@ func (tierCommand) Names() []string { return []string{"tier", "tiers", "role", "
 
 func (tierCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
-		Usage: "tier [档位]", Summary: "fallback 链：走谁、跳过了什么"}
+		Usage: i18n.T("tier [role]", nil), Summary: i18n.T("fallback chain: who is used, what was skipped", nil)}
 }
 
 func (tierCommand) Run(_ cliapi.Host, args []string) int { return cmdTier(args) }
@@ -621,7 +657,7 @@ func (profilesCommand) Names() []string { return []string{"profiles", "ls"} }
 
 func (profilesCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
-		Usage: "profiles", Summary: "所有 profile（优先级 / 标志 / 覆盖）"}
+		Usage: "profiles", Summary: i18n.T("all profiles (priority / flags / overrides)", nil)}
 }
 
 func (profilesCommand) Run(_ cliapi.Host, _ []string) int { return cmdProfiles() }
@@ -641,14 +677,14 @@ func (profileCommand) Unstyled(args []string) bool { return cliapi.Positional(ar
 
 func (profileCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
-		Usage: "profile kv <名> [--write]", Summary: "profile 转 KV 文本"}
+		Usage: i18n.T("profile kv <name> [--write]", nil), Summary: i18n.T("convert a profile to KV text", nil)}
 }
 
 func (profileCommand) Run(host cliapi.Host, args []string) int {
 	if cliapi.Positional(args, 0) == "kv" {
 		return cmdProfileKV(args[1:])
 	}
-	return host.Die(64, "用法：newgate profile kv <名> [--write]")
+	return host.Die(64, i18n.T("usage: newgate profile kv <name> [--write]", nil))
 }
 
 type setProfileCommand struct{}
@@ -662,8 +698,8 @@ func (setProfileCommand) Names() []string { return []string{"--set-profile"} }
 
 func (setProfileCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
-		Usage:   "--set-profile <名> [--agent <agent>]",
-		Summary: "切 profile；省略 --agent 设全局默认"}
+		Usage:   i18n.T("--set-profile <name> [--agent <agent>]", nil),
+		Summary: i18n.T("switch profile; omit --agent to set the global default", nil)}
 }
 
 // Run 的形状由界面归一后给：args[0] 是 profile 名，可选的 `--agent <agent>` 跟在
@@ -672,7 +708,7 @@ func (setProfileCommand) Help() cliapi.HelpLine {
 func (setProfileCommand) Run(_ cliapi.Host, args []string) int {
 	name := cliapi.Positional(args, 0)
 	if name == "" {
-		return style.Die(64, "--set-profile 需要一个 profile 名")
+		return style.Die(64, i18n.T("--set-profile needs a profile name", nil))
 	}
 	return cmdSetProfile(flagValue(args, "--agent"), name)
 }

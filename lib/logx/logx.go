@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Rotator 一个带大小上限的日志写入器。写满就轮转，只保留 keep 份历史。
@@ -57,8 +59,10 @@ func (r *Rotator) Write(p []byte) (int, error) {
 	}
 	if r.size+int64(len(p)) > r.maxBytes {
 		if err := r.rotate(); err != nil {
-			// 轮转失败也别丢日志，继续往当前文件写
-			fmt.Fprintf(os.Stderr, "newgate: 日志轮转失败: %v\n", err)
+			// 轮转失败也别丢日志，继续往当前文件写。
+			// `newgate: ` 那个前缀是程序名（机器标记），留在消息外面。
+			fmt.Fprintf(os.Stderr, "newgate: %s\n",
+				i18n.T("log rotation failed: {err}", i18n.A{"err": err}))
 		}
 	}
 	n, err := r.f.Write(p)
@@ -85,13 +89,15 @@ func (r *Rotator) rotate() error {
 	for i := r.keep - 1; i >= 1; i-- {
 		from, to := fmt.Sprintf("%s.%d", r.path, i), fmt.Sprintf("%s.%d", r.path, i+1)
 		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("轮转 %s → %s: %w", from, to, err)
+			return i18n.Ef(err, "rotating {from} → {to}: {err}",
+				i18n.A{"from": from, "to": to})
 		}
 	}
 	// 这一条是真正要紧的：它失败 = 当前日志没被挪走 = 之后继续往同一个文件写，
 	// 于是 maxBytes 形同虚设。
 	if err := os.Rename(r.path, r.path+".1"); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("轮转 %s → %s.1: %w", r.path, r.path, err)
+		return i18n.Ef(err, "rotating {from} → {to}.1: {err}",
+			i18n.A{"from": r.path, "to": r.path})
 	}
 	return r.open()
 }

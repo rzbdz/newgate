@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Repair 修补 tools 数组里会被严格校验器拒绝的 schema 问题。
@@ -24,7 +26,7 @@ import (
 func Repair(toolsRaw []byte) (out []byte, changes []string, err error) {
 	var tools []interface{}
 	if err := json.Unmarshal(toolsRaw, &tools); err != nil {
-		return nil, nil, fmt.Errorf("tools 不是数组: %w", err)
+		return nil, nil, i18n.Ef(err, "tools is not an array: {err}", nil)
 	}
 
 	var fixed []string
@@ -61,7 +63,7 @@ func Repair(toolsRaw []byte) (out []byte, changes []string, err error) {
 
 func nameOr(s string) string {
 	if s == "" {
-		return "(匿名)"
+		return i18n.T("(anonymous)", nil)
 	}
 	return s
 }

@@ -7,6 +7,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/component"
 	"github.com/rzbdz/newgate/component/entry"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
 	"github.com/rzbdz/newgate/testing/testkit"
@@ -110,20 +111,20 @@ func TestRegisterSelfRejectsBadInput(t *testing.T) {
 		switches []Switch
 		want     string
 	}{
-		{"空模块名", "", nil, "模块名不能为空"},
-		{"重复上报", "plugin-manager", nil, "已经上报过"},
-		{"Path 不姓本模块", "deepseek", []Switch{goodSwitch("thinking.always-thinks")}, "必须以模块名"},
-		{"Path 只等于模块名", "deepseek", []Switch{goodSwitch("deepseek")}, "必须以模块名"},
+		{"空模块名", "", nil, "must not be empty"},
+		{"重复上报", "plugin-manager", nil, "already reported"},
+		{"Path 不姓本模块", "deepseek", []Switch{goodSwitch("thinking.always-thinks")}, "must start with the module name"},
+		{"Path 只等于模块名", "deepseek", []Switch{goodSwitch("deepseek")}, "must start with the module name"},
 		{"没写 Title/Why", "deepseek", []Switch{{Path: "deepseek.x", Danger: DangerQuirk}}, "Title"},
 		{
 			"footgun 不带时限", "deepseek",
 			[]Switch{{Path: "deepseek.x", Title: "t", Why: "w", Danger: DangerFootgun}},
-			"必须带默认时限",
+			"must carry a default time limit",
 		},
 		{
 			"不认识的 Danger", "deepseek",
 			[]Switch{{Path: "deepseek.x", Title: "t", Why: "w", Danger: "危险"}},
-			"不认识",
+			"unknown Danger",
 		},
 	}
 	for _, c := range cases {
@@ -135,8 +136,10 @@ func TestRegisterSelfRejectsBadInput(t *testing.T) {
 				}
 				t.Fatalf("期望被拒，却注册成功了")
 			}
-			if !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("报错文案 %q 里没有 %q", err.Error(), c.want)
+			// 断言的是**消息身份**（英文原文），不是渲染出来的那句话：换一门
+			// 语言、改一处措辞，都不该让这条测试跟着红（见 lib/i18n 的 Error）。
+			if !strings.Contains(i18n.ID(err), c.want) {
+				t.Fatalf("报错身份 %q 里没有 %q", i18n.ID(err), c.want)
 			}
 		})
 	}

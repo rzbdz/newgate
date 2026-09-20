@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/rzbdz/newgate/lib/httpx"
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/domain"
@@ -56,19 +57,20 @@ func cmdShim(agents confighookapi.AgentCatalog, sub, which string) int {
 	switch sub {
 	case "install", "add", "on":
 		if which == "" {
-			return die(64, "用法：newgate shim install <agent>（已知："+
-				strings.Join(agents.Names(), ", ")+"）")
+			return die(64, i18n.T("Usage: newgate shim install <agent> (known: {names})",
+				i18n.A{"names": strings.Join(agents.Names(), ", ")}))
 		}
-		fmt.Println(style.Hint("直接用 newgate on " + which + " 即可，机制由 newgate 自行选择"))
+		fmt.Println(style.Hint(i18n.T("Just use newgate on {agent}; newgate picks the mechanism itself",
+			i18n.A{"agent": which})))
 		fmt.Println()
 		return cmdTakeover(agents, which)
 
 	case "off", "remove", "rm":
 		if which == "" {
-			return die(64, "用法：newgate shim off <agent>（已知："+
-				strings.Join(agents.Names(), ", ")+"）")
+			return die(64, i18n.T("Usage: newgate shim off <agent> (known: {names})",
+				i18n.A{"names": strings.Join(agents.Names(), ", ")}))
 		}
-		fmt.Println(style.Hint("直接用 newgate off " + which + " 即可"))
+		fmt.Println(style.Hint(i18n.T("Just use newgate off {agent}", i18n.A{"agent": which})))
 		fmt.Println()
 		return cmdRelease(which)
 
@@ -78,7 +80,7 @@ func cmdShim(agents confighookapi.AgentCatalog, sub, which string) int {
 				fmt.Fprintln(os.Stderr, style.Item(style.Warn, n+": "+err.Error()))
 				continue
 			}
-			fmt.Println(style.Item(style.OK, "摘掉 shim "+n))
+			fmt.Println(style.Item(style.OK, i18n.T("Removed the shim {name}", i18n.A{"name": n})))
 		}
 		for _, rc := range injection.RCFiles() {
 			changed, err := injection.RemoveFromRC(rc)
@@ -87,7 +89,7 @@ func cmdShim(agents confighookapi.AgentCatalog, sub, which string) int {
 				continue
 			}
 			if changed {
-				fmt.Println(style.Item(style.OK, "从 "+rc+" 删掉 PATH 行"))
+				fmt.Println(style.Item(style.OK, i18n.T("Removed the PATH line from {file}", i18n.A{"file": rc})))
 			}
 		}
 		if fg := injection.Foreign(); len(fg) > 0 {
@@ -101,12 +103,13 @@ func cmdShim(agents confighookapi.AgentCatalog, sub, which string) int {
 				}
 			}
 			if len(shadow) > 0 {
-				fmt.Println(style.Hint("同名外部文件仍在 " + injection.Dir() + "：" + strings.Join(shadow, ", ") + "（会遮住 newgate 的 shim）"))
+				fmt.Println(style.Hint(i18n.T("an external file is still in {dir}: {names} (it shadows newgate's shim)",
+					i18n.A{"dir": injection.Dir(), "names": strings.Join(shadow, ", ")})))
 			}
 		}
 		fmt.Println()
-		fmt.Println(style.Hint("PATH 痕迹已清空，重开 shell 生效"))
-		fmt.Println(style.Hint("这不改接管意愿：下次 newgate start 会重新装回来"))
+		fmt.Println(style.Hint(i18n.T("PATH traces are cleared; reopen the shell to take effect", nil)))
+		fmt.Println(style.Hint(i18n.T("This does not change takeover intent: the next newgate start reinstalls it", nil)))
 		return 0
 
 	default:
@@ -120,37 +123,39 @@ func shimStatus(agents confighookapi.AgentCatalog) int {
 	fmt.Println(style.Rule(72))
 
 	if injection.InPath() {
-		fmt.Println(style.Field("在 PATH", style.Green("是")))
+		fmt.Println(style.Field(i18n.T("In PATH", nil), style.Green(i18n.T("yes", nil))))
 	} else {
-		fmt.Println(style.Field("在 PATH", style.Yellow("否")+style.Dim("   重开 shell 或 exec $SHELL -l")))
+		fmt.Println(style.Field(i18n.T("In PATH", nil), style.Yellow(i18n.T("no", nil))+
+			style.Dim("   "+i18n.T("reopen the shell or exec $SHELL -l", nil))))
 	}
 
 	inst := injection.Installed()
 	if len(inst) == 0 {
-		fmt.Println(style.Field("已装", style.Dim("无")))
+		fmt.Println(style.Field(i18n.T("Installed", nil), style.Dim(i18n.T("none", nil))))
 	} else {
-		t := style.NewTable("shim", "指向")
+		t := style.NewTable("shim", i18n.T("points to", nil))
 		for _, n := range inst {
 			a, ok := agents.Get(n)
 			if !ok {
-				t.Row(n, style.Dim("未知 agent"))
+				t.Row(n, style.Dim(i18n.T("unknown agent", nil)))
 				continue
 			}
 			if real, err := a.FindReal(injection.Dir()); err == nil {
 				t.Row(n, real)
 			} else {
-				t.Row(n, style.Red("找不到真实可执行文件（转发会失败）"))
+				t.Row(n, style.Red(i18n.T("the real executable was not found (forwarding will fail)", nil)))
 			}
 		}
-		fmt.Println(style.Field("已装", fmt.Sprintf("%d 个", len(inst))))
+		fmt.Println(style.Field(i18n.T("Installed", nil),
+			i18n.N("{n} shim", "{n} shims", len(inst), i18n.A{"n": len(inst)})))
 		fmt.Print(t.String())
 	}
 
-	t := style.NewTable("rc 文件", "PATH 行")
+	t := style.NewTable(i18n.T("rc file", nil), i18n.T("PATH line", nil))
 	for _, rc := range injection.RCFiles() {
-		mark := style.Dim("无")
+		mark := style.Dim(i18n.T("none", nil))
 		if injection.HasBlock(rc) {
-			mark = style.Green("有")
+			mark = style.Green(i18n.T("yes", nil))
 		}
 		t.Row(rc, mark)
 	}
@@ -162,20 +167,20 @@ func shimStatus(agents confighookapi.AgentCatalog) int {
 		if s.Mechanism != takeover.MechShim {
 			continue
 		}
-		state := style.Mark(style.OK) + " 生效"
+		state := style.Mark(style.OK) + " " + i18n.T("in effect", nil)
 		switch {
 		case s.Wanted && !s.Active:
-			state = style.Mark(style.Bad) + " 声明接管但未生效"
+			state = style.Mark(style.Bad) + " " + i18n.T("declared takeover but not in effect", nil)
 		case !s.Wanted && s.Active:
-			state = style.Mark(style.Warn) + " 未声明接管却仍装着"
+			state = style.Mark(style.Warn) + " " + i18n.T("not declared but still installed", nil)
 		case !s.Wanted:
-			state = style.Mark(style.Skip) + " 未接管"
+			state = style.Mark(style.Skip) + " " + i18n.T("not taken over", nil)
 		}
 		rows = append(rows, [2]string{s.Agent, state})
 	}
 	if len(rows) > 0 {
-		fmt.Print(style.Section("接管意愿") + "\n")
-		t := style.NewTable("agent", "状态")
+		fmt.Print(style.Section(i18n.T("Takeover intent", nil)) + "\n")
+		t := style.NewTable("agent", i18n.T("status", nil))
 		for _, r := range rows {
 			t.Row(r[0], r[1])
 		}
@@ -183,19 +188,20 @@ func shimStatus(agents confighookapi.AgentCatalog) int {
 	}
 
 	fmt.Println()
-	fmt.Println(style.Hint("底层逃生口。日常：newgate on|off <agent> · newgate shim uninstall 连 rc 一起清"))
+	fmt.Println(style.Hint(i18n.T("Low-level escape hatch; day to day use newgate on|off <agent> · newgate shim uninstall also clears the rc files", nil)))
 	return 0
 }
 
 func cmdStart(agents confighookapi.AgentCatalog, force bool) int {
 	if _, err := os.Stat(paths.ProvidersFile()); os.IsNotExist(err) {
-		fmt.Println(style.Dim("首次运行，初始化配置"))
+		fmt.Println(style.Dim(i18n.T("First run, initializing the config", nil)))
 		if _, err := store.Init(false); err != nil {
 			return die(70, err.Error())
 		}
 	}
 	if i := daemon.Running(); i != nil {
-		fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已在运行   pid %d · 127.0.0.1:%d", i.PID, i.Port)))
+		fmt.Println(style.Item(style.OK, i18n.T("Proxy already running   pid {pid} · 127.0.0.1:{port}",
+			i18n.A{"pid": i.PID, "port": i.Port})))
 		return 0
 	}
 
@@ -205,22 +211,25 @@ func cmdStart(agents confighookapi.AgentCatalog, force bool) int {
 	st, err := store.EnsureControlToken()
 	if err != nil {
 		// 不拦：用户要的是把代理起起来，为一行令牌拒绝启动更糟。但后果明说。
-		fmt.Fprintln(os.Stderr, style.Mark(style.Warn)+" 控制令牌写不出去（跨用户 newgate stop 会不可用）: "+err.Error())
+		fmt.Fprintln(os.Stderr, style.Mark(style.Warn)+" "+i18n.T(
+			"Cannot write the control token (a cross-user newgate stop will not work): {err}",
+			i18n.A{"err": err.Error()}))
 	}
 	// 没 key 就别接管——接管了每个请求都是错误，而用户的配置已经被改了
 	if probs := activeProblems(st); len(probs) > 0 && !force {
-		fmt.Fprintf(os.Stderr, "newgate: 配置不可用，拒绝接管\n")
+		fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T("Config is unusable, refusing to take over", nil))
 		for _, p := range probs {
 			fmt.Fprintf(os.Stderr, "  %s %s\n", style.Mark(style.Bad), p)
 		}
-		fmt.Fprintf(os.Stderr, "%s\n", style.Hint("填 key 进 "+paths.ProvidersFile()+"，或设对应的环境变量"))
-		fmt.Fprintf(os.Stderr, "%s\n", style.Hint("确认：newgate doctor    强行接管：newgate start --force"))
+		fmt.Fprintf(os.Stderr, "%s\n", style.Hint(i18n.T("Put a key in {file}, or set the matching environment variable",
+			i18n.A{"file": paths.ProvidersFile()})))
+		fmt.Fprintf(os.Stderr, "%s\n", style.Hint(i18n.T("Check: newgate doctor    Force takeover: newgate start --force", nil)))
 		return 65
 	}
 
 	info, err := daemon.Spawn(st.Port)
 	if err != nil {
-		return die(70, "启动守护进程失败: "+err.Error())
+		return die(70, i18n.T("Cannot start the daemon: {err}", i18n.A{"err": err.Error()}))
 	}
 	ok := false
 	for k := 0; k < 60; k++ {
@@ -233,18 +242,21 @@ func cmdStart(agents confighookapi.AgentCatalog, force bool) int {
 	if !ok {
 		// 区分「进程没起来」和「起来了但我们连不上」——后者绝不能杀进程
 		if httpx.TCPAlive("127.0.0.1", st.Port, time.Second) {
-			fmt.Fprintf(os.Stderr,
-				"newgate: 端口 %d 在听但 HTTP 探活失败，代理进程保留。\n"+
-					"  最常见原因：出站代理把 loopback 请求劫走了。跑 newgate doctor。\n", st.Port)
+			fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T(
+				"Port {port} is listening but the HTTP probe failed; the proxy process is kept",
+				i18n.A{"port": st.Port}))
+			fmt.Fprintf(os.Stderr, "  %s\n", i18n.T(
+				"Most likely cause: an outbound proxy is hijacking loopback requests. Run newgate doctor", nil))
 		} else {
-			fmt.Fprintf(os.Stderr, "newgate: 代理没起来（端口 %d 没在听），看日志 %s\n",
-				st.Port, paths.LogFile())
+			fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T(
+				"The proxy did not come up (nothing is listening on port {port}); see the log {log}",
+				i18n.A{"port": st.Port, "log": paths.LogFile()}))
 			_, _ = daemon.Stop()
 			return 70
 		}
 	}
-	fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已启动   pid %d · 127.0.0.1:%d · profile %s",
-		info.PID, st.Port, st.DefaultProfile)))
+	fmt.Println(style.Item(style.OK, i18n.T("Proxy started   pid {pid} · 127.0.0.1:{port} · profile {profile}",
+		i18n.A{"pid": info.PID, "port": st.Port, "profile": st.DefaultProfile})))
 
 	// 全面接管：所有没被用户显式 off 掉的 agent，各按自己的机制插上。
 	fmt.Println()
@@ -261,11 +273,12 @@ func cmdStart(agents confighookapi.AgentCatalog, force bool) int {
 	// 自动热更新」。写盘失败（CLAUDE.md §3.1 记的那个 umask 权限坑就是现场）时
 	// TakenOver 没落盘，下次 start 的行为与用户以为的正相反，而屏幕上全是绿的。
 	if err := store.SaveState(st); err != nil {
-		return style.Die(70, "接管状态写不回 state.json："+err.Error())
+		return style.Die(70, i18n.T("Cannot write the takeover state back to state.json: {err}",
+			i18n.A{"err": err.Error()}))
 	}
 	fmt.Println()
-	fmt.Println(style.Hint("配置改动 1 秒内自动热更新，无需重启"))
-	fmt.Println(style.Hint("原配置备份 " + paths.BackupDir() + "/original/"))
+	fmt.Println(style.Hint(i18n.T("Config changes hot-reload within 1 second; no restart needed", nil)))
+	fmt.Println(style.Hint(i18n.T("Original config backup: {dir}/original/", i18n.A{"dir": paths.BackupDir()})))
 	return 0
 }
 
@@ -303,7 +316,7 @@ func printResults(rs []takeover.Result) {
 // 实现细节。对外只有「接管」和「释放」，机制由 runtime/takeover 挑。
 func cmdTakeover(agents confighookapi.AgentCatalog, agent string) int {
 	if agent == "" {
-		return die(64, "要接管谁？例：newgate on claude")
+		return die(64, i18n.T("Which agent to take over? e.g. newgate on claude", nil))
 	}
 	st := store.LoadState()
 	r := takeover.On(agent, st.Port)
@@ -315,27 +328,28 @@ func cmdTakeover(agents confighookapi.AgentCatalog, agent string) int {
 		warnShellEnvConflict(agents, agent)
 	}
 	if daemon.Running() == nil {
-		fmt.Println(style.Hint("代理未运行 · newgate start 之后才生效"))
+		fmt.Println(style.Hint(i18n.T("Proxy is not running · it takes effect after newgate start", nil)))
 	}
 	return 0
 }
 
 func cmdRelease(agent string) int {
 	if agent == "" {
-		return die(64, "要释放谁？例：newgate off claude")
+		return die(64, i18n.T("Which agent to release? e.g. newgate off claude", nil))
 	}
 	r := takeover.Off(agent)
 	if r.Err != nil {
 		return die(65, r.Err.Error())
 	}
 	if len(r.Lines) == 0 {
-		fmt.Println(style.Item(style.Skip, style.Pad(agent, 10)+"本来就没被接管"))
+		fmt.Println(style.Item(style.Skip, style.Pad(agent, 10)+i18n.T("was not taken over in the first place", nil)))
 	} else {
 		printResults([]takeover.Result{r})
 	}
-	fmt.Println(style.Hint(agent + " 已恢复直连；newgate start 不再接管它（newgate on " + agent + " 恢复）"))
+	fmt.Println(style.Hint(i18n.T("{agent} is back to a direct connection; newgate start will no longer take it over (newgate on {agent} restores it)",
+		i18n.A{"agent": agent})))
 	if r.Mechanism == takeover.MechShim {
-		fmt.Println(style.Hint("当前 shell 可能缓存了路径：hash -r（zsh: rehash）"))
+		fmt.Println(style.Hint(i18n.T("This shell may have cached the path: hash -r (zsh: rehash)", nil)))
 	}
 	return 0
 }
@@ -353,21 +367,22 @@ func cmdStop() int {
 		return die(70, err.Error())
 	}
 	if pid > 0 {
-		fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已停止   pid %d", pid)))
+		fmt.Println(style.Item(style.OK, i18n.T("Proxy stopped   pid {pid}", i18n.A{"pid": pid})))
 	} else {
-		fmt.Println(style.Item(style.Skip, "代理本来没在跑"))
+		fmt.Println(style.Item(style.Skip, i18n.T("The proxy was not running", nil)))
 	}
 
 	st := store.LoadState()
 	st.TakenOver = false
 	// 同上：这一步写不出去，下次 start 会以为「用户从没放手过」。
 	if err := store.SaveState(st); err != nil {
-		return style.Die(70, "接管状态写不回 state.json："+err.Error())
+		return style.Die(70, i18n.T("Cannot write the takeover state back to state.json: {err}",
+			i18n.A{"err": err.Error()}))
 	}
 
 	fmt.Println()
-	fmt.Println(style.Hint("所有工具已恢复直连；PATH 里那行仍指向空 shim 目录，无害"))
-	fmt.Println(style.Hint("彻底清掉：newgate shim uninstall"))
+	fmt.Println(style.Hint(i18n.T("All tools are back to direct connections; the PATH line still points at the empty shim dir, which is harmless", nil)))
+	fmt.Println(style.Hint(i18n.T("Remove it completely: newgate shim uninstall", nil)))
 	return 0
 }
 
@@ -397,7 +412,7 @@ func tryHandoff() bool {
 	}
 	st := store.LoadState()
 	if st.ControlToken == "" {
-		fmt.Println(style.Item(style.Skip, "daemon 没有控制令牌（升级前启动的），退回 stop+start"))
+		fmt.Println(style.Item(style.Skip, i18n.T("The daemon has no control token (started before the upgrade), falling back to stop+start", nil)))
 		return false
 	}
 	port := i.Port
@@ -409,9 +424,10 @@ func tryHandoff() bool {
 	supports, err := handoffSupported(port)
 	if err != nil || !supports {
 		if err != nil {
-			fmt.Println(style.Item(style.Skip, fmt.Sprintf("探测 daemon 交接能力失败（%v），退回 stop+start", err)))
+			fmt.Println(style.Item(style.Skip, i18n.T("Cannot probe the daemon handoff capability ({err}), falling back to stop+start",
+				i18n.A{"err": err})))
 		} else {
-			fmt.Println(style.Item(style.Skip, "运行中的是旧版 daemon（不支持优雅交接），退回 stop+start"))
+			fmt.Println(style.Item(style.Skip, i18n.T("The running daemon is an old version (no graceful handoff), falling back to stop+start", nil)))
 		}
 		return false
 	}
@@ -424,25 +440,29 @@ func tryHandoff() bool {
 	// 旧 daemon 要等新进程 ready 才回 200，给足时间
 	resp, err := httpx.LocalClient(20 * time.Second).Do(req)
 	if err != nil {
-		fmt.Println(style.Item(style.Skip, fmt.Sprintf("交接请求发不出去（%v），退回 stop+start", err)))
+		fmt.Println(style.Item(style.Skip, i18n.T("Cannot send the handoff request ({err}), falling back to stop+start",
+			i18n.A{"err": err})))
 		return false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		b, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 512))
-		fmt.Println(style.Item(style.Skip, fmt.Sprintf("交接被拒（HTTP %d: %s），退回 stop+start", resp.StatusCode, b)))
+		fmt.Println(style.Item(style.Skip, i18n.T("Handoff refused (HTTP {code}: {body}), falling back to stop+start",
+			i18n.A{"code": resp.StatusCode, "body": string(b)})))
 		return false
 	}
 	// 200 = 新进程已接上 socket、pid/lock 已改写。这里只确认它完全就位。
 	for k := 0; k < 100; k++ { // 最多 5s
 		if j := daemon.Running(); j != nil && j.PID != i.PID && pingProxy(j.Port) {
-			fmt.Println(style.Item(style.OK, fmt.Sprintf("代理已优雅重启   pid %d → %d · 127.0.0.1:%d", i.PID, j.PID, j.Port)))
-			fmt.Println(style.Hint("socket 无缝交接：在途请求由旧进程排空，会话不中断；接管状态未动"))
+			fmt.Println(style.Item(style.OK, i18n.T("Proxy gracefully restarted   pid {old} → {new} · 127.0.0.1:{port}",
+				i18n.A{"old": i.PID, "new": j.PID, "port": j.Port})))
+			fmt.Println(style.Hint(i18n.T("Socket handed over seamlessly: in-flight requests drain in the old process, sessions are not interrupted; takeover state is untouched", nil)))
 			return true
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	fmt.Printf("%s 交接已发出，但新进程 5 秒内没就位 · 日志 %s\n", style.Mark(style.Warn), paths.LogFile())
+	fmt.Printf("%s %s\n", style.Mark(style.Warn), i18n.T("Handoff sent, but the new process was not in place within 5 seconds · log {log}",
+		i18n.A{"log": paths.LogFile()}))
 	return false
 }
 
@@ -491,15 +511,15 @@ func activeProblems(st *domain.State) []string {
 	for name := range used {
 		prov, ok := snap.Providers.Providers[name]
 		if !ok {
-			out = append(out, fmt.Sprintf("provider %q 未定义", name))
+			out = append(out, i18n.T("Provider {name} is not defined", i18n.A{"name": name}))
 			continue
 		}
 		if prov.Key() == "" {
-			hint := "在 providers.json 里填 api_key"
+			hint := i18n.T("fill in api_key in providers.json", nil)
 			if prov.APIKeyEnv != "" {
-				hint = "设环境变量 " + prov.APIKeyEnv + " 或填 api_key"
+				hint = i18n.T("set the environment variable {env} or fill in api_key", i18n.A{"env": prov.APIKeyEnv})
 			}
-			out = append(out, fmt.Sprintf("provider %q 没有 key → %s", name, hint))
+			out = append(out, i18n.T("Provider {name} has no key → {hint}", i18n.A{"name": name, "hint": hint}))
 		}
 	}
 	return out
@@ -519,8 +539,8 @@ func warnShellEnvConflict(agents confighookapi.AgentCatalog, toolID string) {
 	if len(conflict) == 0 {
 		return
 	}
-	fmt.Println(style.Hint("shell 里已导出 " + strings.Join(conflict, ", ")))
-	fmt.Println(style.Hint("接管时在子进程内覆盖，不影响 newgate；off 之后重新生效（即回到直连）"))
+	fmt.Println(style.Hint(i18n.T("Already exported in the shell: {names}", i18n.A{"names": strings.Join(conflict, ", ")})))
+	fmt.Println(style.Hint(i18n.T("Takeover overrides it inside the child process, without affecting newgate; it applies again after off (i.e. back to a direct connection)", nil)))
 }
 
 // ---------- 命令声明 ----------
@@ -542,7 +562,7 @@ func (startCommand) Names() []string { return []string{"start"} }
 
 func (startCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionTakeover, Rank: rankTakeover,
-		Usage: "start", Summary: "起代理 + 接管所有 agent"}
+		Usage: "start", Summary: i18n.T("Start the proxy + take over every agent", nil)}
 }
 
 func (c startCommand) Run(_ cliapi.Host, args []string) int {
@@ -563,7 +583,7 @@ func (stopCommand) Names() []string { return []string{"stop"} }
 
 func (stopCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionTakeover, Rank: rankTakeover,
-		Usage: "stop", Summary: "停代理 + 所有 agent 恢复直连"}
+		Usage: "stop", Summary: i18n.T("Stop the proxy + every agent back to a direct connection", nil)}
 }
 
 func (stopCommand) Run(_ cliapi.Host, args []string) int {
@@ -584,7 +604,7 @@ func (takeoverCommand) Names() []string { return []string{"on", "takeover", "tak
 
 func (takeoverCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionTakeover, Rank: rankTakeover,
-		Usage: "on <agent>", Summary: "只接管一个"}
+		Usage: "on <agent>", Summary: i18n.T("Take over just one", nil)}
 }
 
 func (c takeoverCommand) Run(_ cliapi.Host, args []string) int {
@@ -602,7 +622,7 @@ func (releaseCommand) Names() []string { return []string{"off", "release", "free
 
 func (releaseCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionTakeover, Rank: rankTakeover,
-		Usage: "off <agent>", Summary: "只放开一个，以后 start 也不再管它"}
+		Usage: "off <agent>", Summary: i18n.T("Release just one; later start runs will leave it alone", nil)}
 }
 
 func (releaseCommand) Run(_ cliapi.Host, args []string) int {
@@ -623,7 +643,7 @@ func (restartCommand) Names() []string { return []string{"restart"} }
 
 func (restartCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionTakeover, Rank: rankTakeover,
-		Usage: "restart", Summary: "重启代理，接管现场原样保留"}
+		Usage: "restart", Summary: i18n.T("Restart the proxy, keeping the takeover scene as it is", nil)}
 }
 
 func (c restartCommand) Run(_ cliapi.Host, args []string) int {
@@ -641,7 +661,7 @@ func (shimCommand) Names() []string { return []string{"shim"} }
 
 func (shimCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionMaintenance, Rank: 50,
-		Usage: "shim …", Summary: "底层逃生口，平时用 on/off 就够了"}
+		Usage: "shim …", Summary: i18n.T("Low-level escape hatch; on/off is enough day to day", nil)}
 }
 
 func (c shimCommand) Run(_ cliapi.Host, args []string) int {

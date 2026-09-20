@@ -3,8 +3,9 @@ package thinkcache
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"strings"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
 // Observer 旁路观测一条响应，攒出「这一轮的推理内容」和它对应的 key。
@@ -239,23 +240,25 @@ func (o *Observer) ObserveBody(body []byte) {
 // 不打任何内容，只有计数和布尔。
 func (o *Observer) Wire() string {
 	if o == nil {
-		return "（没有观测者）"
+		return i18n.T("(no observer)", nil)
 	}
-	dialect := "未知方言"
+	dialect := i18n.T("unknown dialect", nil)
 	switch {
 	case o.sawAnthropic && o.sawOpenAI:
-		dialect = "两种混着"
+		dialect = i18n.T("mixed dialects", nil)
 	case o.sawAnthropic:
 		dialect = "anthropic"
 	case o.sawOpenAI:
 		dialect = "openai"
 	}
-	s := fmt.Sprintf("%s %d 块 / 推理增量 %d / 正文增量 %d",
-		dialect, o.chunks, o.reasonDeltas, o.textDeltas)
 	if o.badChunks > 0 {
-		s += fmt.Sprintf(" / **%d 块解析不了**", o.badChunks)
+		return i18n.T("{dialect} {chunks} chunks / {reasoning} reasoning deltas / {text} text deltas / **{bad} chunks unparsable**",
+			i18n.A{"dialect": dialect, "chunks": o.chunks, "reasoning": o.reasonDeltas,
+				"text": o.textDeltas, "bad": o.badChunks})
 	}
-	return s
+	return i18n.T("{dialect} {chunks} chunks / {reasoning} reasoning deltas / {text} text deltas",
+		i18n.A{"dialect": dialect, "chunks": o.chunks, "reasoning": o.reasonDeltas,
+			"text": o.textDeltas})
 }
 
 // Keys 这一轮的推理内容该挂在哪些 key 上。

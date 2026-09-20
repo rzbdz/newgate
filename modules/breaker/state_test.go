@@ -97,7 +97,7 @@ func TestBucketSwitchRestartsTheStreak(t *testing.T) {
 	if !rate().Opened {
 		t.Fatal("限流账本连续第三次失败应开闸")
 	}
-	if got := state(t, b, "relay", "model"); got.Rule != "限流" {
+	if got := state(t, b, "relay", "model"); got.Rule != "rate limit" {
 		t.Fatalf("开闸原因应是限流: %+v", got)
 	}
 }
@@ -112,15 +112,15 @@ func TestPerBucketPolicy(t *testing.T) {
 		cooldown  time.Duration
 		rule      string
 	}{
-		{"连接失败", Input{Kind: KindConnError}, 2, 60 * time.Second, "可用性"},
-		{"首字节超时（客户端侧无差别）", Input{Kind: KindConnError}, 2, 60 * time.Second, "可用性"},
-		{"500", Input{Kind: KindUpstreamStatus, Status: 500}, 2, 60 * time.Second, "可用性"},
-		{"503", Input{Kind: KindUpstreamStatus, Status: 503}, 2, 60 * time.Second, "可用性"},
-		{"流中途断", Input{Kind: KindStreamTruncated, Written: true}, 2, 60 * time.Second, "可用性"},
-		{"429", Input{Kind: KindUpstreamStatus, Status: 429}, 3, 20 * time.Second, "限流"},
-		{"401", Input{Kind: KindUpstreamStatus, Status: 401}, 1, 5 * time.Minute, "配置"},
-		{"403", Input{Kind: KindUpstreamStatus, Status: 403}, 1, 5 * time.Minute, "配置"},
-		{"404", Input{Kind: KindUpstreamStatus, Status: 404}, 1, 5 * time.Minute, "配置"},
+		{"连接失败", Input{Kind: KindConnError}, 2, 60 * time.Second, "availability"},
+		{"首字节超时（客户端侧无差别）", Input{Kind: KindConnError}, 2, 60 * time.Second, "availability"},
+		{"500", Input{Kind: KindUpstreamStatus, Status: 500}, 2, 60 * time.Second, "availability"},
+		{"503", Input{Kind: KindUpstreamStatus, Status: 503}, 2, 60 * time.Second, "availability"},
+		{"流中途断", Input{Kind: KindStreamTruncated, Written: true}, 2, 60 * time.Second, "availability"},
+		{"429", Input{Kind: KindUpstreamStatus, Status: 429}, 3, 20 * time.Second, "rate limit"},
+		{"401", Input{Kind: KindUpstreamStatus, Status: 401}, 1, 5 * time.Minute, "config"},
+		{"403", Input{Kind: KindUpstreamStatus, Status: 403}, 1, 5 * time.Minute, "config"},
+		{"404", Input{Kind: KindUpstreamStatus, Status: 404}, 1, 5 * time.Minute, "config"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -448,7 +448,7 @@ func TestPreSealDiagnosticSealsWhenProbeAlsoFails(t *testing.T) {
 		t.Fatalf("诊断说不可用却没摘: %+v", r)
 	}
 	got := state(t, b, "p", "m")
-	if got.State != "open" || !strings.Contains(got.Reason, "诊断探活也不通") {
+	if got.State != "open" || !strings.Contains(got.Reason, "diagnostic probe also failed") {
 		t.Fatalf("开闸原因应写明诊断结论: %+v", got)
 	}
 }

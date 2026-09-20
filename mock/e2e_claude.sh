@@ -57,6 +57,11 @@ mkdir -p "$NEWGATE_HOME/mappings"
 # 启动时父进程 env 会漏给子进程），不 unset 会让「没声明的 profile」
 # 用例读到父会话的值、假失败。
 unset CLAUDE_CODE_MAX_CONTEXT_TOKENS CLAUDE_CODE_AUTO_COMPACT_WINDOW
+# 语言同理：脚本断言的是**源语言原文**（英文），而跑它的机器可能是 zh-Hans
+# （我们自己的机器就是）。不钉住的话，「界面上是英文」这类断言在中文机器上
+# 假红——而第 21 章要验的正是「换个环境变量真的换语言」，它自己造环境。
+export NEWGATE_LANG=en
+unset LC_ALL LC_MESSAGES LANG LANGUAGE 2>/dev/null || true
 
 cleanup() {
   "$BIN" stop >/dev/null 2>&1 || true
@@ -240,10 +245,12 @@ case "$PLUGIN_OUT" in
   *"infra"*"gateway"*"model"*) ok "plugin：按分类分组展示" ;;
   *) bad "plugin 没有按分类分组" ;;
 esac
+# 断言源语言原文：界面文案现在走目录表，中文是译文（语言可切），而源语言那条
+# 路径是恒等的——CI 上 LANG=C，钉住它才稳定。
 case "$PLUGIN_OUT" in
-  *"无法 runtime 开关（v1）"*)
+  *"cannot be toggled at runtime (v1)"*)
     ok "plugin：没上报开关点的模块显式标注（不是静默省略）" ;;
-  *) bad "plugin 没标注「无法 runtime 开关」" ;;
+  *) bad "plugin 没标注「cannot be toggled at runtime」" ;;
 esac
 
 # 开关点认不出来时必须是**报错**，不是静默当成 on/off。
@@ -287,9 +294,45 @@ check "schema-repair on ⇒ 上游收到补好的 required" "$(has_required)" "�
 post_schema
 check "schema-repair off ⇒ 字节原样，不补 required" "$(has_required)" "无"
 
-check "收尾：开关都回到出厂态" \
-  "$("$BIN" status 2>&1 | command grep -c 'special 关了\|schema repair off')" "0"
+# 收尾：把探针还原，`status` 那行「补丁开关」就该**整行消失**（出厂态 = 一个都
+# 不报）。这里断言的是开关名（机器标记），不是那行的说法——说法跟着语言走。
+#
+# 2026-09-20 修：这条以前 grep 的是 `schema repair off`（空格），而代码印的是
+# `schema-repair=off`（连字符），于是它**恒真**——脚本刚把 schema-repair 关掉，
+# 那一行本来就该出现。空断言比没有断言更坏：它看起来在守着什么。
+"$BIN" schema-repair on >/dev/null 2>&1
+check "收尾：开关都回到出厂态（status 不再报补丁开关）" \
+  "$("$BIN" status 2>&1 | command grep -c 'schema-repair=off\|special_treatment=off\|special off:\|debug=on')" "0"
 
+
+echo; echo "== 21. 语言：源语言恒等、译文可选、配置压过系统 LANG =="
+# 三件事分开验，因为它们会分别坏掉：
+#   (a) 默认（没配、系统没说）是英文——源语言那条路径是**恒等**的，不查表；
+#   (b) NEWGATE_LANG=zh-Hans 真的换语言（不是「配了但没人读」）；
+#   (c) 配置里的语言**压过**系统 LANG——英文系统上强制中文，是这个功能的一半理由；
+#   (d) 反过来，这一次性的环境变量又压过配置（排障时要能临时换回来）。
+# 探针用 `status` 里那一行 `● Running` / `● 运行中`：它由 CLI 进程渲染，且两种
+# 语言下都是稳定的一行。
+zh_running() { env "$@" "$BIN" status 2>&1 | command grep -c '● 运行中'; }
+
+check "默认是英文（源语言恒等）" \
+  "$(env -u NEWGATE_LANG LANG=C.UTF-8 "$BIN" status 2>&1 | command grep -c '● Running')" "1"
+check "NEWGATE_LANG=zh-Hans 换到中文" "$(zh_running NEWGATE_LANG=zh-Hans)" "1"
+check "没配过时跟随系统 LANG" "$(zh_running NEWGATE_LANG= LANG=zh_CN.UTF-8)" "1"
+
+# 配置压过 LANG：这正是「英文系统上强制中文」那个诉求。
+"$BIN" lang en >/dev/null 2>&1
+check "写进配置的 en 压过 LANG=zh_CN.UTF-8" \
+  "$(env LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 "$BIN" status 2>&1 | command grep -c '● Running')" "1"
+check "NEWGATE_LANG 又压过配置（临时换回来）" \
+  "$(zh_running LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 NEWGATE_LANG=zh-Hans)" "1"
+
+# `newgate lang` 自己要把覆盖率说出来：翻了多少、还差多少，是译者唯一的仪表盘。
+"$BIN" lang >"$SANDBOX/lang.out" 2>&1
+command grep -q 'zh-Hans' "$SANDBOX/lang.out" \
+  && ok "lang：列出每门语言与覆盖率" || bad "lang 没列出语言：$(head -3 "$SANDBOX/lang.out")"
+"$BIN" lang zh-Hans >/dev/null 2>&1 \
+  && ok "lang <tag>：持久化" || bad "lang <tag> 没成功"
 
 echo
 echo "结果: $PASS 通过, $FAIL 失败"

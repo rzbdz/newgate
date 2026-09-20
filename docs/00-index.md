@@ -16,6 +16,7 @@
 | 10 | [10-testing-security.md](10-testing-security.md) | 如何验证并守住安全边界？ |
 | 11 | [11-troubleshooting.md](11-troubleshooting.md) | 常见故障如何定位？ |
 | 12 | [12-newgate-remote.md](12-newgate-remote.md) | newgate-remote：基于 Tailscale 的分布式网关设计（仅设计文档，未实现） |
+| 13 | [13-i18n.md](13-i18n.md) | 界面与日志怎么本地化？为什么键就是那句英文？翻译流程怎么跑？ |
 
 ## 历史阅读
 

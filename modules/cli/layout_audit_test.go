@@ -30,8 +30,8 @@ func usageFixture(t *testing.T) *service {
 	s := &service{}
 	// 名字各不相同：账本按 Names 查重（撞名当场报错，这是它的不变量之一）。
 	for i, line := range []HelpLine{
-		{Section: "维护", Usage: "claudecode-deepseek-thing on|off [时长]", Summary: "一个很长的模块名，用来把左列撑开"},
-		{Section: "模块", Usage: "plugin [模块[.路径]] [on|off] [时长]", Summary: "全部模块按分类列出；开关某个模块或某个开关点"},
+		{Section: SectionMaintenance, Usage: "claudecode-deepseek-thing on|off [时长]", Summary: "一个很长的模块名，用来把左列撑开"},
+		{Section: SectionModules, Usage: "plugin [模块[.路径]] [on|off] [时长]", Summary: "全部模块按分类列出；开关某个模块或某个开关点"},
 	} {
 		if _, err := s.RegisterCommand(fakeDoc{name: fmt.Sprintf("fake%d", i), line: line}); err != nil {
 			t.Fatalf("注册失败: %v", err)
@@ -65,8 +65,10 @@ func TestUsageIncludesModuleContributions(t *testing.T) {
 			t.Fatalf("--help 里没有 %q：\n%s", want, text)
 		}
 	}
-	// 自开的节要有自己的标题，而不是被吞进上一节。
-	if !strings.Contains(text, "模块\n") {
+	// 自开的节要有自己的标题，而不是被吞进上一节。标题断言的是**显示名**
+	// （源语言就是英文那句）：槽位的键是 ASCII 身份，文案归目录
+	// ——见 extension.Section.Display。
+	if !strings.Contains(text, SectionModules.Display()+"\n") {
 		t.Fatalf("模块自开的节没有渲染出来：\n%s", text)
 	}
 }

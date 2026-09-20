@@ -144,7 +144,9 @@ func TestShapeDetectorIsWiredThroughTheRealGraph(t *testing.T) {
 		t.Fatalf("日志里没有 [shape-400]——判据没被认领，或转发路径没读 Shape；\n%s",
 			h.Logs())
 	}
-	if !strings.Contains(h.Logs(), "判据 test-shape") {
+	// 断言的是**判据的名字**（`detector test-shape`）：名字是机器标记，跟着它走
+	// 的中文说法会随语言变，而这一行要证明的事情与语言无关。
+	if !strings.Contains(h.Logs(), "detector test-shape") {
 		t.Fatalf("日志没说清是哪条判据认的（多家上游同时报 400 时这是唯一能分辨的信息）；\n%s",
 			h.Logs())
 	}

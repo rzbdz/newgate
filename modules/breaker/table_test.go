@@ -22,7 +22,7 @@ func TestBreakerIsScopedToBinding(t *testing.T) {
 	if len(status) != 1 || status[0].Provider != "relay" || status[0].Model != "slow" {
 		t.Fatalf("熔断快照不对: %+v", status)
 	}
-	if status[0].Rule != "可用性" || status[0].State != "open" {
+	if status[0].Rule != "availability" || status[0].State != "open" {
 		t.Fatalf("摘牌原因/状态没进快照: %+v", status[0])
 	}
 }
@@ -38,7 +38,7 @@ func TestSnapshotShowsFailuresBelowThreshold(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("失败 1 次（未开闸）的 binding 没有出现在快照里: %+v", got)
 	}
-	if got[0].Fails != 1 || got[0].Open || got[0].State != "closed" || got[0].Rule != "可用性" {
+	if got[0].Fails != 1 || got[0].Open || got[0].State != "closed" || got[0].Rule != "availability" {
 		t.Fatalf("未开闸的失败计数不对: %+v", got[0])
 	}
 }
@@ -106,7 +106,7 @@ func TestOpenStateSurvivesRestart(t *testing.T) {
 	}
 	got := second.Snapshot()
 	if len(got) != 1 || !got[0].Open || got[0].Fails != 1 ||
-		got[0].State != "open" || got[0].Rule != "可用性" {
+		got[0].State != "open" || got[0].Rule != "availability" {
 		t.Fatalf("摘牌状态没有完整恢复: %+v", got)
 	}
 }

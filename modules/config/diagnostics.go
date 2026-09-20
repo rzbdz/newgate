@@ -17,9 +17,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/domain"
@@ -65,7 +65,7 @@ func (reporter) Diagnostics() []cliapi.Diagnostic {
 
 // checkFiles 三个必需文件在不在。
 func checkFiles() cliapi.Diagnostic {
-	d := cliapi.Diagnostic{Rank: rankCheckFiles, Label: "文件"}
+	d := cliapi.Diagnostic{Rank: rankCheckFiles, Label: i18n.T("Files", nil)}
 	var missing, ok []string
 	for _, p := range []string{paths.ProvidersFile(), paths.Mappings()} {
 		if _, err := os.Stat(p); err != nil {
@@ -79,18 +79,19 @@ func checkFiles() cliapi.Diagnostic {
 	// 「代理在跑却连不上」，而只 os.Stat 的体检会把那个文件列进 ok 里、报全部通过
 	// ——用户拿到的是一组互相矛盾的现象（见 store.ValidateState 的说明）。
 	if err := store.ValidateState(); err != nil {
-		missing = append(missing, "state.json（"+err.Error()+"）")
+		missing = append(missing, i18n.T("{file} ({err})",
+			i18n.A{"file": "state.json", "err": err.Error()}))
 	} else {
 		ok = append(ok, "state.json")
 	}
 	extra := ""
 	if names, err := store.ListProfiles(); err == nil {
-		extra = fmt.Sprintf(" · %d 个 profile", len(names))
+		extra = " · " + i18n.N("{n} profile", "{n} profiles", len(names), i18n.A{"n": len(names)})
 	}
 	if len(missing) > 0 {
 		d.State = "bad"
-		d.Line = strings.Join(missing, " · ") + " 不存在"
-		d.Details = append(d.Details, "newgate init 铺开默认配置")
+		d.Line = i18n.T("{files} missing", i18n.A{"files": strings.Join(missing, " · ")})
+		d.Details = append(d.Details, i18n.T("newgate init lays down the default configuration", nil))
 		return d
 	}
 	d.State = "ok"
@@ -100,16 +101,18 @@ func checkFiles() cliapi.Diagnostic {
 
 // checkChain profile 引用的 provider 与 key 齐不齐。
 func checkChain() cliapi.Diagnostic {
-	d := cliapi.Diagnostic{Rank: rankCheckChain, Label: "链路"}
+	d := cliapi.Diagnostic{Rank: rankCheckChain, Label: i18n.T("Chain", nil)}
 	probs := store.Validate()
 	names, _ := store.ListProfiles()
 	if len(probs) == 0 {
 		d.State = "ok"
-		d.Line = fmt.Sprintf("%d 个 profile 的 provider 与 key 均可用", len(names))
+		d.Line = i18n.N("{n} profile has usable providers and keys",
+			"{n} profiles have usable providers and keys", len(names), i18n.A{"n": len(names)})
 		return d
 	}
 	d.State = "bad"
-	d.Line = fmt.Sprintf("%d 处配置问题", len(probs))
+	d.Line = i18n.N("{n} configuration problem", "{n} configuration problems",
+		len(probs), i18n.A{"n": len(probs)})
 	d.Details = probs
 	return d
 }
@@ -119,7 +122,7 @@ func checkChain() cliapi.Diagnostic {
 // Status 一行说清用哪个 profile，有 per-agent 覆盖才展开。
 func (reporter) Status() []cliapi.StatusLine {
 	st := store.LoadState()
-	line := style.Cyan(st.DefaultProfile) + style.Dim(" 默认")
+	line := style.Cyan(st.DefaultProfile) + style.Dim(" "+i18n.T("default", nil))
 	over := 0
 	var parts []string
 	for _, id := range sortedAgentIDs(st) {
@@ -131,7 +134,7 @@ func (reporter) Status() []cliapi.StatusLine {
 	if over > 0 {
 		line += "   " + strings.Join(parts, "   ")
 	}
-	return []cliapi.StatusLine{{Rank: rankStatusConfig, Label: "配置", Value: line}}
+	return []cliapi.StatusLine{{Rank: rankStatusConfig, Label: i18n.T("Config", nil), Value: line}}
 }
 
 // sortedAgentIDs 稳定的已知 agent 顺序。
@@ -167,27 +170,28 @@ func (reporter) StatusBlocks() []cliapi.StatusBlock {
 // bindingBlock 默认 profile 的档位绑定表。
 func bindingBlock(st *domain.State) cliapi.StatusBlock {
 	block := cliapi.StatusBlock{Rank: rankBlockBinding,
-		Title: "档位绑定   profile " + st.DefaultProfile}
+		Title: i18n.T("role bindings   profile {name}", i18n.A{"name": st.DefaultProfile})}
 	pr, err := store.LoadProfile(st.DefaultProfile)
 	if err != nil {
 		block.Lines = append(block.Lines,
-			style.Item(style.Warn, fmt.Sprintf("默认 profile %q 读不出: %v", st.DefaultProfile, err)))
+			style.Item(style.Warn, i18n.T("cannot read the default profile {name}: {err}",
+				i18n.A{"name": st.DefaultProfile, "err": err.Error()})))
 		return block
 	}
 	provs, _ := store.LoadProviders()
-	t := style.NewTable("档位", "绑定", "备注")
+	t := style.NewTable(i18n.T("Role", nil), i18n.T("Binding", nil), i18n.T("Note", nil))
 	for _, role := range domain.Roles {
 		b, ok := pr.Resolve(role)
 		if !ok {
-			t.Row(style.Dim(role), style.Dim("未绑定"), "")
+			t.Row(style.Dim(role), style.Dim(i18n.T("unbound", nil)), "")
 			continue
 		}
 		note := ""
 		if provs != nil {
 			if p, exists := provs.Providers[b.Provider]; !exists {
-				note = style.Red("provider 未定义")
+				note = style.Red(i18n.T("provider is not defined", nil))
 			} else if p.Key() == "" {
-				note = style.Yellow("缺 api_key")
+				note = style.Yellow(i18n.T("api_key missing", nil))
 			}
 		}
 		t.Row(style.Cyan(role), b.String(), note)
@@ -203,7 +207,7 @@ func chainBlock(st *domain.State, doc *controlplane.Doc) cliapi.StatusBlock {
 	if err != nil {
 		return block
 	}
-	block.Title = "fallback 链   normal 档，按序尝试"
+	block.Title = i18n.T("fallback chain   role normal, tried in order", nil)
 	// MaxSteps: 0——`status` 展示的是**完整候选链**，maxAttempts 是单次请求的
 	// 执行上限，不是 membership。传 Attempts() 会把第 4 站之后静默裁掉，于是
 	// 「normal 档里怎么没有 ark」这种观感问题（2026-09-17 实查：ark 是第 4 站，
@@ -212,14 +216,15 @@ func chainBlock(st *domain.State, doc *controlplane.Doc) cliapi.StatusBlock {
 		Active: st.DefaultProfile, Available: doc.Available(), Rank: doc.Rank(),
 		MaxSteps: 0})
 	if len(steps) == 0 {
-		block.Lines = append(block.Lines, style.Item(style.Warn, "无可用候选   newgate tier normal"))
+		block.Lines = append(block.Lines,
+			style.Item(style.Warn, i18n.T("no usable candidate   newgate tier normal", nil)))
 		return block
 	}
 	block.Lines = append(block.Lines, strings.TrimRight(bindingChain(steps, "  "), "\n"))
 	if limit := st.Chain.Attempts(); limit < len(steps) {
-		block.Lines = append(block.Lines, style.Hint(fmt.Sprintf(
-			"单次请求最多尝试前 %d 站；后续 %d 站仍在链中（newgate tier normal 看明细）",
-			limit, len(steps)-limit)))
+		block.Lines = append(block.Lines, style.Hint(i18n.T(
+			"a request tries at most the first {limit} stops; the remaining {rest} stay in the chain (details: newgate tier normal)",
+			i18n.A{"limit": limit, "rest": len(steps) - limit})))
 	}
 	if tail := chainTail(steps, skips); tail != "" {
 		block.Lines = append(block.Lines, style.Hint(tail))
@@ -230,20 +235,23 @@ func chainBlock(st *domain.State, doc *controlplane.Doc) cliapi.StatusBlock {
 // chainTail 链尾的一句话总结：还有多少候选被跳过、去哪儿看原因。
 func chainTail(steps []resolve.Step, skips []resolve.Skip) string {
 	if len(skips) == 0 {
-		return fmt.Sprintf("链上 %d 站", len(steps))
+		return i18n.N("{n} stop in the chain", "{n} stops in the chain",
+			len(steps), i18n.A{"n": len(steps)})
 	}
 	reasons := map[string]int{}
 	for _, s := range skips {
-		reasons[skipKind(s.Reason)]++
+		reasons[skipKind(s)]++
 	}
 	var parts []string
-	for _, k := range skipKinds {
+	for _, k := range skipKindOrder {
 		if n := reasons[k]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%s %d", k, n))
+			parts = append(parts, fmt.Sprintf("%s %d", skipLabel(k), n))
 		}
 	}
-	return fmt.Sprintf("链上 %d 站；跳过 %d（%s）   newgate tier normal",
-		len(steps), len(skips), strings.Join(parts, " · "))
+	return i18n.N("{stops} stop in the chain; {skipped} skipped ({reasons})   newgate tier normal",
+		"{stops} stops in the chain; {skipped} skipped ({reasons})   newgate tier normal",
+		len(steps), i18n.A{"stops": len(steps), "skipped": len(skips),
+			"reasons": strings.Join(parts, " · ")})
 }
 
 // ---------- 诊断包的原始素材 ----------
@@ -256,20 +264,20 @@ func (reporter) Dump() []cliapi.DumpSection {
 }
 
 func dumpProviders() cliapi.DumpSection {
-	s := cliapi.DumpSection{Rank: rankDumpProviders, Title: "providers.json（密钥脱敏）"}
+	s := cliapi.DumpSection{Rank: rankDumpProviders, Title: i18n.T("providers.json (keys redacted)", nil)}
 	provs, err := store.LoadProviders()
 	if err != nil {
-		s.Lines = append(s.Lines, "  读不到: "+err.Error())
+		s.Lines = append(s.Lines, "  "+i18n.T("cannot read: {err}", i18n.A{"err": err.Error()}))
 		return s
 	}
 	for _, n := range sortedKeys(provs.Providers) {
 		p := provs.Providers[n]
-		k := "(空)"
+		k := i18n.T("(empty)", nil)
 		if v := p.Key(); v != "" {
 			if len(v) > 10 {
-				k = v[:7] + "…" + strconv.Itoa(len(v)) + "字符"
+				k = v[:7] + "…" + i18n.T("{n} chars", i18n.A{"n": len(v)})
 			} else {
-				k = "(过短)"
+				k = i18n.T("(too short)", nil)
 			}
 		}
 		s.Lines = append(s.Lines, fmt.Sprintf("  %-14s %-45s protocol=%-10s key=%s",
@@ -277,14 +285,15 @@ func dumpProviders() cliapi.DumpSection {
 		// 两种方言分家的上游：另一个 base 也报出来，否则「claude 的流量到底发去
 		// 哪」在这一屏里是黑盒。
 		if p.AnthropicURL != "" {
-			s.Lines = append(s.Lines, fmt.Sprintf("  %-14s %-45s （anthropic 方言走这条）", "", p.AnthropicURL))
+			s.Lines = append(s.Lines, fmt.Sprintf("  %-14s %-45s %s", "", p.AnthropicURL,
+				i18n.T("(the anthropic dialect goes to this one)", nil)))
 		}
 	}
 	return s
 }
 
 func dumpBindings() cliapi.DumpSection {
-	s := cliapi.DumpSection{Rank: rankDumpBindings, Title: "所有 profile 的绑定"}
+	s := cliapi.DumpSection{Rank: rankDumpBindings, Title: i18n.T("bindings of all profiles", nil)}
 	names, _ := store.ListProfiles()
 	st := store.LoadState()
 	for _, n := range names {
@@ -339,13 +348,14 @@ func (glossary) Glossary() []cliapi.GlossaryLine {
 		}
 		keys = append(keys, r.Key)
 	}
-	def := "模块贡献的动态角色，写法同档位"
+	def := i18n.T("a dynamic role contributed by a module, written like a role", nil)
 	switch {
 	case len(keys) > 2:
 		keys = keys[:2]
 		fallthrough
 	case len(keys) > 0:
-		def = "模块贡献的动态角色（" + strings.Join(keys, " / ") + "），写法同档位"
+		def = i18n.T("a dynamic role contributed by a module ({keys}), written like a role",
+			i18n.A{"keys": strings.Join(keys, " / ")})
 	}
 	// profile 与配置文件的说法本来写死在界面里（cli.usageText），可这两样都是
 	// **本模块的词汇**：界面凭什么知道 providers.json 叫什么、state.json 在哪。
@@ -357,9 +367,12 @@ func (glossary) Glossary() []cliapi.GlossaryLine {
 	// 目录现取 paths.Config()：沙箱（NEWGATE_HOME）与 --home 覆盖下真正生效的
 	// 是哪一个，只有这里说了算。
 	return []cliapi.GlossaryLine{
-		{Rank: 15, Term: "profile", Definition: "一套「档位 → provider/模型」绑定"},
-		{Rank: 20, Term: "槽位键", Definition: def},
-		{Rank: 30, Term: "配置目录", Definition: paths.Config()},
-		{Rank: 31, Term: "配置文件", Definition: "providers.json · mappings/*.kv · state.json"},
+		{Rank: 15, Term: i18n.T("profile", nil),
+			Definition: i18n.T("a set of role → provider/model bindings", nil)},
+		{Rank: 20, Term: i18n.T("slot key", nil), Definition: def},
+		// 目录与文件名是**路径**，不是文案：它们必须逐字可粘贴，所以原样给。
+		{Rank: 30, Term: i18n.T("config dir", nil), Definition: paths.Config()},
+		{Rank: 31, Term: i18n.T("config files", nil),
+			Definition: "providers.json · mappings/*.kv · state.json"},
 	}
 }

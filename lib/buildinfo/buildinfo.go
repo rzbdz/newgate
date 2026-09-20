@@ -14,7 +14,11 @@
 // 唯一依据，所以它必须到处都能拿到，而不是只有某一个命令打得出。
 package buildinfo
 
-import "time"
+import (
+	"time"
+
+	i18n "github.com/rzbdz/newgate/lib/i18n"
+)
 
 // 由组合根通过 Set 注入（ldflags → main → 这里）。零值对开发者友好：make build
 // 出来的本机二进制就该显示 dev。
@@ -44,9 +48,12 @@ func Version() string { return version }
 func BuildTimeDisplay() string { return StampDisplay(buildTime) }
 
 // VersionLine 是 `newgate version` 的三行输出。
+//
+// `newgate ` 那个前缀是程序名（机器标记），留在消息外面。
 func VersionLine() string {
-	return "newgate " + version + "\n  构建于 " + BuildTimeDisplay() +
-		"\n  提交于 " + StampDisplay(commitTime)
+	return "newgate " + version +
+		i18n.T("\n  built at {time}", i18n.A{"time": BuildTimeDisplay()}) +
+		i18n.T("\n  committed at {time}", i18n.A{"time": StampDisplay(commitTime)})
 }
 
 // StampDisplay 把 ldflags 里的时间戳渲染成**一个**本地时间。
