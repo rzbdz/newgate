@@ -55,13 +55,13 @@ newgate logs
 ## 代码结构
 
 ```text
-go/component       typed capability graph and lifecycle kernel
-go/lib             stateless shared helpers
-go/modules/config  configuration semantics and persistence
-go/modules/gateway routing data plane and extension execution
-go/modules/runtime daemon, launch, injection, and takeover
-go/modules/cli     local control plane
-go/modules/*       client, model, and cross-components
+component       typed capability graph and lifecycle kernel
+lib             stateless shared helpers
+modules/config  configuration semantics and persistence
+modules/gateway routing data plane and extension execution
+modules/runtime daemon, launch, injection, and takeover
+modules/cli     local control plane
+modules/*       client, model, and cross-components
 ```
 
 每个模块根目录以 `module.go` 为标准入口，公开契约属于模块自己的 `api/`。

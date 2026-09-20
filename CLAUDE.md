@@ -34,7 +34,7 @@ newgate：把 AI CLI（claude / opencode）的模型选择收敛到**语义档�
 
 ```bash
 cd go
-make build      # 本机二进制 → go/bin/newgate（dynamic，本机够用）
+make build      # 本机二进制 → bin/newgate（dynamic，本机够用）
 make static     # CGO_ENABLED=0 全静态，跨机器部署必须用这个
 make test       # == go test ./...
 go vet ./... && gofmt -l component modules cmd
@@ -95,13 +95,13 @@ app.Main(ctx, app.Options{Loader: app.Selection{
 装模块/关模块**都不改 core 的代码**，core 也不认识任何模块名。
 
 **2026-09-20 之前不是这样**：那时内核根挂着一张 `modules-ext.json`（Pin），构建期
-把发行版仓库 clone 到 `go/modules-ext/` 再扫一遍。那套机制整个删了，因为产品决定
+把发行版仓库 clone 到 `modules-ext/` 再扫一遍。那套机制整个删了，因为产品决定
 住进了内核里，代价实测三条：编一次发行版就把内核 checkout 改脏（生成的清单被重写成
 发行版那份，挡住 pull/换分支）、内核 CI 必须去 clone 另一个仓库、装配清单 import 了
 发行版的包（核心里出现一条指向发行版的编译期依赖）。现在内核**完全离线**：
 
 ```bash
-cd go && make check          # 本仓库自己的 fmt/vet/清单/单测/两条 e2e
+make check          # 本仓库自己的 fmt/vet/清单/单测/两条 e2e
 GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事实不是承诺
 ```
 
@@ -132,17 +132,17 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
   转移、流式）做**大测试**；各模块自己的特殊行为放**模块内部**，只有它自己清楚
   边界在哪：
   - 单元：纯函数，不需要额外设施；
-  - 模块：`go/testing/testkit` —— `testkit.Start(t, 我, 桩...)` 装出「我 + 我的
+  - 模块：`testing/testkit` —— `testkit.Start(t, 我, 桩...)` 装出「我 + 我的
     依赖链」的真组件图，断言接口通过性和注册/撤销对称性；`testkit.Sandbox(t)`
     圈住 `NEWGATE_HOME`/`NEWGATE_TARGET_DIR`/`HOME`；
-  - 系统：`go/testing/system` —— `system.Start(t)` 起**整张**真组件图 + 真转发
+  - 系统：`testing/system` —— `system.Start(t)` 起**整张**真组件图 + 真转发
     服务（**临时端口，不是 8899**，所以能和跑着的线上 daemon 并存）+ 进程内假
-    上游（`go/testing/upstream`，两方言 + 流式 + 严格 reasoning + 故障注入）。
+    上游（`testing/upstream`，两方言 + 流式 + 严格 reasoning + 故障注入）。
     不是 e2e：没有子进程、没有 PATH shim、没有真接管；
   - 端到端：`mock/*.sh` —— 真二进制、真进程、真接管。**刻意与 Go 侧解耦**
     （不 import 任何 core 包），所以 Go 怎么重构都不该影响它。它一红就是行为
     真的变了。
-- **一把梭**：`cd go && make check`（格式 + vet + 生成清单 + 单测 + 两条零 token
+- **一把梭**：`make check`（格式 + vet + 生成清单 + 单测 + 两条零 token
   端到端）。拆开：`make test` / `make test-race` / `make e2e` / `make e2e-claude`。
 - **单测不出网**（`docs/10-testing-security.md` §1）：一律用 `httptest`，出网即失败。
 - **端到端零 token**：`make e2e-claude`（假上游 + 沙箱 `NEWGATE_HOME`，不碰真实

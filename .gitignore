@@ -21,7 +21,6 @@ node_modules/
 *.bak
 providers.json
 
-# 构建产物。装配清单里只有本仓库的模块（发行版是另一个 Go module，见
-# docs/09-extension-guide.md §8），所以这里不再有「另一个仓库的 checkout」。
-/go/bin/
-/go/dist/
+# 构建产物（bin/ 与 dist/）由上面 # build 那一段忽略；装配清单里只有本仓库的
+# 模块（发行版是另一个 Go module，见 docs/09-extension-guide.md §8），所以这里
+# 不再有「另一个仓库的 checkout」。

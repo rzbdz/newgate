@@ -1,0 +1,260 @@
+// Package cli 是命令行前端。
+//
+// 分层规则见 docs/03-architecture.md 与 docs/08-operations.md：
+// CLI / TUI / Web 三个壳都**不允许**自己实现业务逻辑，只能调用下层。
+// 一旦允许某个壳「就这一个功能自己写一下」，三端行为漂移就开始了，
+// 而且不可逆——用户会发现「Web 上能删的东西 CLI 删不掉」，然后不再
+// 信任任何一端。
+package cli
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/rzbdz/newgate/lib/buildinfo"
+	"github.com/rzbdz/newgate/lib/style"
+)
+
+// usageText 组装 `newgate --help`。
+//
+// **界面自己不认识任何一条命令、任何一个模块**：所有命令行都由拥有那项能力的
+// 模块经 HelpLine 声明，这里只做组装与排版。上一版这里写死了一张 cmd(...) 清单，
+// 结果是命令搬回模块之后界面还在硬编码它们——"搬了"等于白搬，而且每加一个模块
+// 都得回来改界面（那正是本次重构要拆掉的东西）。
+//
+// 位置由命令自己声明的 Rank 决定；节的先后由槽位规则决定（见 extension.Section
+// 与 PlanSections），节内再按 Rank、Usage 排。同 Rank 时靠 Usage 兜底，保证每次
+// 跑出来顺序一致。
+func usageText(service *service) string {
+	var b strings.Builder
+	b.WriteString(style.Bold("newgate") + " — AI CLI 的语义模型层代理\n")
+
+	// 左列按显示宽度补齐（CJK 双宽），右列一律暗色——扫读时先看命令名，
+	// 需要时再看说明。
+	cmd := func(left, right string) {
+		const commandWidth = 38
+		prefix := "  " + style.Cyan(style.Pad(left, commandWidth))
+		if right == "" {
+			b.WriteString(prefix + "\n")
+			return
+		}
+		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-commandWidth)
+		for i, line := range lines {
+			if i == 0 {
+				b.WriteString(prefix + line + "\n")
+			} else {
+				b.WriteString(strings.Repeat(" ", 2+commandWidth) + line + "\n")
+			}
+		}
+	}
+
+	// 收集：谁注入的命令，就由谁声明它在 help 里长什么样、放哪个**槽位**。
+	//
+	// 界面在这里**不认识任何一条命令、任何一个模块**：它只认识一组通用槽位键 +
+	// 一条「自定义节先到先得、抢不到进 others」的规则（extension.PlanSections）。
+	// 装一个新模块从不要求改这里一行。
+	type entry struct {
+		declared Section
+		line     HelpLine
+	}
+	var entries []entry
+	if service != nil {
+		for _, c := range service.commands.All() {
+			doc, ok := c.(Documented)
+			if !ok {
+				continue // 可选接口：没声明就不占一行，但仍然能用
+			}
+			line := doc.Help()
+			if line.Usage == "" {
+				continue
+			}
+			entries = append(entries, entry{line.Section, line})
+		}
+	}
+	// 规划按**声明顺序**做（= 命令注册顺序），因为自定义节的名额是先到先得的。
+	declared := make([]Section, 0, len(entries))
+	for _, e := range entries {
+		declared = append(declared, e.declared)
+	}
+	plan := PlanSections(declared)
+
+	// 同一个显示节里的行按 Rank 再按 Usage 排；节的先后由 plan 决定，不参与
+	// Rank 竞争——否则掰小自己的 Rank 就能把整节搬到最前面，槽位表就白设了。
+	grouped := map[Section][]HelpLine{}
+	for _, e := range entries {
+		slot := plan.Slot(e.declared)
+		grouped[slot] = append(grouped[slot], e.line)
+	}
+	for _, slot := range plan.Order() {
+		lines := grouped[slot]
+		if len(lines) == 0 {
+			continue
+		}
+		sort.Slice(lines, func(i, j int) bool {
+			if lines[i].Rank != lines[j].Rank {
+				return lines[i].Rank < lines[j].Rank
+			}
+			return lines[i].Usage < lines[j].Usage
+		})
+		b.WriteString("\n" + style.Bold(slot) + "\n")
+		for _, line := range lines {
+			cmd(line.Usage, line.Summary)
+		}
+	}
+
+	// 术语表是**界面自己的**东西：用户不知道某个词是什么意思时看的字典。它不是
+	// 命令行清单（那是模块的），所以留在这里。但**表里的每一行都归模块自己**——
+	// 界面上一版还在写死 `profile` 与那张配置文件清单（providers.json /
+	// mappings/*.kv / state.json），那两样都是 config 的词汇，界面凭什么知道。
+	// 现在全部经 cliapi.Glossarist 交上来（见 modules/config/diagnostics.go）。
+	//
+	// 右列跟着左列一起折行：定义是模块写的，长度不受界面控制，写死一行的版式
+	// 迟早会被某一条长定义顶破 75 列上限（style.MaxColumns）。
+	b.WriteString("\n" + style.Bold("术语") + "\n")
+	term := func(left, right string) {
+		const termWidth = 12
+		prefix := "  " + style.Pad(style.Cyan(left), termWidth)
+		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-termWidth)
+		for i, line := range lines {
+			if i == 0 {
+				b.WriteString(prefix + line + "\n")
+			} else {
+				b.WriteString(strings.Repeat(" ", 2+termWidth) + line + "\n")
+			}
+		}
+	}
+	if service != nil {
+		for _, line := range service.glossaryLines() {
+			term(line.Term, line.Definition)
+		}
+	}
+	return b.String()
+}
+
+func runCLI(service *service, args []string) int {
+	if shouldAuditLayout(service, args) {
+		return auditLayout(args, func() int { return run(service, args) })
+	}
+	return run(service, args)
+}
+
+func run(service *service, args []string) int {
+	if len(args) == 0 {
+		fmt.Print(usageText(service))
+		return 0
+	}
+
+	// 动作型选项，可出现在任意位置
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--set-profile" || strings.HasPrefix(args[i], "--set-profile="):
+			name := optValue(args, i, "--set-profile")
+			if name == "" {
+				return die(64, "--set-profile 需要一个 profile 名")
+			}
+			// 认得出这个选项的形状（argv 解析是界面的活），但**语义归 config**：
+			// 归一成 config 那条命令认识的形状再交给它。
+			command, ok := service.moduleCommand("--set-profile")
+			if !ok {
+				return die(64, "--set-profile 没有实现（装配缺了 config 模块）")
+			}
+			rest := []string{name}
+			if agent := findFlag(args, "--agent", "--tool", "--target"); agent != "" {
+				rest = append(rest, "--agent", agent)
+			}
+			return command.Run(moduleCLIHost{verb: name}, rest)
+		}
+	}
+
+	// 账本查表：模块注入的命令与界面自己的命令走同一条路。
+	//
+	// **界面在这里不认识任何一条命令**——它只知道"有人往这个账本里挂过东西"。
+	// 上一版这里是一个几百行的 switch（后来是 detectLaunch + cmdLaunch），每一条
+	// 都是一次「界面认识某个模块」，那批命令因此永远搬不回自己的模块。
+	//
+	// 前置选项也要容忍：`newgate --profile ds claude` 里第一个 token 是 newgate
+	// 自己的选项，真正要执行的命令在后面。**找出那一条是 argv 解析**，所以归界面；
+	// 它叫什么、怎么解析剩下的参数，归命令自己。
+	if name := lookupName(args); name != "" {
+		if command, ok := service.moduleCommand(name); ok {
+			return command.Run(moduleCLIHost{verb: name}, dropName(args, name))
+		}
+	}
+	return die(64, fmt.Sprintf("未知命令 %q（newgate --help）", args[0]))
+}
+
+// VersionLine 是 `newgate version` 的输出（版式与取值都在 lib/buildinfo）。
+func VersionLine() string { return buildinfo.VersionLine() }
+
+// dropName 去掉 argv 里**那个动词**（第一个与 name 相同的 token），返回它的参数。
+//
+// 为什么不是 `args[1:]`：前置选项也要容忍（`newgate --profile ds claude`），那时
+// 动词不在第 0 位上。契约说「args 里没有命令名」，那就得按名字而不是按位置剥。
+func dropName(args []string, name string) []string {
+	for i, a := range args {
+		if a == name {
+			return append(append([]string{}, args[:i]...), args[i+1:]...)
+		}
+	}
+	return args
+}
+
+// lookupCommand 按同一套名字解析规则查账本。
+func lookupCommand(service *service, args []string) (Command, bool) {
+	if service == nil || len(args) == 0 {
+		return nil, false
+	}
+	return service.moduleCommand(lookupName(args))
+}
+
+// lookupName 找出这串 argv 里**该由哪条命令处理**：跳过 newgate 自己的前置选项
+// 与它们的值，取第一个位置参数；都没有就退回 args[0]（让未知命令的报错带上它）。
+//
+// 只认 `--profile` / `--preset` / `--agent` 这类「后面跟一个值」的选项形状。
+// 这个名单很短而且稳定：它是 newgate 自己的全局选项，不是命令的参数。
+func lookupName(args []string) string {
+	skipNext := false
+	for _, a := range args {
+		switch {
+		case skipNext:
+			skipNext = false
+		case a == "--profile" || a == "--preset" || a == "--agent":
+			skipNext = true
+		case strings.HasPrefix(a, "-"):
+			// 其它选项（--force / -v / --json …）由命令自己解析，跳过。
+		default:
+			return a
+		}
+	}
+	return args[0]
+}
+
+// ---------- 小工具 ----------
+
+// die 是界面自己的报错出口（版式在 lib/style，各模块共用同一份）。
+func die(code int, msg string) int { return style.Die(code, msg) }
+
+func optValue(args []string, i int, name string) string {
+	if strings.Contains(args[i], "=") {
+		return strings.SplitN(args[i], "=", 2)[1]
+	}
+	if i+1 < len(args) {
+		return args[i+1]
+	}
+	return ""
+}
+
+func findFlag(args []string, names ...string) string {
+	for i, a := range args {
+		for _, n := range names {
+			if a == n && i+1 < len(args) {
+				return args[i+1]
+			}
+			if strings.HasPrefix(a, n+"=") {
+				return strings.SplitN(a, "=", 2)[1]
+			}
+		}
+	}
+	return ""
+}

@@ -24,8 +24,8 @@ name: CI
 # 真正要看的「main 现在绿不绿」反而被埋了。
 #
 # 这个取舍有代价，要说清楚：**没有 PR 门禁了**。合进 main 之前不再有自动判定，
-# 所以「推之前先本地跑 `cd go && make ci`」从好习惯变成了流程的一部分——那条
-# 命令在本地复刻下面这三档（含干净 runner 的配置目录），见 go/Makefile 的
+# 所以「推之前先本地跑 `make ci`」从好习惯变成了流程的一部分——那条
+# 命令在本地复刻下面这三档（含干净 runner 的配置目录），见 Makefile 的
 # `ci` 目标。坏的 main 比坏的 PR 严重得多：main 一红，所有人下次拉下来都是红的。
 #
 # `workflow_dispatch` 保留：偶尔需要在某个分支上手动验一次（比如动了 CI 本身），
@@ -50,7 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: go
     # runner 本来就是干净的，这里仍然**显式**钉住配置目录：让「测试偷偷依赖
     # 运行它的那台机器上的配置」在任何 runner 上都必然暴露，而不是碰运气。
     # 与本地 `make ci` 的沙箱同一个意图（那条命令就是照它写的）。
@@ -69,12 +68,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           # 跟 go.mod 走，不写死版本——否则升级 toolchain 时这里会静默落后。
-          go-version-file: go/go.mod
+          go-version-file: go.mod
           # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
           # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
           # 都报 "Some specified paths were not resolved, unable to cache
           # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
-          cache-dependency-path: go/go.mod
+          cache-dependency-path: go.mod
 
       - name: gofmt
         run: make check-fmt
@@ -97,7 +96,6 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: go
     # 与 static 同一个理由（见那里的注释）：钉住配置目录，别让 runner 状态漏进来。
     env:
       NEWGATE_HOME: /tmp/newgate-ci
@@ -105,12 +103,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go/go.mod
+          go-version-file: go.mod
           # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
           # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
           # 都报 "Some specified paths were not resolved, unable to cache
           # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
-          cache-dependency-path: go/go.mod
+          cache-dependency-path: go.mod
 
       - run: go test -race ./...
 
@@ -120,17 +118,16 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: go
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go/go.mod
+          go-version-file: go.mod
           # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
           # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
           # 都报 "Some specified paths were not resolved, unable to cache
           # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
-          cache-dependency-path: go/go.mod
+          cache-dependency-path: go.mod
 
       # 两条脚本的依赖：python3（假上游）、curl（打代理）、md5sum（逐字节还原校验）。
       - name: 装依赖
@@ -142,10 +139,10 @@ jobs:
         run: make build
 
       - name: opencode 侧端到端
-        run: bash ../mock/e2e.sh
+        run: bash mock/e2e.sh
 
       - name: Claude Code 侧端到端
-        run: bash ../mock/e2e_claude.sh
+        run: bash mock/e2e_claude.sh
 
       # 失败时把沙箱日志带出来——脚本自己会清沙箱，所以只能靠它打到 stdout
       # 的内容。这两步是兜底：把代理日志也捞一份，方便判断是网关行为变了

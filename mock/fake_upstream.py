@@ -22,7 +22,7 @@ NEXT_FAIL = {"code": None}
 # 上游那条 400 的真实判据。**2026-09-18 按实测重写**：原来这里照抄的是官方文档
 # 口径（「带 tools 且思考开着时，历史里每条 assistant 都必须回传非空推理」），
 # 那条口径在真实上游上根本不成立——打真实 smt-deepseek/deepseek-flash 逐格实测
-# （每格 3/3，见 go/modules/deepseek/st-reasoning.go 文件头与 docs/06-reasoning.md §2b）：
+# （每格 3/3，见 modules/deepseek/st-reasoning.go 文件头与 docs/06-reasoning.md §2b）：
 #
 #   reasoning_content 的形态（真实原文 / 省略字段 / 空串 / 占位符）**全都不影响结果**
 #   唯一起作用的是**尾部形状**：

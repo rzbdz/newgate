@@ -2,14 +2,14 @@
 
 ## 1. 新组件
 
-在 `go/modules/<name>/module.go` 定义：
+在 `modules/<name>/module.go` 定义：
 
 ```go
 func New() modules.Component
 ```
 
 按需声明 `Requires`、`Provides`、`Start` 和 `Stop`。**不需要改任何清单**：
-装配清单由 `go/tools/genmodules` 构建期扫描 `modules/` 生成，目录进来就自动
+装配清单由 `tools/genmodules` 构建期扫描 `modules/` 生成，目录进来就自动
 在图上（判据：根 `module.go` 导出 `func New() modules.Component`）。
 `make build` 会自动重生成，`make check-generate` 只校验。
 
@@ -262,7 +262,7 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 
 | 你想做什么 | 放哪里 | 谁决定装 |
 | --- | --- | --- |
-| 内核机制的一部分（网关、熔断、接管、界面） | `go/modules/`，随 core 走 | 扫描 `modules/` 目录，全装 |
+| 内核机制的一部分（网关、熔断、接管、界面） | `modules/`，随 core 走 | 扫描 `modules/` 目录，全装 |
 | 某个上游的怪癖、某个客户端的特殊行为、产品取舍 | **发行版仓库**，它自己的 Go module | 发行版的规格书点名 |
 
 判据很直接：**「换个发行版，这个模块还该在吗？」** 该在 → core；不该在 → 发行版。
@@ -274,7 +274,7 @@ DeepSeek 的尾部形状修补、GLM 的思维链回传、客户端×模型的�
 组合根的装配逻辑留在内核，「装哪些」是消费者的事：
 
 ```go
-// go/app/manifest.go
+// app/manifest.go
 type Entry struct {
 	Dir       string            // 目录名——它就是「关掉哪一个」的键
 	Component modules.Component
@@ -287,7 +287,7 @@ type Selection struct {
 }
 func (s Selection) Load() ([]modules.Component, error)
 
-// go/app/main.go
+// app/main.go
 type Options struct{ Loader modules.Loader; Version, BuildTime, CommitTime string }
 func Main(ctx context.Context, opts Options) int   // 留痕 → 起图 → 问入口 → 交出去
 ```
@@ -304,7 +304,7 @@ func Main(ctx context.Context, opts Options) int   // 留痕 → 起图 → 问�
 my-dist/
 ├── core/                 submodule：内核源码（钉在一个提交上）
 ├── go/                   发行版自己的 Go module
-│   ├── go.mod            replace github.com/rzbdz/newgate/go => ../core/go
+│   ├── go.mod            replace github.com/rzbdz/newgate => ./core
 │   ├── modules/<名字>/    发行版的模块（形态与内核 modules/ 完全一致）
 │   ├── manifest/         生成物：规格书 → Selection（进版本控制）
 │   ├── cmd/newgate/      main（十几行）
@@ -321,7 +321,7 @@ my-dist/
   "disable": ["cli"] }
 ```
 
-`modules` = 本仓库 `go/modules/` 下要装的目录名（**白名单**——不在名单里的不装，
+`modules` = 本仓库 `modules/` 下要装的目录名（**白名单**——不在名单里的不装，
 所以同一份目录可以既放着变体模块又不进默认产品）；`disable` = 要关掉的内核模块目录名。
 
 **没有第二张纸。** 2026-09-20 之前内核根还有一张 `modules-ext.json`（Pin）指向发行版
@@ -335,9 +335,9 @@ my-dist/
 形态与 `modules/` 里**完全一样**（一个目录、一个 `module.go`、导出
 `func New() modules.Component`，见 §1）。差别只有两处：
 
-- 它在发行版仓库的 `go/modules/<名字>/` 下；
-- import 路径是 `github.com/<你的发行版 module>/go/modules/<名字>`（对内核的 import
-  不变：`github.com/rzbdz/newgate/go/...`）。
+- 它在发行版仓库的 `modules/<名字>/` 下；
+- import 路径是 `github.com/<你的发行版 module>/modules/<名字>`（对内核的 import
+  不变：`github.com/rzbdz/newgate/...`）。
 
 **目录名不必是 Go 标识符**：`simple-cli` 这种连字符名字合法，生成器把 import 别名
 拧成 `ext_simple_cli`——判据是 `tools/genmodules/scan.Ident`，内核与发行版两个生成器
@@ -381,11 +381,11 @@ build/build.sh            # 生成清单 → 编静态二进制 → dist/
 
 ### 测试跟着拥有者走
 
-- 内核的测试只管**内核的逻辑与内核的模块**（`cd go && go test ./...`，离线）；
+- 内核的测试只管**内核的逻辑与内核的模块**（`go test ./...`，离线）；
 - 发行版模块的行为由发行版自己测（它的模块测试 + `mock/` 端到端）；
 - 发行版的流水线里**第一项就是内核的全部测试**（`core-test`）——发行版带的就是
   这份依赖，它绿不绿直接决定产品能不能发；
-- `go/testing/{testkit,system,upstream}` 从这里起是**对外 API**：发行版拿它起真图
+- `testing/{testkit,system,upstream}` 从这里起是**对外 API**：发行版拿它起真图
   （`system.StartWith(t, 你自己的 loader)`）测自己的模块。别随便重塑这几个包的形状，
   那会是一次跨仓库的破坏性变更（而症状出现在别人的 CI 上）。
 

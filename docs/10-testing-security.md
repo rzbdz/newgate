@@ -12,8 +12,8 @@ Go 单测使用 `httptest` 或本地 listener。任何需要真实 provider toke
 | 层 | 在哪 | 装什么 | 覆盖什么 | 盲区 |
 | --- | --- | --- | --- | --- |
 | 单元 | 各包 `*_test.go` | 纯函数 / 单个 struct | 算法、解析、边界 | 接线（谁注册了什么） |
-| 模块 | `go/testing/testkit` | 我 + 我的依赖链，真组件图 | 接口通过性、注册/撤销对称性、模块自己的特殊行为 | 跨模块的真实数据面 |
-| 系统 | `go/testing/system` | 整张真组件图 + 真转发服务 + 假上游 | 路由、fallback、thinkcache、逐字节、流式分帧 | 真进程、真接管、真配置改写 |
+| 模块 | `testing/testkit` | 我 + 我的依赖链，真组件图 | 接口通过性、注册/撤销对称性、模块自己的特殊行为 | 跨模块的真实数据面 |
+| 系统 | `testing/system` | 整张真组件图 + 真转发服务 + 假上游 | 路由、fallback、thinkcache、逐字节、流式分帧 | 真进程、真接管、真配置改写 |
 | 端到端 | `mock/*.sh` | 真二进制、真进程、真接管 | 「装出来的东西能不能跑」 | 报文级细节（断言靠 grep） |
 
 分工的原则是**测试跟着「谁知道这件事」走**：
@@ -36,8 +36,8 @@ Go 单测使用 `httptest` 或本地 listener。任何需要真实 provider toke
 
 | 段 | 在哪跑 | 覆盖 |
 | --- | --- | --- |
-| `core-test` | 内核仓库（`cd go && GOPROXY=off go test ./...`） | 内核的逻辑 + 内核的模块 |
-| `dist-test` | 发行版仓库（`cd go && go test ./...`） | 发行版自己的模块 |
+| `core-test` | 内核仓库（`GOPROXY=off go test ./...`） | 内核的逻辑 + 内核的模块 |
+| `dist-test` | 发行版仓库（`go test ./...`） | 发行版自己的模块 |
 | 端到端 | 发行版仓库（`mock/e2e_claude_dist.sh`） | 发行版模块的真实行为（真二进制 + 内核的假上游） |
 
 2026-09-20 之前不是这样：内核的 `app/default_test.go`、`testing/system/`、
@@ -47,7 +47,7 @@ Go 单测使用 `httptest` 或本地 listener。任何需要真实 provider toke
 `testing/system/shape_test.go` 用测试自己的合成判据，断言「形状 400 → 认领 → 只计数
 不摘牌 → 日志留痕」这条因果链的每一环都是内核自己的）。
 
-由此有一条约束要记住：**`go/testing/{testkit,system,upstream}` 从这时起是对外 API**
+由此有一条约束要记住：**`testing/{testkit,system,upstream}` 从这时起是对外 API**
 ——发行版拿 `system.StartWith(t, 自己的 loader)` 起真图测自己的模块。重塑这几个包的
 形状会是一次跨仓库的破坏性变更，而症状出现在别人的 CI 上。
 
@@ -72,7 +72,7 @@ w := testkit.Get(graph, wrapperapi.Capability)
 到测试输出里（`无可用候选。跳过原因：…` 是典型）——路由类断言红掉时，那几
 行才是证据。
 
-系统层用的假上游是 `go/testing/upstream`：`mock/fake_upstream.py` 的进程内替身，
+系统层用的假上游是 `testing/upstream`：`mock/fake_upstream.py` 的进程内替身，
 两种方言 + 严格 DeepSeek 口径 + `FailNext`/`Requests`/`SetChunkDelay`。它的
 `Client()` **不走环境代理**——跑测试的会话自己就穿行在 newgate 里，环境里挂着
 代理时发给假上游的请求会先被真网关转一手，断言就全乱了。

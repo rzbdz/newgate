@@ -1,6 +1,6 @@
 # Component framework
 
-`go/component` 是依赖和生命周期内核，不包含任何 gateway 或模型知识。
+`component` 是依赖和生命周期内核，不包含任何 gateway 或模型知识。
 
 ## 1. 六个概念
 
@@ -200,10 +200,10 @@ Registry capability 的注册方法返回 `component.Release`。Consumer 保存 
 
 ## 3. 组合根
 
-`go/app` 是唯一知道有哪些具体组件的地方——注意它在 `modules/` **之外**，
+`app` 是唯一知道有哪些具体组件的地方——注意它在 `modules/` **之外**，
 这样"`modules/` 下每个目录都是一个组件"没有例外。
 
-装配清单由 `go/tools/genmodules` 在构建期扫描 `modules/` 生成
+装配清单由 `tools/genmodules` 在构建期扫描 `modules/` 生成
 （`app/modules_gen.go`），所以**装一个模块 = 把目录复制进来、重新编译**，
 不需要改任何清单。判据是目录含根 `module.go` 且导出 `func New() modules.Component`。
 
