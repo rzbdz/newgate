@@ -85,6 +85,9 @@ func newTable() *table {
 }
 
 // SetPolicy 整份替换策略；零值项按 DefaultPolicy 补齐。
+//
+// 今天**没有生产调用者**（零值策略就是 DefaultPolicy），也**不在公开的 Breaker
+// 接口上**——理由见 api.go 那段收窄说明。
 func (b *table) SetPolicy(p Policy) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -92,6 +95,9 @@ func (b *table) SetPolicy(p Policy) {
 }
 
 // SetErrorHandler 注入持久化错误出口；健康状态不能因后台写盘失败而静默丢失。
+//
+// 与 SetVerifier 一样，它不在公开的 Breaker 接口上：唯一的调用者是 BindEnv
+// （见 api.go 的收窄说明）。
 //
 // 装载期的错误（health.json 坏了）也走这里：那一刻还没有出口，所以先存着，
 // 出口一装上就立刻补报——「不静默」是这个仓库的硬要求。
@@ -106,7 +112,23 @@ func (b *table) SetErrorHandler(fn func(error)) {
 	}
 }
 
-// SetVerifier 注入「上闸前的最后一次诊断」（见 api.go 的同名方法）。
+// SetVerifier 注入「上闸前的最后一次诊断」。
+//
+// 连续失败数到达阈值时先别摘：调这个函数做几次主动探活，探活说它还通就不摘、
+// 计数清零。理由是真实现场（2026-09-17）：smt-deepseek 被摘了很多次，每次
+// `newgate probe` 都是 fluent——因为真实流量失败的是**第一字节超时**（分类器
+// 那条链把 126KB 的 system 塞进 12s 的紧预算），而探活发的是最小请求，永远探
+// 不到这个边界。两者的结论不一致时，谁的证据更硬？探活是**主动、可控、可重复**
+// 的，被动流量则是单点、受上下文尺寸和排队影响的。摘牌会让用户被悄悄换给别的
+// 模型，代价不对称，所以上闸前必须再要一次主动证据。
+//
+// 返回 true = 这条 binding 仍然可用（不摘）；false = 确认不可用（照摘）。
+// nil（默认）＝不做这一步，行为与以前完全一致。
+//
+// **它不在公开的 Breaker 接口上**（2026-09-21 收窄）：全仓库唯一的调用者是下面
+// BindEnv 那一处，而把它摆在接口上意味着任何拿到健康表 capability 的模块都能
+// 一句 `SetVerifier(nil)` 把这道安全诊断**静默**卸掉——不报错、依赖图上没有边、
+// 改动时也看不出来。一个能力只该有一扇门，门开在拥有它的模块上。
 func (b *table) SetVerifier(fn func(provider, model string) bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

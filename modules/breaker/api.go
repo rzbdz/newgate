@@ -35,6 +35,26 @@ const (
 
 // Breaker 是健康表端口。数据面只读前两项、只写 Report/ObserveSuccess；
 // 渲染层只读 Snapshot。
+//
+// # 这个接口为什么是「读多写少」（2026-09-21 收窄）
+//
+// 它曾经在上面挂着三个 setter：`SetPolicy` / `SetErrorHandler` / `SetVerifier`。
+// 三个都是**无主的写门**——任何拿到健康表 capability 的模块都能调，而全仓库的
+// 调用点**一个都不在接口上**（都在下面的 BindEnv 与测试里，作用于具体的 *table）。
+// 也就是说：接口开得比所有真实用法都大，多出来的部分是一扇谁都能推的门。
+//
+// 多出来的代价不是假想的。`SetVerifier` 是上闸前那道安全诊断的开关，一句
+// `SetVerifier(nil)` 就能把它**静默**卸掉——不报错、依赖图上没有边、code review
+// 也看不出有人碰过它。而 `SetPolicy` 更干脆：它**零调用者**，是为一个还没做的
+// 功能（把策略挂到 state.json）预留的 API。
+//
+// 判据是「一个能力只该有一扇门，门开在拥有它的模块上」：
+//   - 数据面借给策略的运行期能力 → `policy.EnvBinder.BindEnv`（那条缝有主、
+//     有向、时机明确），健康表在 BindEnv 里把日志出口与探针接回来；
+//   - 策略本身 → 今天恒为 DefaultPolicy，将来要可配时再开一扇**有主**的门，
+//     而不是现在留一个谁都能改的 setter。
+//
+// 那三个方法照旧在（都是 *table 上的），只是不再从端口上露出来。
 type Breaker interface {
 	// Available 回答这个 binding 现在能不能进候选链。建链期调用。
 	//
@@ -56,29 +76,14 @@ type Breaker interface {
 	// Snapshot 冻结一份可序列化的现状。
 	Snapshot() []Status
 
-	// SetPolicy 整份替换熔断策略（零值项按默认补齐）。
-	SetPolicy(Policy)
 	// Flush 把节流窗口内尚未落盘的延迟样本同步写出（优雅退出用）。
 	Flush()
 	// UseFile 让健康表跨优雅重启存活。
+	//
+	// 它与上面那三个 setter **不是**一类，所以留在端口上：它开的是「状态存哪儿」，
+	// 不是「借你一个能力」——没有它健康表只是不落盘，行为可预期，也没有第二个人
+	// 会来改它。收窄那一刀只砍无主的**能力**注入。
 	UseFile(path string) error
-	// SetErrorHandler 注入持久化错误出口；健康状态不能因写盘失败而静默丢失。
-	SetErrorHandler(func(error))
-
-	// SetVerifier 注入「上闸前的最后一次诊断」。
-	//
-	// 连续失败数到达阈值时先别摘：调这个函数做几次主动探活，探活说它还通就
-	// 不摘、计数清零。理由是真实现场（2026-09-17）：smt-deepseek 被摘了
-	// 很多次，每次 `newgate probe` 都是 fluent——因为真实流量失败的是
-	// **第一字节超时**（分类器那条链把 126KB 的 system 塞进 12s 的紧预算），
-	// 而探活发的是最小请求，永远探不到这个边界。两者的结论不一致时，谁的
-	// 证据更硬？探活是**主动、可控、可重复**的，被动流量则是单点、受上下文
-	// 尺寸和排队影响的。摘牌会让用户被悄悄换给别的模型，代价不对称，所以
-	// 上闸前必须再要一次主动证据。
-	//
-	// 返回 true = 这条 binding 仍然可用（不摘）；false = 确认不可用（照摘）。
-	// nil（默认）＝不做这一步，行为与以前完全一致。
-	SetVerifier(func(provider, model string) bool)
 
 	// RegisterShapeDetector 贡献一条「这个 4xx 是请求形状问题」的判据。
 	//
