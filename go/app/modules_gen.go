@@ -2,21 +2,27 @@
 //
 // 这里的内容由 `make generate`（或 go generate ./app）扫描 modules/ 得到。
 // 想装一个模块就把它的目录复制进 modules/、重新编译；不要手工编辑本文件。
+// 外部发行版的模块（modules-ext/）也在同一份清单里，装哪些由仓库根的
+// modules-ext.json 点名，见 tools/extmanifest。
+//
+// ⚠ 清单里若有 modules-ext/ 下的包，编译需要那份 checkout；缺了先跑 make generate
+// （它会按 modules-ext.json 把代码拉下来）。
 
 package app
 
 import (
 	modules "github.com/rzbdz/newgate/go/component"
+	ext_claudecode_deepseek "github.com/rzbdz/newgate/go/modules-ext/modules/claudecode_deepseek"
+	ext_claudecode_glm "github.com/rzbdz/newgate/go/modules-ext/modules/claudecode_glm"
+	ext_deepseek "github.com/rzbdz/newgate/go/modules-ext/modules/deepseek"
+	ext_glm "github.com/rzbdz/newgate/go/modules-ext/modules/glm"
+	ext_hello "github.com/rzbdz/newgate/go/modules-ext/modules/hello"
 	mod_breaker "github.com/rzbdz/newgate/go/modules/breaker"
 	mod_claudecode "github.com/rzbdz/newgate/go/modules/claudecode"
-	mod_claudecode_deepseek "github.com/rzbdz/newgate/go/modules/claudecode_deepseek"
-	mod_claudecode_glm "github.com/rzbdz/newgate/go/modules/claudecode_glm"
 	mod_cli "github.com/rzbdz/newgate/go/modules/cli"
 	mod_config "github.com/rzbdz/newgate/go/modules/config"
 	mod_confighook "github.com/rzbdz/newgate/go/modules/confighook"
-	mod_deepseek "github.com/rzbdz/newgate/go/modules/deepseek"
 	mod_gateway "github.com/rzbdz/newgate/go/modules/gateway"
-	mod_glm "github.com/rzbdz/newgate/go/modules/glm"
 	mod_opencode "github.com/rzbdz/newgate/go/modules/opencode"
 	mod_opencodeomo "github.com/rzbdz/newgate/go/modules/opencodeomo"
 	mod_pluginmanager "github.com/rzbdz/newgate/go/modules/pluginmanager"
@@ -32,14 +38,10 @@ func generatedComponents() []modules.Component {
 	return []modules.Component{
 		mod_breaker.New(),
 		mod_claudecode.New(),
-		mod_claudecode_deepseek.New(),
-		mod_claudecode_glm.New(),
 		mod_cli.New(),
 		mod_config.New(),
 		mod_confighook.New(),
-		mod_deepseek.New(),
 		mod_gateway.New(),
-		mod_glm.New(),
 		mod_opencode.New(),
 		mod_opencodeomo.New(),
 		mod_pluginmanager.New(),
@@ -47,5 +49,10 @@ func generatedComponents() []modules.Component {
 		mod_thinking.New(),
 		mod_tui.New(),
 		mod_wrapper.New(),
+		ext_claudecode_deepseek.New(),
+		ext_claudecode_glm.New(),
+		ext_deepseek.New(),
+		ext_glm.New(),
+		ext_hello.New(),
 	}
 }

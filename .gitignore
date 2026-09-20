@@ -20,5 +20,12 @@ node_modules/
 /tmp/
 *.bak
 providers.json
+
+# 外部模块 checkout：把哪个发行版编进来是**这份源码 + modules-ext.json** 的事，
+# 而代码本身来自别的仓库。构建期按声明 clone 到这里（见 tools/extmanifest），
+# 所以它和 bin/ 一样是产物——谁的工作区里有一份、钉在哪个提交，都不该进版本控制。
+# 进版本控制会立刻回到 submodule 时代：一份 checkout 只能钉一个发行版。
+/go/modules-ext/
+/go/.modules-ext
 /go/bin/
 /go/dist/

@@ -1,9 +1,11 @@
 package app
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	modscan "github.com/rzbdz/newgate/go/tools/genmodules/scan"
@@ -36,10 +38,32 @@ func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	if len(generated) == 0 {
 		t.Fatal("装配清单为空：生成器没有扫到任何组件")
 	}
+	// 清单 = 扫描 modules/ 得到的 + 发行版声明点名要的外部模块。前者逐个对账，
+	// 后者只保证「连得上」——它的内容由 modules-ext.json 与发行版仓库决定，
+	// 不是本仓库的目录快照（见 tools/extmanifest）。
 	dirs := moduleDirs(t, filepath.Join(root, "modules"))
-	if len(generated) != len(dirs) {
-		t.Fatalf("装配了 %d 个组件，modules/ 下有 %d 个目录", len(generated), len(dirs))
+	if len(generated) < len(dirs) {
+		t.Fatalf("装配了 %d 个组件，modules/ 下就有 %d 个目录——自带模块少装了", len(generated), len(dirs))
 	}
+	for _, dir := range dirs {
+		if !strings.Contains(string(mustReadGenerated(t)), "/modules/"+dir+"\"") {
+			t.Fatalf("modules/%s 是组件，但生成清单里没有它的 import", dir)
+		}
+	}
+}
+
+// mustReadGenerated 读生成的清单源码（给上面那条 import 对账用）。
+func mustReadGenerated(t *testing.T) []byte {
+	t.Helper()
+	_, current, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test source path")
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(current), "modules_gen.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 // moduleDirs 返回 modules/ 下所有「是组件」的目录名。
