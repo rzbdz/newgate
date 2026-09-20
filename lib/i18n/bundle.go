@@ -139,6 +139,24 @@ type bundleReader struct {
 	err error
 }
 
+// hint 把一个**来自文件**的条数变成可以安全交给 make 的容量提示。
+//
+// 为什么需要：`make(map[K]V, n)` 会按 n 预分配，而 n 是文件里写着的数。一个坏掉的
+// 或者被人换过的 bundle 可以写着 40 亿条——那会在**第一处边界检查生效之前**先要一次
+// 巨额分配，症状是启动时 OOM（或者干脆 panic），而不是一句「这个 bundle 是坏的」。
+// 这里按「剩下多少字节」夹一次：每条至少 perEntry 个字节，超出这个数的条数一定是
+// 假的。夹的是**容量提示**，不是判据——真正的越界仍然由每一步的检查拦。
+func (r *bundleReader) hint(n uint32, perEntry int) int {
+	if r.err != nil {
+		return 0
+	}
+	most := uint32((len(r.b) - r.at) / perEntry)
+	if n > most {
+		return int(most)
+	}
+	return int(n)
+}
+
 // fail 记下第一处越界就停：后面每一步都拿 err 短路，不必每处都写 if。
 func (r *bundleReader) fail(what string) {
 	if r.err == nil {
@@ -202,14 +220,14 @@ func DecodeCatalog(raw []byte) (Catalog, error) {
 	}
 	out := Catalog{Language: r.str(), Source: r.str()}
 	if n := r.u32(); n > 0 {
-		out.Widths = make(map[string]int, n)
+		out.Widths = make(map[string]int, r.hint(n, 8))
 		for i := uint32(0); i < n && r.err == nil; i++ {
 			k := r.str()
 			out.Widths[k] = int(int32(r.u32()))
 		}
 	}
 	n := r.u32()
-	out.Messages = make(map[string]Entry, n)
+	out.Messages = make(map[string]Entry, r.hint(n, 5))
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		id := r.str()
 		e := Entry{Text: r.str(), One: r.str(), Other: r.str(), Note: r.str()}
@@ -237,12 +255,12 @@ func DecodeLedger(raw []byte) (Ledger, error) {
 		return Ledger{}, fmt.Errorf("expected a ledger bundle, found kind %q", kind)
 	}
 	n := r.u32()
-	out := Ledger{Messages: make(map[string]LedgerEntry, n)}
+	out := Ledger{Messages: make(map[string]LedgerEntry, r.hint(n, 5))}
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		id := r.str()
 		e := LedgerEntry{Where: r.str()}
 		if na := r.u32(); na > 0 {
-			e.Args = make([]string, 0, na)
+			e.Args = make([]string, 0, r.hint(na, 4))
 			for j := uint32(0); j < na && r.err == nil; j++ {
 				e.Args = append(e.Args, r.str())
 			}

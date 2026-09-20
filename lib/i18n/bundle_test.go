@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"encoding/binary"
 	"slices"
 	"testing"
 )
@@ -93,6 +94,39 @@ func TestABundleRefusesGarbage(t *testing.T) {
 	// 类型对不上也要报（拿账本去当译文读）。
 	if _, err := DecodeCatalog(EncodeLedger(Ledger{Messages: map[string]LedgerEntry{"x": {Where: "y"}}})); err == nil {
 		t.Error("账本被当成译文读成功了，该报错")
+	}
+}
+
+// TestAHostileCountDoesNotAllocate：条数字段是**文件里写着的数**，不能直接拿去
+// `make(map, n)`。
+//
+// 这一条防的不是「读出错数据」而是「读的时候先崩」：`make(map[K]V, 40 亿)` 会在
+// 第一处边界检查生效**之前**先要一次巨额分配——症状是启动时 OOM，而不是一句
+// 「这个 bundle 是坏的」。而目录表是在 Start 里读的，起不来就等于 `newgate status`
+// 也跑不了，而那条命令正是用来查「为什么起不来」的。
+//
+// 断言写成「不 panic 且报错」：分配那个大小在测试机上会直接崩，所以它红了就是这条
+// 检查真的有用。
+func TestAHostileCountDoesNotAllocate(t *testing.T) {
+	mk := func(kind byte, count uint32) []byte {
+		raw := append([]byte(nil), bundleMagic...)
+		raw = append(raw, kind)
+		if kind == bundleKindCatalog {
+			raw = append(raw, 0, 0, 0, 0) // language 空串
+			raw = append(raw, 0, 0, 0, 0) // source 空串
+			raw = append(raw, 0, 0, 0, 0) // widths: 0 个
+		}
+		var tmp [4]byte
+		binary.LittleEndian.PutUint32(tmp[:], count)
+		return append(raw, tmp[:]...)
+	}
+	huge := uint32(0xFFFFFFF0)
+	if _, err := DecodeCatalog(mk(bundleKindCatalog, huge)); err == nil {
+		t.Error("条数是天文数字时该报错")
+	}
+	// 账本同理：它的条数字段在更前面，走的是另一条 make。
+	if _, err := DecodeLedger(mk(bundleKindLedger, huge)); err == nil {
+		t.Error("账本条数是天文数字时该报错")
 	}
 }
 
