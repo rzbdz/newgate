@@ -417,6 +417,10 @@
       "text": "交接请求发不出去（{err}），退回 stop+start",
       "reviewed": true
     },
+    "Cannot share the port with other services, the data plane will serve it alone: {err}": {
+      "text": "无法与其他服务共享端口，数据面将独自服务它：{err}",
+      "reviewed": true
+    },
     "Cannot start the daemon: {err}": {
       "text": "启动守护进程失败: {err}",
       "reviewed": true
@@ -1044,6 +1048,10 @@
     },
     "This does not change takeover intent: the next newgate start reinstalls it": {
       "text": "这不改接管意愿：下次 newgate start 会重新装回来",
+      "reviewed": true
+    },
+    "This port is shared: services mounted on it take their paths first, everything else is the data plane": {
+      "text": "此端口为共享端口：挂在它上面的服务优先占用各自的路径，其余一切归数据面",
       "reviewed": true
     },
     "This shell may have cached the path: hash -r (zsh: rehash)": {
@@ -2234,6 +2242,10 @@
     },
     "porthub: the prefix cannot be / — that is the whole port. Give a path prefix instead, e.g. /ui": {
       "text": "porthub：前缀不能是 /——那是整个端口。请给出路径前缀，例如 /ui",
+      "reviewed": true
+    },
+    "porthub: {owner} wants to serve the port with a nil fallback handler": {
+      "text": "porthub：{owner} 想用一个 nil 兜底 handler 来服务这个端口",
       "reviewed": true
     },
     "pre-gate diagnosis {provider}/{model} attempt {attempt}/{total}: HTTP {status} {err} ({latency})": {

@@ -45,10 +45,10 @@
       "where": "modules/gateway/command_probe.go:186"
     },
     "  (failover)": {
-      "where": "modules/gateway/forward/forward.go:1203"
+      "where": "modules/gateway/forward/forward.go:1226"
     },
     "  (first byte exceeded {limit} — upstream stalling or queued)": {
-      "where": "modules/gateway/forward/forward.go:1090",
+      "where": "modules/gateway/forward/forward.go:1113",
       "args": [
         "limit"
       ]
@@ -156,7 +156,7 @@
       ]
     },
     "#{req} <- {model} stream={stream} req={bytes} bytes  start": {
-      "where": "modules/gateway/forward/forward.go:786",
+      "where": "modules/gateway/forward/forward.go:809",
       "args": [
         "bytes",
         "model",
@@ -165,7 +165,7 @@
       ]
     },
     "#{req} body we sent ({bytes} bytes): {body}": {
-      "where": "modules/gateway/forward/forward.go:1167",
+      "where": "modules/gateway/forward/forward.go:1190",
       "args": [
         "body",
         "bytes",
@@ -173,7 +173,7 @@
       ]
     },
     "#{req} chain budget {budget} ms exhausted, stopping at step {step}": {
-      "where": "modules/gateway/forward/forward.go:903",
+      "where": "modules/gateway/forward/forward.go:926",
       "args": [
         "budget",
         "req",
@@ -181,13 +181,13 @@
       ]
     },
     "#{req} client cancelled; upstream cut off (saves the remaining tokens)": {
-      "where": "modules/gateway/forward/forward.go:1302",
+      "where": "modules/gateway/forward/forward.go:1325",
       "args": [
         "req"
       ]
     },
     "#{req} client disconnected (forwarded {chunks} chunks / {bytes} bytes): {err}": {
-      "where": "modules/gateway/forward/forward.go:1241",
+      "where": "modules/gateway/forward/forward.go:1264",
       "args": [
         "bytes",
         "chunks",
@@ -196,7 +196,7 @@
       ]
     },
     "#{req} client request {method} {path}{headers}\n    body({bytes} bytes): {body}": {
-      "where": "modules/gateway/forward/forward.go:788",
+      "where": "modules/gateway/forward/forward.go:811",
       "args": [
         "body",
         "bytes",
@@ -207,7 +207,7 @@
       ]
     },
     "#{req} count_tokens ({bytes} bytes) -> local rough estimate {n} tokens": {
-      "where": "modules/gateway/forward/forward.go:600",
+      "where": "modules/gateway/forward/forward.go:640",
       "args": [
         "bytes",
         "n",
@@ -215,7 +215,7 @@
       ]
     },
     "#{req} count_tokens -> {name} upstream true value: {value}": {
-      "where": "modules/gateway/forward/forward.go:678",
+      "where": "modules/gateway/forward/forward.go:718",
       "args": [
         "name",
         "req",
@@ -223,28 +223,28 @@
       ]
     },
     "#{req} count_tokens forward failed ({err}); falling back to local rough estimate": {
-      "where": "modules/gateway/forward/forward.go:652",
+      "where": "modules/gateway/forward/forward.go:692",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} count_tokens upstream {code}; falling back to local rough estimate": {
-      "where": "modules/gateway/forward/forward.go:667",
+      "where": "modules/gateway/forward/forward.go:707",
       "args": [
         "code",
         "req"
       ]
     },
     "#{req} dump write failed (check permissions/disk): {err}": {
-      "where": "modules/gateway/forward/forward.go:1362",
+      "where": "modules/gateway/forward/forward.go:1385",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} learned {name} has no count_tokens endpoint (upstream {code}); falling back to local rough estimate, no retry": {
-      "where": "modules/gateway/forward/forward.go:660",
+      "where": "modules/gateway/forward/forward.go:700",
       "args": [
         "code",
         "name",
@@ -252,7 +252,7 @@
       ]
     },
     "#{req} learned {provider}/{model} {what} — applied to later requests automatically (turn off with `newgate st`)": {
-      "where": "modules/gateway/forward/forward.go:1333",
+      "where": "modules/gateway/forward/forward.go:1356",
       "args": [
         "model",
         "provider",
@@ -261,14 +261,14 @@
       ]
     },
     "#{req} no usable candidate; skipped: {skips}": {
-      "where": "modules/gateway/forward/forward.go:882",
+      "where": "modules/gateway/forward/forward.go:905",
       "args": [
         "req",
         "skips"
       ]
     },
     "#{req} non-stream response ended: {bytes} bytes / {ms} ms total": {
-      "where": "modules/gateway/forward/forward.go:1297",
+      "where": "modules/gateway/forward/forward.go:1320",
       "args": [
         "bytes",
         "ms",
@@ -276,7 +276,7 @@
       ]
     },
     "#{req} recorded {bytes} bytes of reasoning and {n} key {keys} this round; replaying them to the client next round": {
-      "where": "modules/gateway/forward/forward.go:1270",
+      "where": "modules/gateway/forward/forward.go:1293",
       "args": [
         "bytes",
         "keys",
@@ -285,21 +285,21 @@
       "other": "#{req} recorded {bytes} bytes of reasoning and {n} keys {keys} this round; replaying them to the client next round"
     },
     "#{req} scene NOT saved (check permissions/disk): {err}": {
-      "where": "modules/gateway/forward/forward.go:1160",
+      "where": "modules/gateway/forward/forward.go:1183",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} scene archived to {dir}/": {
-      "where": "modules/gateway/forward/forward.go:1162",
+      "where": "modules/gateway/forward/forward.go:1185",
       "args": [
         "dir",
         "req"
       ]
     },
     "#{req} sending upstream {target}\n    body({bytes} bytes, delta vs original {delta}): {body}": {
-      "where": "modules/gateway/forward/forward.go:1009",
+      "where": "modules/gateway/forward/forward.go:1032",
       "args": [
         "body",
         "bytes",
@@ -309,7 +309,7 @@
       ]
     },
     "#{req} set \"required\": [] on {n} tool to pass strict validators (semantically a no-op): {changes}": {
-      "where": "modules/gateway/forward/forward.go:948",
+      "where": "modules/gateway/forward/forward.go:971",
       "args": [
         "changes",
         "req"
@@ -317,7 +317,7 @@
       "other": "#{req} set \"required\": [] on {n} tools to pass strict validators (semantically a no-op): {changes}"
     },
     "#{req} stream ended normally: {chunks} chunks / {bytes} bytes / {ms} ms total": {
-      "where": "modules/gateway/forward/forward.go:1293",
+      "where": "modules/gateway/forward/forward.go:1316",
       "args": [
         "bytes",
         "chunks",
@@ -326,28 +326,28 @@
       ]
     },
     "#{req} tools repair skipped (parse failed, sending as-is): {err}": {
-      "where": "modules/gateway/forward/forward.go:944",
+      "where": "modules/gateway/forward/forward.go:967",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} tools write-back failed, sending as-is: {err}": {
-      "where": "modules/gateway/forward/forward.go:953",
+      "where": "modules/gateway/forward/forward.go:976",
       "args": [
         "err",
         "req"
       ]
     },
     "#{req} upstream raw: {body}": {
-      "where": "modules/gateway/forward/forward.go:1166",
+      "where": "modules/gateway/forward/forward.go:1189",
       "args": [
         "body",
         "req"
       ]
     },
     "#{req} upstream response headers {code}{headers}": {
-      "where": "modules/gateway/forward/forward.go:1197",
+      "where": "modules/gateway/forward/forward.go:1220",
       "args": [
         "code",
         "headers",
@@ -355,7 +355,7 @@
       ]
     },
     "#{req} upstream sent no reasoning this round ({n} tool call, request thinking={thinking}, tool id {keys}); wire layer: {wire}. None of these history messages can be replayed next round (no placeholders are fabricated)": {
-      "where": "modules/gateway/forward/forward.go:1286",
+      "where": "modules/gateway/forward/forward.go:1309",
       "args": [
         "keys",
         "req",
@@ -365,7 +365,7 @@
       "other": "#{req} upstream sent no reasoning this round ({n} tool calls, request thinking={thinking}, tool id {keys}); wire layer: {wire}. None of these history messages can be replayed next round (no placeholders are fabricated)"
     },
     "#{req} upstream stream cut (forwarded {chunks} chunks / {bytes} bytes): {err}{note}": {
-      "where": "modules/gateway/forward/forward.go:1317",
+      "where": "modules/gateway/forward/forward.go:1340",
       "args": [
         "bytes",
         "chunks",
@@ -375,7 +375,7 @@
       ]
     },
     "#{req} upstream {code}, full evidence saved to {base}.*": {
-      "where": "modules/gateway/forward/forward.go:1146",
+      "where": "modules/gateway/forward/forward.go:1169",
       "args": [
         "base",
         "code",
@@ -383,7 +383,7 @@
       ]
     },
     "#{req} upstream {code}, writing evidence failed (the directory is creatable but files are not writable; check permissions/disk — CLAUDE.md §3.1 records this trap): {err}": {
-      "where": "modules/gateway/forward/forward.go:1142",
+      "where": "modules/gateway/forward/forward.go:1165",
       "args": [
         "code",
         "err",
@@ -391,7 +391,7 @@
       ]
     },
     "#{req} {binding} request shape rejected (detector {detector}; evidence {base}.*)": {
-      "where": "modules/gateway/forward/forward.go:1153",
+      "where": "modules/gateway/forward/forward.go:1176",
       "args": [
         "base",
         "binding",
@@ -400,7 +400,7 @@
       ]
     },
     "#{req} {note} ({bytes} bytes)": {
-      "where": "modules/gateway/forward/forward.go:1731",
+      "where": "modules/gateway/forward/forward.go:1754",
       "args": [
         "bytes",
         "note",
@@ -408,7 +408,7 @@
       ]
     },
     "#{req} {route}  {path}  {status}  first byte {ms} ms  stream={stream}  profile={profile}{failover}": {
-      "where": "modules/gateway/forward/forward.go:1199",
+      "where": "modules/gateway/forward/forward.go:1222",
       "args": [
         "failover",
         "ms",
@@ -421,7 +421,7 @@
       ]
     },
     "#{req} {route} client cancelled during connect ({err}); stopping the whole chain": {
-      "where": "modules/gateway/forward/forward.go:1064",
+      "where": "modules/gateway/forward/forward.go:1087",
       "args": [
         "err",
         "req",
@@ -429,7 +429,7 @@
       ]
     },
     "#{req} {route} connect failed: {err}{note}{hint}": {
-      "where": "modules/gateway/forward/forward.go:1092",
+      "where": "modules/gateway/forward/forward.go:1115",
       "args": [
         "err",
         "hint",
@@ -448,7 +448,7 @@
       "where": "modules/config/diagnostics.go:275"
     },
     "(field absent)": {
-      "where": "modules/gateway/forward/forward.go:1639"
+      "where": "modules/gateway/forward/forward.go:1662"
     },
     "(no observer)": {
       "where": "modules/gateway/thinkcache/observe.go:243"
@@ -469,7 +469,7 @@
       "where": "modules/config/diagnostics.go:280"
     },
     "(unrecognized)": {
-      "where": "modules/gateway/forward/forward.go:1643"
+      "where": "modules/gateway/forward/forward.go:1666"
     },
     "(until {until})": {
       "where": "modules/gateway/status.go:60",
@@ -484,7 +484,7 @@
       ]
     },
     "+{n} body key": {
-      "where": "modules/gateway/forward/forward.go:1624",
+      "where": "modules/gateway/forward/forward.go:1647",
       "args": [
         "n"
       ],
@@ -580,6 +580,12 @@
         "err"
       ]
     },
+    "Cannot share the port with other services, the data plane will serve it alone: {err}": {
+      "where": "modules/gateway/serve.go:192",
+      "args": [
+        "err"
+      ]
+    },
     "Cannot start the daemon: {err}": {
       "where": "modules/runtime/commands.go:232",
       "args": [
@@ -593,7 +599,7 @@
       ]
     },
     "Cannot write the control token (cross-user stop unavailable): {err}": {
-      "where": "modules/gateway/serve.go:129",
+      "where": "modules/gateway/serve.go:138",
       "args": [
         "err"
       ]
@@ -605,7 +611,7 @@
       ]
     },
     "Cannot write the pidfile (status/metrics will not see this process): {err}": {
-      "where": "modules/gateway/serve.go:118",
+      "where": "modules/gateway/serve.go:127",
       "args": [
         "err"
       ]
@@ -641,14 +647,14 @@
       "where": "modules/runtime/commands.go:220"
     },
     "Configuration hot-reloaded (generation {gen}): {changes} — running sessions are unaffected": {
-      "where": "modules/gateway/serve.go:146",
+      "where": "modules/gateway/serve.go:155",
       "args": [
         "changes",
         "gen"
       ]
     },
     "Configuration reloaded (generation {gen}), no structural change": {
-      "where": "modules/gateway/serve.go:142",
+      "where": "modules/gateway/serve.go:151",
       "args": [
         "gen"
       ]
@@ -657,10 +663,10 @@
       "where": "modules/gateway/diagnostics.go:101"
     },
     "Control endpoint /__newgate/stop is ready (cross-user stop available)": {
-      "where": "modules/gateway/serve.go:131"
+      "where": "modules/gateway/serve.go:140"
     },
     "Control stop (token verified), exiting": {
-      "where": "modules/gateway/serve.go:216"
+      "where": "modules/gateway/serve.go:243"
     },
     "Count": {
       "where": "modules/config/commands.go:544"
@@ -687,7 +693,7 @@
       ]
     },
     "Drain complete, the old process is stepping down": {
-      "where": "modules/gateway/serve.go:231"
+      "where": "modules/gateway/serve.go:258"
     },
     "Enable: newgate st on {name}": {
       "where": "modules/gateway/command_special.go:165",
@@ -705,13 +711,13 @@
       "where": "modules/gateway/diagnostics.go:155"
     },
     "Failed to acquire the lock: {err}": {
-      "where": "modules/gateway/serve.go:108",
+      "where": "modules/gateway/serve.go:117",
       "args": [
         "err"
       ]
     },
     "Failed to load the configuration: {err}": {
-      "where": "modules/gateway/serve.go:136",
+      "where": "modules/gateway/serve.go:145",
       "args": [
         "err"
       ]
@@ -753,7 +759,7 @@
       "where": "modules/cli/cli.go:150"
     },
     "Graceful handover: taking over the listening socket from the parent process": {
-      "where": "modules/gateway/serve.go:121"
+      "where": "modules/gateway/serve.go:130"
     },
     "Handoff refused (HTTP {code}: {body}), falling back to stop+start": {
       "where": "modules/runtime/commands.go:450",
@@ -802,13 +808,13 @@
       "where": "modules/breaker/command.go:112"
     },
     "Listening socket handed over to the new process, waiting for in-flight requests to drain (up to 10 minutes)": {
-      "where": "modules/gateway/serve.go:229"
+      "where": "modules/gateway/serve.go:256"
     },
     "Log file": {
       "where": "modules/cli/diag.go:77"
     },
     "Log rotation init failed, falling back to stdout: {err}": {
-      "where": "modules/gateway/serve.go:97",
+      "where": "modules/gateway/serve.go:106",
       "args": [
         "err"
       ]
@@ -841,13 +847,13 @@
       "where": "modules/runtime/commands.go:248"
     },
     "NEWGATE_LISTENER_FD={value} is not an fd number": {
-      "where": "modules/gateway/forward/forward.go:263",
+      "where": "modules/gateway/forward/forward.go:303",
       "args": [
         "value"
       ]
     },
     "New configuration failed to load, still using the last usable configuration: {err}": {
-      "where": "modules/gateway/serve.go:152",
+      "where": "modules/gateway/serve.go:161",
       "args": [
         "err"
       ]
@@ -1019,7 +1025,7 @@
       ]
     },
     "Proxy exiting: {err}": {
-      "where": "modules/gateway/serve.go:234",
+      "where": "modules/gateway/serve.go:261",
       "args": [
         "err"
       ]
@@ -1068,19 +1074,19 @@
       "where": "modules/gateway/thinkcache_status.go:32"
     },
     "Received SIGHUP, forcing a configuration reload": {
-      "where": "modules/gateway/serve.go:190"
+      "where": "modules/gateway/serve.go:217"
     },
     "Received a control stop while draining, exiting now (pid/lock untouched)": {
-      "where": "modules/gateway/serve.go:213"
+      "where": "modules/gateway/serve.go:240"
     },
     "Received {sig} while draining, exiting now (pid/lock untouched)": {
-      "where": "modules/gateway/serve.go:196",
+      "where": "modules/gateway/serve.go:223",
       "args": [
         "sig"
       ]
     },
     "Received {sig}, exiting": {
-      "where": "modules/gateway/serve.go:200",
+      "where": "modules/gateway/serve.go:227",
       "args": [
         "sig"
       ]
@@ -1213,6 +1219,9 @@
     },
     "This does not change takeover intent: the next newgate start reinstalls it": {
       "where": "modules/runtime/commands.go:112"
+    },
+    "This port is shared: services mounted on it take their paths first, everything else is the data plane": {
+      "where": "modules/gateway/serve.go:196"
     },
     "This shell may have cached the path: hash -r (zsh: rehash)": {
       "where": "modules/runtime/commands.go:352"
@@ -1389,7 +1398,7 @@
       "where": "modules/thinking/st-always.go:112"
     },
     "advancing to next chain step: {step}": {
-      "where": "modules/gateway/forward/forward.go:1097",
+      "where": "modules/gateway/forward/forward.go:1120",
       "args": [
         "step"
       ]
@@ -1580,7 +1589,7 @@
       ]
     },
     "cannot read config — run `newgate doctor`": {
-      "where": "modules/gateway/forward/forward.go:315"
+      "where": "modules/gateway/forward/forward.go:355"
     },
     "cannot read mappings: {err}": {
       "where": "modules/config/commands.go:84",
@@ -1595,7 +1604,7 @@
       ]
     },
     "cannot read request body: {err}": {
-      "where": "modules/gateway/forward/forward.go:743"
+      "where": "modules/gateway/forward/forward.go:766"
     },
     "cannot read the config, so this run injects no real model names and no window declaration (the proxy still routes by tier name): {err}": {
       "where": "modules/runtime/launch/launch.go:122",
@@ -1669,7 +1678,7 @@
       ]
     },
     "capability cache load failed (will re-probe this run): {err}": {
-      "where": "modules/gateway/forward/forward.go:229",
+      "where": "modules/gateway/forward/forward.go:278",
       "args": [
         "err"
       ]
@@ -1751,13 +1760,13 @@
       ]
     },
     "control stop requested by {addr}, exiting": {
-      "where": "modules/gateway/forward/forward.go:446",
+      "where": "modules/gateway/forward/forward.go:486",
       "args": [
         "addr"
       ]
     },
     "control token mismatch": {
-      "where": "modules/gateway/forward/forward.go:376"
+      "where": "modules/gateway/forward/forward.go:416"
     },
     "convert a profile to KV text": {
       "where": "modules/config/commands.go:693"
@@ -1879,7 +1888,7 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "drain complete, exiting (socket continues under pid {pid})": {
-      "where": "modules/gateway/forward/forward.go:513",
+      "where": "modules/gateway/forward/forward.go:553",
       "args": [
         "pid"
       ]
@@ -1920,7 +1929,7 @@
       "where": "component/entry/entry.go:216"
     },
     "error {code}: {msg}": {
-      "where": "modules/gateway/forward/forward.go:1658",
+      "where": "modules/gateway/forward/forward.go:1681",
       "args": [
         "code",
         "msg"
@@ -2001,7 +2010,7 @@
       "where": "modules/config/commands.go:42"
     },
     "graceful handoff: socket handed to new process pid {pid}, draining in-flight requests": {
-      "where": "modules/gateway/forward/forward.go:495",
+      "where": "modules/gateway/forward/forward.go:535",
       "args": [
         "pid"
       ]
@@ -2065,13 +2074,13 @@
       "where": "modules/runtime/commands.go:170"
     },
     "inherited fd {fd} is not a TCP listener": {
-      "where": "modules/gateway/forward/forward.go:272",
+      "where": "modules/gateway/forward/forward.go:312",
       "args": [
         "fd"
       ]
     },
     "inheriting listener fd {fd} failed": {
-      "where": "modules/gateway/forward/forward.go:268",
+      "where": "modules/gateway/forward/forward.go:308",
       "args": [
         "fd"
       ]
@@ -2084,7 +2093,7 @@
       ]
     },
     "invalid request JSON": {
-      "where": "modules/gateway/forward/forward.go:384"
+      "where": "modules/gateway/forward/forward.go:424"
     },
     "isolated for at least 60s; only a successful probe can restore it afterwards": {
       "where": "modules/gateway/command_probe.go:233"
@@ -2122,7 +2131,7 @@
       "where": "modules/gateway/metrics/hints.go:62"
     },
     "length delta vs original after rewrite: {diff} bytes": {
-      "where": "modules/gateway/forward/forward.go:1360",
+      "where": "modules/gateway/forward/forward.go:1383",
       "args": [
         "diff"
       ]
@@ -2168,16 +2177,16 @@
       "where": "modules/pluginmanager/command.go:45"
     },
     "listener handle not ready yet": {
-      "where": "modules/gateway/forward/forward.go:480"
+      "where": "modules/gateway/forward/forward.go:520"
     },
     "listening on 127.0.0.1:{port}": {
-      "where": "modules/gateway/forward/forward.go:250",
+      "where": "modules/gateway/forward/forward.go:290",
       "args": [
         "port"
       ]
     },
     "listening on 127.0.0.1:{port} failed": {
-      "where": "modules/gateway/forward/forward.go:282",
+      "where": "modules/gateway/forward/forward.go:322",
       "args": [
         "port"
       ]
@@ -2228,7 +2237,7 @@
       "where": "modules/gateway/command_metrics.go:176"
     },
     "model {model} is neither a known tier ({tiers}) nor bound in any profile; run `newgate tier` for available bindings": {
-      "where": "modules/gateway/forward/forward.go:884",
+      "where": "modules/gateway/forward/forward.go:907",
       "args": [
         "model",
         "tiers"
@@ -2260,7 +2269,7 @@
       ]
     },
     "newgate {version} (built {built}) started, default profile={profile}, config hot-reload enabled": {
-      "where": "modules/gateway/serve.go:221",
+      "where": "modules/gateway/serve.go:248",
       "args": [
         "built",
         "profile",
@@ -2375,7 +2384,7 @@
       "where": "modules/breaker/command.go:133"
     },
     "only POST is accepted": {
-      "where": "modules/gateway/forward/forward.go:370"
+      "where": "modules/gateway/forward/forward.go:410"
     },
     "other": {
       "where": "modules/config/commands.go:226"
@@ -2543,13 +2552,13 @@
       ]
     },
     "porthub: a prefix must start with /, got {prefix}": {
-      "where": "lib/porthub/porthub.go:154",
+      "where": "lib/porthub/porthub.go:219",
       "args": [
         "prefix"
       ]
     },
     "porthub: prefix {prefix} (mounted by {owner}) collides with the reserved prefix {reserved}, which belongs to the data plane / control plane namespace — claiming it would send requests meant for this machine upstream as if they were data-plane traffic": {
-      "where": "lib/porthub/porthub.go:89",
+      "where": "lib/porthub/porthub.go:100",
       "args": [
         "owner",
         "prefix",
@@ -2557,24 +2566,30 @@
       ]
     },
     "porthub: prefix {prefix} is already mounted by {owner} — two services on one path means only one of them ever sees a request, so this errors instead of letting the later one win silently": {
-      "where": "lib/porthub/porthub.go:98",
+      "where": "lib/porthub/porthub.go:109",
       "args": [
         "owner",
         "prefix"
       ]
     },
     "porthub: the handler {owner} wants to mount at {prefix} is nil": {
-      "where": "lib/porthub/porthub.go:84",
+      "where": "lib/porthub/porthub.go:95",
       "args": [
         "owner",
         "prefix"
       ]
     },
     "porthub: the prefix cannot be / — that is the whole port. Give a path prefix instead, e.g. /ui": {
-      "where": "lib/porthub/porthub.go:159"
+      "where": "lib/porthub/porthub.go:224"
+    },
+    "porthub: {owner} wants to serve the port with a nil fallback handler": {
+      "where": "lib/porthub/porthub.go:157",
+      "args": [
+        "owner"
+      ]
     },
     "pre-gate diagnosis {provider}/{model} attempt {attempt}/{total}: HTTP {status} {err} ({latency})": {
-      "where": "modules/gateway/forward/forward.go:197",
+      "where": "modules/gateway/forward/forward.go:209",
       "args": [
         "attempt",
         "err",
@@ -2762,7 +2777,7 @@
       "where": "modules/runtime/commands.go:129"
     },
     "request body has no top-level model string field ({method} {path})": {
-      "where": "modules/gateway/forward/forward.go:770",
+      "where": "modules/gateway/forward/forward.go:793",
       "args": [
         "method",
         "path"
@@ -2778,7 +2793,7 @@
       "where": "modules/breaker/plane.go:286"
     },
     "request short-circuited by special plugin {plugin} (no upstream call)": {
-      "where": "modules/gateway/forward/forward.go:1729",
+      "where": "modules/gateway/forward/forward.go:1752",
       "args": [
         "plugin"
       ]
@@ -2802,7 +2817,7 @@
       ]
     },
     "rewriting model failed: {err}": {
-      "where": "modules/gateway/forward/forward.go:911"
+      "where": "modules/gateway/forward/forward.go:934"
     },
     "role bindings   profile {name}": {
       "where": "modules/config/diagnostics.go:173",
@@ -2844,7 +2859,7 @@
       ]
     },
     "route: {route}\nstatus: 400\ntag: {tag}\ndetector: {detector}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n": {
-      "where": "modules/gateway/forward/forward.go:1460",
+      "where": "modules/gateway/forward/forward.go:1483",
       "args": [
         "detector",
         "reqHeaders",
@@ -2854,7 +2869,7 @@
       ]
     },
     "route: {route}\nstatus: {status}\n\n--- client request headers ---{reqHeaders}\n\n--- upstream response headers ---{respHeaders}\n": {
-      "where": "modules/gateway/forward/forward.go:1411",
+      "where": "modules/gateway/forward/forward.go:1434",
       "args": [
         "reqHeaders",
         "respHeaders",
@@ -3108,7 +3123,7 @@
       "where": "modules/gateway/thinkcache/disk.go:275"
     },
     "thinkcache disk layer disabled (memory-only): {err}": {
-      "where": "modules/gateway/serve.go:164",
+      "where": "modules/gateway/serve.go:173",
       "args": [
         "err"
       ]
@@ -3165,7 +3180,7 @@
       "where": "modules/config/commands.go:657"
     },
     "tier {tier} has no usable candidate under profile {profile} (tiers: {tiers}); run `newgate tier {tier}` to see why each candidate was skipped": {
-      "where": "modules/gateway/forward/forward.go:888",
+      "where": "modules/gateway/forward/forward.go:911",
       "args": [
         "profile",
         "tier",
@@ -3197,7 +3212,7 @@
       "where": "modules/breaker/command.go:192"
     },
     "troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)": {
-      "where": "modules/gateway/forward/forward.go:1664"
+      "where": "modules/gateway/forward/forward.go:1687"
     },
     "turned off": {
       "where": "modules/pluginmanager/command.go:398"
@@ -3247,7 +3262,7 @@
       "where": "modules/breaker/status/status.go:129"
     },
     "upstream {provider} connect failed: {err}": {
-      "where": "modules/gateway/forward/forward.go:1093",
+      "where": "modules/gateway/forward/forward.go:1116",
       "args": [
         "err",
         "provider"
@@ -3583,7 +3598,7 @@
       ]
     },
     "{route} -> {status}{note}  upstream said: {body}": {
-      "where": "modules/gateway/forward/forward.go:1130",
+      "where": "modules/gateway/forward/forward.go:1153",
       "args": [
         "body",
         "note",
@@ -3647,7 +3662,7 @@
       "other": "… and {n} more"
     },
     "…(truncated, {n} characters total)": {
-      "where": "modules/gateway/forward/forward.go:1589",
+      "where": "modules/gateway/forward/forward.go:1612",
       "args": [
         "n"
       ]

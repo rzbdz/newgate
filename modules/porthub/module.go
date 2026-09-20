@@ -1,12 +1,12 @@
 // Package porthub 把「一个端口上挂多个服务」做成一个组件。
 //
-// 它存在的意义只有一个：让消费者能问出「**这个进程里有没有这张表**」——有就挂上去
-// （共用 gateway 那个端口），没有就自己监听一个端口（fallback）。表本身住在
-// lib/porthub（叶子机制），真正服务的是 gateway 那个 http.Server：它在 catch-all
-// 里先问表、问不到才当数据面转发（见 modules/gateway/forward 的 dispatch）。
+// 它存在的意义只有一个：让消费者能问出「**这个进程里有没有共享端口这回事**」
+// ——有就挂上去（共用 gateway 那个端口），没有就自己监听一个端口（fallback）。
+// 表本身住在 lib/porthub（叶子机制）。
 //
-// 所以「关掉 porthub」不是分派处的特判，而是依赖没接上：消费者 Optional 拿不到
-// 端口，于是走各自的 fallback。
+// 端口归这张表：守护进程入口（modules/gateway/serve.go）把数据面的 handler 交给
+// `Root`，拿到根 handler 交给 http.Server。所以「关掉 porthub」不是任何一处的
+// 特判——是数据面自己服务端口（今天的样子）vs 交出去让表来分派。
 package porthub
 
 import (
@@ -16,10 +16,17 @@ import (
 	hub "github.com/rzbdz/newgate/lib/porthub"
 )
 
-// Service 是消费者看到的那一面：往表里挂一条。查询那半边不给出去——它只属于
-// 分派处（gateway），多一个人问就多一个「谁排谁前面」的问题。
+// Service 是消费者看到的那一面：往表里挂一条（web 界面这类），或者交出这个端口
+// 的根 handler（数据面）。
+//
+// 查询那半边不给出去——「谁接住了这个路径」只有分派处需要知道，多一个人问就多
+// 一个「谁排谁前面」的问题。
 type Service interface {
 	Mount(prefix, owner string, h http.Handler) (func(), error)
+
+	// Root 见 lib/porthub.Registry.Root：登记兜底服务（数据面），换回这个端口
+	// 该用的根 handler。
+	Root(owner string, fallback http.Handler) (http.Handler, error)
 }
 
 // Capability 是「这张挂载表在这个进程里」这件事本身。

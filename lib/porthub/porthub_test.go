@@ -160,6 +160,59 @@ func TestMountsSnapshotIsSorted(t *testing.T) {
 	}
 }
 
+// TestRootIsThePortsDispatch 锁「端口归谁」：Root 交出的 handler 就是那个端口的
+// 分派——挂载的服务优先，没人认领的落回兜底（数据面）。
+func TestRootIsThePortsDispatch(t *testing.T) {
+	r := NewRegistry()
+	if _, err := r.Mount("/ui", "web", body("web")); err != nil {
+		t.Fatal(err)
+	}
+	root, err := r.Root("datapath", body("datapath"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		"/ui/x":        "web",
+		"/v1/messages": "datapath", // 没挂过 → 兜底
+		"/":            "datapath",
+	}
+	for path, want := range cases {
+		rec := httptest.NewRecorder()
+		root.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Body.String(); got != want {
+			t.Errorf("root(%q) = %q，想要 %q", path, got, want)
+		}
+	}
+	if got := r.FallbackOwner(); got != "datapath" {
+		t.Errorf("FallbackOwner() = %q，想要 datapath", got)
+	}
+}
+
+// TestRootRejectsNilFallback：nil 兜底在**装的时候**就报错，而不是等到一个请求
+// 打进来才在热路径上炸（那时候的现场是 500 + 一段 panic 栈，没人会联想到是启动
+// 时的一次调用少传了参数）。
+func TestRootRejectsNilFallback(t *testing.T) {
+	if _, err := NewRegistry().Root("datapath", nil); err == nil {
+		t.Error("nil 兜底该被拒绝——一个 nil handler 挂上去的报错会出现在每个请求里")
+	}
+}
+
+// TestMountsIncludeTheFallback：诊断输出要能完整回答「这个端口上都在跑什么」，
+// 所以兜底在快照里表现为一条 `/` 的记录（它接住的正是所有没被更长前缀认领的路径）。
+func TestMountsIncludeTheFallback(t *testing.T) {
+	r := NewRegistry()
+	if _, err := r.Mount("/ui", "web", body("web")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Root("datapath", body("dp")); err != nil {
+		t.Fatal(err)
+	}
+	got := r.Mounts()
+	if len(got) != 2 || got[0].Prefix != "/" || got[0].Owner != "datapath" || got[1].Prefix != "/ui" {
+		t.Fatalf("Mounts() = %+v，想要 [/ → datapath, /ui → web]", got)
+	}
+}
+
 // TestConcurrentMountAndLookup 是「两个前端同时跑」的那条 race 保护点：分派每
 // 请求现查表，而挂载/撤销发生在模块的 Start/Stop。跑 -race 才有意义。
 func TestConcurrentMountAndLookup(t *testing.T) {

@@ -33,6 +33,7 @@ import (
 	"github.com/rzbdz/newgate/modules/gateway/forward"
 	"github.com/rzbdz/newgate/modules/gateway/policy"
 	"github.com/rzbdz/newgate/modules/gateway/thinkcache"
+	porthubapi "github.com/rzbdz/newgate/modules/porthub"
 	"github.com/rzbdz/newgate/modules/runtime/daemon"
 )
 
@@ -42,7 +43,15 @@ import (
 //
 // 它只带 filters（数据面策略账本）进去，不带任何具体策略：账本在 Bind 期就存在
 // （gateway 的 New 里建），贡献者在各自 Start 期往里写，数据面在 Serve 期读。
-type serveCommand struct{ filters *policy.Registry }
+type serveCommand struct {
+	filters *policy.Registry
+	// hub 是共享端口那张表（porthub 没装就是 nil）。
+	//
+	// 它只在这一处出现：**守护进程入口**是这个进程里唯一知道「端口上还有别人」
+	// 的地方。数据面（forward）拿到的是一个 handler，不知道它从哪来；porthub
+	// 拿到的是一个 handler，不知道它是谁——两边都不认识对方。
+	hub porthubapi.Service
+}
 
 var (
 	_ cliapi.Command  = (*serveCommand)(nil)
@@ -55,7 +64,7 @@ func (serveCommand) Names() []string { return []string{"__serve"} }
 func (serveCommand) Unstyled([]string) bool { return true }
 
 func (c serveCommand) Run(_ cliapi.Host, args []string) int {
-	return Serve(c.filters, intFlag(args, "--port", 0))
+	return Serve(c.filters, c.hub, intFlag(args, "--port", 0))
 }
 
 // intFlag 取 `--名字 N` 或 `--名字=N` 里的整数，没有给默认值。
@@ -89,7 +98,7 @@ func intFlag(args []string, name string, def int) int {
 //
 // 依赖方向：数据面只认识**策略账本**（policy.Registry），不认识任何一位策略。
 // 账本由 gateway 的 New 建好（Bind 期），策略在各自 Start 期注册进来。
-func Serve(filters *policy.Registry, port int) int {
+func Serve(filters *policy.Registry, hub porthubapi.Service, port int) int {
 	rot, rerr := logx.New(paths.LogFile(), 16<<20, 3) // 16MB × 4 份
 	var lg *log.Logger
 	if rerr != nil {
@@ -169,6 +178,24 @@ func Serve(filters *policy.Registry, port int) int {
 		lg.Printf("[thinkcache] %v", err)
 	})
 	srv := forward.New(port, lg, watcher, filters)
+
+	// 这个端口的根 handler：装了 porthub 就交给它（挂载表优先，没人认领的落回
+	// 数据面），没装就是数据面自己——也就是这个机制出现之前的样子。
+	//
+	// 为什么合成放在这里而不是数据面里：**这是组合，不是数据面的逻辑**。数据面
+	// 是「转发一次模型请求」这条链，它不该知道这个进程的端口上还住着谁；而守护
+	// 进程入口本来就是「把这个进程装起来」的地方（日志、锁、信号、排空都在这儿）。
+	// 依赖本身是声明的（module.go 里的 Optional），所以在依赖图上看得见。
+	if hub != nil {
+		root, err := hub.Root("gateway", srv.Handler())
+		if err != nil {
+			lg.Printf("%s", i18n.T("Cannot share the port with other services, the data plane will serve it alone: {err}",
+				i18n.A{"err": err}))
+		} else {
+			srv.SetRoot(root)
+			lg.Printf("%s", i18n.T("This port is shared: services mounted on it take their paths first, everything else is the data plane", nil))
+		}
+	}
 
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)

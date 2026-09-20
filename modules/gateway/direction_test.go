@@ -74,6 +74,41 @@ func TestTheDataPlaneDoesNotNameAnyStrategy(t *testing.T) {
 	}
 }
 
+// TestTheDataPlaneDoesNotKnowThePortSharingMechanism 是同一把尺子的第二条：
+// **数据面不认识「一个端口上挂多个服务」这件事**。
+//
+// 2026-09-20 的第一版实现把 porthub 查表写进了 catch-all（`forward.dispatch`），
+// 编译过、转发照常、单测全绿——唯一的症状是数据面从此知道了这个进程的部署形态：
+// 端口上还住着谁、谁先接住哪个路径。那些是**守护进程入口**的知识（它把数据面的
+// handler 交给 porthub，换回这个端口的根 handler，见 serve.go）。
+//
+// 判据与策略那条一样是「连名字都不出现」，范围只到 forward/：serve.go 与
+// module.go **必须**认识它（那就是合成发生的地方），这也是判据 1 那两个文件在
+// 这里被排除的原因。
+func TestTheDataPlaneDoesNotKnowThePortSharingMechanism(t *testing.T) {
+	root := gatewayRoot(t)
+	dir := filepath.Join(root, "forward")
+	checked := 0
+	for _, path := range sourceFiles(t, dir) {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("读不了 %s: %v", path, err)
+		}
+		checked++
+		for i, line := range strings.Split(string(body), "\n") {
+			if strings.Contains(line, "porthub") {
+				t.Errorf("%s:%d 数据面源码里出现了端口共享机制的名字——"+
+					"数据面只该拿到一个 handler，不知道它从哪来、也不知道端口上还有谁：\n    %s\n"+
+					"   合成请留在守护进程入口（serve.go 的 rootHandler 那一段）",
+					path, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("forward/ 里一个源文件都没扫到——判据会变成空转")
+	}
+}
+
 // gatewayRoot 是 modules/gateway 的绝对路径（本文件所在目录）。
 func gatewayRoot(t *testing.T) string {
 	t.Helper()

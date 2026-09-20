@@ -25,7 +25,6 @@ import (
 
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/logx"
-	"github.com/rzbdz/newgate/lib/porthub"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/config/resolve"
@@ -68,6 +67,19 @@ type Server struct {
 	requests uint64
 	failures uint64
 	started  time.Time
+
+	// mux 是数据面自己的 handler（7 条 pattern，catch-all 就是转发）；
+	// root 非 nil 时用它当这个端口的根 handler。
+	//
+	// 这个接缝存在的理由：**端口上可能不止一个服务**（web 界面这类服务想共用
+	// 同一个端口）。谁来决定「这个请求归谁」，不该由数据面回答——所以这里只留
+	// 一个空位，由守护进程入口把根 handler 装进来。数据面因此完全不认识那张
+	// 挂载表，也不认识任何一位房客（这条由 direction_test.go 钉住）。
+	//
+	// 默认（root == nil）就是数据面自己服务端口，也就是共享端口这件事出现之前
+	// 的样子：单机测试与 testing/system 的 harness 走的都是这条路。
+	mux  http.Handler
+	root http.Handler
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -219,6 +231,43 @@ func (e serverEnv) Logf(format string, args ...any) { e.s.logf(format, args...) 
 
 func (e serverEnv) Probe(provider, model string) bool { return e.s.probe(provider, model) }
 
+// Handler 造出数据面在这个端口上的 handler。
+//
+// 想在同一个端口上再挂服务的人（守护进程入口）**先问它要一份**，把它当作兜底
+// 包进自己的路由，再用 SetRoot 装回来。幂等：反复调用拿到同一份（mux 建一次
+// 就存下来）——兜底与端口服务的必须是同一个东西。
+func (s *Server) Handler() http.Handler {
+	if s.mux == nil {
+		mux := http.NewServeMux()
+		mux.HandleFunc(controlpath.Status, s.handleStatus)
+		mux.HandleFunc(controlpath.Metrics, s.handleMetrics)
+		mux.HandleFunc(controlpath.Health, s.handleHealth)
+		mux.HandleFunc(controlpath.Stop, s.handleControlStop)
+		mux.HandleFunc(controlpath.Upgrade, s.handleControlUpgrade)
+		mux.HandleFunc("/v1/models", s.handleModels)
+		// catch-all：数据面。走到这里的路径要么是数据面自己的（/v1、/a），要么
+		// 是别人明确交给它的（端口上没人认领的那些）。
+		mux.HandleFunc("/", s.handleProxy)
+		s.mux = mux
+	}
+	return s.mux
+}
+
+// SetRoot 换掉这个端口的根 handler。**必须在 Start 之前**调（Start 之后
+// http.Server 已经拿着旧的那份了，改了不会生效，而且没人会告诉你）。
+func (s *Server) SetRoot(h http.Handler) { s.root = h }
+
+// rootHandler 是 Start 真正交给 http.Server 的那一个。
+//
+// 单独一个函数只为一件事：让「端口交给谁」这件事**可测**——测试调它、Start 调它，
+// 是同一条路径（不然测试只能自己去起监听、连端口，而那样测的是别的东西）。
+func (s *Server) rootHandler() http.Handler {
+	if s.root != nil {
+		return s.root
+	}
+	return s.Handler()
+}
+
 func (s *Server) Start() error {
 	// 策略要的运行期能力在这里交付（探活的形状见 probe 的说明）。
 	s.Filters.BindEnv(serverEnv{s: s})
@@ -228,23 +277,14 @@ func (s *Server) Start() error {
 	if err := probe.LoadCachedCapabilities(); err != nil {
 		s.logf("[probe] %s", i18n.T("capability cache load failed (will re-probe this run): {err}", i18n.A{"err": err}))
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc(controlpath.Status, s.handleStatus)
-	mux.HandleFunc(controlpath.Metrics, s.handleMetrics)
-	mux.HandleFunc(controlpath.Health, s.handleHealth)
-	mux.HandleFunc(controlpath.Stop, s.handleControlStop)
-	mux.HandleFunc(controlpath.Upgrade, s.handleControlUpgrade)
-	mux.HandleFunc("/v1/models", s.handleModels)
-	// catch-all 交给 dispatch：它先问端口上的挂载表（web 界面这类服务就住在同一个
-	// 端口上），问不到才当数据面转发。
-	mux.HandleFunc("/", s.dispatch)
+	handler := s.rootHandler()
 
 	ln, err := s.listen()
 	if err != nil {
 		return err
 	}
 	s.started = time.Now()
-	s.srv = &http.Server{Handler: mux}
+	s.srv = &http.Server{Handler: handler}
 	s.ln = ln
 	s.signalReady() // 交接进来的进程：告诉父进程「socket 已接上」
 	s.logf("[proxy] %s", i18n.T("listening on 127.0.0.1:{port}", i18n.A{"port": s.Port}))
@@ -706,23 +746,6 @@ func (s *Server) mainLoopHead(tgt Target) (resolve.Step, bool) {
 		return resolve.Step{}, false
 	}
 	return resolve.Step{Profile: active, Binding: b, Provider: p}, true
-}
-
-// dispatch 是 catch-all：先问端口上的挂载表，问不到才当数据面转发。
-//
-// 为什么**每请求现查**而不是启动时把表抄进 mux：模块的 Start 顺序由 capability
-// 依赖图决定，不保证「挂东西的模块」排在 gateway 前面；抄一份还会让 Stop 之后的
-// 撤销失效（那时候 mux 已经建好了）。表的读写由 lib/porthub 用 RWMutex 保护——
-// 这就是「CLI 与 dashboard 同时跑」的 race 保护点。
-//
-// 保留前缀（/v1、/a、/__newgate）在**挂的时候**就报错了（lib/porthub 的 reserved），
-// 所以这里不用再判一次：走到这里的路径要么是数据面，要么是别人明确挂上来的。
-func (s *Server) dispatch(w http.ResponseWriter, r *http.Request) {
-	if h, ok := porthub.Default().Lookup(r.URL.Path); ok {
-		h.ServeHTTP(w, r)
-		return
-	}
-	s.handleProxy(w, r)
 }
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {

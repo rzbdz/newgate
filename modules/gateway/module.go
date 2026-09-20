@@ -15,6 +15,7 @@ import (
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	configapi "github.com/rzbdz/newgate/modules/config"
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
+	porthubapi "github.com/rzbdz/newgate/modules/porthub"
 
 	"github.com/rzbdz/newgate/modules/gateway/gatewaystate"
 	"github.com/rzbdz/newgate/modules/gateway/policy"
@@ -55,6 +56,11 @@ func New() modules.Component {
 			// 照常工作，只是没有入口。界面不依赖本模块（它没有任何出边），所以这
 			// 条边不可能成环。
 			modules.Optional(cliapi.Capability),
+			// porthub 也是弱依赖，而且**只有守护进程入口用它**：`__serve` 起的
+			// 那个进程把「这个端口上谁应答」交给它（见 serve.go 的 rootHandler）。
+			// 数据面（forward 整个目录）一个字都不认识它——那条由
+			// direction_test.go 钉住，跟「数据面不认识任何策略」同一把尺子。
+			modules.Optional(porthubapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
@@ -84,6 +90,10 @@ func New() modules.Component {
 			if !ok {
 				return nil
 			}
+			// 共享端口那张表（装了就取，没装就是 nil → 数据面自己服务端口）。
+			// 这里只**取**，怎么用是 serve.go 的事：本模块的其余部分（数据面、
+			// 命令、状态行）都不需要知道它存在。
+			hub, _ := modules.Get(ctx, porthubapi.Capability)
 			for _, cmd := range []cliapi.Command{
 				specialCommand{}, schemaRepairCommand{}, debugCommand{},
 				// 观测面也归数据面自己：计数器怎么分组、探活探出了什么，
@@ -92,7 +102,7 @@ func New() modules.Component {
 				// 守护进程本体：`newgate __serve`。它以前是界面的命令，但它跑的
 				// 是数据面（见 serve.go）。策略账本原样递进去——**这一层不认识
 				// 任何一位策略**，谁插进来由各自的 Start 决定。
-				serveCommand{filters: port.filters},
+				serveCommand{filters: port.filters, hub: hub},
 			} {
 				release, err := cli.RegisterCommand(cmd)
 				if err != nil {
