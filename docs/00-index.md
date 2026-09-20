@@ -12,7 +12,7 @@
 | 6 | [06-reasoning.md](06-reasoning.md) | reasoning content 为什么会丢，如何恢复？ |
 | 7 | [07-clients-runtime.md](07-clients-runtime.md) | Claude/OpenCode 如何被接管？ |
 | 8 | [08-operations.md](08-operations.md) | 如何运行、升级和诊断？ |
-| 9 | [09-extension-guide.md](09-extension-guide.md) | 如何新增组件或上游补丁？ |
+| 9 | [09-extension-guide.md](09-extension-guide.md) | 如何新增组件、上游补丁、共享端口挂载、web 界面贡献、运行期开关？ |
 | 10 | [10-testing-security.md](10-testing-security.md) | 如何验证并守住安全边界？ |
 | 11 | [11-troubleshooting.md](11-troubleshooting.md) | 常见故障如何定位？ |
 | 12 | [12-newgate-remote.md](12-newgate-remote.md) | newgate-remote：基于 Tailscale 的分布式网关设计（仅设计文档，未实现） |
@@ -37,3 +37,7 @@
 | Agent | 被接管的 AI CLI，如 Claude Code、OpenCode |
 | Component | capability graph 中拥有生命周期的节点 |
 | Capability | 组件之间使用的 typed port |
+| Port（共享端口） | 网关监听的那个端口；`/` 归数据面，其余前缀可以挂别的服务（porthub） |
+| Concept | 模块交给 web 界面的一个「面」：数据 + 怎么写回去（`lib/view`） |
+| Switch | 模块上报的运行期开关点（plugin-manager） |
+| Revision | 文件内容的哈希，CAS 写的基线（`config/store`） |

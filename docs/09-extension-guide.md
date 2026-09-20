@@ -141,6 +141,124 @@ gateway/special、config/roleprov、confighook 里那三份手写账本**暂时�
 它们各有真实差异（插件拓扑排序、`Refresh` 读侧、三张异质表共享一张 token），
 强行归并会造出更差的抽象。`Registry` 先在 `cli` 上验证，再逐个迁。
 
+## 3b. 共享端口：往网关那个端口上挂东西（porthub）
+
+网关监听的那个端口**不只属于数据面**。`/` 之外的前缀可以挂别的服务（web 界面、
+将来别的），机制在 `lib/porthub` + `modules/porthub`：
+
+```go
+Requires: []component.Requirement{component.Optional(porthubapi.Capability)},
+Start: func(_ context.Context, ctx component.Context) error {
+    hub, ok := component.Get(ctx, porthubapi.Capability)
+    if !ok {
+        return nil // 没装共享端口 = 这次装配里我没入口，功能照常
+    }
+    release, err := hub.Mount("/myservice", "my-module", http.StripPrefix("/myservice", myHandler))
+    …
+},
+Stop: func(context.Context) error { return component.ReleaseAll(releases) },
+```
+
+三条规矩，每条都有代价在背后：
+
+- **保留前缀挂不上去**（`/v1`、`/a`、`/__newgate`）：它们已经归数据面与控制面。
+  挂上去的成功率不高，而失败的样子很吓人——那些路径落进 catch-all 会被**当数据面
+  转发给上游**，症状是「我的界面把请求发到了模型服务」。
+- **挂载是进程内注册**，不起 socket、不起 goroutine。所以模块的 `Start` 在每一条
+  `newgate …` 命令里挂一次是完全无害的（`Start` 每次调用都会跑，见
+  `modules/i18n` 的教训）。**要起监听的话判据必须是「这次进程是服务进程」**，
+  而那个事实属于入口账本，不属于这里。
+- **谁提供端口、谁不提供**：`Root(owner, fallback)` 由**组合根**那一侧调用
+  （`gateway/serve.go` 的 `Serve`），fallback 是数据面自己的 handler。数据面
+  **一个字都不许提 porthub**——`modules/gateway/direction_test.go` 那条棘轮扫
+  `forward/` 的非测试源码，连注释里出现这个词都算红。理由：端口怎么分派是产品
+  决定，数据面只该知道自己是一个 handler。
+
+## 3c. web 界面贡献（`lib/view`）
+
+模块把自己的控制面交给 web 界面，走的是与 `cli/extension` 同一套模式，契约在
+叶子包 `lib/view`（界面模块提供账本，业务模块 `Optional` 依赖它）。
+
+```go
+Requires: []component.Requirement{component.Optional(viewapi.Capability)},
+Start: func(_ context.Context, ctx component.Context) error {
+    v, ok := component.Get(ctx, viewapi.Capability)
+    if !ok {
+        return nil
+    }
+    rel, err := v.Register("my-module", myConcepts) // ← 登记产出函数，不产出数据
+    …
+},
+```
+
+**一个概念 = 数据 + 怎么改**（`Concept{ID, Kind, Title, Data, Broken, Apply}`）：
+
+- `Kind` 是渲染方式（`mapping-editor` / `code` / `toggles` / `series` / `table` /
+  `log`）。前端**只认这几种**：加一个模块的面不需要改前端，除非它带来一种新的
+  **形状**（那时两边都要动，这是诚实的代价）。
+- `Apply(edit, base)` 是**拥有那份文件的人**才知道的写法：改哪一段、哪些字段必须
+  原样保留。界面自己不写文件——那样它就必须知道 profile 的字段、mappings 的布局、
+  哪些文件带凭据不能写回，那些知识会长在界面里，一个模块一块。
+- `Broken` 是「这个东西此刻读不出来」。**照常报一张卡片、写上原因**，不要让它从
+  列表里消失（用户会以为它不存在），也不要让整次快照失败（一个坏文件弄白整个界面）。
+
+**注册不读盘**（这条最要紧）：`Register` 只登记一个产出函数，产出发生在**有人来问
+界面的那一刻**。因为每一个 `newgate …` 进程都会跑一遍 `Start`，而绝大多数进程没有
+人会打开界面——把「读全部配置、解析每个 profile」放在注册时，等于让每一次 CLI 调用
+都白付一遍。顺带买到的第二件事：界面上的刷新是真的刷新（CLI 刚建的档位文件出现在
+下一次快照里，而不是等守护进程重启）。
+
+写回一个可能被别人改过的文件时，`Apply` 必须走有基线的写（下一节）。
+
+## 3d. 有基线的写：`config/store` 的 CAS
+
+同一个文件可能有两个写者（命令行与浏览器）。原子写只保证读者不会看到半截文件，
+**不保证**写者读到的是最新那份——没有基线检查时，后写的那位静默赢。
+
+```go
+base := store.Revision(path)              // 加载时拿到的基线（sha256:<hex>）
+…
+rev, err := store.WriteIfUnchanged(path, base, data)
+var stale *store.StaleError
+if errors.As(err, &stale) {
+    // 磁盘上已经不是你以为的那份：stale.Base / stale.Current 是两边的版本，
+    // stale.Disk 是磁盘原文。**绝不覆盖**，把两边摆给用户看。
+}
+```
+
+- 基线是**内容哈希**，不是 mtime：同一秒内的两次编辑、保留了时间戳的复制，都是
+  不同的文件。
+- 整段「读 → 比对 → 写」在一把 `flock` 里，所以两个并发写者里恰好一个成功。
+- 写整个 `state.json` 时用 `store.StateBytes(st)` + `WriteIfUnchanged`，**不要**
+  绕开基线直接 `SaveState`：后者会把别人在这中间的改动盖掉，而且是静默的。
+- 界面那一侧要把 `*StaleError` 翻译成 `*view.Conflict`（两边原文都带上，用户才
+  知道丢的是什么）。这个翻译是六行、允许各写一份；**CAS 的语义只在 store 里有一份**。
+
+## 3e. 运行期开关（plugin-manager）
+
+模块想让自己的某个行为能被运行期开关，在 `Start` 里自愿上报（不报就是合法状态，
+图不会因此报缺端口）：
+
+```go
+pm := component.MustGet(ctx, pluginmanagerapi.Capability)
+release, err := pm.RegisterSelf("my-module", []pluginmanagerapi.Switch{{
+    Path:  "my-module.tail-shape", // 必须以模块名为前缀，全局唯一
+    Title: i18n.T("Repair the tail shape", nil),
+    Why:   i18n.T("what turning it off does: …", nil),
+    Danger: pluginmanagerapi.DangerQuirk,
+    Default: true,                 // 出厂开着：kill switch（用户能关）
+}})
+```
+
+- **`Default` 决定语义**：`true` 是 kill switch（用户的「关」写进 Off 表），`false`
+  是 mode（用户的「开」写进 On 表）。`DangerFootgun` 必须声明 `TTL > 0`（注册期
+  强制）——「不给无限期的 footgun」是结构性保证，不是纪律。
+- **写语义只有一份**：`pluginmanager.SetSwitch(st, sw, on, ttl, forever)`。命令行与
+  web 界面都调它。里面三条规则（走哪张表、动作等于出厂态就是撤销、footgun 不收
+  永久）任何一条在第二个界面上写岔，两个界面就会对同一份文件给出相反的答案。
+- 热路径（每个请求都要问「这条关了吗」）只调 `query.Off/On` 这类**纯函数**，读传入
+  的配置快照：无锁、无 IO、不查注册表。
+
 ## 4. 新 Agent
 
 Agent 组件通常：
