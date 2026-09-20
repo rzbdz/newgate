@@ -12,7 +12,7 @@
 | 6 | [06-reasoning.md](06-reasoning.md) | reasoning content 为什么会丢，如何恢复？ |
 | 7 | [07-clients-runtime.md](07-clients-runtime.md) | Claude/OpenCode 如何被接管？ |
 | 8 | [08-operations.md](08-operations.md) | 如何运行、升级和诊断？ |
-| 9 | [09-extension-guide.md](09-extension-guide.md) | 如何新增组件、上游补丁、共享端口挂载、web 界面贡献、运行期开关？ |
+| 9 | [09-extension-guide.md](09-extension-guide.md) | 如何新增组件、上游补丁、共享端口挂载、web 界面贡献、运行期开关、进程入口？ |
 | 10 | [10-testing-security.md](10-testing-security.md) | 如何验证并守住安全边界？ |
 | 11 | [11-troubleshooting.md](11-troubleshooting.md) | 常见故障如何定位？ |
 | 12 | [12-newgate-remote.md](12-newgate-remote.md) | newgate-remote：基于 Tailscale 的分布式网关设计（仅设计文档，未实现） |
