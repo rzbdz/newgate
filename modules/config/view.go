@@ -59,23 +59,25 @@ func registerView(v view.Service) (modules.Release, error) {
 	// 用例是一句话：**改完全局默认，想让所有客户端都跟着它**。单独设过的客户端
 	// 不跟着走是对的（它们被明确指定过），但「全部收敛回跟随，然后我只维护一个
 	// 默认」是常见诉求，而逐个去点一遍要十六次操作。
-	forceFollow := view.Action{
-		ID:    "force-follow",
-		Label: func() string { return i18n.T("force: every client follows the default", nil) },
-		Run:   forceAllFollow,
+	applyAll := view.Action{
+		ID: "apply-default-all",
+		// 它挂在**栏目**上，所以宾语得自己写全：旁边没有哪张卡告诉读的人「应用什么」。
+		// （卡片上那一对不一样，见 profileActions——那里的宾语是那张卡。）
+		Label: func() string { return i18n.T("apply the default to all clients", nil) },
+		Run:   applyDefaultToAll,
 	}
 	return v.Register("config",
 		view.Title(func() string { return i18n.T("Configuration", nil) }).
-			Does(create).Does(forceFollow), concepts)
+			Does(create).Does(applyAll), concepts)
 }
 
-// forceAllFollow 清掉所有 per-agent 链头（见 store.ClearAllAgentProfiles）。
+// applyDefaultToAll 清掉所有 per-agent 链头（见 store.ClearAllAgentProfiles）。
 //
 // 它不改全局默认本身：用户要的是「大家都跟着它」，不是「把它改成别的」。
 //
 // 一条都不存在时**也算成功**（返回 nil）：那正是用户想要的状态，报一个错只会让人
 // 以为没生效。界面做完动作会重读快照，各家的链头那一格会自己显示成「跟随缺省」。
-func forceAllFollow() (string, error) {
+func applyDefaultToAll() (string, error) {
 	if _, err := store.ClearAllAgentProfiles(); err != nil {
 		return "", i18n.Ef(err, "cannot clear the per-client profiles: {err}", nil)
 	}
@@ -294,6 +296,21 @@ func profileConcept(name string, all []string) view.Concept {
 // 还有「**所有客户端**都跟着它」。单独设过的客户端不跟着走是对的（它们被明确指定
 // 过），但要逐个去点一遍就是十六次操作——第二个按钮把「设默认」与「收敛」一次做完，
 // 它不多做任何别的事。
+//
+// # 措辞：`apply` / `apply to all`（2026-09-21 用户定的）
+//
+// 第一版写的是 `set as the default profile` 与 `set as the default, and make every
+// client follow it`，第二版又写成 `force: …`。两个都不对，而且是**同一个**错：
+// 把「这个动作做了什么」当成按钮的字。
+//
+// `force` 尤其糟——它是用户描述需求时的**口语**（「加个 force 功能，强制 apply」），
+// 而我把那个词直接搬到了界面上。用户的原话是：「你应该搞成 apply 和 apply all 啊。
+// 应用。应用到全部。」
+//
+// 于是这一对改成**同一个动词、只差作用域**：`apply` = 把这个档位应用起来（成为全局
+// 默认），`apply to all` = 再往所有客户端应用一遍。两个词都在说「应用」，差别写在
+// 后半截——这正是「同一件事的两个范围」该有的样子，而动词本身不必再解释一遍宾语：
+// 宾语就是**这张卡**（按钮长在这份档位的卡上，卡头写着它的名字）。
 func profileActions(name string) []view.Action {
 	if store.LoadState().DefaultProfile == name {
 		return nil
@@ -301,26 +318,24 @@ func profileActions(name string) []view.Action {
 	return []view.Action{
 		{
 			ID:    "set-default",
-			Label: func() string { return i18n.T("set as the default profile", nil) },
+			Label: func() string { return i18n.T("apply", nil) },
 			Run:   func() (string, error) { return setDefaultProfile(name, false) },
 		},
 		{
-			ID: "set-default-force",
-			Label: func() string {
-				return i18n.T("set as the default, and make every client follow it", nil)
-			},
-			Run: func() (string, error) { return setDefaultProfile(name, true) },
+			ID:    "set-default-all",
+			Label: func() string { return i18n.T("apply to all", nil) },
+			Run:   func() (string, error) { return setDefaultProfile(name, true) },
 		},
 	}
 }
 
-// setDefaultProfile 把一份档位设成全局默认；force 时顺带清掉每个客户端的链头。
+// setDefaultProfile 把一份档位设成全局默认；all 时顺带清掉每个客户端的链头。
 //
 // 它**不改这一份档位本身**：用户要的是「默认用它」，不是「把它改一改」。所以这个
 // 按钮不会让这张卡变脏、也不会产生一份待保存的草稿——它是一次落盘的动作，
 // 做完界面重读一遍（见 lib/view 的 Concept.Actions）。
-func setDefaultProfile(name string, force bool) (string, error) {
-	if err := store.SetDefaultProfile(name, force); err != nil {
+func setDefaultProfile(name string, all bool) (string, error) {
+	if err := store.SetDefaultProfile(name, all); err != nil {
 		return "", err
 	}
 	return "", nil

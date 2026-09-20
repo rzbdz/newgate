@@ -1464,6 +1464,18 @@
       "text": "缺 api_key",
       "reviewed": true
     },
+    "apply": {
+      "text": "应用",
+      "reviewed": true
+    },
+    "apply the default to all clients": {
+      "text": "把默认应用到全部客户端",
+      "reviewed": true
+    },
+    "apply to all": {
+      "text": "应用到全部",
+      "reviewed": true
+    },
     "argv0 dispatch: what runs when we are called by a client's name": {
       "text": "argv0 分发：以客户端的名字被叫起来时跑的是什么",
       "reviewed": true
@@ -1982,10 +1994,6 @@
     },
     "following the global default ({profile})": {
       "text": "跟随全局缺省（{profile}）",
-      "reviewed": true
-    },
-    "force: every client follows the default": {
-      "text": "强制全部跟随（每个客户端都跟随全局缺省）",
       "reviewed": true
     },
     "forwarded upstream to get the true value": {
@@ -2818,14 +2826,6 @@
     },
     "set api_key in providers.json": {
       "text": "providers.json 里填 api_key",
-      "reviewed": true
-    },
-    "set as the default profile": {
-      "text": "设为默认 profile",
-      "reviewed": true
-    },
-    "set as the default, and make every client follow it": {
-      "text": "设为默认，并让每个客户端都跟随它",
       "reviewed": true
     },
     "set for this client only (other clients follow the global default)": {
