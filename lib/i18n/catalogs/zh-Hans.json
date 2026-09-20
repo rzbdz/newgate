@@ -2216,6 +2216,26 @@
       "text": "policy: 状态文档的字段 {key} 已被 {owner} 占用",
       "reviewed": true
     },
+    "porthub: a prefix must start with /, got {prefix}": {
+      "text": "porthub：前缀必须以 / 开头，实际为 {prefix}",
+      "reviewed": true
+    },
+    "porthub: prefix {prefix} (mounted by {owner}) collides with the reserved prefix {reserved}, which belongs to the data plane / control plane namespace — claiming it would send requests meant for this machine upstream as if they were data-plane traffic": {
+      "text": "porthub：前缀 {prefix}（由 {owner} 挂载）与保留前缀 {reserved} 冲突，后者属于 data plane / control plane 命名空间——占用它会把发给本机的请求当作 data-plane 流量上游",
+      "reviewed": true
+    },
+    "porthub: prefix {prefix} is already mounted by {owner} — two services on one path means only one of them ever sees a request, so this errors instead of letting the later one win silently": {
+      "text": "porthub：前缀 {prefix} 已由 {owner} 挂载——一个路径上两个服务意味着只有一个能看到请求，所以这里直接报错，而不是让后者静默胜出",
+      "reviewed": true
+    },
+    "porthub: the handler {owner} wants to mount at {prefix} is nil": {
+      "text": "porthub：{owner} 想挂载到 {prefix} 的 handler 为 nil",
+      "reviewed": true
+    },
+    "porthub: the prefix cannot be / — that is the whole port. Give a path prefix instead, e.g. /ui": {
+      "text": "porthub：前缀不能是 /——那是整个端口。请给出路径前缀，例如 /ui",
+      "reviewed": true
+    },
     "pre-gate diagnosis {provider}/{model} attempt {attempt}/{total}: HTTP {status} {err} ({latency})": {
       "text": "上闸前诊断 {provider}/{model} 第 {attempt}/{total} 次：HTTP {status} {err}（{latency}）",
       "reviewed": true
@@ -2986,9 +3006,9 @@
       "reviewed": true
     },
     "{n} message comes from the config dir": {
+      "text": "{n} 条消息来自配置目录",
       "other": "{n} 条消息来自 config 目录",
       "machine": true,
-      "text": "{n} 条消息来自配置目录",
       "reviewed": true
     },
     "{n} original config · newgate stop can restore it": {

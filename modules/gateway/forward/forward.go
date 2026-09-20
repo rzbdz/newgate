@@ -25,6 +25,7 @@ import (
 
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/logx"
+	"github.com/rzbdz/newgate/lib/porthub"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/config/resolve"
@@ -234,7 +235,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc(controlpath.Stop, s.handleControlStop)
 	mux.HandleFunc(controlpath.Upgrade, s.handleControlUpgrade)
 	mux.HandleFunc("/v1/models", s.handleModels)
-	mux.HandleFunc("/", s.handleProxy)
+	// catch-all 交给 dispatch：它先问端口上的挂载表（web 界面这类服务就住在同一个
+	// 端口上），问不到才当数据面转发。
+	mux.HandleFunc("/", s.dispatch)
 
 	ln, err := s.listen()
 	if err != nil {
@@ -703,6 +706,23 @@ func (s *Server) mainLoopHead(tgt Target) (resolve.Step, bool) {
 		return resolve.Step{}, false
 	}
 	return resolve.Step{Profile: active, Binding: b, Provider: p}, true
+}
+
+// dispatch 是 catch-all：先问端口上的挂载表，问不到才当数据面转发。
+//
+// 为什么**每请求现查**而不是启动时把表抄进 mux：模块的 Start 顺序由 capability
+// 依赖图决定，不保证「挂东西的模块」排在 gateway 前面；抄一份还会让 Stop 之后的
+// 撤销失效（那时候 mux 已经建好了）。表的读写由 lib/porthub 用 RWMutex 保护——
+// 这就是「CLI 与 dashboard 同时跑」的 race 保护点。
+//
+// 保留前缀（/v1、/a、/__newgate）在**挂的时候**就报错了（lib/porthub 的 reserved），
+// 所以这里不用再判一次：走到这里的路径要么是数据面，要么是别人明确挂上来的。
+func (s *Server) dispatch(w http.ResponseWriter, r *http.Request) {
+	if h, ok := porthub.Default().Lookup(r.URL.Path); ok {
+		h.ServeHTTP(w, r)
+		return
+	}
+	s.handleProxy(w, r)
 }
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
