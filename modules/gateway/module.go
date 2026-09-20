@@ -13,6 +13,7 @@ import (
 
 	modules "github.com/rzbdz/newgate/component"
 	entryapi "github.com/rzbdz/newgate/component/entry"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	servingapi "github.com/rzbdz/newgate/lib/serving"
 	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
@@ -103,7 +104,8 @@ func New() modules.Component {
 			// web 界面那一份（计数器）先注册：它**不依赖 cli**，只装 dashboard
 			// 的装配里也要有——下面那段一旦 return，这里就永远不会跑。
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
-				rel, err := v.Register("gateway", gatewayConcepts)
+				rel, err := v.Register("gateway",
+					viewapi.Title(func() string { return i18n.T("Gateway", nil) }), gatewayConcepts)
 				if err != nil {
 					return err
 				}

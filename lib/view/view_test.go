@@ -22,7 +22,7 @@ import (
 func TestRegisterDoesNotProduce(t *testing.T) {
 	r := NewRegistry()
 	var calls atomic.Int64
-	if _, err := r.Register("config", func() ([]Concept, error) {
+	if _, err := r.Register("config", tsection("config"), func() ([]Concept, error) {
 		calls.Add(1)
 		return []Concept{{ID: "a", Kind: KindCode}}, nil
 	}); err != nil {
@@ -44,7 +44,7 @@ func TestRegisterDoesNotProduce(t *testing.T) {
 func TestSnapshotAsksEveryTime(t *testing.T) {
 	r := NewRegistry()
 	n := 0
-	if _, err := r.Register("config", func() ([]Concept, error) {
+	if _, err := r.Register("config", tsection("config"), func() ([]Concept, error) {
 		n++
 		return []Concept{{ID: "profile." + string(rune('0'+n)), Kind: KindMapping}}, nil
 	}); err != nil {
@@ -96,7 +96,7 @@ func TestSnapshotCanAskJustSomeContributors(t *testing.T) {
 
 func mustCount(t *testing.T, r *Registry, name string, n *atomic.Int64) {
 	t.Helper()
-	if _, err := r.Register(name, func() ([]Concept, error) {
+	if _, err := r.Register(name, tsection(name), func() ([]Concept, error) {
 		n.Add(1)
 		return []Concept{{ID: name + ".x", Kind: KindSeries}}, nil
 	}); err != nil {
@@ -146,10 +146,10 @@ func TestLedgerStampsTheSource(t *testing.T) {
 
 func TestRegisterRejectsEmptySourceAndNilContributor(t *testing.T) {
 	r := NewRegistry()
-	if _, err := r.Register("", func() ([]Concept, error) { return nil, nil }); err == nil {
+	if _, err := r.Register("", tsection("x"), func() ([]Concept, error) { return nil, nil }); err == nil {
 		t.Error("没有来源名的贡献者该被拒绝（报错与分组都要点名）")
 	}
-	if _, err := r.Register("x", nil); err == nil {
+	if _, err := r.Register("x", tsection("x"), nil); err == nil {
 		t.Error("nil 产出函数该被拒绝（界面上会静默什么都没有）")
 	}
 }
@@ -158,7 +158,7 @@ func TestRegisterRejectsEmptySourceAndNilContributor(t *testing.T) {
 // 名重复登记是允许的，后来者不该被前一个的撤销带走。
 func TestReleaseOnlyRemovesItsOwn(t *testing.T) {
 	r := NewRegistry()
-	first, err := r.Register("config", func() ([]Concept, error) {
+	first, err := r.Register("config", tsection("config"), func() ([]Concept, error) {
 		return []Concept{{ID: "a", Kind: KindCode}}, nil
 	})
 	if err != nil {
@@ -173,7 +173,7 @@ func TestReleaseOnlyRemovesItsOwn(t *testing.T) {
 	if err := first(); err != nil {
 		t.Fatalf("撤销该是幂等的: %v", err)
 	}
-	if _, err := r.Register("config", func() ([]Concept, error) {
+	if _, err := r.Register("config", tsection("config"), func() ([]Concept, error) {
 		return []Concept{{ID: "a", Kind: KindCode}}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -254,7 +254,7 @@ func TestConcurrentRegisterAndSnapshot(t *testing.T) {
 		id := string(rune('a' + i))
 		go func() {
 			defer wg.Done()
-			rel, err := r.Register("s"+id, func() ([]Concept, error) {
+			rel, err := r.Register("s"+id, tsection("s"+id), func() ([]Concept, error) {
 				return []Concept{{ID: id, Kind: KindCode}}, nil
 			})
 			if err != nil {
@@ -276,7 +276,105 @@ func TestConcurrentRegisterAndSnapshot(t *testing.T) {
 
 func mustRegister(t *testing.T, r *Registry, source string, concepts ...Concept) {
 	t.Helper()
-	if _, err := r.Register(source, func() ([]Concept, error) { return concepts, nil }); err != nil {
+	if _, err := r.Register(source, tsection(source), func() ([]Concept, error) { return concepts, nil }); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// tsection 造一个栏目名。绝大多数用例只关心账本的行为，不关心标题长什么样，
+// 所以标题就用来源名——**栏目名的断言在 TestSections* 那几条里**，这里不该
+// 顺手把它也钉一遍（钉了就会有人为了改测试而改标题）。
+func tsection(name string) Section {
+	return Title(func() string { return name })
+}
+
+// TestSectionTitlesAreAskedEverySnapshot 是「栏目名为什么是个函数」的棘轮。
+//
+// 界面上的那一栏叫什么由模块自己报，而**报的时候不能翻**：登记发生在各模块的
+// Start 里，那时候语言层装好了没有是没有保证的（业务模块不依赖 modules/locale，
+// 依赖它的只有发行版那份追加目录的模块）。登记时求值的标题会冻在源语言上，而
+// 没有任何东西会因此变红——中文界面上那一栏一直叫 Configuration，看着只像
+// 「还没翻」，不像一条 bug。
+//
+// 所以这条测试盯的不是「标题对不对」，而是**求值发生在哪一刻**：登记之后改掉
+// 那句话的来源，下一次问栏名必须拿到新的。
+func TestSectionTitlesAreAskedEverySnapshot(t *testing.T) {
+	r := NewRegistry()
+	title := "first"
+	if _, err := r.Register("x", Title(func() string { return title }),
+		func() ([]Concept, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := sectionsOf(t, r)["x"]; got != "first" {
+		t.Fatalf("栏名该是登记的那个闭包算出来的，实际 %q", got)
+	}
+	title = "second"
+	if got := sectionsOf(t, r)["x"]; got != "second" {
+		t.Fatalf("栏名在登记那一刻就定死了（%q）——换个语言它也不会变", got)
+	}
+}
+
+// TestSectionsListSilentContributors：一个此刻一条概念都产不出来的源，仍然要
+// 在侧栏里有一个位置。
+//
+// 它消失的代价不是「少一行」：用户会以为那个模块没装，然后去别处找（翻配置、
+// 问 doctor）。今天真会这样的场景是配置目录整个读不了、omo 还没接管过、一个
+// 开关点都没上报——而那时候恰恰最需要看见「这一栏在，只是空的」。
+func TestSectionsListSilentContributors(t *testing.T) {
+	r := NewRegistry()
+	if _, err := r.Register("quiet", tsection("Quiet"),
+		func() ([]Concept, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Register("loud", tsection("Loud"),
+		func() ([]Concept, error) { return []Concept{{ID: "a", Kind: KindCode}}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	got := r.Sections()
+	if len(got) != 2 {
+		t.Fatalf("两个源都该在栏目列表里，实际 %d 个: %+v", len(got), got)
+	}
+	if got[0].Source != "loud" || got[1].Source != "quiet" {
+		t.Errorf("栏目该按 source 排序（界面顺序要跨重启稳定）: %+v", got)
+	}
+	if got[1].Title != "Quiet" {
+		t.Errorf("没产出的那位也该有名字: %+v", got[1])
+	}
+}
+
+// TestSectionsSurviveAnEmptyTitle：栏名是一句展示文案。它算不出来时兜成来源名，
+// 而不是让整次快照失败——那代价是整个界面白屏，比一栏标题不好看严重得多。
+func TestSectionsSurviveAnEmptyTitle(t *testing.T) {
+	r := NewRegistry()
+	if _, err := r.Register("config", Title(func() string { return "  " }),
+		func() ([]Concept, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := sectionsOf(t, r)["config"]; got != "config" {
+		t.Errorf("空栏名该兜成来源名（机器标记，至少不是空的）: %q", got)
+	}
+}
+
+// TestRegisterRejectsNoSectionTitle：漏报栏名要在**登记那一刻**红，不能等到
+// 界面渲染——那一刻离这里隔着一次 HTTP 与一次渲染，谁也不会顺着摸回来，症状
+// 是侧栏里一栏没有标题（或者顶着一个模块名）。
+func TestRegisterRejectsNoSectionTitle(t *testing.T) {
+	r := NewRegistry()
+	rel, err := r.Register("x", Section{}, func() ([]Concept, error) { return nil, nil })
+	if err == nil {
+		_ = rel()
+		t.Fatal("没报栏目名该被拒绝（用 view.Title）")
+	}
+	if !strings.Contains(err.Error(), "x") {
+		t.Errorf("报错要点名是哪个源: %v", err)
+	}
+}
+
+func sectionsOf(t *testing.T, r *Registry) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, s := range r.Sections() {
+		out[s.Source] = s.Title
+	}
+	return out
 }

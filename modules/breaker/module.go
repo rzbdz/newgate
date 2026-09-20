@@ -4,6 +4,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
@@ -61,9 +62,11 @@ func New() modules.Component {
 			// web 界面那一份**先**注册：它不依赖 cli，只装 dashboard 的装配里也要
 			// 有——下面那段一旦 return，这里就永远不会跑（与 gateway 同一条）。
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
-				viewRelease, err := v.Register("breaker", func() ([]viewapi.Concept, error) {
-					return healthConcepts(table)
-				})
+				viewRelease, err := v.Register("breaker",
+					viewapi.Title(func() string { return i18n.T("Breaker", nil) }),
+					func() ([]viewapi.Concept, error) {
+						return healthConcepts(table)
+					})
 				if err != nil {
 					return err
 				}

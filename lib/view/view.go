@@ -19,6 +19,10 @@
 // 界面在自己的 service 上问它要数据。所以 web-dashboard 不认识任何模块，
 // 加一个模块的界面也不需要改它——更不用改前端（前端只认 Kind）。
 //
+// 登记时除了产出函数还要报一个**栏目名**（Section）：界面把概念按来源分栏，
+// 而「这一栏叫什么」是模块自己的事——名字若住在界面里，加一个模块就得改一次
+// 界面，那正是上面那条规矩要避免的。名字在**快照那一刻**求值，理由见 Section。
+//
 // # 一个概念 = 一份文件的全部知识
 //
 // 概念不只报**数据**，还带 `Apply`：怎么写回磁盘是**拥有那份数据的人**的知识。
@@ -47,6 +51,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	modules "github.com/rzbdz/newgate/component"
@@ -194,13 +199,52 @@ func (c *Conflict) Error() string {
 // 自己的毛病不要走这里——那会连带把别人的面也弄没，用 Concept.Broken。
 type Contributor func() ([]Concept, error)
 
+// Section 是「这一栏」的展示面：它的名字。
+//
+// 名字为什么是个函数，而不是登记时算好的一个字符串：**登记发生在各模块的 Start
+// 里，而那时候语言层装好了没有是没有保证的**。业务模块不依赖 modules/locale
+// （依赖它的只有发行版的 modules/i18n，它要把自带的目录追加进内核已经装好的
+// 那一份），所以「谁先 Start」不归我们管；在 Start 里求值的标题会冻在源语言上，
+// 而**没有任何东西会因此变红**——中文界面上那一栏就一直叫 Configuration。
+//
+// 求值挪到快照那一刻（Registry.Sections），就与概念标题同一时机、同一门语言：
+// 概念标题一直是那么做的（见 modules/config/view.go 里 `Title: i18n.T(...)`
+// 都在产出函数里），这条只是把栏名拉齐到同一个规矩上。
+type Section struct {
+	Title func() string
+}
+
+// Title 造一个栏目名。传进来的是个**闭包**，不是译好的字符串：
+//
+//	v.Register("config", view.Title(func() string { return i18n.T("Configuration", nil) }), concepts)
+//
+// 这个形状有两个好处，都不是洁癖：
+//
+//   - 类型上就写不出「登记时把标题翻好」那种错（想传字符串编译不过），而那个
+//     错是静默的——英文标题在中文界面上看着只像「还没翻」，不像一条 bug；
+//   - i18n 的扫描器照常看得见那句 msgid。它认的是源码里的 `i18n.T(...)` 调用，
+//     而闭包体里的调用同样在这棵 AST 里，所以**不需要教扫描器认识 view.Title**。
+//     反过来若把 msgid 当字符串收进来（`view.Title("Configuration")`），那句
+//     英文就谁也扫不到：账本里没有它、check 全绿、中文目录里永远缺一条。
+func Title(f func() string) Section { return Section{Title: f} }
+
+// SectionInfo 是栏目列表里的一行。
+//
+// Source 是机器标记（前端拿它跟概念对上、也拿它写进 URL），Title 是给人看的。
+// 与概念一样：标题可以翻译、可以改措辞，而身份不能。
+type SectionInfo struct {
+	Source string `json:"source"`
+	Title  string `json:"title"`
+}
+
 // Service 是贡献者看到的那一面：登记一个产出函数。
 //
 // 查询那半边不给出去——它属于界面自己（谁渲染谁读账本）。与 porthub 的 Service
 // 只给 Mount 是同一条：给出去的面积越小，能长出来的耦合越少。
 type Service interface {
-	// Register 登记 source（模块名，报错与分组时点名用）的产出函数，返回撤销。
-	Register(source string, read Contributor) (modules.Release, error)
+	// Register 登记 source（模块名，报错与分组时点名用）与它的栏目名，外加产出
+	// 函数。返回撤销。
+	Register(source string, section Section, read Contributor) (modules.Release, error)
 }
 
 // Capability 是「这个界面在这个进程里」这件事本身。
@@ -223,9 +267,10 @@ type Registry struct {
 }
 
 type source struct {
-	id   int
-	name string
-	read Contributor
+	id    int
+	name  string
+	title func() string // Register 拒绝 nil，所以这里一定非空
+	read  Contributor
 }
 
 func NewRegistry() *Registry {
@@ -235,9 +280,15 @@ func NewRegistry() *Registry {
 // Register 收下一个贡献者，返回撤销。
 //
 // 这一步**不调用产出函数**：账本在装配期只知道「谁来报」，不知道「报什么」。
-func (r *Registry) Register(name string, read Contributor) (modules.Release, error) {
+func (r *Registry) Register(name string, section Section, read Contributor) (modules.Release, error) {
 	if name == "" {
 		return nil, i18n.E("view: a contributor registered with no source name", nil)
+	}
+	if section.Title == nil {
+		// 报错而不是兜个名字：栏目名缺失是**界面上一栏没有标题**，而那一刻离这里
+		// 隔着一次 HTTP 与一次渲染，谁也不会顺着摸回来。这里红一下最便宜。
+		return nil, i18n.E("view: {source} registered with no section title — the sidebar would have "+
+			"nothing to label its column with (use view.Title)", i18n.A{"source": name})
 	}
 	if read == nil {
 		return nil, i18n.E("view: {source} registered a nil contributor — the interface would show nothing for it",
@@ -245,7 +296,7 @@ func (r *Registry) Register(name string, read Contributor) (modules.Release, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := source{id: r.next, name: name, read: read}
+	s := source{id: r.next, name: name, title: section.Title, read: read}
 	r.next++
 	r.sources = append(r.sources, s)
 	return func() error {
@@ -261,6 +312,35 @@ func (r *Registry) Register(name string, read Contributor) (modules.Release, err
 		}
 		return nil
 	}, nil
+}
+
+// Sections 列出**登记过的全部栏目**（不只是此刻有概念的），按 Source 排序。
+//
+// 为什么不复用「从概念里取 source」：一个源此刻可能一条概念都产不出来——配置
+// 目录整个读不了、omo 还没接管过、插件一个开关点都没上报。那些栏目仍然该在
+// 侧栏里有一个位置：它从列表里消失，用户会以为那个模块不存在，然后去别处找。
+//
+// 它**不调用任何产出函数**（只取登记的栏目名），所以随时问都很便宜，界面可以
+// 在每次快照里捎上它。栏名在这里求值——快照这一刻的语言，而不是登记那一刻的
+// （见 Section 的注释）。
+func (r *Registry) Sections() []SectionInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]SectionInfo, 0, len(r.sources))
+	for _, s := range r.sources {
+		title := ""
+		if s.title != nil {
+			title = s.title()
+		}
+		if strings.TrimSpace(title) == "" {
+			// 兜底而不是报错：栏名是一句展示文案，为它让整次快照失败，代价是
+			// 整个界面白屏——比一栏的标题写成 source 名严重得多。
+			title = s.name
+		}
+		out = append(out, SectionInfo{Source: s.name, Title: title})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Source < out[j].Source })
+	return out
 }
 
 // Snapshot 问一遍贡献者，返回这一刻的概念（按 Source, ID 排序）。

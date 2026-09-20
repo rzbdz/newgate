@@ -3276,6 +3276,22 @@
     "● Running": {
       "text": "● 运行中",
       "reviewed": true
+    },
+    "Configuration": {
+      "text": "配置",
+      "reviewed": true
+    },
+    "Gateway": {
+      "text": "网关",
+      "reviewed": true
+    },
+    "Plugins": {
+      "text": "插件",
+      "reviewed": true
+    },
+    "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
+      "text": "view: {source} 登记时没有报栏目名——侧边栏那一栏就没有东西可以做标题（用 view.Title）",
+      "reviewed": true
     }
   }
 }

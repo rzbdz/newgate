@@ -221,12 +221,21 @@ Start: func(_ context.Context, ctx component.Context) error {
     if !ok {
         return nil
     }
-    rel, err := v.Register("my-module", myConcepts) // ← 登记产出函数，不产出数据
+    // ← 登记：来源名 + 栏目名 + 产出函数。**不产出数据**。
+    rel, err := v.Register("my-module",
+        viewapi.Title(func() string { return i18n.T("My module", nil) }), myConcepts)
     …
 },
 ```
 
-**一个概念 = 数据 + 怎么改**（`Concept{ID, Kind, Title, Data, Broken, Apply}`）：
+**栏目名为什么是个闭包**：界面按来源分栏，而「这一栏叫什么」是模块自己的事——名字
+住在界面里的话，加一个模块就得改一次界面。但名字**不能在登记时翻**：登记发生在各
+模块的 `Start` 里，那时候语言层（`modules/locale`）装好了没有是没有保证的（业务模块
+不依赖它），于是标题会冻在源语言上，而没有任何东西会因此变红。`view.Title` 收的是
+一个闭包，求值发生在**快照那一刻**（与概念标题同一时机）；类型上也因此写不出
+`view.Title(i18n.T(…))` 那种错。
+
+**一个概念 = 数据 + 怎么改**（`Concept{ID, Kind, Title, Data, Broken, Live, Apply}`）：
 
 - `Kind` 是渲染方式（`mapping-editor` / `code` / `toggles` / `series` / `table` /
   `log`）。前端**只认这几种**：加一个模块的面不需要改前端，除非它带来一种新的
@@ -240,6 +249,12 @@ Start: func(_ context.Context, ctx component.Context) error {
   哪些文件带凭据不能写回，那些知识会长在界面里，一个模块一块。
 - `Broken` 是「这个东西此刻读不出来」。**照常报一张卡片、写上原因**，不要让它从
   列表里消失（用户会以为它不存在），也不要让整次快照失败（一个坏文件弄白整个界面）。
+- `Live` 是「这一面会自己变，界面该每隔几秒重问一次」。判据是**读一次贵不贵**，
+  不是数据变不变：计数器、日志尾巴、几个开关的当前值都是内存里读一把；要重读并
+  重新解析每个 profile 的那种就不行。**不声明它不会有任何东西报错**——页面安静地
+  停在打开那一刻，而一张显示「还有多久自动关闭」的卡就永远停在那个数字上。
+  粒度是**源**：界面刷的是「有谁声明了 Live」的那些源，问一个源就是问它全部的
+  贡献者，所以同源那几位得一起便宜。
 
 **注册不读盘**（这条最要紧）：`Register` 只登记一个产出函数，产出发生在**有人来问
 界面的那一刻**。因为每一个 `newgate …` 进程都会跑一遍 `Start`，而绝大多数进程没有

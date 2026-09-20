@@ -35,7 +35,8 @@ import (
 // 理由是这套东西的正确性而不是性能——每条 `newgate …` 命令都会跑到这里，而其中
 // 绝大多数没有人会打开界面（见 lib/view 的包注释）。
 func registerView(v view.Service) (modules.Release, error) {
-	return v.Register("config", concepts)
+	return v.Register("config",
+		view.Title(func() string { return i18n.T("Configuration", nil) }), concepts)
 }
 
 // concepts 是「此刻配置的样子」：state.json 里归本模块的那几个字段、每个 profile

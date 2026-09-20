@@ -4,6 +4,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
@@ -74,9 +75,11 @@ func New() modules.Component {
 			// 注册时只登记产出函数，不算「现在开着没有」：每条 `newgate …` 命令都会
 			// 跑到这里，而绝大多数进程没有人会看界面（见 lib/view 的包注释）。
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
-				rel, err := v.Register("plugin-manager", func() ([]viewapi.Concept, error) {
-					return viewConcepts(service)
-				})
+				rel, err := v.Register("plugin-manager",
+					viewapi.Title(func() string { return i18n.T("Plugins", nil) }),
+					func() ([]viewapi.Concept, error) {
+						return viewConcepts(service)
+					})
 				if err != nil {
 					return err
 				}

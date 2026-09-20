@@ -559,7 +559,7 @@
       ]
     },
     "Breaker": {
-      "where": "modules/breaker/plane.go:273"
+      "where": "modules/breaker/module.go:66"
     },
     "CLIs taken over: {list}": {
       "where": "modules/confighook/command.go:104",
@@ -652,6 +652,9 @@
     "Config is unusable, refusing to take over": {
       "where": "modules/runtime/commands.go:220"
     },
+    "Configuration": {
+      "where": "modules/config/view.go:39"
+    },
     "Configuration hot-reloaded (generation {gen}): {changes} — running sessions are unaffected": {
       "where": "modules/gateway/serve.go:215",
       "args": [
@@ -693,7 +696,7 @@
       "where": "modules/runtime/diagnostics.go:63"
     },
     "Default profile": {
-      "where": "modules/config/view.go:331"
+      "where": "modules/config/view.go:332"
     },
     "Description": {
       "where": "modules/config/commands.go:105"
@@ -767,8 +770,11 @@
     "Full request log (turns itself off after 30 minutes by default)": {
       "where": "modules/gateway/command_debug.go:39"
     },
+    "Gateway": {
+      "where": "modules/gateway/module.go:108"
+    },
     "Global settings": {
-      "where": "modules/config/view.go:336"
+      "where": "modules/config/view.go:337"
     },
     "Glossary": {
       "where": "modules/cli/cli.go:150"
@@ -1006,6 +1012,9 @@
       "args": [
         "name"
       ]
+    },
+    "Plugins": {
+      "where": "modules/pluginmanager/module.go:79"
     },
     "Port not responding": {
       "where": "modules/gateway/diagnostics.go:64"
@@ -1340,7 +1349,7 @@
       "where": "modules/runtime/commands.go:319"
     },
     "Which profile the chain starts from when no agent-specific one is set.": {
-      "where": "modules/config/view.go:332"
+      "where": "modules/config/view.go:333"
     },
     "Who goes through newgate": {
       "where": "modules/runtime/view.go:84"
@@ -2156,7 +2165,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:303",
+      "where": "lib/view/view.go:383",
       "args": [
         "err",
         "source"
@@ -3134,7 +3143,7 @@
       "where": "modules/runtime/takeover/takeover.go:233"
     },
     "the file content in this request is not readable: {err}": {
-      "where": "modules/config/view.go:408",
+      "where": "modules/config/view.go:409",
       "args": [
         "err"
       ]
@@ -3191,7 +3200,7 @@
       "where": "modules/runtime/commands.go:146"
     },
     "the settings in this request are not readable: {err}": {
-      "where": "modules/config/view.go:349",
+      "where": "modules/config/view.go:350",
       "args": [
         "err"
       ]
@@ -3210,7 +3219,7 @@
       ]
     },
     "the tier bindings in this request are not readable: {err}": {
-      "where": "modules/config/view.go:226",
+      "where": "modules/config/view.go:227",
       "args": [
         "err"
       ]
@@ -3418,17 +3427,17 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:240"
+      "where": "lib/view/view.go:285"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:324",
+      "where": "lib/view/view.go:404",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:316",
+      "where": "lib/view/view.go:396",
       "args": [
         "a",
         "b",
@@ -3436,13 +3445,19 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:321",
+      "where": "lib/view/view.go:401",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:243",
+      "where": "lib/view/view.go:294",
+      "args": [
+        "source"
+      ]
+    },
+    "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
+      "where": "lib/view/view.go:290",
       "args": [
         "source"
       ]
@@ -3573,7 +3588,7 @@
       ]
     },
     "{file} is not valid JSON": {
-      "where": "modules/config/view.go:261",
+      "where": "modules/config/view.go:262",
       "args": [
         "file"
       ]

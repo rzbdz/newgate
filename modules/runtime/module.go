@@ -12,6 +12,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	viewapi "github.com/rzbdz/newgate/lib/view"
 	configapi "github.com/rzbdz/newgate/modules/config"
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
@@ -66,7 +67,8 @@ func New() modules.Component {
 			// dashboard 的装配里也要有——下面那段一旦 return，这里就永远不会跑
 			// （与 gateway/config 同一条）。
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
-				rel, err := v.Register("runtime", takeoverConcepts)
+				rel, err := v.Register("runtime",
+					viewapi.Title(func() string { return i18n.T("Takeover", nil) }), takeoverConcepts)
 				if err != nil {
 					return err
 				}
