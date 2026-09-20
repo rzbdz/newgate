@@ -30,7 +30,7 @@ type Entry struct {
 // 而这份清单列的就是全部模块名——modules_gen.go 是它唯一合法的住处。
 func CoreModules() []Entry { return coreModules() }
 
-// Selection 是**由消费者决定**的一组组件：内核自带的减去 Disable、加上 Extra。
+// Selection 是**由消费者决定**的一组组件：内核自带的减去关掉的、加上 Extra。
 //
 // 发行版就是拿它把自己的模块交给内核的组合根：
 //
@@ -41,7 +41,23 @@ func CoreModules() []Entry { return coreModules() }
 //
 // 内核侧零改动：组合根仍然不认识任何模块，它只认识这张表。
 type Selection struct {
+	// AllCore 关掉**内核自带的全部可关模块**——「这个发行版只要框架 + 我自己的模块」。
+	//
+	// 为什么是一个字段，而不是让 Disable 把目录名列满：列满的写法有两份代价，而且
+	// 都是静默的。其一是**名单会腐坏**——它与 CoreModules() 是两个副本，内核加一个
+	// 模块时那份名单不会跟着长，于是「我以为全关掉了」的发行版悄悄多装了一个模块。
+	// 其二是它把一句话能说清的产品决定写成了十几行数据（骨架发行版就是这样）。
+	// AllCore 表达的是「内核自带的都不要」，它跟着 CoreModules() 一起长。
+	//
+	// 「可关的」是关键词：组合根自己要用的那个端口（入口账本）**谁提供谁就关不掉**，
+	// AllCore 也关不掉它——否则一个发行版能把自己变成一个没人能回答「这次调用归谁」
+	// 的二进制。这不是例外，那就是「可关」的定义边界（见 compositionRootPorts）。
+	//
+	// 与 Disable 同时给会报错：那两个说法是同一件事（那些名字本来就在 AllCore 里）。
+	AllCore bool
 	// Disable 是要关掉的内核模块，写**目录名**。名字必须点得中——点不中就报错。
+	//
+	// 要关掉全部请用 AllCore（规格书里写 `"disable": ["*"]`，见 tools/distgen）。
 	Disable []string
 	// Extra 是消费者自己的模块，形态与内核模块完全一致（目录名 + New()）。
 	Extra []Entry
@@ -68,7 +84,21 @@ func (s Selection) Load() ([]modules.Component, error) {
 		extra[e.Dir] = true
 	}
 
-	off := make(map[string]bool, len(s.Disable))
+	off := make(map[string]bool, len(core))
+	if s.AllCore {
+		// 两个说法说同一件事时必须报错，不能取并集：那样 `AllCore` 与一长串
+		// Disable 会同时存在，而后者是前者的过时副本——正是这个字段要消掉的东西。
+		if len(s.Disable) > 0 {
+			return nil, fmt.Errorf("装配选择：AllCore 与 Disable 同时给了（%v）——"+
+				"前者已经包含后者。两个都要就只留 AllCore；只想关掉其中几个就别写 AllCore", s.Disable)
+		}
+		for _, e := range core {
+			if _, serves := servesCompositionRoot(e.Component); serves {
+				continue // 关不掉的那个不在「可关的」里面
+			}
+			off[e.Dir] = true
+		}
+	}
 	for _, dir := range s.Disable {
 		e, isCore := known[dir]
 		if !isCore {
@@ -78,7 +108,8 @@ func (s Selection) Load() ([]modules.Component, error) {
 					"（disable 只用来关掉内核自带的模块；列在这里是**没有效果**的，而你多半以为它关掉了）", dir)
 			}
 			return nil, fmt.Errorf("装配选择：disable 点名了 %q，但内核与自己都没有这个模块"+
-				"（写的是**目录名**吗？比如 claudecode_deepseek 而不是 claudecode-deepseek）", dir)
+				"（写的是**目录名**吗？比如 claudecode_deepseek 而不是 claudecode-deepseek；"+
+				"要关掉全部请用 AllCore）", dir)
 		}
 		if port, serves := servesCompositionRoot(e.Component); serves {
 			return nil, fmt.Errorf("装配选择：disable 点名了 %q（组件 %s），但它提供了组合根自己要用的端口 %q——"+

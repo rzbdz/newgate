@@ -138,6 +138,79 @@ func TestSelectionRejectsDuplicatesAndEmptyGraph(t *testing.T) {
 	}
 }
 
+// AllCore：内核自带的**全部可关模块**一次关掉——「这个发行版只要框架 + 我自己的模块」。
+//
+// 为什么值得一条自己的测试：这个字段的全部价值在于它**跟着 CoreModules() 一起长**
+// （内核加一个模块，写 AllCore 的发行版自动不装它）。所以判据不能是「关掉了某几个
+// 名字」，只能是「剩下的恰好是关不掉的那些」——两边的名字都从声明里读，不写死。
+func TestSelectionAllCoreDisablesEverythingRemovable(t *testing.T) {
+	sel, err := Selection{AllCore: true}.Load()
+	if err != nil {
+		t.Fatalf("AllCore：%v", err)
+	}
+	if len(sel) == 0 {
+		t.Fatal("AllCore 把图关空了——连入口账本都没了，进程起来也没人能认领调用")
+	}
+	kept := 0
+	for _, c := range sel {
+		if _, serves := servesCompositionRoot(c); !serves {
+			t.Errorf("AllCore 之后图里还剩 %s——它不是组合根自己要用的那个：%v", c.Name, names(sel))
+			continue
+		}
+		kept++
+	}
+	if kept == 0 {
+		t.Error("AllCore 把提供组合根端口的组件也关掉了")
+	}
+
+	// 反过来：可关的那些必须**真的**不在图里（不是「我以为关了」）。
+	removable := 0
+	for _, e := range CoreModules() {
+		if _, serves := servesCompositionRoot(e.Component); serves {
+			continue
+		}
+		removable++
+		if contains(names(sel), e.Component.Name) {
+			t.Errorf("AllCore 之后 %s（目录 %s）还在图里", e.Component.Name, e.Dir)
+		}
+	}
+	if removable < 5 {
+		t.Fatalf("内核里可关的模块只剩 %d 个——这条测试退化了", removable)
+	}
+}
+
+// AllCore + Extra 就是骨架发行版那张图：框架 + 我自己的一个模块。
+func TestSelectionAllCoreKeepsExtra(t *testing.T) {
+	sel, err := Selection{
+		AllCore: true,
+		Extra:   []Entry{{Dir: "probe", Component: helloProbe()}},
+	}.Load()
+	if err != nil {
+		t.Fatalf("AllCore + Extra：%v", err)
+	}
+	got := names(sel)
+	if !contains(got, "hello-probe") {
+		t.Errorf("Extra 里的模块没装上：%v", got)
+	}
+	for _, name := range []string{"cli", "gateway", "config"} {
+		if contains(got, name) {
+			t.Errorf("AllCore 之后 %s 还在图里：%v", name, got)
+		}
+	}
+}
+
+// AllCore 与 Disable 同时给：报错。取并集是错的——那样 AllCore 旁边会留着一长串
+// Disable，而后者是前者的过时副本，正是这个字段要消掉的东西。
+func TestSelectionRejectsAllCoreWithDisable(t *testing.T) {
+	_, err := (Selection{AllCore: true, Disable: []string{"cli"}}).Load()
+	if err == nil {
+		t.Fatal("AllCore 与 Disable 同时给，没报错")
+	}
+	if !strings.Contains(err.Error(), "AllCore") {
+		t.Errorf("报错该说清是 AllCore 与 Disable 撞了，实际：%v", err)
+	}
+}
+
 // helloProbe 冒充一个"消费者自己的模块"（Extra 那条路上来的），用来验证
 // 「disable 管不着 Extra」那条拒绝。
 func helloProbe() modules.Component {
