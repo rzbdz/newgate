@@ -48,6 +48,22 @@ func BackupDir() string      { return filepath.Join(Root(), "backups") }
 // 目录里那个同名文件正是我们自己放的）。两个消费者各拼一遍路径，就是两份会漂移的
 // 知识，而漂移的症状是「接管状态又开始撒谎」。
 func ShimDir() string { return filepath.Join(Config(), "bin") }
+
+// RelToRoot 把一个绝对路径写成**相对配置根**的样子（写不出来就退回文件名）。
+//
+// 它服务的是界面契约里那个 `File`/`Path` 字段：概念按「说的是哪份文件」两半配对
+// （控件半与原文半，见 lib/view 的 Toggles.File），所以**同一份文件在两处必须给出
+// 同一种写法**——一处绝对、一处相对，配不上对，而界面上看起来只像「右栏没出来」。
+//
+// 与 ShimDir 同一条：路径布局归本包。这段逻辑 2026-09-21 之前在 config 与 locale
+// 里各有一份（第二份是抄的），而它就是上面那句话说的「会漂移的知识」。
+func RelToRoot(path string) string {
+	rel, err := filepath.Rel(Root(), path)
+	if err != nil {
+		return filepath.Base(path)
+	}
+	return rel
+}
 func LogFile() string { return filepath.Join(Root(), "newgate.log") }
 
 // ThinkCacheFile thinkcache 的落盘冷层文件：滚动 100MB，撑过 daemon 重启。

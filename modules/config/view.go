@@ -272,7 +272,7 @@ func profileView(name, file string, pr *domain.Profile) profileData {
 		}
 	}
 	data := profileData{
-		Profile: name, File: relToRoot(file), Base: store.Revision(file),
+		Profile: name, File: paths.RelToRoot(file), Base: store.Revision(file),
 		Description: pr.Description, Pinned: pr.Pinned, Excluded: pr.Excluded, Extends: pr.Extends,
 		Default:        snap.State != nil && snap.State.DefaultProfile == name,
 		Providers:      providerChoices(snap),
@@ -530,7 +530,7 @@ func writeThrough(conceptID, file, base string, data []byte) (string, error) {
 	var stale *store.StaleError
 	if errors.As(err, &stale) {
 		return "", &view.Conflict{
-			Concept: conceptID, Path: relToRoot(file),
+			Concept: conceptID, Path: paths.RelToRoot(file),
 			Base: stale.Base, Current: stale.Current,
 			Yours: string(data), Theirs: string(stale.Disk),
 		}
@@ -581,7 +581,7 @@ func stateView(file string, st *domain.State) stateData {
 		active, host = st.DefaultProfile, st.Host
 	}
 	return stateData{
-		File: relToRoot(file), Base: store.Revision(file),
+		File: paths.RelToRoot(file), Base: store.Revision(file),
 		Items: []toggleItem{{
 			ID: "default_profile", Kind: "select", Value: active, Options: profileNames(),
 			Label: i18n.T("Default profile", nil),
@@ -708,7 +708,7 @@ func providersConcept() view.Concept {
 		// 档位绑定」，这个顺序与操作的先后是同一件事。
 		Order: 1,
 		Data: view.Records{
-			File:     relToRoot(file),
+			File:     paths.RelToRoot(file),
 			Items:    items,
 			Base:     store.Revision(file),
 			CanAdd:   true,
@@ -955,7 +955,7 @@ type fileData struct {
 func fileConcepts() []view.Concept {
 	var out []view.Concept
 	add := func(path, language string) {
-		rel := relToRoot(path)
+		rel := paths.RelToRoot(path)
 		b, err := os.ReadFile(path)
 		if err != nil {
 			// 读不出来就报一张坏卡片（而不是不报）：源文件那条 tab 少一个文件名，
@@ -1113,12 +1113,4 @@ func profileFile(name string) (string, error) {
 		return js, nil
 	}
 	return "", fmt.Errorf("profile %s has no file", name)
-}
-
-func relToRoot(path string) string {
-	rel, err := filepath.Rel(paths.Root(), path)
-	if err != nil {
-		return filepath.Base(path)
-	}
-	return rel
 }

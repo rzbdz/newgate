@@ -227,12 +227,17 @@ func applySwitches(m Manager, edit json.RawMessage, base string) (string, error)
 	return writeThrough("plugin-manager.switches", paths.StateFile(), base, b)
 }
 
-// writeThrough 与 modules/config/view.go 里那一段是同一件事：把 store 的
-// 「基线不对」翻译成界面契约的 Conflict。
+// writeThrough 把 store 的「基线不对」翻译成界面契约的 Conflict。
 //
-// 六行，两边各一份，是**刻意**的：CAS 的语义（比对什么、怎么锁、写多原子）在
-// store 里只有一份，这里只是把它的失败换个形状。反过来让 store 认识 view 契约，
-// 才是把界面的知识长进数据层。
+// # 为什么这六行抄了三份（config / locale / 这里）
+//
+// 这是**刻意**的，2026-09-21 复核过：CAS 的语义（比对什么、怎么锁、写多原子）在
+// store 里只有一份，这里只是把它的失败换个形状。唯一能把它收成一份的办法是让
+// store 认识 view 契约（或者为它单开一个包），而那两件事都比三份六行的映射更糟
+// ——前者把界面的知识长进数据层，后者为了一个结构体字面量多一层间接。
+//
+// 抄的**判据**：`Conflict` 加了字段时三处都要跟。漏改的症状是冲突对话框里少一栏
+// （前端画空白），不会红。
 func writeThrough(conceptID, file, base string, data []byte) (string, error) {
 	rev, err := store.WriteIfUnchanged(file, base, data)
 	var stale *store.StaleError

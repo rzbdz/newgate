@@ -49,7 +49,7 @@ func languageConcept() view.Concept {
 		ID: "locale.language", Kind: view.KindToggles,
 		Title: i18n.T("Language", nil),
 		Data: view.Toggles{
-			File: relToRoot(file), Base: store.Revision(file),
+			File: paths.RelToRoot(file), Base: store.Revision(file),
 			Items: []view.ToggleItem{{
 				ID:      "lang",
 				Kind:    view.ToggleSelect,
@@ -146,30 +146,17 @@ func applyLanguage(edit json.RawMessage, base string) (string, error) {
 
 // conflict 把「基线对不上」翻成界面认识的那种冲突（带两边的原文）。
 //
-// 这一小段与 modules/config/view.go 的 writeThrough 是同一件事。**它该只有一份**
-// （放在哪一层见 lib/view 与 store 的分工），今天是第二份——记在这里，等设计模式
-// 那一轮收口，别让它长出第三份。
+// 这六行与 modules/config/view.go、modules/pluginmanager/view.go 里那两段是同一件
+// 事，抄三份是**刻意**的（理由写在 pluginmanager 那一份上：另一个选择是让 store
+// 认识 view 契约，那更糟）。判据是 `Conflict` 加字段时三处都要跟。
 func conflict(conceptID, file string, err error, yours []byte) error {
 	var stale *store.StaleError
 	if errors.As(err, &stale) {
 		return &view.Conflict{
-			Concept: conceptID, Path: relToRoot(file),
+			Concept: conceptID, Path: paths.RelToRoot(file),
 			Base: stale.Base, Current: stale.Current,
 			Yours: string(yours), Theirs: string(stale.Disk),
 		}
 	}
 	return err
-}
-
-// relToRoot 把绝对路径写成相对配置根的形式。
-//
-// 与 config 那边同一个形状（概念里的 `file` 是给**界面配对**用的，见
-// languageConcept 的注释），所以两处必须给出同一种写法——绝对路径会让同一份文件
-// 的两半配不上对。
-func relToRoot(path string) string {
-	rel, err := filepath.Rel(paths.Root(), path)
-	if err != nil {
-		return filepath.Base(path)
-	}
-	return rel
 }
