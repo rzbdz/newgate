@@ -2,10 +2,12 @@ package config
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rzbdz/newgate/lib/view"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/config/store"
 	"github.com/rzbdz/newgate/testing/testkit"
@@ -226,4 +228,73 @@ func TestProfileFamilyTerminatesAndGroups(t *testing.T) {
 			t.Fatalf("profileFamily(%q, %v) 不返回——它挂住的是所有人共用的读快照那条路", c.name, c.all)
 		}
 	}
+}
+
+// TestPreviewShowsTheDraftNotTheDisk：控件那一半要能拿**还没落盘的**原文草稿问一句
+// 「我该显示成什么样」（见 view.Concept.Preview）。
+//
+// 没有它的话，用户在原文里粘一整份档位、再去动一个下拉框：控件那一半手里还是改之前
+// 那份盘上内容，而它的编辑载荷是**整份文件**——交上去的就是整份旧表，刚粘的东西当场
+// 没了，而屏幕上从头到尾没显示过它。这条锁三件事：
+//
+//   - 预览反映的是**草稿**，磁盘那份一个字节都不动；
+//   - 返回的形状与快照里的 Data 同一个（界面直接拿它当 data 用）；
+//   - 打字的半成品报 error（界面靠它决定「保持上一次的样子」），而不是 panic、
+//     也不是悄悄给一份空表——空表看起来就像「档位全被删了」。
+func TestPreviewShowsTheDraftNotTheDisk(t *testing.T) {
+	testkit.Sandbox(t)
+	disk := seedFile(t, "demo.kv", "desc=盘上那份\nnormal=p/on-disk\n")
+
+	concept := findConcept(t, "config.profile.demo")
+	if concept.Preview == nil {
+		t.Fatal("档位卡没有 Preview——原文改动之后，控件那一半就永远跟不上")
+	}
+
+	data, err := concept.Preview([]byte("desc=草稿\nrole.zzprobe=p/from-draft\n"))
+	if err != nil {
+		t.Fatalf("预览一份合法草稿报错: %v", err)
+	}
+	pv, ok := data.(profileData)
+	if !ok {
+		t.Fatalf("预览回来的不是 profileData 而是 %T——界面拿它当 data 用，形状必须一致", data)
+	}
+	var ids []string
+	for _, r := range pv.Roles {
+		ids = append(ids, r.ID)
+	}
+	if !slices.Contains(ids, "zzprobe") {
+		t.Errorf("草稿里的档位没出现在预览里: %v", ids)
+	}
+	if slices.Contains(ids, "normal") {
+		t.Errorf("预览把盘上那份混进来了——它只该反映草稿: %v", ids)
+	}
+	if pv.Description != "草稿" {
+		t.Errorf("描述该跟着草稿走，实际 %q", pv.Description)
+	}
+
+	// 预览不是保存。
+	if b, _ := os.ReadFile(disk); !strings.Contains(string(b), "on-disk") {
+		t.Errorf("预览把磁盘改了: %q", b)
+	}
+
+	// 半成品（正敲着的那一行）：报错。
+	if _, err := concept.Preview([]byte("desc=打了一半\nrole.zzprobe=")); err == nil {
+		t.Error("半成品草稿该报错——界面靠这个 error 保持上一次的样子")
+	}
+}
+
+// findConcept 按 id 从这一份装配里取一张卡。
+func findConcept(t *testing.T, id string) view.Concept {
+	t.Helper()
+	all, err := concepts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range all {
+		if c.ID == id {
+			return c
+		}
+	}
+	t.Fatalf("这份装配里没有 %s", id)
+	return view.Concept{}
 }

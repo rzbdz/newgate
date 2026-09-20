@@ -165,6 +165,49 @@ func profileConcept(name string, all []string) view.Concept {
 	if err != nil {
 		return brokenConcept(conceptID, view.KindMapping, name, err)
 	}
+	title := name
+	if pr.Description != "" {
+		title = name + " — " + pr.Description
+	}
+	return view.Concept{
+		ID: conceptID, Kind: view.KindMapping, Title: title,
+		// Order 10：档位文件排在「上游 / 全局设置」之后（见 concepts 的注释）。
+		//
+		// Group 是**两级**的（见 view.Concept.Group）：大档 `档位`，族由
+		// profileFamily 算（`claude-cheap` 缩在 `claude` 底下）。为什么要有大档
+		// 那一段：左栏里「全局设置 / 上游」是**装完就要配的两项**，而档位是**一天天
+		// 加出来的一堆**——不分开的话，那两项与十六个档位平铺在一起，谁也看不出
+		// 这是两类东西（用户的原话：「profile 这里就可以做一个分栏了啊」）。
+		//
+		// 大档的名字走 i18n（它是给人看的），族名是档位名本身（机器标记，不翻）。
+		Order: 10, Group: i18n.T("Profiles", nil) + "/" + profileFamily(name, all),
+		Data: profileView(name, file, pr),
+		Apply: func(edit json.RawMessage, base string) (string, error) {
+			return applyProfileRoles(conceptID, file, edit, base)
+		},
+		// Preview：原文那一半的草稿长这样时，这张控件卡该显示成什么样（见
+		// view.Concept.Preview）。
+		//
+		// 为什么这张卡需要它：用户粘一整份档位进原文那一栏、再想用一个下拉框调一档
+		// ——没有 Preview 的话，控件那一栏手里还是**改之前**那份内容，他那一下编辑
+		// 交上去的是整份旧表，刚粘的东西当场没了，而屏幕上一直没显示过它，所以他
+		// 不会觉得自己正在覆盖什么（见 App.svelte 里 lastEdit 那段）。
+		Preview: func(draft []byte) (any, error) {
+			p, err := parseProfileDraft(file, draft)
+			if err != nil {
+				return nil, err
+			}
+			return profileView(name, file, p), nil
+		},
+	}
+}
+
+// profileView 把一份**已经解析好的**档位拼成编辑器要的全部素材。
+//
+// 加载路径与预览路径共用它，理由一条：两条路必须给出**一模一样**的形状。各写一份
+// 的话，「刚敲完原文」与「保存之后」这两个时刻画出来的会是两张慢慢长歪的表，而那种
+// 不一致没有任何测试会红——只有用的人看得出来（两张表里有一张少了某个字段）。
+func profileView(name, file string, pr *domain.Profile) profileData {
 	// provider 表读不出来不算这张卡片坏掉：档位本身是好的、可以改，只是候选
 	// 下拉框没有素材（providers.json 还没建是全新安装的正常状态）。这条以前是
 	// 「整个 profile 静默消失」，现在是「照常显示、候选为空」。
@@ -194,27 +237,25 @@ func profileConcept(name string, all []string) view.Concept {
 		}
 		data.Roles = append(data.Roles, rd)
 	}
-	title := name
-	if pr.Description != "" {
-		title = name + " — " + pr.Description
+	return data
+}
+
+// parseProfileDraft 把一份**草稿的字节**按那份文件的格式解析成档位。
+//
+// 与 store.readProfileFile 是同一套分支（.kv 走 KV 解析、.json 走 JSON），但输入
+// 是内存里的草稿而不是磁盘上的文件——预览要的正是这个：**还没落盘**的那一份。
+func parseProfileDraft(file string, draft []byte) (*domain.Profile, error) {
+	if strings.HasSuffix(file, ".kv") {
+		return store.ParseProfileKV(string(draft))
 	}
-	return view.Concept{
-		ID: conceptID, Kind: view.KindMapping, Title: title,
-		// Order 10：档位文件排在「上游 / 全局设置」之后（见 concepts 的注释）。
-		//
-		// Group 是**两级**的（见 view.Concept.Group）：大档 `档位`，族由
-		// profileFamily 算（`claude-cheap` 缩在 `claude` 底下）。为什么要有大档
-		// 那一段：左栏里「全局设置 / 上游」是**装完就要配的两项**，而档位是**一天天
-		// 加出来的一堆**——不分开的话，那两项与十六个档位平铺在一起，谁也看不出
-		// 这是两类东西（用户的原话：「profile 这里就可以做一个分栏了啊」）。
-		//
-		// 大档的名字走 i18n（它是给人看的），族名是档位名本身（机器标记，不翻）。
-		Order: 10, Group: i18n.T("Profiles", nil) + "/" + profileFamily(name, all),
-		Data: data,
-		Apply: func(edit json.RawMessage, base string) (string, error) {
-			return applyProfileRoles(conceptID, file, edit, base)
-		},
+	var pr domain.Profile
+	if err := json.Unmarshal(draft, &pr); err != nil {
+		return nil, err
 	}
+	if pr.Roles == nil {
+		pr.Roles = map[string]domain.Candidates{}
+	}
+	return &pr, nil
 }
 
 // roleOrder 是档位的展示顺序：四个标准档位按阶梯先后（重→轻），其余（含 "*" 与
