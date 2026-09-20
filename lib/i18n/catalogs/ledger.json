@@ -1557,7 +1557,7 @@
       "where": "modules/gateway/command_probe.go:200"
     },
     "binding": {
-      "where": "modules/breaker/view.go:53"
+      "where": "modules/breaker/view.go:56"
     },
     "binding health table: trips after consecutive failures, releases one half-open trial when the cooldown expires": {
       "where": "modules/breaker/plane.go:53"
@@ -1978,7 +1978,7 @@
       "where": "modules/pluginmanager/command.go:120"
     },
     "expired": {
-      "where": "modules/breaker/view.go:173"
+      "where": "modules/breaker/view.go:176"
     },
     "extends cycle: {name} points back to itself": {
       "where": "modules/config/store/store.go:137",
@@ -2089,10 +2089,10 @@
       ]
     },
     "half-open · awaiting trial": {
-      "where": "modules/breaker/view.go:132"
+      "where": "modules/breaker/view.go:135"
     },
     "half-open · trial in flight": {
-      "where": "modules/breaker/view.go:130"
+      "where": "modules/breaker/view.go:133"
     },
     "handoff needs a TCP listener, got {type}": {
       "where": "modules/runtime/daemon/daemon.go:400",
@@ -2104,7 +2104,7 @@
       "where": "modules/cli/commands.go:51"
     },
     "healthy": {
-      "where": "modules/breaker/view.go:136"
+      "where": "modules/breaker/view.go:139"
     },
     "in effect": {
       "where": "modules/runtime/commands.go:170"
@@ -3289,10 +3289,10 @@
       "where": "modules/gateway/command_probe.go:150"
     },
     "trial in flight": {
-      "where": "modules/breaker/view.go:165"
+      "where": "modules/breaker/view.go:168"
     },
     "tripped": {
-      "where": "modules/breaker/view.go:134"
+      "where": "modules/breaker/view.go:137"
     },
     "troubleshooting: newgate status / newgate doctor / newgate stop (restores a direct connection)": {
       "where": "modules/gateway/forward/forward.go:1687"
@@ -3591,7 +3591,7 @@
       ]
     },
     "{ms}ms": {
-      "where": "modules/breaker/view.go:104",
+      "where": "modules/breaker/view.go:107",
       "args": [
         "ms"
       ]
@@ -3641,7 +3641,7 @@
       "other": "{n} entries · {used} / {max} · hits {hits} · misses {misses} · evictions {evictions}"
     },
     "{n} failure": {
-      "where": "modules/breaker/view.go:86",
+      "where": "modules/breaker/view.go:89",
       "other": "{n} failures"
     },
     "{n} message comes from the config dir": {
@@ -3681,7 +3681,7 @@
       "other": "{n} profiles · default {name}"
     },
     "{n} shape error": {
-      "where": "modules/breaker/view.go:88",
+      "where": "modules/breaker/view.go:91",
       "other": "{n} shape errors"
     },
     "{n} shim": {
@@ -3692,7 +3692,7 @@
       "other": "{n} shims"
     },
     "{n} spared": {
-      "where": "modules/breaker/view.go:91",
+      "where": "modules/breaker/view.go:94",
       "other": "{n} spared"
     },
     "{n} stop in the chain": {

@@ -49,7 +49,10 @@ func healthConcepts(table Breaker) ([]view.Concept, error) {
 //     「多久以前」这种相对时间在网页上会过期（页面开着不动，数字就不对了）。
 //     延迟与评级是绝对值，留下了。
 func healthTable(rows []Status) view.Table {
-	t := view.Table{Columns: []view.Column{
+	// Rows 显式初始化成空切片，不是 nil：nil 切片序列化成 `null`，而这一格的
+	// 契约是「一个列表」。前端的 `?? []` 兜得住 null，但下一个消费者未必这么
+	// 小心——一个空表在协议里该是 `[]`，不该是「这个字段没有」。
+	t := view.Table{Rows: []map[string]view.Cell{}, Columns: []view.Column{
 		{ID: "binding", Label: i18n.T("binding", nil)},
 		{ID: "state", Label: i18n.T("State", nil)},
 		{ID: "rule", Label: i18n.T("Ledger", nil)},

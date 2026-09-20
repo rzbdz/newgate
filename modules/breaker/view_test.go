@@ -1,6 +1,8 @@
 package breaker
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/rzbdz/newgate/lib/view"
@@ -108,6 +110,16 @@ func TestHealthTableIsEmptyWhenNothingIsKnown(t *testing.T) {
 	}
 	if len(table.Columns) == 0 {
 		t.Fatal("空表也该有表头，否则前端连「这张表在说哪几件事」都显示不出来")
+	}
+	// 空表要序列化成 `[]`，不是 `null`：nil 切片在 JSON 里是 null，而这一格的
+	// 契约是「一个列表」。前端靠 `?? []` 兜住了，但协议不该指望每个消费者都
+	// 这么小心。
+	raw, err := json.Marshal(table)
+	if err != nil {
+		t.Fatalf("表序列化失败: %v", err)
+	}
+	if !strings.Contains(string(raw), `"rows":[]`) {
+		t.Fatalf("空表的 rows 该是 []，实际: %s", raw)
 	}
 }
 
