@@ -165,14 +165,27 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
 
 ## 3. 部署（优雅，零停机）
 
+> **产品二进制从发行版仓库出**（2026-09-20 起）。本仓库的 `make build` / `make static`
+> 产出的是**内核自带**的二进制（十三个模块：网关、熔断、接管、界面…）——**它没有**
+> deepseek / glm 那些上游怪癖补丁。把这里的产物装到线上是一次**降级**：形状 400 的
+> 修补、推理回填、跨上游迁移全没了，症状是「某些请求突然开始 400」或者悄悄沿链
+> 换人（见 `docs/06-reasoning.md`）。
+>
+> 发一版产品：`cd /root/workspace/newgate-ext && build/build.sh`
+> （或直接下 GitHub Release 的产物），再按下面这套换版。
+> 本仓库的二进制只在**内核自己的测试**（`make e2e` / `make e2e-claude`）里用。
+
 ### 3.1 单机
 
 ```bash
-cd go && make build                      # 跨机器用 make static
-cp bin/newgate /root/.local/bin/.newgate.new
+# 产物来自发行版仓库：dist/newgate-<发行版>-<平台>-<架构>
+cp <发行版产物> /root/.local/bin/.newgate.new
 mv -f /root/.local/bin/.newgate.new /root/.local/bin/newgate   # 换名覆盖
 /root/.local/bin/newgate restart         # 优先走优雅交接（socket fd 移交）
 ```
+
+**换完核一下模块数**：`newgate plugin | head -1` 应当是 **19 个模块 · 4 个可运行期
+开关点**。少了就是装错了（内核自带的二进制只有 13 个模块、0 个开关点）。
 
 - **为什么不是 `cp` 直接覆盖**：Text file busy——运行中的进程占着 inode。
   `mv`（rename）换目录项，老进程继续用旧 inode 排空在途请求。
@@ -203,8 +216,11 @@ mv -f /root/.local/bin/.newgate.new /root/.local/bin/newgate   # 换名覆盖
 ### 3.2 跨机器（`panjunzhong@10.0.50.11`，snode1）
 
 ```bash
-cd go && CGO_ENABLED=0 make static        # 必须静态：那台 glibc 旧，动态链接起不来
-scp bin/newgate panjunzhong@10.0.50.11:/data/home2/panjunzhong/WorkSpace/bin/newgate.new
+# 产物来自发行版仓库，且必须是静态的（那台 glibc 旧，动态链接起不来）。
+cd /root/workspace/newgate-ext
+NEWGATE_PLATFORMS=linux/amd64 build/build.sh dist/    # 脚本自带静态断言
+scp dist/newgate-newgate-default-linux-amd64 \
+  panjunzhong@10.0.50.11:/data/home2/panjunzhong/WorkSpace/bin/newgate.new
 ssh panjunzhong@10.0.50.11 'cd /data/home2/panjunzhong/WorkSpace/bin && \
   mv -f newgate.new newgate && ./newgate restart'
 ```

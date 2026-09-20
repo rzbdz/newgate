@@ -74,21 +74,21 @@ newgate naked off         # 关
 
 ## 4. 部署
 
-本机构建：
+**产品二进制从发行版仓库出**（2026-09-20 起，见 `docs/09-extension-guide.md` §8）。
+本仓库的 `make build` / `make static` 只产出**内核自带**的二进制（十三个模块），
+装到线上是一次降级——它没有 deepseek / glm 那些上游怪癖补丁。本仓库的构建只服务
+内核自己的测试（`make e2e`、`make e2e-claude`）。
+
+发一版产品：
 
 ```bash
-cd go
-make build
-```
-
-跨机器使用：
-
-```bash
-make static
+cd <发行版仓库>            # 例如 /root/workspace/newgate-ext
+build/build.sh dist/      # 本机平台；NEWGATE_PLATFORMS 可出平台矩阵
 ```
 
 替换运行中二进制应先写新文件再 rename，避免 `Text file busy`。升级后比较
-`/proc/<pid>/exe` 与目标二进制摘要，确认 daemon 已换成新版本。
+`/proc/<pid>/exe` 与目标二进制摘要，确认 daemon 已换成新版本——另外核一下
+`newgate plugin` 的模块数（19 个模块 / 4 个可运行期开关点），少了就是装错了。
 
 ## 5. 沙箱
 

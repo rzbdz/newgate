@@ -98,7 +98,7 @@ make test               # go test ./...
 make test-race          # 并发相关改动必跑
 make e2e                # opencode 侧零 token 端到端
 make e2e-claude         # Claude Code 侧零 token 端到端
-make static             # 静态二进制（跨机器部署前）
+make static             # 静态二进制（**内核自己的**；产品二进制从发行版仓库出）
 ```
 
 零 token E2E 也可以直接跑脚本，端口和沙箱可用环境变量岔开（人肉并行）：
