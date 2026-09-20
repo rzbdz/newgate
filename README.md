@@ -2,7 +2,7 @@
 
 # newgate
 
-### Your AI CLI asks for a **tier**. newgate picks the model.
+### The mechanism for a gateway that picks the model — with no product in it.
 
 `heavy` · `normal` · `mid` · `light` · `vision`
 
@@ -15,54 +15,41 @@
 
 ---
 
-## What you get
+The kernel is what makes adapting cheap: tiers, fallbacks, the breaker and the
+upgrade path are **mechanism**, so a new model or a new upstream quirk is a
+module someone adds in their own distribution — not a change to the core.
 
-**Takes over your CLI, without your CLI knowing.**
-A PATH shim and the client's own config rewritten in place — env injected
-silently, byte-exact backups taken first. Install once; every switch after that
-happens at the gateway, so you never reopen a session.
-
-**Changing which API answers is one command, not a migration.**
-`newgate profile ark` — the next request takes the new chain. Your client keeps
-running, its config is untouched, no session is interrupted, and the old one
-stays one command away.
+**Your CLI asks for a tier; the gateway picks the model.**
+`heavy` is not one upstream, it's an ordered candidate chain — your rules first,
+then predicted time-to-first-byte. The response tells you where it went.
 
 **Nothing dies with a single upstream.**
-Per-tier candidate chains, ordered by your rules and then by predicted
-time-to-first-byte. Every skip is explained, every reroute is logged, and the
-response tells you where it went.
+Every skip is explained and every reroute is logged. A provider being down,
+rate-limited or wrong is a routing decision, not an outage.
 
 **A breaker that knows whose fault it was.**
 Availability, rate-limit and config failures are separate ledgers with separate
 thresholds. A 400 caused by the *shape of your request* is counted against
 nobody. Half-open trials recover on their own.
 
-**Metrics you can act on.**
-Latency by context size, failovers, first-byte timeouts, rewrites,
-cancellations — each counter with a one-line explanation, because a number
-nobody can interpret is decoration.
-
 **Restart without dropping a request.**
 The listening socket is handed to the new process and the old one drains what's
-in flight, streams included. Upgrading is safe in the middle of an agent session.
-
-**English today, 中文 today, anything tomorrow.**
-Every user-facing string comes from a message catalog, and the source-language
-path is the identity — English output is byte-identical to a build without i18n.
-`newgate lang zh-Hans`, or let it follow the system.
+in flight, streams included. Upgrades are safe mid-session.
 
 **Everything is a module — including the parts you'd expect to be special.**
 Gateway, breaker, UI, entry point, message catalog. Coupling is by capability,
-nothing imports its peers, and a distribution is a *module list*, not a fork.
+nothing imports its peers, and "cannot be removed" is derived from the port the
+composition root consumes — never from a name list.
 
-**Zero dependencies.**
-No third-party packages, no `go.sum`, and the test suite passes with
-`GOPROXY=off`. CJK width, message catalogs and terminal layout are hand-written.
+**Zero dependencies, fully offline build.**
+No third-party packages, no `go.sum`; the suite passes with `GOPROXY=off`. CJK
+width, message catalogs and terminal layout are hand-written.
 
-## The seam
+## What is *not* here
 
-The kernel is mechanism. Which modules ship, whose quirks get patched, in what
-order — a distribution decides, from another repository:
+No upstream quirks, no client takeover, no tiers anyone chose. Which modules
+ship, and in what order, is a distribution's decision — its own repository, its
+own module list, its own policies, forked and edited by whoever wants them:
 
 ```go
 app.Main(ctx, app.Options{Loader: app.Selection{
@@ -71,20 +58,18 @@ app.Main(ctx, app.Options{Loader: app.Selection{
 }})
 ```
 
-The kernel contains the string `deepseek` nowhere outside a doc comment, and
-"cannot be removed" is derived from the port the composition root consumes —
-never from a name list.
+Nothing in the kernel branches on a product name — `deepseek` appears only in
+doc comments, tests and dev tools. Build one from
+[**rzbdz/newgate-ext**](https://github.com/rzbdz/newgate-ext), or write your own
+selection and compose the gateway you actually want.
 
 ## Quick start
 
 ```bash
-make build            # → bin/newgate (kernel modules only: a mechanism harness)
+make build            # → bin/newgate — kernel modules only: a mechanism harness
 bin/newgate init && bin/newgate start
 bin/newgate doctor    # when something is wrong
 ```
-
-> That binary is **not the product** — no upstream-quirk patches. Products come
-> from a distribution: [**rzbdz/newgate-ext**](https://github.com/rzbdz/newgate-ext).
 
 ## Docs
 
