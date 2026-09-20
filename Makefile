@@ -27,10 +27,12 @@ all: build
 ## generate: 扫描 modules/ 重建组合根装配清单（app/modules_gen.go）
 generate:
 	@go run ./tools/genmodules
+	@go run ./tools/i18n bundle -root . -catalogs lib/i18n/catalogs
 
 ## check-generate: 只校验清单是否过期，不改文件（CI/测试用）
 check-generate:
 	@go run ./tools/genmodules -check
+	@go run ./tools/i18n bundle -root . -catalogs lib/i18n/catalogs -check
 
 build: generate
 	@mkdir -p $(OUT)
@@ -125,6 +127,7 @@ e2e: build
 check-i18n:
 	@go run ./tools/i18n extract -check
 	@go run ./tools/i18n check
+	@go run ./tools/i18n bundle -check
 
 ## i18n-sync: 把缺的译文补齐（调本机网关跑 LLM）。**开发者本地跑**，绝不进 CI——
 ## 翻译要花钱、要一台在跑的网关，那不是 push 该付的代价。

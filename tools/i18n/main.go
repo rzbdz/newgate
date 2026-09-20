@@ -35,6 +35,8 @@ func main() {
 	switch cmd {
 	case "extract":
 		err = cmdExtract(args)
+	case "bundle":
+		err = cmdBundle(args)
 	case "check":
 		err = cmdCheck(args)
 	case "status":
@@ -66,6 +68,7 @@ func usage() {
 
   extract [-check]      扫源码重建账本（-check 只校验是否过期，不写文件）
   check [-strict]       静态检查：账本 / 占位符 / 孤儿键 / 覆盖率 / 中文残留
+  bundle [-check]       把 catalogs/*.json 编成运行期直接读的 .bin（-check 只校验是否过期）
   status                每种语言的覆盖率与机翻计数
   audit [-seed]         看/写「还没迁移的文件」清单（-seed 按现状播种）
   missing [-lang zh-Hans]  列出缺哪些译文

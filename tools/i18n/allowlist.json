@@ -8,6 +8,7 @@
     "tools/ciyaml/ciyaml.go": "开发工具：同上——而且它是棘轮自己的声音（报的是「这份 workflow 结构不对」），用被它检查的目录来说话是循环",
     "tools/genmodules/main.go": "开发工具：读者是开发者，输出只出现在生成/校验流水线上",
     "tools/i18n/audit.go": "开发工具：同上",
+    "tools/i18n/bundle.go": "开发工具：同上——生成/校验流水线上的输出，读者是开发者",
     "tools/i18n/check/check.go": "开发工具：同上——而且它是棘轮自己的声音，用被它检查的目录来说话是循环",
     "tools/i18n/main.go": "开发工具：同上",
     "tools/i18n/rename.go": "开发工具：同上",
