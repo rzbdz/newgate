@@ -33,11 +33,11 @@ newgate：把 AI CLI（claude / opencode）的模型选择收敛到**语义档�
 ## 1. 开发
 
 ```bash
-cd go
+# 仓库根就是模块根（2026-09-20 摊平了 go/ 那层）
 make build      # 本机二进制 → bin/newgate（dynamic，本机够用）
 make static     # CGO_ENABLED=0 全静态，跨机器部署必须用这个
 make test       # == go test ./...
-go vet ./... && gofmt -l component modules cmd
+go vet ./... && gofmt -l .
 ```
 
 分层（依赖通过 capability 表达，`component` 不 import 业务模块）：
@@ -145,8 +145,8 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
   - 端到端：`mock/*.sh` —— 真二进制、真进程、真接管。**刻意与 Go 侧解耦**
     （不 import 任何 core 包），所以 Go 怎么重构都不该影响它。它一红就是行为
     真的变了。
-- **一把梭**：`make check`（格式 + vet + 生成清单 + 单测 + 两条零 token
-  端到端）。拆开：`make test` / `make test-race` / `make e2e` / `make e2e-claude`。
+- **一把梭**：`make check`（格式 + vet + 生成清单 + i18n + 单测 + 零 token 端到端）。
+  拆开：`make test` / `make test-race` / `make e2e`。
 - **推之前自动跑**：仓库带了一份 `.githooks/pre-push`，内容就是 `make ci`（沙箱
   `NEWGATE_HOME` + 静态 / 单测 / 竞态 / 端到端，约半分钟）。装上——每个 clone 一次，
   git 不会替你装：
@@ -160,8 +160,9 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
   → checkout 整体失败）。绕开用 `git push --no-verify`——这个口子**故意留着**：
   一条绕不过的钩子，在它自己出毛病的时候会把人卡死。
 - **单测不出网**（`docs/10-testing-security.md` §1）：一律用 `httptest`，出网即失败。
-- **端到端零 token**：`make e2e-claude`（假上游 + 沙箱 `NEWGATE_HOME`，不碰真实
-  配置）。改网关/插件行为后跑一遍，它锁的正是真实现场复现出来的那几条。
+- **端到端零 token**：`make e2e`（假上游 + 沙箱 `NEWGATE_HOME`，不碰真实配置）。
+  改网关/插件行为后跑一遍，它锁的正是真实现场复现出来的那几条。**只有这一条**了
+  ——opencode 侧那条跟着客户端模块搬去了发行版（那边的 `mock/e2e_opencode.sh`）。
 - **打真实上游验证**（几个 token）：利用 `/p/<profile>` 的**单次 profile
   覆盖**，不用切全局状态：
   ```bash
@@ -188,7 +189,7 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
 >
 > 发一版产品：`cd /root/workspace/newgate-ext && build/build.sh`
 > （或直接下 GitHub Release 的产物），再按下面这套换版。
-> 本仓库的二进制只在**内核自己的测试**（`make e2e` / `make e2e-claude`）里用。
+> 本仓库的二进制只在**内核自己的测试**（`make e2e`）里用。
 
 ### 3.1 单机
 

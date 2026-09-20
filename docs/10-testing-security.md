@@ -84,8 +84,7 @@ Stop 漏一个 Release 的症状是**只有第二次装配才炸**——单跑�
 ## 1.2 标准验证
 
 ```bash
-cd go
-make check          # 一把梭：格式 + vet + 生成清单 + 单测 + 两条零 token 端到端
+make check          # 一把梭：格式 + vet + 生成清单 + i18n + 单测 + 零 token 端到端
 ```
 
 拆开来跑：
@@ -94,24 +93,25 @@ make check          # 一把梭：格式 + vet + 生成清单 + 单测 + 两条�
 make check-fmt          # 只校验格式
 make vet
 make check-generate     # 装配清单是否过期
+make check-i18n         # 账本是否过期、译文与源码是否对得上（不出网、不花钱）
 make test               # go test ./...
 make test-race          # 并发相关改动必跑
-make e2e                # opencode 侧零 token 端到端
-make e2e-claude         # Claude Code 侧零 token 端到端
+make e2e                # 零 token 端到端（内核的机制面）
 make static             # 静态二进制（**内核自己的**；产品二进制从发行版仓库出）
 ```
 
 零 token E2E 也可以直接跑脚本，端口和沙箱可用环境变量岔开（人肉并行）：
 
 ```bash
-cd ..
-bash mock/e2e.sh
 bash mock/e2e_claude.sh
 # 并行：NEWGATE_E2E_UP_PORT / NEWGATE_E2E_PROXY_PORT / NEWGATE_E2E_SANDBOX
 ```
 
-OpenCode E2E 覆盖接管、role 路由、热切换、stream 和逐字节恢复。Claude E2E
-覆盖 profile 注入、严格 DeepSeek、thinkcache、count_tokens、优雅交接和 metrics。
+**内核只剩这一条端到端**（2026-09-20）：claude 与 opencode 两个客户端模块搬去了
+发行版，opencode 侧那条脚本跟着走——现在是 `newgate-ext/mock/e2e_opencode.sh`，
+由那边的 CI 跑。内核这条打的是机制面：档位解析、上游严格性、停机与优雅交接、
+运行期开关与 schema-repair，外加 Claude 侧的 profile 注入、thinkcache、
+count_tokens 与 metrics。
 
 ## 1.3 要花真 token 的那条
 
@@ -126,8 +126,31 @@ bash mock/e2e_reasoning_affinity.sh
 
 ## 1.4 CI
 
-`.github/workflows/ci.yml` 三个 job：`static`（格式/vet/生成清单/单测）、
-`race`、`e2e`（两条零 token 端到端）。真 token 那条不在里面。
+`.github/workflows/ci.yml` 三个 job：`static`（格式 / vet / 生成清单 / i18n / 单测）、
+`race`、`e2e`（零 token 端到端）。真 token 那条不在里面。
+
+触发有三条：`push` 到 main、`pull_request`、手动（`workflow_dispatch`）。PR 那一档
+是 2026-09-20 加回来的——本仓库的 README 明着招人 fork，别人提上来的 PR 不该是
+「没人检查」。它**不是门禁**：门禁要 main 上开分支保护 + required checks，本仓库
+仍是直推 main（`make ci` 是这条路的闸门）。
+
+两条判据住在测试里，CI 只是它们的一个入口——本地 `go test ./...` 同样会红：
+
+- `tools/i18n`：账本是否过期、占位符对不对得上、有没有孤儿译文、源码里还有没有
+  中文字面量（细节见 `docs/13-i18n.md`）；
+- `tools/ciyaml`：workflow **文件本身**是否合法。2026-09-20 的教训：一个步骤少了
+  `run:`，整份 workflow 就非法，GitHub 在 0 秒拒掉整个 run——一个 job 都没起，
+  六轮 CI 全是红的，却一条测试都没跑过。这种失败必须有人在**本地**喊。
+
+**推之前**：仓库带了一份 `.githooks/pre-push`，内容就是 `make ci`。装上（每个
+clone 一次，git 不会替你装）：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+绕开用 `git push --no-verify`——这个口子**故意留着**：钩子自己出毛病时（这台机器
+缺 python3 跑不了假上游）不能把人卡死。
 
 ## 2. Build tags
 

@@ -20,7 +20,7 @@ STATIC_LD    := $(LDFLAGS) -extldflags '-static'
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 .PHONY: all build static release test test-race fmt check-fmt vet clean install \
-         verify-static e2e e2e-claude check ci help generate check-generate
+         verify-static e2e check ci help generate check-generate
 
 all: build
 

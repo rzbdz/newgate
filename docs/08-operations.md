@@ -77,7 +77,7 @@ newgate naked off         # 关
 **产品二进制从发行版仓库出**（2026-09-20 起，见 `docs/09-extension-guide.md` §8）。
 本仓库的 `make build` / `make static` 只产出**内核自带**的二进制（十三个模块），
 装到线上是一次降级——它没有 deepseek / glm 那些上游怪癖补丁。本仓库的构建只服务
-内核自己的测试（`make e2e`、`make e2e-claude`）。
+内核自己的测试（`make e2e`）。
 
 发一版产品：
 

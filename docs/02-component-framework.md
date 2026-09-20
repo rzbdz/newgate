@@ -134,7 +134,7 @@ agent 的是 `claudecode` / `opencode`（贡献者）。依赖图能表达「我
 表达不了「我要**所有**往 owner 里写的人都写完」——后者在 `Requires` 里没有对应
 物。2026-09-18 那次实测正是这条被违反：`runtime.Start` 里枚举了一遍
 `agents.Names()`（那一刻目录还是空的），`newgate claude` 于是报「未知命令」，
-`make e2e-claude` 红了 70 条断言。**修法不是加阶段，是把那次读挪到 Serve 期现查**
+`make e2e`（当时叫 `e2e-claude`）红了 70 条断言。**修法不是加阶段，是把那次读挪到 Serve 期现查**
 （`modules/runtime/launch.go`：`Names()` 每次分派现问活的目录，`Run` 里再校验
 id）。这样还顺带更对：装配之后新注册的 agent 立刻可分派，不需要任何重启。
 
