@@ -108,17 +108,19 @@ func (r runtimeReporter) Status() []cliapi.StatusLine {
 	var on, off []string
 	wanted, active := 0, 0
 	for _, s := range takeover.List() {
-		if s.Wanted {
-			wanted++
-		}
-		switch {
-		case s.Active:
+		// 三态判据走 phaseOf（view.go），与 web 那张表同源：两个界面对同一份磁盘
+		// 状态给出不同答案，比其中一个不显示更糟。这里只决定**怎么排版**。
+		switch phaseOf(s) {
+		case phaseActive:
 			active++
 			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.OK))
-		case s.Wanted:
+		case phasePending:
 			on = append(on, s.Agent+style.Dim(" ")+style.Mark(style.Bad))
 		default:
 			off = append(off, s.Agent)
+		}
+		if s.Wanted {
+			wanted++
 		}
 	}
 	line := takeoverLine(on, off)

@@ -12,6 +12,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	viewapi "github.com/rzbdz/newgate/lib/view"
 	configapi "github.com/rzbdz/newgate/modules/config"
 	confighookapi "github.com/rzbdz/newgate/modules/confighook"
 	"github.com/rzbdz/newgate/modules/runtime/agentstate"
@@ -41,6 +42,9 @@ func New() modules.Component {
 			// 以及本模块那一族命令（start/stop/on/off/restart…）都归它自己贡献，
 			// 装着界面就挂上去，没装就跳过——接管照常工作，只是没有入口。
 			modules.Optional(cliapi.Capability),
+			// web 界面同理，而且是**另一条**：只装 dashboard 的装配里（没有终端
+			// 界面），「谁在走 newgate」照样该出现在网页上。
+			modules.Optional(viewapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Runtime(service)),
@@ -57,6 +61,17 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, fieldRelease)
+
+			// web 界面那一份（谁在走 newgate）**先**注册：它不依赖 cli，只装
+			// dashboard 的装配里也要有——下面那段一旦 return，这里就永远不会跑
+			// （与 gateway/config 同一条）。
+			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
+				rel, err := v.Register("runtime", takeoverConcepts)
+				if err != nil {
+					return err
+				}
+				releases = append(releases, rel)
+			}
 
 			// 接管的状态行与两条体检（接管 / 备份）由本模块自报：写这些文件的
 			// 是本模块，界面不该替它读 original/ 目录（见 diagnostics.go）。

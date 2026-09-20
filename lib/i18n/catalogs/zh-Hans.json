@@ -624,6 +624,10 @@
       "text": "交接已发出，但新进程 5 秒内没就位 · 日志 {log}",
       "reviewed": true
     },
+    "How": {
+      "text": "怎么接管的",
+      "reviewed": true
+    },
     "In PATH": {
       "text": "在 PATH",
       "reviewed": true
@@ -686,6 +690,10 @@
     },
     "Maintenance": {
       "text": "维护",
+      "reviewed": true
+    },
+    "Mechanism": {
+      "text": "机制",
       "reviewed": true
     },
     "Memory + the thinkcache.bin cold layer; restored automatically after a restart, counts only, never content": {
@@ -1160,6 +1168,10 @@
       "text": "没有为某个 agent 单独指定时，链从哪个 profile 开始。",
       "reviewed": true
     },
+    "Who goes through newgate": {
+      "text": "谁在走 newgate",
+      "reviewed": true
+    },
     "Why it exists": {
       "text": "为什么存在",
       "reviewed": true
@@ -1258,6 +1270,10 @@
     },
     "advancing to next chain step: {step}": {
       "text": "沿链下一步: {step}",
+      "reviewed": true
+    },
+    "agent": {
+      "text": "agent",
       "reviewed": true
     },
     "agent {agent} falls back to the default profile": {
@@ -1622,6 +1638,10 @@
     },
     "debug=expired": {
       "text": "debug=已过期",
+      "reviewed": true
+    },
+    "declared but not in effect": {
+      "text": "声明了但没生效",
       "reviewed": true
     },
     "declared takeover but not in effect": {
@@ -2646,6 +2666,10 @@
     },
     "switched on": {
       "text": "已打开",
+      "reviewed": true
+    },
+    "taken over": {
+      "text": "已接管",
       "reviewed": true
     },
     "takes effect immediately; running sessions are unaffected": {

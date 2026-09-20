@@ -491,7 +491,7 @@
       "other": "+{n} body keys"
     },
     "--- {file} ({n} bytes) ---": {
-      "where": "modules/runtime/diagnostics.go:227",
+      "where": "modules/runtime/diagnostics.go:229",
       "args": [
         "file",
         "n"
@@ -519,7 +519,7 @@
       "where": "modules/gateway/command_schema.go:34"
     },
     "All direct": {
-      "where": "modules/runtime/diagnostics.go:135"
+      "where": "modules/runtime/diagnostics.go:137"
     },
     "All tools are back to direct connections; the PATH line still points at the empty shim dir, which is harmless": {
       "where": "modules/runtime/commands.go:384"
@@ -531,7 +531,7 @@
       ]
     },
     "An agent declares takeover but it is not in effect; rerun newgate start": {
-      "where": "modules/runtime/diagnostics.go:128"
+      "where": "modules/runtime/diagnostics.go:130"
     },
     "Availability": {
       "where": "modules/breaker/classify.go:68"
@@ -540,7 +540,7 @@
       "where": "modules/locale/command.go:33"
     },
     "Backups": {
-      "where": "modules/runtime/diagnostics.go:183"
+      "where": "modules/runtime/diagnostics.go:185"
     },
     "Binding": {
       "where": "modules/config/commands.go:55"
@@ -678,7 +678,7 @@
       "where": "modules/gateway/view.go:55"
     },
     "Created only after a config file has been taken over": {
-      "where": "modules/runtime/diagnostics.go:189"
+      "where": "modules/runtime/diagnostics.go:191"
     },
     "Currently following the system locale; this setting will take effect once LANG/LC_ALL stop overriding it": {
       "where": "modules/locale/command.go:76"
@@ -786,6 +786,9 @@
         "log"
       ]
     },
+    "How": {
+      "where": "modules/runtime/view.go:83"
+    },
     "In PATH": {
       "where": "modules/runtime/commands.go:126"
     },
@@ -846,6 +849,9 @@
     "Maintenance": {
       "where": "modules/cli/extension/extension.go:237"
     },
+    "Mechanism": {
+      "where": "modules/runtime/view.go:82"
+    },
     "Memory + the thinkcache.bin cold layer; restored automatically after a restart, counts only, never content": {
       "where": "modules/gateway/thinkcache_status.go:50"
     },
@@ -883,10 +889,10 @@
       "where": "modules/gateway/command_debug.go:88"
     },
     "No file was rewritten": {
-      "where": "modules/runtime/diagnostics.go:170"
+      "where": "modules/runtime/diagnostics.go:172"
     },
     "No original backups": {
-      "where": "modules/runtime/diagnostics.go:188"
+      "where": "modules/runtime/diagnostics.go:190"
     },
     "No outbound proxy variables": {
       "where": "modules/gateway/diagnostics.go:81"
@@ -937,7 +943,7 @@
       ]
     },
     "Not taken over: {names}": {
-      "where": "modules/runtime/diagnostics.go:176",
+      "where": "modules/runtime/diagnostics.go:178",
       "args": [
         "names"
       ]
@@ -1216,7 +1222,7 @@
       "where": "modules/gateway/command_debug.go:96"
     },
     "Target files after takeover (newgate-related fragments)": {
-      "where": "modules/runtime/diagnostics.go:210"
+      "where": "modules/runtime/diagnostics.go:212"
     },
     "The daemon has no control token (started before the upgrade), falling back to stop+start": {
       "where": "modules/runtime/commands.go:415"
@@ -1330,6 +1336,9 @@
     "Which profile the chain starts from when no agent-specific one is set.": {
       "where": "modules/config/view.go:332"
     },
+    "Who goes through newgate": {
+      "where": "modules/runtime/view.go:65"
+    },
     "Why it exists": {
       "where": "modules/gateway/command_special.go:141"
     },
@@ -1438,6 +1447,9 @@
       "args": [
         "step"
       ]
+    },
+    "agent": {
+      "where": "modules/runtime/view.go:78"
     },
     "agent {agent} falls back to the default profile": {
       "where": "modules/config/store/watch.go:212",
@@ -1879,6 +1891,9 @@
     },
     "debug=expired": {
       "where": "modules/gateway/status.go:64"
+    },
+    "declared but not in effect": {
+      "where": "modules/runtime/view.go:107"
     },
     "declared takeover but not in effect": {
       "where": "modules/runtime/commands.go:173"
@@ -3094,6 +3109,9 @@
     "switched on": {
       "where": "modules/pluginmanager/command.go:238"
     },
+    "taken over": {
+      "where": "modules/runtime/view.go:103"
+    },
     "takes effect immediately; running sessions are unaffected": {
       "where": "modules/config/commands.go:69"
     },
@@ -3670,7 +3688,7 @@
       "other": "{n} messages come from the config dir"
     },
     "{n} original config · newgate stop can restore it": {
-      "where": "modules/runtime/diagnostics.go:197",
+      "where": "modules/runtime/diagnostics.go:199",
       "args": [
         "n"
       ],
