@@ -298,6 +298,54 @@ release, err := pm.RegisterSelf("my-module", []pluginmanagerapi.Switch{{
 - 热路径（每个请求都要问「这条关了吗」）只调 `query.Off/On` 这类**纯函数**，读传入
   的配置快照：无锁、无 IO、不查注册表。
 
+## 3f. 申报一个进程入口（`component/entry`）
+
+**「这次进程调用归谁」只有一个答案来源**：入口账本。想当入口的模块往它上面申报：
+
+```go
+Requires: []component.Requirement{component.Need(entryapi.Capability)},
+Start: func(_ context.Context, ctx component.Context) error {
+    reg := component.MustGet(ctx, entryapi.Capability)
+    rel, err := reg.Register(myEntry{}, entryapi.RankShim)
+    …
+},
+
+type myEntry struct{}
+func (myEntry) Name() string                  { return "mine" }        // 进日志
+func (myEntry) Claims(p entryapi.Process) bool { … }                   // 只读，无副作用
+func (myEntry) Handle(p entryapi.Process) int  { … }                   // 返回退出码
+```
+
+三条规矩：
+
+- **`Claims` 只读 `Process`，没有副作用**。账本会按 rank 问好几个申报者，「先问谁」
+  不该改变「谁认领」。
+- **别自己读 `os.Args`**。`Process` 是组合根装出来的唯一副本；模块各读一遍等于把
+  「进程是怎么被调起来的」抄了 N 遍（`entry.Process` 的注释就是这么写的）。
+- **`Need` 而不是 `Optional`**，如果没它你就没法工作：声明它能让「摘掉入口账本」
+  在**构图期**当场失败并点名端口，而不是让进程起得来、第一次调用才发现没人认领。
+
+rank 是一把阶梯，**空隙是留给将来的**（按环境分流、按配置分流往中间插，不用改已有模块）：
+
+| rank | 名字 | 谁用 |
+| --- | --- | --- |
+| 0 | `RankShim` | **有条件的**入口：先问，条件不成立就放过去。wrapper（argv0 是被接管的 client）、守护进程本体（`__serve`） |
+| 500 | `RankPreferred` | 产品/测试**显式选定**的壳：发行版自己那个界面（`simple-cli`） |
+| 1000 | `DefaultRank` | 兜底：`Claims` 永远为真，所以必须排在最后。内核的 `cli`、骨架发行版的 `hello` |
+
+**界面不是入口的寄存处**（2026-09-21 改）：守护进程本体（`newgate __serve`）原来
+注册成 cli 的一条命令，于是 `disable: ["cli"]` 的装配**编得出来却起不来**
+（`no entry claimed this call`）——一个纯网页的发行版（没有终端界面，全靠浏览器）
+因此根本不成立。判断一个东西该申报入口还是该注册成界面的命令，问的是**「换个发行版
+它还在吗」的反面**：`newgate status` 换掉界面就没了（它是界面的一条命令），
+`newgate __serve` 换掉界面还得在（它是这个进程存在的方式）。
+
+同一个坑还有第二半：没有界面时**谁来认领无参数的调用**。守护进程因此在不装终端
+界面时退到 `DefaultRank`，认领「只有它自己的 flag」的调用（`newgate --port 8899`）
+——那时没有子命令可派，flag 只可能是它自己的。带别的东西（`newgate frobnicate`、
+`newgate --help`）一律放过去，让组合根说那句「没人认领这次调用」：**认多了比认少了
+更难发现**，它表现为「敲错一条命令却起了一个守护进程」。
+
 ## 4. 新 Agent
 
 Agent 组件通常：
