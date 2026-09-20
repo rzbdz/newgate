@@ -1,0 +1,188 @@
+package app
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/rzbdz/newgate/testing/testkit"
+)
+
+// 这一族测的是 2026-09-20 那条改动：装配记录**只在它变了的时候**整段写出去。
+//
+// 为什么值得钉：判据是「去掉时间戳与耗时之后内容是否相同」，而这两样东西恰好是
+// 每一行都带的。判据写松一点（比如直接哈希原文）不会报错、不会崩，只是**永远
+// 都不同**——于是整段每次都写，改了个寂寞，而日志看起来一切正常。这类「棘轮
+// 自己松掉」的失败，只有真的拿两份只差时间戳的记录去比才看得见。
+
+// record 驱动一段装配记录，返回它写出来的东西。
+func record(t *testing.T, prev string, lines ...string) (string, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	r := newAssemblyRecord(&buf, prev)
+	for _, l := range lines {
+		// 传 %s 而不是把 line 当格式串：记录里本来就有 {name} 这类字面花括号。
+		r.add("%s", l)
+	}
+	r.flush()
+	return buf.String(), assemblyFingerprint(r.plain)
+}
+
+// 一份典型的装配记录。三行分别覆盖三种会变的东西：逐组件耗时、收尾耗时、时间戳。
+var (
+	assemblyA = []string{
+		"assembly: loader 1 handed over 2 components",
+		"start 1/2 cli done (took 321µs)",
+		"start 2/2 gateway done (took 1ms)",
+		"assembly complete: 2 components, took 12ms",
+	}
+	// 与 A 只差耗时：µs/ms 那几位变了，装的还是那两个组件。
+	assemblyA2 = []string{
+		"assembly: loader 1 handed over 2 components",
+		"start 1/2 cli done (took 999µs)",
+		"start 2/2 gateway done (took 8ms)",
+		"assembly complete: 2 components, took 55ms",
+	}
+	// 与 A 差在**装了什么**：多了一个模块，顺序也变了。
+	assemblyB = []string{
+		"assembly: loader 1 handed over 3 components",
+		"start 1/2 cli done (took 321µs)",
+		"start 2/3 gateway done (took 1ms)",
+		"assembly complete: 3 components, took 12ms",
+	}
+)
+
+func TestFingerprintIgnoresTimeAndDuration(t *testing.T) {
+	_, fp1 := record(t, "", assemblyA...)
+	_, fp2 := record(t, "", assemblyA2...)
+	if fp1 != fp2 {
+		t.Errorf("两份只差耗时的记录应当同指纹——否则整段每次都重写，这条改动等于没做\n  %s\n  %s", fp1, fp2)
+	}
+	_, fp3 := record(t, "", assemblyB...)
+	if fp1 == fp3 {
+		t.Error("多起了一个模块，指纹却没变——那升级那一发的整段记录就不会写出来了")
+	}
+}
+
+func TestFullRecordIsWrittenOnlyWhenItChanges(t *testing.T) {
+	// 第一发：日志里还没有记录（prev 为空）→ 整段 + 标记行。
+	out, fp := record(t, "", assemblyA...)
+	for _, l := range assemblyA {
+		if !strings.Contains(out, l) {
+			t.Errorf("第一发应当写整段，缺了这一行: %s", l)
+		}
+	}
+	if !strings.Contains(out, "assembly: fingerprint "+fp[:12]) {
+		t.Errorf("整段末尾应当留下指纹标记，实际:\n%s", out)
+	}
+
+	// 第二发：与第一发同内容（耗时不同而已）→ 只写一行。
+	again, _ := record(t, fp[:12], assemblyA2...)
+	if again != "" && strings.Count(strings.TrimRight(again, "\n"), "\n") != 0 {
+		t.Errorf("同一份装配第二次应当只留一行，实际写了 %d 行:\n%s",
+			strings.Count(again, "\n"), again)
+	}
+	if !strings.Contains(again, "assembly: fingerprint "+fp[:12]) {
+		t.Errorf("那一行里必须带指纹（否则下一发找不到它，又要重写整段）:\n%s", again)
+	}
+
+	// 第三发：装配变了 → 又整段写。
+	changed, _ := record(t, fp[:12], assemblyB...)
+	if !strings.Contains(changed, "assembly complete: 3 components, took 12ms") {
+		t.Errorf("装配变了就要整段重写，实际:\n%s", changed)
+	}
+}
+
+func TestLastFingerprintReadsTheTailOfTheLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "newgate.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o660)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	if got := lastFingerprint(f); got != "" {
+		t.Errorf("空日志里不该找出指纹，得到 %q", got)
+	}
+
+	// 上一次的记录，然后隔开 >8KB 的普通日志，再一条新的。
+	// 窗口只盖得住尾部：找回来的必须是**最近**那一条。
+	if _, err := f.WriteString("assembly: fingerprint aaaaaaaaaaaa — old\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(strings.Repeat("2026/09/20 18:00:00 [proxy] some traffic\n", 300)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("assembly: fingerprint bbbbbbbbbbbb — new\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastFingerprint(f); got != "bbbbbbbbbbbb" {
+		t.Errorf("应当找回最近那条指纹 bbbbbbbbbbbb，得到 %q", got)
+	}
+}
+
+// 窗口是从文件中间切的，第一段必然是半行——那半行里没有标记，但不能因此
+// 整段作废（真实日志的每一行都长，切在半行上是常态，不是边角情况）。
+func TestFingerprintSurvivesAWindowCutMidLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "newgate.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o660)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(strings.Repeat("x", tailWindow-5)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\nassembly: fingerprint cccccccccccc — after the cut\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastFingerprint(f); got != "cccccccccccc" {
+		t.Errorf("被切断的半行不该让整次回看作废，得到 %q", got)
+	}
+}
+
+// TestARepeatedInvocationWritesOneLine 是这条改动的**真路径**测试：不重建装配
+// 记录，而是像二进制那样**真的调用两次 TraceToLogFile，各自装配一遍整图**。
+//
+// 为什么非要有它：上面那几条都是拿着 assemblyRecord 直接驱动，文件由测试自己
+// 打开——于是「生产路径用什么模式打开日志」这件事没有任何断言盖着。2026-09-20
+// 就是这么漏的：TraceToLogFile 用 O_WRONLY 开文件，回看必然 EBADF，每一发都被
+// 当成第一次，整段照写（实测每次 105 行，与改动之前一模一样），而上面四条全绿。
+func TestARepeatedInvocationWritesOneLine(t *testing.T) {
+	env := testkit.Sandbox(t)
+
+	// 一次「调用」= 这个进程真的装配一遍整图并收尾，与 cmd/newgate 那条路同形。
+	invoke := func() {
+		stop := TraceToLogFile()
+		built, err := New(context.Background())
+		if err != nil {
+			t.Fatalf("装配失败: %v", err)
+		}
+		_ = built.Stop(context.Background())
+		stop()
+	}
+
+	logPath := filepath.Join(env.Home, "newgate.log")
+	lines := func() int {
+		raw, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("读日志: %v", err)
+		}
+		return strings.Count(string(raw), "\n")
+	}
+
+	invoke()
+	first := lines()
+	if first < 20 {
+		t.Fatalf("第一发应当写整段装配记录，实际只有 %d 行", first)
+	}
+	invoke()
+	if grew := lines() - first; grew != 1 {
+		t.Errorf("同一份装配的第二次调用应当只留 1 行，实际 %d 行——"+
+			"回看没找到上一次的记录（日志文件的打开模式？指纹的写法？）", grew)
+	}
+}

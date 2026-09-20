@@ -3139,6 +3139,9 @@
     "the file is empty": {
       "where": "modules/config/store/store.go:243"
     },
+    "the full assembly record above is new; it is written again only when the graph changes": {
+      "where": "app/trace.go:248"
+    },
     "the health score uses the main probe latency only; total time also includes dialect and quirk checks": {
       "where": "modules/gateway/command_probe.go:180"
     },
@@ -3344,6 +3347,9 @@
     },
     "unbound": {
       "where": "modules/config/diagnostics.go:186"
+    },
+    "unchanged from the record already in this log (run with NEWGATE_TRACE=1 to watch an assembly live)": {
+      "where": "app/trace.go:252"
     },
     "unknown": {
       "where": "modules/gateway/quirk/quirk.go:53"

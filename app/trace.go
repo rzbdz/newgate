@@ -5,11 +5,19 @@
 package app
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"os"
+	"regexp"
+	"sync"
+	"time"
 
 	modules "github.com/rzbdz/newgate/component"
+	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/paths"
 )
 
@@ -58,9 +66,32 @@ func TraceTo(writers ...io.Writer) func() {
 // 变量当判据则恰好在最需要它的那一次升级上失效。所以这里不做区分：**谁装配了
 // 图，谁就留下这一段**。
 //
-// 代价也说清楚：每次 CLI 调用都会往日志里写一段（本机实测整图 17 个组件约 40 行）。
-// 换来的是「升级后 `newgate logs` 里能逐行对照新旧两版的装配」。嫌吵用
-// `newgate logs` 的过滤看代理那几行即可。
+// # 同一个装配只写一次（2026-09-20）
+//
+// 上面那条「不做区分」的代价，实测比注释里原来写的数字大得多：整图 24 个组件、
+// 每一条 `newgate …` 命令（`status`、`--help`、agent 启动路径上的 `newgate claude`）
+// 都往日志里写 **104 行**，而且这 104 行**逐字相同**——声明顺序是编译期定下的、
+// 拓扑顺序是稳定排序、时延那几位是唯一会变的东西。一个开发下午的日志实测
+// 38087 行，其中真正的代理流量 **23 行**：这本日志是这个产品最主要的排查面
+// （`newgate logs`、alllogs 诊断包），它 99.9% 是装配回音。
+//
+// 所以改成**只在装配变了的时候写整段**，其余每一次留一行：
+//
+//	2026/09/20 18:48:07 assembly: fingerprint 3f9a1c2b4d5e — （一句话）
+//
+// 判据是那段文字**去掉时间戳与耗时之后**的内容哈希。它买到的东西正好是当初要它
+// 的理由：升级那一发的整段记录照样在（新旧二进制装的东西不同 → 指纹不同 → 整段
+// 写出），而同一份二进制敲一万次命令只留下「我装过一次，是这一份」。
+// 这与 watcher、configshare 的日志政策是同一条——**只在状态跃迁时报**。
+//
+// 随之而来的两个取舍，都写明白：
+//
+//   - **记录改成攒完再写**，所以装配**中途**进程死掉时这一段不在日志里（原来
+//     是边装配边写，死的时候能留下半截）。要看那半截就用 `NEWGATE_TRACE=1`——
+//     那条路径照旧一路流出去，不缓冲、不判断，它同时是这条的逃生口。
+//   - 指纹**只在当前这份日志里**找（读尾部 8KB，不另开状态文件）。所以日志
+//     轮转之后的第一发会重写整段——那是对的：新的一份日志本来就该自己带上
+//     这份记录，而不是继承一份它没有的。
 //
 // # 打不开就静默跳过
 //
@@ -69,24 +100,158 @@ func TraceTo(writers ...io.Writer) func() {
 // 往终端吐一行权限警告，而那个权限问题本身已经在别的路径上响亮地报过
 // （thinkcache 落盘关闭、控制令牌写不出去）。
 func TraceToLogFile() func() {
-	f, err := os.OpenFile(paths.LogFile(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o660)
+	// **O_RDWR 而不是 O_WRONLY**：这里要把上一次的记录读回来看（lastFingerprint）。
+	// 写成只写时 ReadAt 一律 EBADF，回看永远返回空——于是每一发都被当成「第一次」，
+	// 整段照写，这个文件要修的东西原样还在。2026-09-20 实测踩过：单元测试自己用
+	// O_RDWR 开文件，所以它看不见（补了 TestRepeatedInvocationsOfTheRealThing 之后才看得见）。
+	// O_APPEND 保证写入仍然只追加。
+	f, err := os.OpenFile(paths.LogFile(), os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o660)
 	if err != nil {
 		if os.Getenv("NEWGATE_TRACE") != "" {
 			return TraceTo(os.Stderr)
 		}
 		return TraceTo()
 	}
-	stop := TraceTo(f, stderrWhenAsked())
+	// NEWGATE_TRACE 是「我现在就要看着它跑」：不缓冲，边装配边写。
+	if os.Getenv("NEWGATE_TRACE") != "" {
+		stop := TraceTo(f, os.Stderr)
+		return func() {
+			stop()
+			_ = f.Close()
+		}
+	}
+	rec := newAssemblyRecord(f, lastFingerprint(f))
+	modules.SetTrace(rec.add)
 	return func() {
-		stop()
+		rec.flush()
+		modules.SetTrace(nil)
 		_ = f.Close()
 	}
 }
 
-// stderrWhenAsked：NEWGATE_TRACE 设了才交 stderr 出去，否则返回 nil（TraceTo 会跳过）。
-func stderrWhenAsked() io.Writer {
-	if os.Getenv("NEWGATE_TRACE") != "" {
-		return os.Stderr
+// fingerprintMarker 是写进日志的那行标记的**机器锚点**。它刻意不走 i18n：
+// 下面是按它找上一次记录的（见 lastFingerprint），翻译了它，中文环境下就再也
+// 找不回自己的记录——每一条命令都会重写整段，正是这个文件要修掉的东西。
+// 一句话的解释跟在它后面，那句是翻译的。
+var fingerprintMarker = regexp.MustCompile(`assembly: fingerprint ([0-9a-f]{12})`)
+
+// tailWindow 是回看上次记录时读的日志尾部长度。
+//
+// 8KB 的依据：整段记录 24 个组件约 10KB，而标记写在**最末**，所以窗口只要盖得住
+// 「最后一行附近」就够——不必盖住整段。
+const tailWindow = 8 << 10
+
+// lastFingerprint 在当前日志的尾部找最近一次记下的指纹；没有就返回空。
+//
+// 只读当前这一份日志文件，不读 `.1` 那些世代：轮转之后本文件里没有记录，于是
+// 下一发重写整段——新日志自己带上这份记录，正是想要的。
+func lastFingerprint(f *os.File) string {
+	st, err := f.Stat()
+	if err != nil {
+		return ""
 	}
-	return nil
+	size := st.Size()
+	off := int64(0)
+	if size > tailWindow {
+		off = size - tailWindow
+	}
+	buf := make([]byte, size-off)
+	// ReadAt 不动文件偏移，所以这次回看不会影响后面的追加。
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return ""
+	}
+	if off > 0 {
+		// 窗口可能切在一行中间，第一段是半行，丢掉。
+		i := bytes.IndexByte(buf, '\n')
+		if i < 0 {
+			return ""
+		}
+		buf = buf[i+1:]
+	}
+	all := fingerprintMarker.FindAllSubmatch(buf, -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return string(all[len(all)-1][1])
 }
+
+// 指纹要把「每次都会变」的两位去掉：时间戳前缀与耗时。剩下的部分（模块、顺序、
+// 弱依赖命中与否）才是「这一版装配成什么样」。
+var (
+	traceStamp    = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)
+	traceTook     = regexp.MustCompile(`\(took [^)]*\)`)
+	traceTookTail = regexp.MustCompile(`, took [^,\n]*$`)
+)
+
+// normalizeTraceLine 去掉一行装配记录里与「装了什么」无关的部分。
+//
+// 两种耗时的写法都要认：逐组件的 `… done (took 321µs)`，和收尾那句
+// `assembly complete: 24 components, took 12ms`。
+func normalizeTraceLine(l string) string {
+	l = traceStamp.ReplaceAllString(l, "")
+	l = traceTook.ReplaceAllString(l, "(took)")
+	l = traceTookTail.ReplaceAllString(l, "")
+	return l
+}
+
+// assemblyFingerprint 是整段记录的哈希（去时间戳、去耗时之后）。
+func assemblyFingerprint(lines []string) string {
+	h := sha256.New()
+	for _, l := range lines {
+		_, _ = io.WriteString(h, l)
+		_, _ = h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// assemblyRecord 攒下一段装配记录，收尾时决定整段写出去还是只留一行。
+type assemblyRecord struct {
+	mu    sync.Mutex
+	out   io.Writer
+	prev  string   // 上一次记下的指纹（空 = 这份日志里没有记录过）
+	lines []string // 带时间戳的原文：整段写出去时用
+	plain []string // 去时间戳去耗时：算指纹用
+}
+
+func newAssemblyRecord(out io.Writer, prev string) *assemblyRecord {
+	return &assemblyRecord{out: out, prev: prev}
+}
+
+// add 是 component.SetTrace 的回调，装配期每一条都从这儿过。
+//
+// 时间戳在这里就打好（不是收尾时补）：那 24 行 `start n/24 … (took …)` 的**顺序与
+// 时延**正是这段记录的价值所在，攒完再统一盖一个时间会把它们全压成同一刻。
+func (r *assemblyRecord) add(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, stamp()+msg)
+	r.plain = append(r.plain, normalizeTraceLine(msg))
+}
+
+// flush 写出去。整段只在指纹变了时写，否则只写一行。
+func (r *assemblyRecord) flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.lines) == 0 {
+		return
+	}
+	// 比的是**写进日志的那 12 位**，不是完整的 64 位哈希：prev 是从日志里读回来的，
+	// 拿全长去比它永远不相等，于是整段每次都写——这个文件要修的东西原样还在，
+	// 而日志看起来完全正常（2026-09-20 被 TestFullRecordIsWrittenOnlyWhenItChanges 抓住）。
+	fp := assemblyFingerprint(r.plain)[:12]
+	marker := fmt.Sprintf("assembly: fingerprint %s", fp)
+	if fp != r.prev {
+		for _, l := range r.lines {
+			fmt.Fprintln(r.out, l)
+		}
+		fmt.Fprintf(r.out, "%s%s — %s\n", stamp(), marker, i18n.T(
+			"the full assembly record above is new; it is written again only when the graph changes", nil))
+		return
+	}
+	fmt.Fprintf(r.out, "%s%s — %s\n", stamp(), marker, i18n.T(
+		"unchanged from the record already in this log (run with NEWGATE_TRACE=1 to watch an assembly live)", nil))
+}
+
+// stamp 是 log.LstdFlags 的格式，与 TraceTo 那条路径写出来的一模一样。
+func stamp() string { return time.Now().Format("2006/01/02 15:04:05 ") }
