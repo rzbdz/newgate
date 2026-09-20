@@ -3014,6 +3014,13 @@
         "to"
       ]
     },
+    "refusing to back up: {file} has already been taken over by newgate, but {orig} does not exist.\n  Using it as the original backup would lose your original config for good.\n  Either put a clean copy from backups/<timestamp>/ back into original/,\n  or revert the config by hand and run newgate start again": {
+      "where": "modules/confighook/backup.go:65",
+      "args": [
+        "file",
+        "orig"
+      ]
+    },
     "remove this block (or run newgate shim uninstall) to restore everything": {
       "where": "modules/runtime/injection/shim.go:175"
     },

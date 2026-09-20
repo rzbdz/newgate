@@ -2664,6 +2664,10 @@
       "text": "引用成环（{from} → {to}），已跳过",
       "reviewed": true
     },
+    "refusing to back up: {file} has already been taken over by newgate, but {orig} does not exist.\n  Using it as the original backup would lose your original config for good.\n  Either put a clean copy from backups/<timestamp>/ back into original/,\n  or revert the config by hand and run newgate start again": {
+      "text": "拒绝备份：{file} 已经被 newgate 接管过，但 {orig} 不存在。\n  拿它当原件备份会让你原来的配置永久丢失。\n  要么把 backups/<timestamp>/ 里一份干净的放回 original/，\n  要么手工把配置改回去再跑一次 newgate start",
+      "reviewed": true
+    },
     "remove this block (or run newgate shim uninstall) to restore everything": {
       "text": "删掉这一段（或跑 newgate shim uninstall）即可完全恢复原状。",
       "reviewed": true
@@ -2928,12 +2932,12 @@
       "text": "当前 shell 的 PATH 还没生效，重开 shell 或 `exec $SHELL -l`",
       "reviewed": true
     },
-    "the entry ledger: which module claims this process invocation": {
-      "text": "入口账本：这次进程调用归谁",
-      "reviewed": true
-    },
     "the edge that says this process is serving": {
       "text": "「这个进程开始服务了」这条边",
+      "reviewed": true
+    },
+    "the entry ledger: which module claims this process invocation": {
+      "text": "入口账本：这次进程调用归谁",
       "reviewed": true
     },
     "the file content in this request is not readable: {err}": {
@@ -3336,12 +3340,12 @@
       "text": "{agent} 已恢复直连；newgate start 不再接管它（newgate on {agent} 恢复）",
       "reviewed": true
     },
-    "{agent} was installed but is still not on PATH — open a new shell and try again": {
-      "text": "{agent} 装上了，但这个进程的 PATH 上还是找不到它 —— 开一个新 shell 再试一次",
-      "reviewed": true
-    },
     "{agent} is not installed. Run `{cmd}` to install it? [y/N] ": {
       "text": "{agent} 还没装。要跑 `{cmd}` 装上它吗？[y/N] ",
+      "reviewed": true
+    },
+    "{agent} was installed but is still not on PATH — open a new shell and try again": {
+      "text": "{agent} 装上了，但这个进程的 PATH 上还是找不到它 —— 开一个新 shell 再试一次",
       "reviewed": true
     },
     "{ago} ago": {
