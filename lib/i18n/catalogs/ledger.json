@@ -669,7 +669,7 @@
       "where": "modules/runtime/diagnostics.go:189"
     },
     "Currently following the system locale; this setting will take effect once LANG/LC_ALL stop overriding it": {
-      "where": "modules/locale/command.go:69"
+      "where": "modules/locale/command.go:76"
     },
     "DNS resolution": {
       "where": "modules/gateway/probe/net.go:61"
@@ -900,7 +900,7 @@
       ]
     },
     "Not in effect now: {source} overrides it in this shell (use NEWGATE_LANG={tag} for one command)": {
-      "where": "modules/locale/command.go:65",
+      "where": "modules/locale/command.go:72",
       "args": [
         "source",
         "tag"
@@ -1979,10 +1979,10 @@
       "where": "modules/config/domain/extra.go:56"
     },
     "from config": {
-      "where": "modules/locale/command.go:82"
+      "where": "modules/locale/command.go:89"
     },
     "from the system locale": {
-      "where": "modules/locale/command.go:84"
+      "where": "modules/locale/command.go:91"
     },
     "full diagnostic bundle": {
       "where": "modules/cli/commands.go:63"
@@ -2198,7 +2198,7 @@
       ]
     },
     "machine-translated, unreviewed: {n}": {
-      "where": "modules/locale/command.go:106",
+      "where": "modules/locale/command.go:113",
       "args": [
         "n"
       ],
@@ -2215,7 +2215,7 @@
       ]
     },
     "missing: {n}": {
-      "where": "modules/locale/command.go:110",
+      "where": "modules/locale/command.go:117",
       "args": [
         "n"
       ],
@@ -2880,7 +2880,7 @@
       "where": "modules/thinking/st-always.go:156"
     },
     "source": {
-      "where": "modules/locale/command.go:103"
+      "where": "modules/locale/command.go:110"
     },
     "special off: {list}": {
       "where": "modules/gateway/status.go:73",

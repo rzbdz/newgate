@@ -59,13 +59,20 @@ func (c *command) set(host cliapi.Host, want string) int {
 		return host.Die(70, i18n.T("Cannot write the language to state.json: {err}", i18n.A{"err": err.Error()}))
 	}
 	fmt.Println(style.Item(style.OK, i18n.T("Saved to state.json: {tag}", i18n.A{"tag": match})))
-	// 保存成功不等于立刻生效：环境变量与 LANG 都可能压着它（见 resolve.go 的次序）。
-	// 这句话必须说——否则用户会以为没保存上，而那是最难查的一类「我明明设了」。
-	if c.svc.source != SourceConfig && c.svc.lang != match {
+	// 保存成功不等于**这个 shell 里**立刻生效：压得过配置的只有两样东西——环境变量
+	// 与系统 locale（见 resolve.go 的次序）。这两种要说，否则用户会以为没保存上，
+	// 而那是最难查的一类「我明明设了」。
+	//
+	// `default`（谁都没说）与 `config`（读到的就是配置）**都不是覆盖**：前者被配置
+	// 压过，后者下次读到的就是刚写的这个。2026-09-20 之前这里写的是「来源不是
+	// config 就警告」，于是「本来谁都没设、现在设上了」会被说成「未生效」——
+	// 一句彻头彻尾的假话，实测踩到（见 commit 说明）。
+	switch c.svc.source {
+	case SourceEnvOverride:
 		fmt.Println(style.Item(style.Warn, i18n.T(
 			"Not in effect now: {source} overrides it in this shell (use NEWGATE_LANG={tag} for one command)",
-			i18n.A{"source": string(c.svc.source), "tag": match})))
-	} else if c.svc.source == SourceSystem {
+			i18n.A{"source": c.sourceWord(), "tag": match})))
+	case SourceSystem:
 		fmt.Println(style.Item(style.Warn, i18n.T(
 			"Currently following the system locale; this setting will take effect once LANG/LC_ALL stop overriding it",
 			nil)))
