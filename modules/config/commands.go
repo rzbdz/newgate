@@ -155,7 +155,10 @@ func cmdProfileKV(args []string) int {
 		return 0
 	}
 	kvPath := filepath.Join(paths.Mappings(), name+".kv")
-	if err := os.WriteFile(kvPath, []byte(text), 0o660); err != nil {
+	// 走 store.Write（原子 + 备份环），**不是 os.WriteFile**：这条命令是当场把一份
+	// profile 换成另一种格式，覆盖的正是用户手上那份配置；直写让它死在半路时留下
+	// 一份被截断的文件，而且那一版连备份都没有（见 store.Write 的注释）。
+	if err := store.Write(kvPath, []byte(text)); err != nil {
 		return style.Die(70, i18n.T("cannot write {path}: {err}",
 			i18n.A{"path": kvPath, "err": err.Error()}))
 	}

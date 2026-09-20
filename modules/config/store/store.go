@@ -60,22 +60,31 @@ func Load() (*Snapshot, error) {
 
 // ---------- 原子写 ----------
 
-// writeJSON 用同目录临时文件 + rename 保证读者只看到完整旧版或新版。
-// 当前没有跨进程写锁，因此多个写者并发更新同一文件时仍是最后写入者生效。
-func writeJSON(path string, v interface{}, mode os.FileMode) error {
+// writeJSON 落一份 JSON 配置：序列化，然后交给 writeFileAtomic 那条唯一的写路径。
+//
+// **不要在这里自己拼 `path + ".tmp"`**——那是这一段原来的写法，也正是
+// writeFileAtomic 当初被改掉的那个 bug：固定临时名会让两个并发写者撞在同一个
+// inode 上，一个 rename 走了，另一个 rename 的是一份被对方写了一半的内容。两份
+// 实现并存，只会让其中一份慢慢腐坏（这一份当时就腐坏了），所以这里直接调它。
+//
+// 权限不在参数里了：能到这里的调用方一律要 0660（配置目录是多人共享读的），
+// writeFileAtomic 本来就落这个值，多一个参数只会多一种写法。
+func writeJSON(path string, v interface{}) error {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	// 同 writeFileAtomic：替换之前先把当前这份抄进历史环（见 history.go）。
-	snapshotBeforeWrite(path)
-	tmp := path + ".tmp"
-	if err := ioutil.WriteFile(tmp, b, mode); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeFileAtomic(path, b)
 }
+
+// Write 原子地覆盖一份配置文件，并在替换之前把当前那份抄进历史环。
+//
+// 给**不走 CAS 的写**用：`newgate profile kv --write` 这类由人当场发起的转换没有
+// 「加载时的基线」可比，但它仍然必须走这一条路径——直接 os.WriteFile 会让进程死在
+// 半路时留下一份被截断的配置，而且**那一版连备份都没有**（备份恰恰是为一件事存在
+// 的）。判据是代价不对称：多一次 rename 换掉「一次截断 = 配置没了」。
+func Write(path string, data []byte) error { return writeFileAtomic(path, data) }
 
 func readJSON(path string, v interface{}) error {
 	b, err := ioutil.ReadFile(path)
@@ -119,7 +128,7 @@ func LoadProviders() (*domain.Providers, error) {
 // 注意：不能把 LoadProviders 解析出来的环境变量值写回去，否则密钥就落盘了。
 // 调用方必须传入原始形态。
 func SaveProviders(p *domain.Providers) error {
-	return writeJSON(paths.ProvidersFile(), p, 0o660)
+	return writeJSON(paths.ProvidersFile(), p)
 }
 
 // ---------- profiles ----------
@@ -186,7 +195,7 @@ func LoadProfileRaw(name string) (*domain.Profile, error) {
 // SaveProfile 写 profile。不含密钥（只有 provider/model 绑定），组内共享读
 // 没有暴露面：wrapper 启动（launch.Launch）本就要解析它来注入真实模型名。
 func SaveProfile(pr *domain.Profile) error {
-	return writeJSON(filepath.Join(paths.Mappings(), pr.Name+".json"), pr, 0o660)
+	return writeJSON(filepath.Join(paths.Mappings(), pr.Name+".json"), pr)
 }
 
 func ListProfiles() ([]string, error) {

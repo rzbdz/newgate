@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/rzbdz/newgate/modules/config/domain"
 )
 
 // 写盘之前留一份「上一版」。
@@ -124,5 +126,59 @@ func TestHistoryIsPerFile(t *testing.T) {
 	got, _ := os.ReadFile(hist[0])
 	if string(got) != "old-a.kv" {
 		t.Errorf("历史串了别人的内容: %q", got)
+	}
+}
+
+// TestEverythingThatWritesGoesThroughTheSamePath：**所有**落盘都走同一条路
+// （原子替换 + 备份环）。
+//
+// 为什么值得一条测试：这条路上有两个真实存在过的漏口——`writeJSON` 自己拼
+// `path + ".tmp"`（**固定名**：两个并发写者撞在同一个 inode 上，一个 rename 走的
+// 是对方写了一半的内容），以及 `newgate profile kv --write` 直接 os.WriteFile
+// （进程死在半路留下一份被截断的配置，而那一版连备份都没有）。两份实现并存只会让
+// 其中一份慢慢腐坏——所以这里按**行为**钉：不管是哪个入口，写完之后上一版都在，
+// 而且不留临时文件。
+func TestEverythingThatWritesGoesThroughTheSamePath(t *testing.T) {
+	dir := sandbox(t)
+	if err := os.MkdirAll(filepath.Join(dir, "mappings"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. store.Write：不走 CAS 的那种（`newgate profile kv --write` 用的就是它）。
+	kv := filepath.Join(dir, "mappings", "x.kv")
+	if err := Write(kv, []byte("first\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(kv, []byte("second\n")); err != nil {
+		t.Fatal(err)
+	}
+	ents := HistoryEntries(kv)
+	if len(ents) != 1 {
+		t.Fatalf("写两次该只留一版历史（第一次是新建，没有上一版），实际 %d 版", len(ents))
+	}
+	if b, _ := os.ReadFile(ents[0]); string(b) != "first\n" {
+		t.Errorf("历史里那份不是上一版: %q", b)
+	}
+
+	// 2. SaveProfile：JSON 那条（曾经自己拼固定临时名的那条）。
+	empty := map[string]domain.Candidates{}
+	for _, body := range []string{"一", "二"} {
+		if err := SaveProfile(&domain.Profile{Name: "y", Description: body, Roles: empty}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(HistoryEntries(filepath.Join(dir, "mappings", "y.json"))); got != 1 {
+		t.Errorf("JSON 那条写路径没留历史（它就是当时自己拼临时名的那条）: %d 版", got)
+	}
+
+	// 3. 不留临时文件：`mappings/` 里只该有我们认识的那两个。
+	names, err := os.ReadDir(filepath.Join(dir, "mappings"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range names {
+		if e.Name() != "x.kv" && e.Name() != "y.json" {
+			t.Errorf("写完之后多了一个文件 %q——临时文件该在 rename 时消失", e.Name())
+		}
 	}
 }
