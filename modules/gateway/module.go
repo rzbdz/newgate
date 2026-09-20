@@ -12,6 +12,7 @@ import (
 	"context"
 
 	modules "github.com/rzbdz/newgate/component"
+	entryapi "github.com/rzbdz/newgate/component/entry"
 	servingapi "github.com/rzbdz/newgate/lib/serving"
 	viewapi "github.com/rzbdz/newgate/lib/view"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
@@ -69,6 +70,11 @@ func New() modules.Component {
 			modules.Optional(servingapi.Capability),
 			// web 界面同 ui：弱依赖。装了就报自己那面（计数器），没装就跳过。
 			modules.Optional(viewapi.Capability),
+			// 入口账本：**守护进程本体申报在它上面**（`newgate __serve`，见 serve.go）。
+			// 与 wrapper 同一条理由用 Need 而不是 Optional：摘掉账本，这个进程就
+			// 没人起得来了，而那种故障要到第一次 `newgate start` 才显形。声明它让
+			// 构图期当场失败并点名端口（见 app/matrix_test.go 的摘除矩阵）。
+			modules.Need(entryapi.Capability),
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Gateway(port)),
@@ -104,10 +110,6 @@ func New() modules.Component {
 				releases = append(releases, rel)
 			}
 
-			cli, ok := modules.Get(ctx, cliapi.Capability)
-			if !ok {
-				return nil
-			}
 			// 共享端口那张表（装了就取，没装就是 nil → 数据面自己服务端口）。
 			// 这里只**取**，怎么用是 serve.go 的事：本模块的其余部分（数据面、
 			// 命令、状态行）都不需要知道它存在。
@@ -115,15 +117,41 @@ func New() modules.Component {
 			// 服务期回调那本账（同上：装了就取，没装就是 nil）。想在「这个进程开
 			// 始服务」时才起来的模块登记在它上面——数据面与界面因此都不必认识对方。
 			listeners, _ := modules.Get(ctx, servingapi.Capability)
+
+			// 守护进程本体申报为**入口**（下面那段 cli 一旦缺席就 return，所以它
+			// 必须在这里）：`disable: ["cli"]` 的装配里没有界面，可守护进程仍然
+			// 要有人起——纯 dashboard 的发行版就是这种形状（见 serve.go）。
+			//
+			// 策略账本原样递进去：**这一层不认识任何一位策略**，谁插进来由各自的
+			// Start 决定。
+			cli, hasUI := modules.Get(ctx, cliapi.Capability)
+			// 没有终端界面时退到**兜底**位：那时 `newgate` 无参数没有别人能回答，
+			// 而这个进程唯一说得通的行为就是起服务（见 serve.go 的 headless）。
+			//
+			// 位置即判据：入口账本按 rank 问，所以「谁更具体谁先答」是自动的。
+			// 另一条会兜底的入口（发行版自己的壳，如 hello）要么在 RankPreferred
+			// 上、要么与本条互斥（它出现时通常连网关都没装）。
+			rank := entryapi.RankShim
+			if !hasUI {
+				rank = entryapi.DefaultRank
+			}
+			entries := modules.MustGet(ctx, entryapi.Capability)
+			entryRelease, err := entries.Register(
+				serveEntry{filters: port.filters, hub: hub, listeners: listeners, headless: !hasUI},
+				rank)
+			if err != nil {
+				return err
+			}
+			releases = append(releases, entryRelease)
+
+			if !hasUI {
+				return nil
+			}
 			for _, cmd := range []cliapi.Command{
 				specialCommand{}, schemaRepairCommand{}, debugCommand{},
 				// 观测面也归数据面自己：计数器怎么分组、探活探出了什么，
 				// 都是网关的语义（见 command_metrics.go / command_probe.go）。
 				metricsCommand{}, probeCommand{}, logsCommand{},
-				// 守护进程本体：`newgate __serve`。它以前是界面的命令，但它跑的
-				// 是数据面（见 serve.go）。策略账本原样递进去——**这一层不认识
-				// 任何一位策略**，谁插进来由各自的 Start 决定。
-				serveCommand{filters: port.filters, hub: hub, listeners: listeners},
 			} {
 				release, err := cli.RegisterCommand(cmd)
 				if err != nil {

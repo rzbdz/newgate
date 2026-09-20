@@ -24,11 +24,11 @@ import (
 	"syscall"
 	"time"
 
+	entryapi "github.com/rzbdz/newgate/component/entry"
 	"github.com/rzbdz/newgate/lib/buildinfo"
 	"github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/logx"
 	servingapi "github.com/rzbdz/newgate/lib/serving"
-	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
 	"github.com/rzbdz/newgate/modules/config/paths"
 	"github.com/rzbdz/newgate/modules/config/store"
 	"github.com/rzbdz/newgate/modules/gateway/forward"
@@ -38,13 +38,23 @@ import (
 	"github.com/rzbdz/newgate/modules/runtime/daemon"
 )
 
-// serveCommand 是守护进程本体：`newgate __serve`。
+// serveEntry 是守护进程本体：`newgate __serve`。
 //
-// **故意没有 HelpLine**：它是内部入口，用户不该在 help 里看到它，也不该手敲。
+// **它是一个入口申报（component/entry），不是一条界面命令**（2026-09-21 改）。
+//
+// 为什么：`__serve` 回答的是「这次进程调用归谁」，那正是入口账本的问题；而挂成
+// cli 命令时，**关掉界面就等于关掉了守护进程本体**——`disable: ["cli"]` 的装配
+// 编得出来，却起不了 daemon（实测：`newgate: no entry claimed this call (asked:
+// wrapper did not claim)`）。纯 dashboard 的发行版（没有终端界面，只有一个网页
+// 控制台）因此根本不成立，而它是**合法**的产品形状：那时候守护进程仍然要有人
+// 起，网页才有东西可连。wrapper 报「argv0 是被接管的 client」走的也是这条道。
+//
+// 顺带少一样声明：它当命令时得报 Unstyled（输出不是版式），当入口就不必了——
+// 入口的输出去哪儿是入口自己的事。
 //
 // 它只带 filters（数据面策略账本）进去，不带任何具体策略：账本在 Bind 期就存在
 // （gateway 的 New 里建），贡献者在各自 Start 期往里写，数据面在 Serve 期读。
-type serveCommand struct {
+type serveEntry struct {
 	filters *policy.Registry
 	// hub 是共享端口那张表（porthub 没装就是 nil）。
 	//
@@ -58,20 +68,63 @@ type serveCommand struct {
 	// 「我在服务」的地方**。数据面拿到的是一个已经装好的进程，界面拿到的是一个
 	// 「可以起来了」的通知——两边都不认识对方，也不认识本模块的另一半。
 	listeners servingapi.Service
+
+	// headless 记的是「这个装配里没有终端界面」，由 Start 按装了什么算出来
+	// （见 module.go），决定**无参数时这个进程是什么**。
+	//
+	// 有界面时：`newgate` 无参数是给界面回答的（帮助 / 状态），守护进程只在
+	// 显式 `__serve` 时认领。没有界面时（纯 dashboard 的发行版就是这种形状）：
+	// 这个进程**就是**守护进程——那时没有第二个答案可给，而 `newgate start`
+	// 也随界面一起没了（它是 runtime 注册进界面的命令），不给兜底的话这种构建
+	// 编得出来却永远起不来（`no entry claimed this call`）。
+	headless bool
 }
 
-var (
-	_ cliapi.Command  = (*serveCommand)(nil)
-	_ cliapi.Unstyled = (*serveCommand)(nil)
-)
+var _ entryapi.Handler = (*serveEntry)(nil)
 
-func (serveCommand) Names() []string { return []string{"__serve"} }
+// Name 进日志：组合根那句 `[entry] resolve: … → <Name>`。
+func (serveEntry) Name() string { return "__serve" }
 
-// Unstyled：守护进程本体，输出是它自己的日志流（见 cliapi.Unstyled）。
-func (serveCommand) Unstyled([]string) bool { return true }
+// Claims 认两件事：显式的 `newgate __serve …`，以及**没有界面时的「只有本入口
+// 自己的 flag」**（`newgate --port 8907`）。
+//
+// 第一条逐字相等，不做拼写容错：`__serve` 是内部入口（daemon.Spawn 拼出来的），
+// 不是给人敲的，猜错一个近似拼写只会让真正的错误更难看出来。
+//
+// 第二条只在不装界面时成立（见 headless）：那时没有子命令可派，flag 只可能是
+// 守护进程自己的，所以「起服务」是唯一说得通的行为。**带了别的东西就放过去**
+// ——`newgate frobnicate` 该得到「没人认领这次调用」这句人话，而不是悄悄起一个
+// 守护进程（那种错要等端口被占或者根本连不上才会被发现）。
+//
+// 只读 Process、没有副作用——入口账本会问好几个申报者，问的顺序不该改变结果。
+func (e serveEntry) Claims(p entryapi.Process) bool {
+	if len(p.Args) > 0 && p.Args[0] == "__serve" {
+		return true
+	}
+	return e.headless && onlyOwnFlags(p.Args)
+}
 
-func (c serveCommand) Run(_ cliapi.Host, args []string) int {
-	return Serve(c.filters, c.hub, c.listeners, intFlag(args, "--port", 0))
+// onlyOwnFlags 报告这串参数**只**由本入口自己的 flag 组成。
+//
+// 认得的就是 `--port`：它是守护进程的参数，而「哪些参数属于我」这件事只有
+// 守护进程自己知道。将来它多一个 flag，这里跟着加一行——这是诚实的代价，
+// 比「凡是横杠开头的都算我的」安全得多（那会把 `--help` 也吞进来，
+// 于是在一个没有界面的构建里敲 `newgate --help` 会起一个守护进程）。
+func onlyOwnFlags(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--port":
+			i++ // 吃掉它的值；值缺了 intFlag 会退回默认端口
+		case strings.HasPrefix(a, "--port="):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (c serveEntry) Handle(p entryapi.Process) int {
+	return Serve(c.filters, c.hub, c.listeners, intFlag(p.Args, "--port", 0))
 }
 
 // intFlag 取 `--名字 N` 或 `--名字=N` 里的整数，没有给默认值。

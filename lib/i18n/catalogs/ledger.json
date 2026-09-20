@@ -584,7 +584,7 @@
       ]
     },
     "Cannot share the port with other services, the data plane will serve it alone: {err}": {
-      "where": "modules/gateway/serve.go:199",
+      "where": "modules/gateway/serve.go:252",
       "args": [
         "err"
       ]
@@ -602,7 +602,7 @@
       ]
     },
     "Cannot write the control token (cross-user stop unavailable): {err}": {
-      "where": "modules/gateway/serve.go:145",
+      "where": "modules/gateway/serve.go:198",
       "args": [
         "err"
       ]
@@ -614,7 +614,7 @@
       ]
     },
     "Cannot write the pidfile (status/metrics will not see this process): {err}": {
-      "where": "modules/gateway/serve.go:134",
+      "where": "modules/gateway/serve.go:187",
       "args": [
         "err"
       ]
@@ -650,14 +650,14 @@
       "where": "modules/runtime/commands.go:220"
     },
     "Configuration hot-reloaded (generation {gen}): {changes} — running sessions are unaffected": {
-      "where": "modules/gateway/serve.go:162",
+      "where": "modules/gateway/serve.go:215",
       "args": [
         "changes",
         "gen"
       ]
     },
     "Configuration reloaded (generation {gen}), no structural change": {
-      "where": "modules/gateway/serve.go:158",
+      "where": "modules/gateway/serve.go:211",
       "args": [
         "gen"
       ]
@@ -666,10 +666,10 @@
       "where": "modules/gateway/diagnostics.go:101"
     },
     "Control endpoint /__newgate/stop is ready (cross-user stop available)": {
-      "where": "modules/gateway/serve.go:147"
+      "where": "modules/gateway/serve.go:200"
     },
     "Control stop (token verified), exiting": {
-      "where": "modules/gateway/serve.go:250"
+      "where": "modules/gateway/serve.go:303"
     },
     "Count": {
       "where": "modules/config/commands.go:544"
@@ -702,7 +702,7 @@
       ]
     },
     "Drain complete, the old process is stepping down": {
-      "where": "modules/gateway/serve.go:284"
+      "where": "modules/gateway/serve.go:337"
     },
     "Enable: newgate st on {name}": {
       "where": "modules/gateway/command_special.go:165",
@@ -720,13 +720,13 @@
       "where": "modules/gateway/diagnostics.go:155"
     },
     "Failed to acquire the lock: {err}": {
-      "where": "modules/gateway/serve.go:124",
+      "where": "modules/gateway/serve.go:177",
       "args": [
         "err"
       ]
     },
     "Failed to load the configuration: {err}": {
-      "where": "modules/gateway/serve.go:152",
+      "where": "modules/gateway/serve.go:205",
       "args": [
         "err"
       ]
@@ -771,7 +771,7 @@
       "where": "modules/cli/cli.go:150"
     },
     "Graceful handover: taking over the listening socket from the parent process": {
-      "where": "modules/gateway/serve.go:137"
+      "where": "modules/gateway/serve.go:190"
     },
     "Handoff refused (HTTP {code}: {body}), falling back to stop+start": {
       "where": "modules/runtime/commands.go:450",
@@ -820,13 +820,13 @@
       "where": "modules/breaker/command.go:112"
     },
     "Listening socket handed over to the new process, waiting for in-flight requests to drain (up to 10 minutes)": {
-      "where": "modules/gateway/serve.go:282"
+      "where": "modules/gateway/serve.go:335"
     },
     "Log file": {
       "where": "modules/cli/diag.go:77"
     },
     "Log rotation init failed, falling back to stdout: {err}": {
-      "where": "modules/gateway/serve.go:113",
+      "where": "modules/gateway/serve.go:166",
       "args": [
         "err"
       ]
@@ -868,7 +868,7 @@
       ]
     },
     "New configuration failed to load, still using the last usable configuration: {err}": {
-      "where": "modules/gateway/serve.go:168",
+      "where": "modules/gateway/serve.go:221",
       "args": [
         "err"
       ]
@@ -1040,7 +1040,7 @@
       ]
     },
     "Proxy exiting: {err}": {
-      "where": "modules/gateway/serve.go:287",
+      "where": "modules/gateway/serve.go:340",
       "args": [
         "err"
       ]
@@ -1092,19 +1092,19 @@
       "where": "modules/gateway/thinkcache_status.go:32"
     },
     "Received SIGHUP, forcing a configuration reload": {
-      "where": "modules/gateway/serve.go:224"
+      "where": "modules/gateway/serve.go:277"
     },
     "Received a control stop while draining, exiting now (pid/lock untouched)": {
-      "where": "modules/gateway/serve.go:247"
+      "where": "modules/gateway/serve.go:300"
     },
     "Received {sig} while draining, exiting now (pid/lock untouched)": {
-      "where": "modules/gateway/serve.go:230",
+      "where": "modules/gateway/serve.go:283",
       "args": [
         "sig"
       ]
     },
     "Received {sig}, exiting": {
-      "where": "modules/gateway/serve.go:234",
+      "where": "modules/gateway/serve.go:287",
       "args": [
         "sig"
       ]
@@ -1168,7 +1168,7 @@
       "where": "modules/runtime/commands.go:459"
     },
     "Some services did not start: {err}": {
-      "where": "modules/gateway/serve.go:272",
+      "where": "modules/gateway/serve.go:325",
       "args": [
         "err"
       ]
@@ -1254,7 +1254,7 @@
       "where": "modules/runtime/commands.go:112"
     },
     "This port is shared: services mounted on it take their paths first, everything else is the data plane": {
-      "where": "modules/gateway/serve.go:203"
+      "where": "modules/gateway/serve.go:256"
     },
     "This shell may have cached the path: hash -r (zsh: rehash)": {
       "where": "modules/runtime/commands.go:352"
@@ -2321,7 +2321,7 @@
       ]
     },
     "newgate {version} (built {built}) started, default profile={profile}, config hot-reload enabled": {
-      "where": "modules/gateway/serve.go:255",
+      "where": "modules/gateway/serve.go:308",
       "args": [
         "built",
         "profile",
@@ -3215,7 +3215,7 @@
       "where": "modules/gateway/thinkcache/disk.go:275"
     },
     "thinkcache disk layer disabled (memory-only): {err}": {
-      "where": "modules/gateway/serve.go:180",
+      "where": "modules/gateway/serve.go:233",
       "args": [
         "err"
       ]
