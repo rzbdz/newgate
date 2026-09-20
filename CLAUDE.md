@@ -52,12 +52,12 @@ go vet ./... && gofmt -l component modules cmd
 | `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
 | `modules/cli` | 命令行界面：分派、排版、注入点（**不含任何业务知识**，见 §4） | `newgate <动词>` 的分派与 help |
 | `modules/<客户端>` | Claude Code、opencode 的接入与组合行为（**客户端**留 core） | 新增客户端支持 |
-| `modules-ext/modules/<上游或交叉语义>` | 上游怪癖修补（DeepSeek 尾部形状、GLM 思维链、客户端×模型交叉语义）。**不在本仓库**：住在发行版仓库里，构建期 clone 到 `go/modules-ext/` | 修某个上游的怪癖 |
-| `app`（在 `modules/` 之外） | 组合根：装图、把这次调用交给入口。**不认识任何模块** | 换装图方式 |
+| **发行版的模块**（上游怪癖修补、客户端×交叉语义） | **不在本仓库**：住在发行版仓库里，那是**另一个 Go module** | 修某个上游的怪癖 |
+| `app`（在 `modules/` 之外） | 组合根：装图、把这次调用交给入口。**不认识任何模块**；对内提供 `Selection`/`Main` 这条接缝 | 换装图方式 |
 | `root`（唯一的 built-in，不在 `modules/` 下） | 入口账本：谁认领这次进程调用 | 加入口类型 |
-| `tools/genmodules` | 构建期扫描 `modules/` + 落实发行版声明，生成装配清单 | 改模块发现规则 |
-| `tools/extmanifest` | 读 Pin 与 Spec、把发行版代码拉到 `go/modules-ext/` | 改发行版机制 |
-| `testing/{testkit,upstream,system}` | 测试设施：模块层起图、进程内假上游、系统层整图 | 加测试设施（不是产品代码） |
+| `tools/genmodules` | 构建期扫描 `modules/`，生成装配清单（**只看本仓库、完全离线**） | 改模块发现规则 |
+| `tools/genmodules/scan` | 「哪些目录算组件」+「目录名怎么拧成 import 别名」的唯一实现（发行版的生成器也用这份） | 改组件判据 |
+| `testing/{testkit,upstream,system}` | 测试设施：模块层起图、进程内假上游、系统层整图。**从这里起是对外 API**（发行版拿 `system.StartWith` 测自己的模块） | 加测试设施（不是产品代码） |
 
 每个 `modules/<name>`（无例外）都必须在根目录提供唯一的 `module.go`，由它用
 `New()` 直接返回 `component.Component`，并声明 `Requires`、`Provides`、`Start`
@@ -79,37 +79,44 @@ service」。端口不声明基数（没有 `One`/`Many`），需要唯一性由
 会自动重生成，`make check-generate` 只校验；`app` 里有一条测试跑它，拦住
 「加了模块忘了生成」的静默漏装配。
 
-### 发行版（modules-ext，2026-09-20 起）
+### 发行版：另一个 Go module（2026-09-20 起）
 
 **core 只是内核**：链的复合、结局的推进、身份的定义、故障的隔离。**哪些模块属于
-这个产品**是发行版的事，答案在两张纸里，分属两个主人：
+这个产品**是发行版的事——发行版是**另一个仓库、另一个 Go module**，它把 core
+当依赖（`replace` 到它自己的 `core/` submodule），并把自己那张表交给内核的组合根：
 
-    "我这次构建用哪个发行版？"   → 仓库根的 modules-ext.json（Pin：repo/revision/spec）
-    "这个发行版由哪些模块组成？" → 发行版仓库里的 dist.json（Spec：modules/disable）
-
-构建期按 Pin 把发行版仓库 clone 到 `go/modules-ext/`（**产物，在 .gitignore 里**），
-`make generate` 把 Spec 点名的模块写进装配清单。装模块/关模块**都不改 core 的代码**：
-
-```bash
-$EDITOR modules-ext.json     # 换发行版仓库或钉的提交
-$EDITOR go/modules-ext/dist.json  # 或在发行版仓库里改规格书
-make build                   # 会自动重新 generate（Pin 变了要重跑）
+```go
+app.Main(ctx, app.Options{Loader: app.Selection{
+    Disable: []string{"cli"},                        // 关掉内核的界面（写**目录名**）
+    Extra:   []app.Entry{{Dir: "deepseek", Component: deepseek.New()}},
+}})
 ```
 
-- **`make build` 自己会重跑 generate**，所以换发行版必须把 `NEWGATE_MODULES_PIN`
-  给**整个 make 调用**（`NEWGATE_MODULES_PIN=… make build`），只给 `make generate`
-  那一发是没用的——第二发会把清单按默认 Pin 生成回去。
-- `NEWGATE_MODULES_PIN` 指另一份 Pin（试装变体、发行版自己的构建脚本用）；
-  `NEWGATE_EXT_DRYRUN=1` 不拉代码（离网/CI，checkout 由构建方准备）。
+装模块/关模块**都不改 core 的代码**，core 也不认识任何模块名。
+
+**2026-09-20 之前不是这样**：那时内核根挂着一张 `modules-ext.json`（Pin），构建期
+把发行版仓库 clone 到 `go/modules-ext/` 再扫一遍。那套机制整个删了，因为产品决定
+住进了内核里，代价实测三条：编一次发行版就把内核 checkout 改脏（生成的清单被重写成
+发行版那份，挡住 pull/换分支）、内核 CI 必须去 clone 另一个仓库、装配清单 import 了
+发行版的包（核心里出现一条指向发行版的编译期依赖）。现在内核**完全离线**：
+
+```bash
+cd go && make check          # 本仓库自己的 fmt/vet/清单/单测/两条 e2e
+GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事实不是承诺
+```
+
+`app/independence_test.go` 守着这条边界（Pin 文件、`modules-ext` 的 import 路径、
+`extmanifest`、`NEWGATE_MODULES_PIN` / `NEWGATE_EXT_DRYRUN`，一个都不许回来）。
+
 - 官方发行版：`git@github.com:rzbdz/newgate-modules-ext.git`，`main` = 官方发行版，
-  `template` = 给别人 fork 的骨架。**fork 它 + `build/release.sh` 就是一个新发行版**。
-- **两个 checkout，别搞混**：`go/modules-ext/` 是**构建期产物**（Pin 说了算，别在里面
-  改代码，下次 `make generate` 会把它切回钉的那一发）；改 ext 模块请去独立的工作目录
-  `/root/workspace/newgate-ext`（`origin` = ssh，直推），推完把 `modules-ext.json` 的
-  `revision` 挪到新提交、重跑 `make generate`。
-- 装不装 ext 都要能编：`TestRemovalMatrix`（app/matrix_test.go）逐个模块摘一遍，
+  `template` = 给别人 fork 的骨架。**fork 它 + `build/build.sh` 就是一个新发行版**。
+- **改发行版模块请去发行版的工作目录**（如 `/root/workspace/newgate-ext`），那是个
+  独立的 Go module，改完直接提交推送；要动内核就去内核仓库改、推，再回来挪 gitlink。
+- 装不装发行版都要能编：`TestRemovalMatrix`（app/matrix_test.go）逐个模块摘一遍，
   **只有 built-in（root）不可摘**；`app/direction_test.go` 与
   `modules/gateway/direction_test.go` 守着「组合根/数据面不认识任何具体模块」。
+- 测试边界：**内核的测试只管内核的逻辑与内核的模块**；发行版模块的行为（DeepSeek
+  的尾部形状、推理回填、跨上游迁移）由发行版自己的测试与 `mock/` 端到端锁。
 
 档位阶梯（2026-09-16 四档化）：
 `heavy`(fable) > `normal`(opus，**主力**) > `mid`(sonnet) > `light`(haiku)，

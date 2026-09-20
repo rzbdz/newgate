@@ -67,15 +67,18 @@ import，优雅交接期间新旧二进制混跑，控制面文档的形状是�
 弱依赖因为**没有提供者而不建边**（各模块拿到 `ok == false` 就跳过），功能一个
 不少，只是没有命令行入口。
 
-### 注：发行版（modules-ext）不在本图里
+### 注：发行版的模块不在本图里
 
 本仓库只是 **core**：它提供机制，不提供产品定义。「这个二进制由哪些模块组成」
-由发行版说了算，构建期按仓库根的 `modules-ext.json`（Pin）把发行版仓库 clone 到
-`go/modules-ext/`，再把它的 `dist.json`（Spec）点名的模块扫进装配清单。
+由发行版说了算——发行版是**另一个仓库、另一个 Go module**，它把 core 当依赖
+（`replace` 到自己的 `core/` submodule），并把 `app.Selection` 交给内核的组合根：
+内核自带的减去它要关掉的、加上它自己的（见 `docs/09-extension-guide.md` §8）。
 
-对这张图来说 ext 模块**没有任何特殊**：同一个 import 前缀、同一张依赖图、同一套
-`Provides/Requires`。区别只在**谁决定装**——`modules/` 按目录全装，ext 按规格书
-点名（见 `docs/09-extension-guide.md` §8、`tools/extmanifest`）。
+对这张图来说发行版模块**没有任何特殊**：同一张依赖图、同一套 `Provides/Requires`、
+同一套生命周期。区别只在**谁决定装**——`modules/` 按目录全装，发行版的按规格书
+点名。内核**不认识它们中的任何一个**（连名字都不认识）：`app/direction_test.go`
+守着组合根不 import 任何具体模块，`app/independence_test.go` 守着「内核里没有
+发行版机制」这条边界。
 
 所以读这张图时请注意：图中某些模块（上游怪癖修补、客户端×模型交叉语义）**不在
 本仓库的 `modules/` 里**。那也是刻意的——它们随发行版变，不该钉死在 core。

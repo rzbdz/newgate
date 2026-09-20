@@ -255,7 +255,7 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 - **fail-open**：贡献者 panic 当作「它没跑过」，判决按零值合并（零值 = 没有
   意见）。一个坏策略绝不能把整条链的判断夺走。
 
-## 8. 外部模块与发行版（modules-ext）
+## 8. 发行版：另一个 Go module
 
 **core 不认识任何一个具体模块**（`app/direction_test.go` 守着）。所以「装一个模块」
 这件事有两条路：
@@ -263,47 +263,85 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 | 你想做什么 | 放哪里 | 谁决定装 |
 | --- | --- | --- |
 | 内核机制的一部分（网关、熔断、接管、界面） | `go/modules/`，随 core 走 | 扫描 `modules/` 目录，全装 |
-| 某个上游的怪癖、某个客户端的特殊行为、产品取舍 | **发行版仓库**，构建期 clone 到 `go/modules-ext/` | 发行版的规格书点名 |
+| 某个上游的怪癖、某个客户端的特殊行为、产品取舍 | **发行版仓库**，它自己的 Go module | 发行版的规格书点名 |
 
-判据很直接：**「换个发行版，这个模块还该在吗？」** 该在 → core；不该在 → ext。
+判据很直接：**「换个发行版，这个模块还该在吗？」** 该在 → core；不该在 → 发行版。
 DeepSeek 的尾部形状修补、GLM 的思维链回传、客户端×模型的交叉语义都属于第二类：
 它们是产品决策，随上游和发行版变。
 
-### 两张纸
+### 接缝：`app.Selection`
 
-    modules-ext.json   仓库根，**构建者**的：这次构建用哪个发行版
-    dist.json          发行版仓库根，**发行版作者**的：这个产品由哪些模块组成
+组合根的装配逻辑留在内核，「装哪些」是消费者的事：
+
+```go
+// go/app/manifest.go
+type Entry struct {
+	Dir       string            // 目录名——它就是「关掉哪一个」的键
+	Component modules.Component
+}
+func CoreModules() []Entry      // 内核自带的组件表（实现落在生成的 modules_gen.go）
+
+type Selection struct {
+	Disable []string            // 要关掉的内核模块，写**目录名**
+	Extra   []Entry             // 消费者自己的模块
+}
+func (s Selection) Load() ([]modules.Component, error)
+
+// go/app/main.go
+type Options struct{ Loader modules.Loader; Version, BuildTime, CommitTime string }
+func Main(ctx context.Context, opts Options) int   // 留痕 → 起图 → 问入口 → 交出去
+```
+
+发行版的 main 于是只有十几行：交出「哪张图 + 版本号」，其余交给 `app.Main`。
+
+`Disable` 写的是**目录名**（`claudecode_deepseek`）而不是组件名
+（`claudecode-deepseek`）——十四个内核模块里有三个两者不同。写错名字会在
+`Selection.Load()` 当场报错，因为「我以为关掉了，它其实还在跑」是这一层最坏的失效。
+
+### 发行版长什么样
+
+```
+my-dist/
+├── core/                 submodule：内核源码（钉在一个提交上）
+├── go/                   发行版自己的 Go module
+│   ├── go.mod            replace github.com/rzbdz/newgate/go => ../core/go
+│   ├── modules/<名字>/    发行版的模块（形态与内核 modules/ 完全一致）
+│   ├── manifest/         生成物：规格书 → Selection（进版本控制）
+│   ├── cmd/newgate/      main（十几行）
+│   └── tools/distgen/    读规格书、生成上面那份清单
+├── dist.json             规格书
+└── build/build.sh        唯一的构建入口
+```
+
+    dist.json   发行版作者的东西：这个产品由哪些模块组成
 
 ```json
-// modules-ext.json —— 只钉三件事
-{ "repo": "https://github.com/rzbdz/newgate-modules-ext.git",
-  "revision": "b8244e243db57ce282f49649c84916b77edf8229",
-  "spec": "dist.json" }
-
-// dist.json —— 发行版自己的形态
 { "distribution": "newgate-default",
-  "core": { "repo": "https://github.com/rzbdz/newgate.git", "revision": "…" },
   "modules": ["hello", "deepseek", "glm"],
   "disable": ["cli"] }
 ```
 
-**分成两张纸是为了让 fork 有意义**：把「启用哪几个模块」放在 core 仓库里的话，
-fork 了 ext 的人加了模块，还得回去改 core 的文件才能启用它。
+`modules` = 本仓库 `go/modules/` 下要装的目录名（**白名单**——不在名单里的不装，
+所以同一份目录可以既放着变体模块又不进默认产品）；`disable` = 要关掉的内核模块目录名。
 
-### 写一个外部模块
+**没有第二张纸。** 2026-09-20 之前内核根还有一张 `modules-ext.json`（Pin）指向发行版
+仓库、构建期把它 clone 进来；那套机制整个删掉了。理由是它让**产品决定住在内核里**，
+代价实测有三条：编一次发行版就把内核 checkout 改脏（生成的清单被重写成发行版那份）、
+内核 CI 必须去 clone 另一个仓库、装配清单 import 了发行版的包（内核里出现一条指向
+发行版的编译期依赖）。现在内核**完全离线**，`app/independence_test.go` 守着这条边界。
+
+### 写一个发行版模块
 
 形态与 `modules/` 里**完全一样**（一个目录、一个 `module.go`、导出
 `func New() modules.Component`，见 §1）。差别只有两处：
 
-- 它在发行版仓库的 `modules/<名字>/` 下，构建期被 clone 到
-  `go/modules-ext/modules/<名字>/`；
-- import 路径是 `github.com/rzbdz/newgate/go/modules-ext/modules/<名字>`（对内核的
-  import 不变——checkout 就在内核的 module 里，所以发行版仓库**不需要 go.mod**）。
+- 它在发行版仓库的 `go/modules/<名字>/` 下；
+- import 路径是 `github.com/<你的发行版 module>/go/modules/<名字>`（对内核的 import
+  不变：`github.com/rzbdz/newgate/go/...`）。
 
-**目录名不必是 Go 标识符**：`simple-cli` 这种连字符名字合法，生成器会把 import
-别名拧成 `ext_simple_cli`（`aliasFor`）。但**推之前请在内核 checkout 里跑一遍
-`gofmt -l .` 与 `go vet ./...`**——ext 的包编进内核的 module，所以它们的不合格
-会在内核的 CI 里红。
+**目录名不必是 Go 标识符**：`simple-cli` 这种连字符名字合法，生成器把 import 别名
+拧成 `ext_simple_cli`——判据是 `tools/genmodules/scan.Ident`，内核与发行版两个生成器
+共用同一份实现（同一把尺子，否则同一个目录名会在两个仓库里得到两种解释）。
 
 ### 关掉一个 core 模块
 
@@ -319,9 +357,9 @@ fork 了 ext 的人加了模块，还得回去改 core 的文件才能启用它�
 ### 造一个发行版
 
 ```bash
-git clone <你 fork 的 ext 仓库> my-dist && cd my-dist
+git clone --recursive <你 fork 的发行版仓库> my-dist && cd my-dist
 $EDITOR dist.json
-build/release.sh          # 拿核心源码（或 $NEWGATE_CORE）→ 写 Pin → make static
+build/build.sh            # 生成清单 → 编静态二进制 → dist/
 ```
 
 官方发行版仓库 `rzbdz/newgate-modules-ext` 有两个分支：`template`（给别人 fork 的
@@ -331,8 +369,18 @@ build/release.sh          # 拿核心源码（或 $NEWGATE_CORE）→ 写 Pin �
 
 | 目录 | 角色 | 能不能在里面改代码 |
 | --- | --- | --- |
-| `go/modules-ext/`（core 里） | **构建期产物**：Pin 钉的那一发被 clone 到这里 | 不能——下次 `make generate` 会把它切回钉的提交 |
-| `/root/workspace/newgate-ext` | **开发工作目录**：独立 clone，`origin` = ssh | 能，改完直推，然后把 Pin 的 `revision` 挪过去 |
+| 发行版里的 `core/`（submodule） | **内核源码**，钉在某个提交上 | 能，但改完先推内核仓库，再回来挪 gitlink（`git add core`） |
+| 你的发行版工作目录（如 `/root/workspace/newgate-ext`） | **发行版的产品代码** | 能，改完直接提交推送 |
+
+### 测试跟着拥有者走
+
+- 内核的测试只管**内核的逻辑与内核的模块**（`cd go && go test ./...`，离线）；
+- 发行版模块的行为由发行版自己测（它的模块测试 + `mock/` 端到端）；
+- 发行版的流水线里**第一项就是内核的全部测试**（`core-test`）——发行版带的就是
+  这份依赖，它绿不绿直接决定产品能不能发；
+- `go/testing/{testkit,system,upstream}` 从这里起是**对外 API**：发行版拿它起真图
+  （`system.StartWith(t, 你自己的 loader)`）测自己的模块。别随便重塑这几个包的形状，
+  那会是一次跨仓库的破坏性变更（而症状出现在别人的 CI 上）。
 
 ## 9. 文档和历史
 

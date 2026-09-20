@@ -29,6 +29,28 @@ Go 单测使用 `httptest` 或本地 listener。任何需要真实 provider toke
 制**，不 import 任何 core 包。所以 Go 侧怎么重构都不该影响它们——它们一红，
 说明行为真的变了。
 
+### 1.2 两个仓库各测各的（2026-09-20 起）
+
+发行版的模块不在本仓库（见 `docs/09-extension-guide.md` §8），所以测试分成两段，
+**发行版流水线里的第一项就是内核的全部测试**：
+
+| 段 | 在哪跑 | 覆盖 |
+| --- | --- | --- |
+| `core-test` | 内核仓库（`cd go && GOPROXY=off go test ./...`） | 内核的逻辑 + 内核的模块 |
+| `dist-test` | 发行版仓库（`cd go && go test ./...`） | 发行版自己的模块 |
+| 端到端 | 发行版仓库（`mock/e2e_claude_dist.sh`） | 发行版模块的真实行为（真二进制 + 内核的假上游） |
+
+2026-09-20 之前不是这样：内核的 `app/default_test.go`、`testing/system/`、
+`modules/gateway/forward/` 里都躺着断言**发行版模块**行为的用例，内核的 e2e 里还有
+整整五章在验 DeepSeek 的补丁。后果是内核摘掉那个模块就红——**内核再也测不干净**。
+那些断言跟着拥有者搬走了；内核留下的是**机制**的覆盖（例如
+`testing/system/shape_test.go` 用测试自己的合成判据，断言「形状 400 → 认领 → 只计数
+不摘牌 → 日志留痕」这条因果链的每一环都是内核自己的）。
+
+由此有一条约束要记住：**`go/testing/{testkit,system,upstream}` 从这时起是对外 API**
+——发行版拿 `system.StartWith(t, 自己的 loader)` 起真图测自己的模块。重塑这几个包的
+形状会是一次跨仓库的破坏性变更，而症状出现在别人的 CI 上。
+
 **模块层**用 `testkit` 起图，只传你关心的组件，依赖由 capability 推导：
 
 ```go
