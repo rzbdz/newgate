@@ -11,6 +11,8 @@
 ![dependencies](https://img.shields.io/badge/third--party_deps-0-brightgreen)
 ![build](https://img.shields.io/badge/build-fully_offline-blue)
 
+<sub><b>English</b> · <a href="README.zh-Hans.md">中文</a></sub>
+
 </div>
 
 ---
