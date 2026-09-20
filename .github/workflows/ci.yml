@@ -48,8 +48,6 @@ jobs:
   static:
     name: 静态检查与单测
     runs-on: ubuntu-latest
-    defaults:
-      run:
     # runner 本来就是干净的，这里仍然**显式**钉住配置目录：让「测试偷偷依赖
     # 运行它的那台机器上的配置」在任何 runner 上都必然暴露，而不是碰运气。
     # 与本地 `make ci` 的沙箱同一个意图（那条命令就是照它写的）。
@@ -100,8 +98,6 @@ jobs:
   race:
     name: 竞态检测
     runs-on: ubuntu-latest
-    defaults:
-      run:
     # 与 static 同一个理由（见那里的注释）：钉住配置目录，别让 runner 状态漏进来。
     env:
       NEWGATE_HOME: /tmp/newgate-ci
@@ -122,8 +118,6 @@ jobs:
   e2e:
     name: 零 token 端到端
     runs-on: ubuntu-latest
-    defaults:
-      run:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -144,8 +138,12 @@ jobs:
       - name: 构建
         run: make build
 
-      - name: opencode 侧端到端
-
+      # 内核只剩一条端到端：`mock/e2e_claude.sh` 打的是**机制面**（档位解析、
+      # 上游严格性、停机与优雅交接、运行期开关）。claude 与 opencode 两个**客户端**
+      # 模块在 2026-09-20 搬去了发行版，所以 opencode 侧那条脚本也跟着走了
+      # （`newgate-ext/mock/e2e_opencode.sh`，由发行版的 CI 跑）。这里原来那一步的
+      # `run:` 在摊平 go/ 时被误删，留下一个没有 run/uses 的步骤——YAML 非法，
+      # GitHub 直接拒掉整个 workflow，一个 job 都没起（2026-09-20 修）。
       - name: Claude Code 侧端到端
         run: bash mock/e2e_claude.sh
 
