@@ -243,6 +243,17 @@ type ToggleItem struct {
 	// Placeholder 是空格子里的提示（比如「空 = 只听回环」）。空值时它比 why
 	// 更该被看见：用户对着一个空输入框，第一句话得告诉他空着是什么意思。
 	Placeholder string `json:"placeholder,omitempty"`
+	// Group 是**卡片内部**再分一层的标题：值一变，界面就在这一格前面插一行小标题
+	// （见 kinds/Toggles.svelte）。空 = 不分组。
+	//
+	// 与 Concept.Group 不是一回事：那个分的是**侧栏里的栏目**，这个分的是**同一张
+	// 卡里的若干行**。opencode 的 omo 槽位用它把 agent 与 category 分成两段——
+	// 十几行下拉挤在一起时，那两行小标题是唯一能让眼睛停一下的东西。
+	//
+	// 它在契约里而不是在某一家模块里：形状归 Kind，而「界面上怎么摆」这件事已经
+	// 有一份实现（前端那个渲染器），多加一个只有一家认得的字段等于让别家写的卡片
+	// 分组静默失效。
+	Group string `json:"group,omitempty"`
 }
 
 // ToggleKind 的取值。

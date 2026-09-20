@@ -1070,6 +1070,9 @@
     "Process is healthy but requests cannot reach it; usually an outbound proxy hijacking loopback (see the Environment item).": {
       "where": "modules/gateway/diagnostics.go:139"
     },
+    "Profile": {
+      "where": "modules/confighook/view.go:39"
+    },
     "Profiles": {
       "where": "modules/config/view.go:231"
     },
@@ -1416,6 +1419,12 @@
     },
     "Which agent to take over? e.g. newgate on claude": {
       "where": "modules/runtime/commands.go:319"
+    },
+    "Which chain this client starts from. The chain decides what each tier resolves to; changing it takes effect the next time this client is taken over (newgate on {agent}).": {
+      "where": "modules/confighook/view.go:29",
+      "args": [
+        "agent"
+      ]
     },
     "Which dialect this upstream speaks. Empty means openai.": {
       "where": "modules/config/view.go:754"
@@ -2186,6 +2195,12 @@
         "name"
       ]
     },
+    "following the global default ({profile})": {
+      "where": "modules/confighook/profile.go:80",
+      "args": [
+        "profile"
+      ]
+    },
     "forwarded upstream to get the true value": {
       "where": "modules/gateway/metrics/hints.go:58"
     },
@@ -2310,7 +2325,7 @@
       ]
     },
     "interface: {source} could not produce its view: {err}": {
-      "where": "lib/view/view.go:694",
+      "where": "lib/view/view.go:705",
       "args": [
         "err",
         "source"
@@ -3175,6 +3190,9 @@
     "set api_key in providers.json": {
       "where": "modules/config/store/store.go:439"
     },
+    "set for this client only (other clients follow the global default)": {
+      "where": "modules/confighook/profile.go:78"
+    },
     "set in the config: {tier} (the default is {def}) — takes effect the next time {agent} is taken over (newgate on {agent})": {
       "where": "modules/confighook/slots.go:165",
       "args": [
@@ -3711,17 +3729,17 @@
       ]
     },
     "view: a contributor registered with no source name": {
-      "where": "lib/view/view.go:546"
+      "where": "lib/view/view.go:557"
     },
     "view: concept {id} ({source}) has no kind — the interface would not know how to render it": {
-      "where": "lib/view/view.go:715",
+      "where": "lib/view/view.go:726",
       "args": [
         "id",
         "source"
       ]
     },
     "view: concept {id} is contributed by both {a} and {b} — two concepts on one id means only one of them is ever reachable from the interface": {
-      "where": "lib/view/view.go:707",
+      "where": "lib/view/view.go:718",
       "args": [
         "a",
         "b",
@@ -3729,19 +3747,19 @@
       ]
     },
     "view: {source} contributed a concept with no id": {
-      "where": "lib/view/view.go:712",
+      "where": "lib/view/view.go:723",
       "args": [
         "source"
       ]
     },
     "view: {source} registered a nil contributor — the interface would show nothing for it": {
-      "where": "lib/view/view.go:555",
+      "where": "lib/view/view.go:566",
       "args": [
         "source"
       ]
     },
     "view: {source} registered with no section title — the sidebar would have nothing to label its column with (use view.Title)": {
-      "where": "lib/view/view.go:551",
+      "where": "lib/view/view.go:562",
       "args": [
         "source"
       ]
@@ -4136,14 +4154,14 @@
       ]
     },
     "{source} has no action called {action} — the page is probably stale, reload it": {
-      "where": "lib/view/view.go:648",
+      "where": "lib/view/view.go:659",
       "args": [
         "action",
         "source"
       ]
     },
     "{source}.{action} has nothing to run": {
-      "where": "lib/view/view.go:652",
+      "where": "lib/view/view.go:663",
       "args": [
         "action",
         "source"

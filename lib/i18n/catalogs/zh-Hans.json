@@ -916,6 +916,10 @@
       "text": "进程正常，请求到不了它；常见于出站代理劫持 loopback（见「环境」一项）。",
       "reviewed": true
     },
+    "Profile": {
+      "text": "Profile",
+      "reviewed": true
+    },
     "Profiles": {
       "text": "档位",
       "reviewed": true
@@ -1270,6 +1274,10 @@
     },
     "Which agent to take over? e.g. newgate on claude": {
       "text": "要接管谁？例：newgate on claude",
+      "reviewed": true
+    },
+    "Which chain this client starts from. The chain decides what each tier resolves to; changing it takes effect the next time this client is taken over (newgate on {agent}).": {
+      "text": "这个客户端从哪条链起步。链决定每个档位最终落到哪家模型上；改完要等下次接管这个客户端才生效（newgate on {agent}）。",
       "reviewed": true
     },
     "Which dialect this upstream speaks. Empty means openai.": {
@@ -1962,6 +1970,10 @@
     },
     "flush failed for {name}: {err}": {
       "text": "{name} 落盘失败: {err}",
+      "reviewed": true
+    },
+    "following the global default ({profile})": {
+      "text": "跟随全局缺省（{profile}）",
       "reviewed": true
     },
     "forwarded upstream to get the true value": {
@@ -2786,6 +2798,10 @@
     },
     "set api_key in providers.json": {
       "text": "providers.json 里填 api_key",
+      "reviewed": true
+    },
+    "set for this client only (other clients follow the global default)": {
+      "text": "只给这个客户端设过（其它客户端跟随全局缺省）",
       "reviewed": true
     },
     "set in the config: {tier} (the default is {def}) — takes effect the next time {agent} is taken over (newgate on {agent})": {
