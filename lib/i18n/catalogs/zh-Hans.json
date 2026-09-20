@@ -904,6 +904,10 @@
       "text": "进程正常，请求到不了它；常见于出站代理劫持 loopback（见「环境」一项）。",
       "reviewed": true
     },
+    "Profiles": {
+      "text": "档位",
+      "reviewed": true
+    },
     "Provider {name} has no key → {hint}": {
       "text": "provider {name} 没有 key → {hint}",
       "reviewed": true

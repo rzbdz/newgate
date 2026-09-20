@@ -201,8 +201,15 @@ func profileConcept(name string, all []string) view.Concept {
 	return view.Concept{
 		ID: conceptID, Kind: view.KindMapping, Title: title,
 		// Order 10：档位文件排在「上游 / 全局设置」之后（见 concepts 的注释）。
-		// Group：按家族归拢，左栏里 `claude-cheap` 缩在 `claude` 下面（见 profileFamily）。
-		Order: 10, Group: profileFamily(name, all),
+		//
+		// Group 是**两级**的（见 view.Concept.Group）：大档 `档位`，族由
+		// profileFamily 算（`claude-cheap` 缩在 `claude` 底下）。为什么要有大档
+		// 那一段：左栏里「全局设置 / 上游」是**装完就要配的两项**，而档位是**一天天
+		// 加出来的一堆**——不分开的话，那两项与十六个档位平铺在一起，谁也看不出
+		// 这是两类东西（用户的原话：「profile 这里就可以做一个分栏了啊」）。
+		//
+		// 大档的名字走 i18n（它是给人看的），族名是档位名本身（机器标记，不翻）。
+		Order: 10, Group: i18n.T("Profiles", nil) + "/" + profileFamily(name, all),
 		Data: data,
 		Apply: func(edit json.RawMessage, base string) (string, error) {
 			return applyProfileRoles(conceptID, file, edit, base)
