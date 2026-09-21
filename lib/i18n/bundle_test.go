@@ -101,7 +101,7 @@ func TestABundleRefusesGarbage(t *testing.T) {
 		}
 	}
 	// 类型对不上也要报（拿账本去当译文读）。
-	if _, err := DecodeCatalog(EncodeLedger(Ledger{Messages: map[string]LedgerEntry{"x": {Where: "y"}}})); err == nil {
+	if _, err := DecodeCatalog(EncodeLedger(Ledger{Messages: map[string]LedgerEntry{"x": {Args: []string{"y"}}}})); err == nil {
 		t.Error("账本被当成译文读成功了，该报错")
 	}
 }
@@ -165,7 +165,7 @@ func TestTheEmbeddedBundlesMatchTheJSON(t *testing.T) {
 			t.Errorf("账本里少了 %q（bundle 落后于 JSON？）", id)
 			continue
 		}
-		if got.Where != want.Where || got.One != want.One ||
+		if got.One != want.One ||
 			got.Other != want.Other || got.Note != want.Note ||
 			!slices.Equal(got.Args, want.Args) {
 			t.Errorf("账本 %q 对不上（bundle 落后于 JSON？）\n  想要 %+v\n  实际 %+v", id, want, got)

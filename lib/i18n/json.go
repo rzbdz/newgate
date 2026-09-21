@@ -61,7 +61,6 @@ type ledgerJSON struct {
 }
 
 type ledgerEntryJSON struct {
-	Where string   `json:"where"`
 	Args  []string `json:"args,omitempty"`
 	Other string   `json:"other,omitempty"` // 复数消息的复数形式
 	Note  string   `json:"note,omitempty"`  // 人写的，extract 不许覆盖
@@ -159,7 +158,7 @@ func ParseLedger(raw []byte) (Ledger, error) {
 	}
 	out := Ledger{Messages: make(map[string]LedgerEntry, len(f.Messages))}
 	for id, e := range f.Messages {
-		out.Messages[id] = LedgerEntry{Where: e.Where, Args: e.Args, Other: e.Other, Note: e.Note}
+		out.Messages[id] = LedgerEntry{Args: e.Args, Other: e.Other, Note: e.Note}
 	}
 	return out, nil
 }
@@ -171,7 +170,7 @@ func MarshalLedger(l Ledger) ([]byte, error) {
 		Messages: make(map[string]ledgerEntryJSON, len(l.Messages)),
 	}
 	for id, e := range l.Messages {
-		f.Messages[id] = ledgerEntryJSON{Where: e.Where, Args: e.Args, Other: e.Other, Note: e.Note}
+		f.Messages[id] = ledgerEntryJSON{Args: e.Args, Other: e.Other, Note: e.Note}
 	}
 	return encode(f)
 }

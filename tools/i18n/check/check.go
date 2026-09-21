@@ -197,11 +197,14 @@ var forbidden = map[string]bool{
 }
 
 // buildLedger 把扫描结果变成账本。人写的 note 保留（extract 绝不覆盖人写的东西）。
+//
+// **不记位置**（2026-09-21）：`scan.Call` 有 Where（`文件:行`，报错时点名用），但账本
+// 不留它——位置一变账本就"过期"，而那是每次挪一行代码都会发生的事。理由与代价写在
+// lib/i18n 的 Ledger 注释里。
 func buildLedger(msgs map[string]scan.Call) i18n.Ledger {
 	led := i18n.Ledger{Messages: make(map[string]i18n.LedgerEntry, len(msgs))}
 	for msg, call := range msgs {
 		led.Messages[msg] = i18n.LedgerEntry{
-			Where: call.Where,
 			Args:  call.Args,
 			Other: call.Plural,
 		}
@@ -209,7 +212,7 @@ func buildLedger(msgs map[string]scan.Call) i18n.Ledger {
 	return led
 }
 
-// MergeLedger 把新扫出来的账本与旧账本合并：消息的 where/args 用新的，**note 用旧的**。
+// MergeLedger 把新扫出来的账本与旧账本合并：消息的 args 用新的，**note 用旧的**。
 func MergeLedger(old, fresh i18n.Ledger) i18n.Ledger {
 	out := i18n.Ledger{Messages: make(map[string]i18n.LedgerEntry, len(fresh.Messages))}
 	for msg, e := range fresh.Messages {

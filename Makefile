@@ -24,9 +24,20 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 all: build
 
-## generate: 扫描 modules/ 重建组合根装配清单（app/modules_gen.go）
+## generate: 重建全部**生成物**：装配清单（app/modules_gen.go）、本地化账本、目录表的
+## 编译期形态（catalogs/*.bin）。
+##
+## 账本（extract）也在这里重建，而不是留给开发者手动跑（2026-09-21 用户：
+## 「如果不需要 token，纯逻辑静态扫描，那你就做进 build 里面啊，塞进流程里」）。
+## 它本来就是**纯静态扫描**的产物——与清单、bundle 同一类东西，却曾经是唯一一个
+## 要人记得手动生成的。忘了的代价是构建红，而红的那句话（「账本已过期」）与实际
+## 改动毫无关系，于是每次都要花时间去修一个自己没碰过的东西。
+##
+## `check-i18n` 里的 `extract -check` 照旧拦「重建了但没提交」——那道门守的是
+## 「提交的产物与源码一致」，与这里谁负责重建无关。
 generate:
 	@go run ./tools/genmodules
+	@go run ./tools/i18n extract -root . -catalogs lib/i18n/catalogs
 	@go run ./tools/i18n bundle -root . -catalogs lib/i18n/catalogs
 
 ## check-generate: 只校验清单是否过期，不改文件（CI/测试用）

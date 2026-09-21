@@ -28,7 +28,9 @@ import (
 //
 // # 格式
 //
-//	魔数 "NGCAT1\n"（8 字节）
+//	魔数 "NGCAT2\n"（8 字节）
+//	（NGCAT1 是有 Where 那一格时的格式。改格式必须换魔数：拿一份旧 .bin 去按
+//	新布局解，会一路读歪而不报错——那是「解释器对不上语法」的经典坏法。）
 //	类型 1 字节           'c' 译文 / 'l' 账本
 //	u32 段数 → 每段      u32 长度 + 字节（字符串一律这样放；u32 是为了不用想上限）
 //	条目按**键排序**写：同一份 JSON 生成的字节必须逐字节相同，否则 -check 会
@@ -36,7 +38,7 @@ import (
 //
 // 读的每一个长度都做边界检查：这个格式是**生成物**，但它可能来自一次失败的构建
 // （半截文件）或者一个被别人换过的仓库。越界读是崩溃，比报一句错严重得多。
-const bundleMagic = "NGCAT1\n"
+const bundleMagic = "NGCAT2\n"
 
 const (
 	bundleKindCatalog = 'c'
@@ -117,7 +119,6 @@ func EncodeLedger(l Ledger) []byte {
 	for _, id := range ids {
 		e := l.Messages[id]
 		w.str(id)
-		w.str(e.Where)
 		args := append([]string(nil), e.Args...)
 		sort.Strings(args)
 		w.u32(uint32(len(args)))
@@ -258,7 +259,7 @@ func DecodeLedger(raw []byte) (Ledger, error) {
 	out := Ledger{Messages: make(map[string]LedgerEntry, r.hint(n, 5))}
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		id := r.str()
-		e := LedgerEntry{Where: r.str()}
+		var e LedgerEntry
 		if na := r.u32(); na > 0 {
 			e.Args = make([]string, 0, r.hint(na, 4))
 			for j := uint32(0); j < na && r.err == nil; j++ {

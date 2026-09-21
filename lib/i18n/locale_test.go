@@ -12,12 +12,12 @@ import (
 // 拿它们当夹具的话每迁一个模块都要改测试。
 func testLedger() Ledger {
 	return Ledger{Messages: map[string]LedgerEntry{
-		"Proxy": {Where: "modules/cli/diag.go:88"},
+		"Proxy": {},
 		"An external file {names} is still in {dir}": {
-			Where: "modules/runtime/commands.go:104", Args: []string{"dir", "names"}},
-		"Saved {n} file": {Where: "modules/config/commands.go:88",
+			Args: []string{"dir", "names"}},
+		"Saved {n} file": {
 			Args: []string{"n"}, Other: "Saved {n} files"},
-		"Only in the source language": {Where: "modules/cli/cli.go:12"},
+		"Only in the source language": {},
 	}}
 }
 
@@ -338,7 +338,7 @@ func TestExtendAddsNewMessagesOnly(t *testing.T) {
 
 	const own = "hello from the distribution"
 	err := Extend(Ledger{Messages: map[string]LedgerEntry{
-		own: {Where: "modules/hello/hello.go:1"},
+		own: {},
 	}}, []Catalog{{Language: "zh-Hans", Messages: map[string]Entry{
 		own:     {Text: "发行版自己的一句话"},
 		"Proxy": {Text: "内核已经说过的，不该被改掉"},
@@ -444,7 +444,7 @@ func TestLedgerRoundTrip(t *testing.T) {
 			t.Errorf("账本丢了 %q", id)
 			continue
 		}
-		if got.Where != want.Where || got.Other != want.Other ||
+		if got.Other != want.Other ||
 			strings.Join(got.Args, ",") != strings.Join(want.Args, ",") {
 			t.Errorf("%s 往返后变了: %+v vs %+v", id, got, want)
 		}
@@ -470,8 +470,14 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 	if _, err := ParseCatalog([]byte(`{"meta":{},"messages":{}}`)); err == nil {
 		t.Fatal("没有 meta.language 该报错")
 	}
-	if _, err := ParseLedger([]byte(`{"messages":{"x":{"where":"a.go:1"}}}`)); err != nil {
+	if _, err := ParseLedger([]byte(`{"messages":{"x":{"args":["dir"]}}}`)); err != nil {
 		t.Fatalf("账本该解得出来: %v", err)
+	}
+	// `where` 那一格 2026-09-21 删了（理由见 Ledger 的注释）。它还出现在老账本里的话，
+	// DisallowUnknownFields 会当场报错——这正是我们要的：旧的账本必须显式重生成，
+	// 而不是被静默忽略掉一整个字段。
+	if _, err := ParseLedger([]byte(`{"messages":{"x":{"where":"a.go:1"}}}`)); err == nil {
+		t.Fatal("账本里还留着 where 该报错（那一格已经删了）")
 	}
 	if _, err := ParseLedger([]byte(`{"massages":{}}`)); err == nil {
 		t.Fatal("拼错的账本字段名该报错")
@@ -546,7 +552,7 @@ func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 	install(t, "zh-Hans")
 
 	const own = "a sentence only the distribution has"
-	if err := Extend(Ledger{Messages: map[string]LedgerEntry{own: {Where: "modules/hello/hello.go:1"}}},
+	if err := Extend(Ledger{Messages: map[string]LedgerEntry{own: {}}},
 		[]Catalog{{Language: "zh-Hans", Messages: map[string]Entry{own: {Text: "发行版自己的一句话"}}}}); err != nil {
 		t.Fatalf("Extend: %v", err)
 	}
