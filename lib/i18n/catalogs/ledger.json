@@ -218,6 +218,13 @@
       ],
       "other": "#{req} recorded {bytes} bytes of reasoning and {n} keys {keys} this round; replaying them to the client next round"
     },
+    "#{req} response rewritten on the way out ({n} event): upstream bytes differ from what the client got": {
+      "args": [
+        "n",
+        "req"
+      ],
+      "other": "#{req} response rewritten on the way out ({n} events): upstream bytes differ from what the client got"
+    },
     "#{req} scene NOT saved (check permissions/disk): {err}": {
       "args": [
         "err",

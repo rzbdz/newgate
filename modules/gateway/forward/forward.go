@@ -936,6 +936,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var trail []string // 给 X-Newgate-Chain
 	for i, a := range steps {
 		isLast := i == len(steps)-1
+		// 这一发的响应改写者（见下面 special.ClaimEgress）。每一站都重置：
+		// 换了一个上游就是另一份请求形状，上一站认下的改写不适用这一站。
+		var egress special.Egress
 		if i > 0 && time.Now().After(deadline) {
 			metrics.Default.Inc("chain.budget_exhausted")
 			s.logf("[proxy] %s", i18n.T("#{req} chain budget {budget} ms exhausted, stopping at step {step}",
@@ -999,7 +1002,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// 这边是「只有某家上游才需要」的，由插件自己 Match 认领。
 		// （分类器改走 light 链的路由决策不在这——见上面 special.Route。）
 		if gatewaystate.SpecialEnabled(st) {
-			res := special.Apply(newBody, &special.Request{
+			patched := &special.Request{
 				InModel:  inModel,
 				Tier:     tier,
 				Model:    a.Binding.Model,
@@ -1013,7 +1016,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				Agent:    tgt.TaskCreate,
 				State:    st,
 				Quirks:   quirk.Default,
-			}, pluginOff(st))
+			}
+			res := special.Apply(newBody, patched, pluginOff(st))
 			counted := map[string]bool{}
 			for _, n := range res.Notes {
 				s.logf("[proxy] #%d special_treatment %s", reqID, n)
@@ -1028,6 +1032,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if res.Changed {
 				newBody = res.Body
 			}
+			// 响应侧：问一句这一发的响应要不要改（比如请求侧把 custom 工具降级成了
+			// function，响应侧就得把那几个 function_call 改回 custom_tool_call）。
+			// 问在**请求改完之后**：认领者要拿刚 Apply 过的结果决定改哪几条，所以
+			// 它看到的必须是最终的那份请求。原文 `body` 一起交过去——响应侧要改
+			// 哪几条，判据往往只在客户端发来的那一份里（见 special.Egressor）。
+			egress = special.ClaimEgress(patched, body, pluginOff(st))
 		}
 
 		target := a.Provider.URL(suffix)
@@ -1259,7 +1269,13 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(resp.StatusCode)
 
-		// 逐块转发。响应体一个字节都不改，也绝不缓冲整个响应。
+		// 逐块转发。响应体一个字节都不改，也绝不缓冲整个响应——**除非**这一发
+		// 的响应被人认领了（special.ClaimEgress，在发请求前问过）。
+		//
+		// 认领的那一发要按 SSE 事件边界切开再转发：拆帧只改变**写出时机**，不改
+		// 变字节（每条事件原样交给认领者，它说不动就一字不动）。没人认领时走的是
+		// 原来那条逐字节直通的快路——「没有补丁时转发就是转发」这条承诺，不因为
+		// 多了一个扩展点而变贵。
 		//
 		// 旁路挂一个观测者，把上游吐出来的推理内容记进 thinkcache，供下一轮
 		// 补回去（客户端会把它剥掉，见 modules/deepseek/st-reasoning.go）。
@@ -1271,16 +1287,35 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		buf := make([]byte, 32*1024)
 		var chunks int
 		var bytesOut int64
+
+		// 有人认领这一发的响应吗（special.ClaimEgress，在发请求前问过）。认领了
+		// 才拆 SSE 事件；没有就是原来那条逐字节直通的快路。
+		egressOn := stream && egress != nil
+		// 出站改写必须留痕（「不静默」在这条路上的落点）：它改的是**上游回来的
+		// 字节**，用户手里那份原文与上游给的对不上，只有日志能解释为什么。
+		var egressEvents int
+		var sp *sseSplitter
+		writeOut := func(p []byte) error {
+			_, err := w.Write(p)
+			return err
+		}
+		if egressOn {
+			sp = newSSESplitter(w, egress, func(orig, out []byte) { egressEvents++ })
+			writeOut = sp.write
+		}
 		for {
 			n, rderr := resp.Body.Read(buf)
 			if n > 0 {
-				if _, werr := w.Write(buf[:n]); werr != nil {
+				if werr := writeOut(buf[:n]); werr != nil {
 					metrics.Default.Inc("client.cancel")
 					s.logf("[proxy] %s", i18n.T("#{req} client disconnected (forwarded {chunks} chunks / {bytes} bytes): {err}",
 						i18n.A{"req": reqID, "chunks": chunks, "bytes": bytesOut, "err": werr}))
 					return
 				}
 				if stream {
+					// 观测者拿到上游给的**原字节**，不是改写后的：thinkcache 要
+					// 回填的是上游那一轮的推理原文，补丁改过的形状帮不上忙，
+					// 而且改坏的形状会让缓存整轮落空。
 					ob.Write(buf[:n])
 				} else if len(nonStream) < 8<<20 {
 					nonStream = append(nonStream, buf[:n]...)
@@ -1294,6 +1329,21 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if rderr != nil {
 				switch {
 				case rderr == io.EOF:
+					if sp != nil {
+						// 尾巴：很多上游的最后一个事件不带结尾空行，不吐就丢字节。
+						if ferr := sp.flush(); ferr != nil {
+							metrics.Default.Inc("client.cancel")
+							s.logf("[proxy] %s", i18n.T("#{req} client disconnected (forwarded {chunks} chunks / {bytes} bytes): {err}",
+								i18n.A{"req": reqID, "chunks": chunks, "bytes": bytesOut, "err": ferr}))
+							return
+						}
+					}
+					if egressEvents > 0 {
+						s.logf("[proxy] %s", i18n.N(
+							"#{req} response rewritten on the way out ({n} event): upstream bytes differ from what the client got",
+							"#{req} response rewritten on the way out ({n} events): upstream bytes differ from what the client got",
+							egressEvents, i18n.A{"req": reqID, "n": egressEvents}))
+					}
 					if !stream && len(nonStream) > 0 {
 						ob.ObserveBody(nonStream)
 					}

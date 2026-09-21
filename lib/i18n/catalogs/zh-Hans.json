@@ -204,6 +204,10 @@
       "text": "#{req} 记下本轮推理内容 {bytes} 字节 / {n} 个 key {keys}，下一轮替客户端补回去",
       "reviewed": true
     },
+    "#{req} response rewritten on the way out ({n} event): upstream bytes differ from what the client got": {
+      "text": "#{req} 响应在出去的路上被改写过（{n} 条事件）：客户端手里的字节与上游给的不一样",
+      "reviewed": true
+    },
     "#{req} scene NOT saved (check permissions/disk): {err}": {
       "text": "#{req} 现场**没存下来**（查权限/磁盘）: {err}",
       "reviewed": true

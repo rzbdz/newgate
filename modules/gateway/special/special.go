@@ -196,6 +196,41 @@ type ResponseAuditor interface {
 	AuditResponse(body []byte) string
 }
 
+// Egress 改写**上游回来的响应**，一条 SSE 事件一条地改。
+//
+// 它与请求侧的 Plugin 对称，而且是这个模型里唯一一处「吐出去的字节不再是上游
+// 原话」的地方——所以规则写死在这里，不靠调用方自觉：
+//
+//   - **每一条 event 原样进、原样出。** 调用方按 SSE 的事件边界切，把**这个
+//     事件的原始字节**（含 `event:` 行与结尾空行）交给它；返回 nil 就是一字不改。
+//     返回的字节是**这条事件的完整替代**，调用方负责写出去。
+//   - **只改你认领的那几条。** 没认出来的一律返回 nil——哪怕只是「顺手统一一下
+//     格式」，那也是把上游的字节换成了我们的，而这条路上没有版本号能让人发现。
+//   - **fail-open：panic 或返回空 slice 都当没改。** 与 Apply 同一条规矩
+//     （见包注释）：宁可少改一条事件，不能因为一个补丁把整条流转断。
+//
+// 它是**接口而不是函数**：响应改写几乎总是带状态（要记住这一发的哪几个 output
+// item 被改成了什么），而状态该活在这一发请求上——见 Egressor。
+type Egress interface {
+	Egress(event []byte) []byte
+}
+
+// Egressor 是插件的可选搭档：**这一发的响应**由谁改。
+//
+// 在请求阶段问一次（插件刚 Apply 完、请求还没发出去），返回非 nil 就表示这一发
+// 的响应归它改。每次问都该给一个**新实例**，理由是响应改写的状态只属于这一发：
+// 插件实例是进程级单例，而多个请求同时在线上跑，做成每次一个新对象就不需要锁，
+// 也不会把 A 那发的判断带到 B 那发。
+//
+// `original` 是**客户端发来的原始请求字节**（不是 Apply 之后的那一份）。响应侧要
+// 改哪几条，判据往往只在原始请求里：比如客户端声明了哪些工具是它自己的 custom
+// 类型，而 Apply 已经把那些声明改成上游认的形状了——想从改完的 body 倒推回去是
+// 猜，从原文里读是事实。
+type Egressor interface {
+	// Egress 认领这一发的响应改写；nil = 这一发不归我。
+	Egress(req *Request, original []byte) Egress
+}
+
 // Registry 持有当前网关的插件集合、稳定执行顺序和注册所有权 token。
 type Registry struct {
 	mu      sync.RWMutex
@@ -519,6 +554,60 @@ func AuditResponse(body []byte) string {
 		}
 	}
 	return strings.Join(reports, "\n")
+}
+
+// ClaimEgress 问一遍插件：**这一发的响应**归谁改。
+//
+// 在请求刚被 Apply 完、还没发出去时问一次，拿到的实例跟着这一发走到底。
+// 返回 nil 表示没人认领，调用方走原来那条逐字节直通的转发。
+//
+// 为什么要先问（而不是让每个事件都过一遍插件）：改响应要把 SSE 拆成事件，而拆帧
+// 让「一个字节都不动」这条承诺多了一层。没有认领者时调用方必须一眼看得出可以走
+// 原来的快路——所以判断放在**发请求之前**，与真正执行时用的是同一份名单。
+//
+// 只认第一个（按注册顺序问，与 Respond / Route 同一条）：响应只有一个出口，两家
+// 各改各的拼出来的是谁都没写过的东西。
+//
+// `original` 原样转给认领者（见 Egressor 的说明：它要的是客户端发来的那一份）。
+func ClaimEgress(req *Request, original []byte, off func(name string) bool) Egress {
+	for _, p := range Plugins() {
+		if off != nil && off(p.Name()) {
+			continue
+		}
+		claimer, ok := p.(Egressor)
+		if !ok {
+			continue
+		}
+		var egress Egress
+		func() {
+			// fail-open：认领器 panic 就当它没认领，这一发照原样转发。
+			defer func() { _ = recover() }()
+			egress = claimer.Egress(req, original)
+		}()
+		if egress != nil {
+			return egress
+		}
+	}
+	return nil
+}
+
+// RewriteEvent 把**一条 SSE 事件**交给认领者改写；它说不动就返回 nil。
+//
+// panic 当没改（fail-open，与 Apply 同）：宁可少改一条事件，也不能因为一个补丁
+// 把整条流转断。
+func RewriteEvent(e Egress, event []byte) []byte {
+	if e == nil {
+		return nil
+	}
+	var out []byte
+	func() {
+		defer func() { _ = recover() }()
+		out = e.Egress(event)
+	}()
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // ToolLoopNeedsRebase 询问匹配 candidate 的插件是否需要先有损重建，才能接手
