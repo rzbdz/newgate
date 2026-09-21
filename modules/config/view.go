@@ -283,7 +283,33 @@ func profileConcept(name string, all []string) view.Concept {
 			return profileView(name, file, p), nil
 		},
 		Actions: profileActions(name),
+		Note:    profileNote(name),
 	}
+}
+
+// profileNote 说这张档位卡此刻**是不是正在生效的那一份**。
+//
+// 是 → 一句绿色的「当前配置」，不是 → 不画任何东西。
+//
+// # 为什么不能只靠「按钮不画」表达这件事（2026-09-21 用户指出）
+//
+// 第一版就是那样：已经生效的那一张不挂那对按钮（理由见 profileActions），于是
+// 十六张档位卡里有十五张长着两个按钮、一张什么都没有。用户的原话是：
+//
+//	你应该注入的是一个 info only 的绿色：当前配置 / Active profile 的效果啊！
+//
+// 他说得对，而且指出的是一个**信息缺口**：「这份在生效吗」是他打开这一节最想
+// 知道的事，而当时的界面只用一个**缺席**去暗示它——缺席是看不出来的，两张卡
+// 长得几乎一样，唯一的差别是少两个按钮。而不画按钮与不画任何东西是两件事。
+//
+// 措辞按用户给的来：`active profile`（中文「当前配置」）。它是**陈述**不是命令，
+// 所以不着重点色（那是按钮用的），走 ToneOK——绿色的意思是「一切正常，这就是
+// 现在生效的那一份」，与健康表里 `ok` 那一格是同一个语气。
+func profileNote(name string) *view.Note {
+	if store.LoadState().DefaultProfile != name {
+		return nil
+	}
+	return &view.Note{Text: i18n.T("active profile", nil), Tone: view.ToneOK}
 }
 
 // profileActions 是这张档位卡上的按钮；它**已经就是默认**时返回空。
@@ -291,6 +317,9 @@ func profileConcept(name string, all []string) view.Concept {
 // 为什么已经默认的那一张不挂：「把当前这份设为默认」显示在它自己身上是纯噪音，
 // 而卡片上按钮一多，真正有用的那个就会被淹掉。判据只有一条（此刻的 DefaultProfile
 // 是不是它），所以它不会骗人。
+//
+// 注意「不挂按钮」**不等于**「什么都不说」：那一张卡上有一句绿色的 `active profile`
+// （见 profileNote）。两件事分开之后，这条函数只回答「该给哪些按钮」。
 //
 // 为什么是两个而不是一个：改默认 profile 这件事，用户想要的常常不止「默认改成它」，
 // 还有「**所有客户端**都跟着它」。单独设过的客户端不跟着走是对的（它们被明确指定

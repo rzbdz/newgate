@@ -1412,6 +1412,10 @@
       "text": "生效",
       "reviewed": true
     },
+    "active profile": {
+      "text": "当前配置",
+      "reviewed": true
+    },
     "added reasoning_effort:\"low\" (the upstream error asks for low/high/max)": {
       "text": "补 reasoning_effort:\"low\"（报错原文要求 low/high/max）",
       "reviewed": true
