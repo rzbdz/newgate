@@ -41,6 +41,33 @@ newgate claude --profile=ds
 
 该覆盖编码到 Gateway URL，不修改全局默认。
 
+### 直接用：把 newgate 当 LLM 后端
+
+```bash
+newgate ask "把这段话译成英文：……"
+echo "解释一下这段 diff" | newgate ask --tier light
+newgate ask --profile ds --system "只回 JSON" "……"
+```
+
+`ask` 走**正在跑的那个代理**发一句问题，只把回答的正文打出来。它自己不起代理
+（一次提问不该变成一次状态改变），也不是第二个客户端——档位链、fallback、熔断、
+上游怪癖修补在它这条路上照样生效，因为它走的就是那条路。
+
+选项：`--tier`（默认 `normal`，写的是**档位名**不是模型名）、`--profile`（单次
+覆盖，不动全局默认）、`--system`、`--max-tokens`。没给问题就读管道。
+
+**思维链走 stderr，正文走 stdout**：`answer=$(newgate ask …)` 拿到的必须是干净的
+正文，而 reasoning 模型的一发回答里思维链常常比正文长好几倍（见 06-reasoning.md）。
+人在终端上照样看得见它。
+
+别的客户端想直接用这个后端，端点在 `http://127.0.0.1:<port>`（默认 8899）：
+
+- `POST /v1/messages` —— anthropic 方言；
+- `POST /v1/chat/completions` —— openai 方言；
+- `POST /p/<profile>/v1/messages` —— 单次 profile 覆盖。
+
+两种方言各自成对：报哪个方言的错、说哪个方言的话。用哪一条取决于手上的客户端。
+
 ## 3. 观测
 
 ```bash
