@@ -50,7 +50,7 @@ func TestSnapshotDoesNotInventRowsForNoOps(t *testing.T) {
 	b, _ := clocked()
 	b.Report("relay", "a", Input{Kind: KindClientCancel})
 	b.Report("relay", "b", Input{Kind: KindUpstreamStatus, Status: 400, Body: []byte(`{"error":"bad param"}`)})
-	b.Report("relay", "c", Input{Kind: KindUpstreamStatus, Status: 402})
+	b.Report("relay", "c", Input{Kind: KindUpstreamStatus, Status: 405})
 	b.Report("relay", "d", Input{Kind: KindUpstreamSuccess})
 
 	if got := b.Snapshot(); len(got) != 0 {

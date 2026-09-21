@@ -75,10 +75,16 @@ func TestClassify(t *testing.T) {
 			Input{Kind: KindUpstreamStatus, Status: 429, IsLast: true},
 			Verdict{Bucket: BucketRateLimit}},
 
-		// —— 配置：key 坏了 / 这家没这个模型 ——
+		// —— 配置：key 坏了 / 这家没这个模型 / 这家没钱了 ——
 		{"401",
 			Input{Kind: KindUpstreamStatus, Status: 401},
 			Verdict{Advance: true, Bucket: BucketConfig}},
+		{"402",
+			Input{Kind: KindUpstreamStatus, Status: 402},
+			Verdict{Advance: true, Bucket: BucketConfig}},
+		{"402（链尾）",
+			Input{Kind: KindUpstreamStatus, Status: 402, IsLast: true},
+			Verdict{Bucket: BucketConfig}},
 		{"403",
 			Input{Kind: KindUpstreamStatus, Status: 403},
 			Verdict{Advance: true, Bucket: BucketConfig}},
@@ -104,7 +110,6 @@ func TestClassify(t *testing.T) {
 			Verdict{Advance: true, Bucket: BucketAvailability}},
 
 		// —— 其它 4xx / 3xx：请求本身有问题，撞遍所有上游没有意义 ——
-		{"402", Input{Kind: KindUpstreamStatus, Status: 402}, Verdict{}},
 		{"405", Input{Kind: KindUpstreamStatus, Status: 405}, Verdict{}},
 		{"418", Input{Kind: KindUpstreamStatus, Status: 418}, Verdict{}},
 		{"3xx（不再转移）", Input{Kind: KindUpstreamStatus, Status: 302}, Verdict{}},

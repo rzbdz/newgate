@@ -98,6 +98,9 @@ func TestPlaneJudgeTruthTable(t *testing.T) {
 		{"404（配置账本一次即摘）",
 			gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 404},
 			gwpolicy.Verdict{Attribute: true, Metrics: []string{"breaker.opened"}}},
+		{"402（余额不足：确定性的配置问题，与 401/403/404 同账本一次即摘）",
+			gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 402},
+			gwpolicy.Verdict{Attribute: true, Metrics: []string{"breaker.opened"}}},
 		{"408",
 			gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 408},
 			gwpolicy.Verdict{Attribute: true}},
@@ -112,8 +115,6 @@ func TestPlaneJudgeTruthTable(t *testing.T) {
 			gwpolicy.Verdict{Attribute: true}},
 
 		// —— 其它 4xx：请求本身有问题，撞遍所有上游没有意义 ——
-		{"402", gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 402},
-			gwpolicy.Verdict{Stop: true}},
 		{"405", gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 405},
 			gwpolicy.Verdict{Stop: true}},
 		{"418", gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 418},
@@ -175,7 +176,7 @@ func TestPlaneJudgeCountsFailuresIntoTheLedger(t *testing.T) {
 	}{
 		{"形状 400", gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 400, Body: []byte(shapeBody)}},
 		{"非形状 400", gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 400, Body: []byte(`{"error":"x"}`)}},
-		{"402", gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 402}},
+		{"405", gwpolicy.Outcome{Kind: gwpolicy.RejectedStatus, Status: 405}},
 	}
 	for _, tt := range notCounting {
 		t.Run("不记账/"+tt.name, func(t *testing.T) {

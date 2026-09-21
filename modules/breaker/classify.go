@@ -138,7 +138,9 @@ type Result struct {
 //	                        fallback_on_400 约束**——那个开关是拦「拿坏请求撞遍
 //	                        所有上游」的，而形状错误恰恰是「只有这家挑食」。
 //	429                   → 走 + 记限流
-//	401/403/404           → 走 + 记配置
+//	401/402/403/404       → 走 + 记配置（402 insufficient balance 是确定性的
+//	                        配置问题：这一家没钱了，重试它没有意义，换下一家是
+//	                        唯一可能成功的方向）
 //	408/409/5xx           → 走 + 记可用性
 //	其它 4xx（含非形状 400）→ 不记不换：请求本身有问题，换谁都一样
 //	3xx / 2xx             → 什么都不做（成功路径由 KindUpstreamSuccess 表达）
@@ -168,7 +170,7 @@ func Classify(in Input) Verdict {
 		return Verdict{Advance: advance, Bucket: BucketShape}
 	case in.Status == 429:
 		return Verdict{Advance: advance, Bucket: BucketRateLimit}
-	case in.Status == 401, in.Status == 403, in.Status == 404:
+	case in.Status == 401, in.Status == 402, in.Status == 403, in.Status == 404:
 		return Verdict{Advance: advance, Bucket: BucketConfig}
 	case in.Status == 408, in.Status == 409, in.Status >= 500:
 		return Verdict{Advance: advance, Bucket: BucketAvailability}
