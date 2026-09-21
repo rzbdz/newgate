@@ -370,6 +370,76 @@ func TestRegisterRejectsNoSectionTitle(t *testing.T) {
 	}
 }
 
+// TestNobodyDeclaresALandingByDefault：没人声明落点时，**行为与这条改动之前一模
+// 一样**——一个 Default 都没有，界面照它原来那套规矩挑（第一个有卡片的那一栏）。
+//
+// 这条是这次改动的安全绳：装 `home` 的装配里首屏换了地方，不装的那些（`dist.json`
+// 之外的四份规格书、内核自己的测试图）必须一个字都没变。破了它就是一次静默的
+// 行为变更——而「首屏落在哪」没有任何测试会因此变红。
+func TestNobodyDeclaresALandingByDefault(t *testing.T) {
+	r := NewRegistry()
+	for _, name := range []string{"breaker", "config", "gateway"} {
+		if _, err := r.Register(name, tsection(name), func() ([]Concept, error) { return nil, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, s := range r.Sections() {
+		if s.Default {
+			t.Errorf("%s 被标成了落点，而没人声明过", s.Source)
+		}
+	}
+}
+
+// TestLandingIsTheDeclaredSection：声明了落点的那一栏带上它，其余不带。
+//
+// 它端给界面的是 `default: true` 这一格（SectionInfo.Default），前端按它决定首屏
+// 落在哪儿——在这之前，那件事是「谁的名字按字母序排在前面」这个偶然。
+func TestLandingIsTheDeclaredSection(t *testing.T) {
+	r := NewRegistry()
+	if _, err := r.Register("breaker", tsection("Breaker"), func() ([]Concept, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	// 名字刻意排在字母序**最后**：落点靠声明，不靠在字母表里插队——插队那套
+	// （把 source 起成 `aaa-home`）是这次改动要消灭的东西。
+	if _, err := r.Register("home", tsection("Home").Landing(), func() ([]Concept, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, s := range r.Sections() {
+		got[s.Source] = s.Default
+	}
+	if !got["home"] {
+		t.Errorf("声明了 Landing 的那一栏没被标成落点: %+v", got)
+	}
+	if got["breaker"] {
+		t.Errorf("没声明的那一栏不该是落点: %+v", got)
+	}
+}
+
+// TestSeveralLandingsResolveBySource：两个模块都想当落点（那是发行版装机时的
+// 选择冲突，不是谁写错了）时，按 Source 取最小的那个。
+//
+// 为什么要一条确定性规则：不定它的话，被选中的那个取决于各模块 Start 的先后，
+// 而那种「装法一变、首屏就换地方」的错没有任何东西会红。取最小与 Sections 的
+// 排序用同一把尺子，看的人因此不会困惑。
+func TestSeveralLandingsResolveBySource(t *testing.T) {
+	r := NewRegistry()
+	for _, name := range []string{"zebra", "apple"} {
+		if _, err := r.Register(name, tsection(name).Landing(), func() ([]Concept, error) { return nil, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var landed []string
+	for _, s := range r.Sections() {
+		if s.Default {
+			landed = append(landed, s.Source)
+		}
+	}
+	if len(landed) != 1 || landed[0] != "apple" {
+		t.Fatalf("多个落点该只留 source 最小的那个，实际 %v", landed)
+	}
+}
+
 func sectionsOf(t *testing.T, r *Registry) map[string]string {
 	t.Helper()
 	out := map[string]string{}

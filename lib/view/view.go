@@ -505,6 +505,22 @@ type Section struct {
 	// ——界面能提供的只有「用户点了这个按钮」，别的都得由实现者自己看盘上有什么决定
 	// （新档位该叫什么名字就是这样：只有后端知道哪几个名字已经被占了）。
 	Actions []Action
+	// Default 是「没有位置时落在这里」——界面的首屏落在这一栏上。
+	//
+	// 为什么要它：首屏此前是**谁的名字排在前面**这个偶然——`Sections` 按 Source
+	// 字母序排（跨重启稳定是必须的，但字母序本身没有含义），于是第一个有卡片的那
+	// 一栏成了默认落点，而那一栏是 `breaker`（字母最前）。想让用户先看见「一屏
+	// 全能」那一节，唯一的办法是把 source 起成 `aaa-home` 之类来插队——那是**把
+	// 巧合当机制**，字母表一变（或者多一个字母更靠前的模块）它就不成立了，而且
+	// 看代码的人完全不知道那个名字是为什么那么起的。
+	//
+	// 所以拆成两件事：**内核说「谁可以被声明为落点」**（这一格，加上下面那条
+	// 确定性规则），**谁是落点是产品取舍**（由模块自己声明）。加一个模块仍然不用
+	// 改界面——这是这条规矩一直的样子。
+	//
+	// 它与 Group / Actions 同一条：**只影响界面怎么摆**，不参与任何身份（Source
+	// 才是身份：URL、草稿、路由都按它走）。所以「这一栏不再是落点」不搬任何东西。
+	Default bool
 }
 
 // Action 是栏目上的一个动作。
@@ -577,6 +593,21 @@ func (s Section) In(group func() string) Section {
 //     英文就谁也扫不到：账本里没有它、check 全绿、中文目录里永远缺一条。
 func Title(f func() string) Section { return Section{Title: f} }
 
+// Landing 把这一栏声明成界面的落点（没位置时落在它上）。
+//
+//	v.Register("home", view.Title(...).Landing(), concepts)
+//
+// 为什么是链在 Title 后面的方法（与 In / Does 同一个形状）：调用点有七处，而**只有
+// 一处**需要它——多一个必填参数会让那七处都写一个零值，看的人还得判断「这个 false
+// 是没想好还是真的不是落点」。链式调用让其余六处一行不动。
+//
+// 多个人声明时的规则见 Sections：**按 Source 取最小的那个**。不定这条，谁被选中就
+// 取决于 map 遍历顺序，而那种「重启一次换个首屏」的错没有任何东西会红。
+func (s Section) Landing() Section {
+	s.Default = true
+	return s
+}
+
 // SectionInfo 是栏目列表里的一行。
 //
 // Source 是机器标记（前端拿它跟概念对上、也拿它写进 URL），Title 是给人看的。
@@ -589,6 +620,14 @@ type SectionInfo struct {
 	// Actions 是这一栏上的动作（见 Section.Actions）。Run 是**函数**，端不出去，
 	// 所以这里只给「有哪些按钮」：ID 回传时用，Label 是按钮上的字。
 	Actions []ActionInfo `json:"actions,omitempty"`
+	// Default 是「没有位置时落在这里」（见 Section.Default）。
+	//
+	// 端给界面的原因与 Group 一样：**落点是界面在用的东西**，而界面不认识任何模块
+	// （它只知道 Source 这个机器标记）。让前端自己按字母序取第一个，就是把这条产品
+	// 取舍抄进前端——而前端那份抄件没有模块能改。
+	//
+	// `omitempty` 是有意的：绝大多数栏目不是落点，那几行 JSON 不必带一个 false。
+	Default bool `json:"default,omitempty"`
 }
 
 // ActionInfo 是栏目动作给界面的那一面（见 Section.Actions）。
@@ -631,6 +670,7 @@ type source struct {
 	name  string
 	title func() string // Register 拒绝 nil，所以这里一定非空
 	group func() string // 可空：没写就是不分组
+	def   bool          // 见 Section.Default：界面的落点
 	acts  []Action
 	read  Contributor
 }
@@ -658,7 +698,8 @@ func (r *Registry) Register(name string, section Section, read Contributor) (mod
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := source{id: r.next, name: name, title: section.Title, group: section.Group, acts: section.Actions, read: read}
+	s := source{id: r.next, name: name, title: section.Title, group: section.Group,
+		def: section.Default, acts: section.Actions, read: read}
 	r.next++
 	r.sources = append(r.sources, s)
 	return func() error {
@@ -685,6 +726,9 @@ func (r *Registry) Register(name string, section Section, read Contributor) (mod
 // 它**不调用任何产出函数**（只取登记的栏目名），所以随时问都很便宜，界面可以
 // 在每次快照里捎上它。栏名在这里求值——快照这一刻的语言，而不是登记那一刻的
 // （见 Section 的注释）。
+//
+// 排序跨重启稳定（按 Source，机器标记，不随语言变）：界面顺序变来变去会让用户
+// 每次都要重找一遍。**落点不靠这个顺序表达**——见 Section.Default。
 func (r *Registry) Sections() []SectionInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -713,10 +757,41 @@ func (r *Registry) Sections() []SectionInfo {
 			}
 			acts = append(acts, ActionInfo{ID: a.ID, Label: label})
 		}
-		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group, Actions: acts})
+		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group, Actions: acts, Default: s.def})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Source < out[j].Source })
+	// 落点**最多一个**。多个人声明时按 Source 取最小的那个：不定这条的话，被选中
+	// 的那个就取决于登记顺序（也就是各模块 Start 的先后），而那种「装法一变、首屏
+	// 就换地方」的错没有任何东西会红。取最小与上面的排序用的是同一把尺子，所以
+	// 「谁排在最前面」与「谁是落点」看起来是一致的。
+	if n := countDefaults(out); n > 1 {
+		for i := range out {
+			if out[i].Default && !isFirstDefault(out, i) {
+				out[i].Default = false
+			}
+		}
+	}
 	return out
+}
+
+func countDefaults(s []SectionInfo) int {
+	n := 0
+	for _, x := range s {
+		if x.Default {
+			n++
+		}
+	}
+	return n
+}
+
+// isFirstDefault 说 out[i] 是不是最小的那个 Default（排序之后 = 最靠前的）。
+func isFirstDefault(out []SectionInfo, i int) bool {
+	for j := 0; j < i; j++ {
+		if out[j].Default {
+			return false
+		}
+	}
+	return true
 }
 
 // RunAction 跑一个栏目动作（见 Section.Actions）。
