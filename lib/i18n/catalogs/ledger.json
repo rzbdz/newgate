@@ -503,6 +503,12 @@
         "n"
       ]
     },
+    "--max-tokens wants a positive number, got {value}": {
+      "where": "modules/ask/command.go:61",
+      "args": [
+        "value"
+      ]
+    },
     "--set-profile <name> [--agent <agent>]": {
       "where": "modules/config/commands.go:725"
     },
@@ -1630,6 +1636,12 @@
     "argv0 dispatch: what runs when we are called by a client's name": {
       "where": "modules/wrapper/module.go:50"
     },
+    "ask [--tier <tier>] [--profile <name>] <prompt…>": {
+      "where": "modules/ask/command.go:32"
+    },
+    "ask one prompt through the running proxy, and print just the answer": {
+      "where": "modules/ask/module.go:43"
+    },
     "assembly complete: {count} components, took {took}": {
       "where": "component/component.go:297",
       "args": [
@@ -1763,6 +1775,12 @@
     "cannot be toggled at runtime: this module reports no switch points": {
       "where": "modules/pluginmanager/command.go:170"
     },
+    "cannot build the request: {err}": {
+      "where": "modules/ask/command.go:92",
+      "args": [
+        "err"
+      ]
+    },
     "cannot clear the per-client profiles: {err}": {
       "where": "modules/config/view.go:82"
     },
@@ -1810,6 +1828,13 @@
         "port"
       ]
     },
+    "cannot reach the proxy at {url}: {err}": {
+      "where": "modules/ask/command.go:112",
+      "args": [
+        "err",
+        "url"
+      ]
+    },
     "cannot read config — run `newgate doctor`": {
       "where": "modules/gateway/forward/forward.go:370"
     },
@@ -1839,6 +1864,12 @@
       "args": [
         "err",
         "name"
+      ]
+    },
+    "cannot read the prompt from stdin: {err}": {
+      "where": "modules/ask/command.go:72",
+      "args": [
+        "err"
       ]
     },
     "cannot read the role keys of module {module}: {err}": {
@@ -2656,6 +2687,9 @@
     "not taken over": {
       "where": "modules/runtime/commands.go:177"
     },
+    "nothing to ask — write a prompt, or pipe one in": {
+      "where": "modules/ask/command.go:77"
+    },
     "nothing yet — one version is kept before every write": {
       "where": "modules/config/commands.go:782"
     },
@@ -3202,6 +3236,9 @@
         "cmd"
       ]
     },
+    "send one prompt through the proxy and print the answer": {
+      "where": "modules/ask/command.go:33"
+    },
     "send real requests to candidates and report their health": {
       "where": "modules/gateway/command_probe.go:50"
     },
@@ -3392,6 +3429,12 @@
     "takes effect immediately; running sessions are unaffected": {
       "where": "modules/config/commands.go:71"
     },
+    "the answer broke off: {err}": {
+      "where": "modules/ask/command.go:127",
+      "args": [
+        "err"
+      ]
+    },
     "the bind address must be an IP (or empty for loopback only), got {value}": {
       "where": "modules/config/view.go:742",
       "args": [
@@ -3495,8 +3538,18 @@
         "pid"
       ]
     },
+    "the proxy answered HTTP {status}: {body}": {
+      "where": "modules/ask/command.go:121",
+      "args": [
+        "body",
+        "status"
+      ]
+    },
     "the proxy is not running (newgate start) — the breaker table lives in the daemon's memory": {
       "where": "modules/breaker/command.go:66"
+    },
+    "the proxy is not running — start it with newgate start": {
+      "where": "modules/ask/command.go:84"
     },
     "the proxy refused the stop request (HTTP {code})": {
       "where": "modules/runtime/daemon/daemon.go:526",

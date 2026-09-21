@@ -10,6 +10,7 @@ package app
 
 import (
 	modules "github.com/rzbdz/newgate/component"
+	mod_ask "github.com/rzbdz/newgate/modules/ask"
 	mod_breaker "github.com/rzbdz/newgate/modules/breaker"
 	mod_cli "github.com/rzbdz/newgate/modules/cli"
 	mod_config "github.com/rzbdz/newgate/modules/config"
@@ -32,6 +33,7 @@ import (
 // 内核这一侧今天恰好个个同名，那是巧合、不是规矩。
 func coreModules() []Entry {
 	return []Entry{
+		{Dir: "ask", Component: mod_ask.New()},
 		{Dir: "breaker", Component: mod_breaker.New()},
 		{Dir: "cli", Component: mod_cli.New()},
 		{Dir: "config", Component: mod_config.New()},
@@ -51,7 +53,7 @@ func coreModules() []Entry {
 // generatedComponents 是内核自己那张图要装的组件。
 // 顺序不是依赖声明——真实启动顺序由 capability 依赖图在构图期计算。
 func generatedComponents() []modules.Component {
-	out := make([]modules.Component, 0, 13)
+	out := make([]modules.Component, 0, 14)
 	for _, e := range coreModules() {
 		out = append(out, e.Component)
 	}

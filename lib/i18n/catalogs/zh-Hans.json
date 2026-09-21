@@ -344,6 +344,10 @@
       "text": "--- {file} ({n} 字节) ---",
       "reviewed": true
     },
+    "--max-tokens wants a positive number, got {value}": {
+      "text": "--max-tokens 要一个正整数，收到的是 {value}",
+      "reviewed": true
+    },
     "--set-profile <name> [--agent <agent>]": {
       "text": "--set-profile <名> [--agent <agent>]",
       "reviewed": true
@@ -1480,6 +1484,14 @@
       "text": "argv0 分发：以客户端的名字被叫起来时跑的是什么",
       "reviewed": true
     },
+    "ask [--tier <tier>] [--profile <name>] <prompt…>": {
+      "text": "ask [--tier <档位>] [--profile <名>] <问题…>",
+      "reviewed": true
+    },
+    "ask one prompt through the running proxy, and print just the answer": {
+      "text": "走正在跑的那个代理问一句，只把回答的正文打出来",
+      "reviewed": true
+    },
     "assembly complete: {count} components, took {took}": {
       "text": "装配完成：{count} 个组件，用时 {took}",
       "reviewed": true
@@ -1592,6 +1604,10 @@
       "text": "无法 runtime 开关：这个模块没有上报任何开关点",
       "reviewed": true
     },
+    "cannot build the request: {err}": {
+      "text": "拼不出请求：{err}",
+      "reviewed": true
+    },
     "cannot clear the per-client profiles: {err}": {
       "text": "清不掉各客户端的链头：{err}",
       "reviewed": true
@@ -1628,6 +1644,10 @@
       "text": "连不上代理 127.0.0.1:{port}（newgate doctor）",
       "reviewed": true
     },
+    "cannot reach the proxy at {url}: {err}": {
+      "text": "连不上代理 {url}：{err}",
+      "reviewed": true
+    },
     "cannot read config — run `newgate doctor`": {
       "text": "配置读不出 ← 跑 `newgate doctor`",
       "reviewed": true
@@ -1650,6 +1670,10 @@
     },
     "cannot read the default profile {name}: {err}": {
       "text": "默认 profile {name} 读不出: {err}",
+      "reviewed": true
+    },
+    "cannot read the prompt from stdin: {err}": {
+      "text": "从 stdin 读不到问题：{err}",
       "reviewed": true
     },
     "cannot read the role keys of module {module}: {err}": {
@@ -2384,6 +2408,10 @@
       "text": "未接管",
       "reviewed": true
     },
+    "nothing to ask — write a prompt, or pipe one in": {
+      "text": "没有要问的东西——写一句问题，或者用管道喂进来",
+      "reviewed": true
+    },
     "nothing yet — one version is kept before every write": {
       "text": "还没有 —— 每次写盘之前都会先留一版",
       "reviewed": true
@@ -2812,6 +2840,10 @@
       "text": "正在跑: {cmd}",
       "reviewed": true
     },
+    "send one prompt through the proxy and print the answer": {
+      "text": "走代理发一句问题，把回答打出来",
+      "reviewed": true
+    },
     "send real requests to candidates and report their health": {
       "text": "给候选打真实请求，出健康报告",
       "reviewed": true
@@ -2972,6 +3004,10 @@
       "text": "即刻生效；已在运行的会话不受影响",
       "reviewed": true
     },
+    "the answer broke off: {err}": {
+      "text": "回答中途断了：{err}",
+      "reviewed": true
+    },
     "the bind address must be an IP (or empty for loopback only), got {value}": {
       "text": "监听地址得是个 IP（或者留空表示只听回环），收到的是 {value}",
       "reviewed": true
@@ -3076,8 +3112,16 @@
       "text": "代理 (pid {pid}) 由其他用户运行且没有控制令牌——请让启动它的用户执行一次 `newgate stop`（之后任意组员都能停）",
       "reviewed": true
     },
+    "the proxy answered HTTP {status}: {body}": {
+      "text": "代理回了 HTTP {status}：{body}",
+      "reviewed": true
+    },
     "the proxy is not running (newgate start) — the breaker table lives in the daemon's memory": {
       "text": "代理没在运行（newgate start）——熔断表在 daemon 内存里",
+      "reviewed": true
+    },
+    "the proxy is not running — start it with newgate start": {
+      "text": "代理没在跑——先 newgate start",
       "reviewed": true
     },
     "the proxy refused the stop request (HTTP {code})": {
