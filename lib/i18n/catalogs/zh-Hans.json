@@ -1520,8 +1520,12 @@
       "text": "装配：第 {index} 个 loader 报错：{err}",
       "reviewed": true
     },
-    "assembly: loader {index} handed over {count} components": {
-      "text": "装配：第 {index} 个 loader 交出 {count} 个组件",
+    "assembly: precomputed plan used — {count} components, no resolution": {
+      "text": "装配：用的是构建期算好的图纸——{count} 个组件，没有运行期解析",
+      "reviewed": true
+    },
+    "assembly: {count} components, no precomputed plan — resolving at run time": {
+      "text": "装配：{count} 个组件，没有构建期图纸——运行期解析一遍",
       "reviewed": true
     },
     "auth": {
@@ -3266,10 +3270,6 @@
     },
     "unbound": {
       "text": "未绑定",
-      "reviewed": true
-    },
-    "unchanged from the record already in this log (run with NEWGATE_TRACE=1 to watch an assembly live)": {
-      "text": "与这份日志里已有的记录相同（想实时看着一次装配跑，用 NEWGATE_TRACE=1）",
       "reviewed": true
     },
     "unknown": {

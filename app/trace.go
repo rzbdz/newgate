@@ -75,9 +75,13 @@ func TraceTo(writers ...io.Writer) func() {
 // 38087 行，其中真正的代理流量 **23 行**：这本日志是这个产品最主要的排查面
 // （`newgate logs`、alllogs 诊断包），它 99.9% 是装配回音。
 //
-// 所以改成**只在装配变了的时候写整段**，其余每一次留一行：
+// 所以改成**只在装配变了的时候写整段**，没变就**一个字都不写**：
 //
-//	2026/09/20 18:48:07 assembly: fingerprint 3f9a1c2b4d5e — （一句话）
+//	2026/09/20 18:48:07 assembly: fingerprint 3f9a1c2b4d5e — 上面这段是新的
+//
+// （2026-09-21 又收了一次：原先「没变」时会留一行说明。那一行仍然是回音——
+// 敲一条 `newgate status` 就往守护进程日志里加一行「什么都没变」，而这份日志
+// 上每一行都该是一次跃迁。理由写在 flush 里。）
 //
 // 判据是那段文字**去掉时间戳与耗时之后**的内容哈希。它买到的东西正好是当初要它
 // 的理由：升级那一发的整段记录照样在（新旧二进制装的东西不同 → 指纹不同 → 整段
@@ -252,17 +256,26 @@ func (r *assemblyRecord) flush() {
 	// 拿全长去比它永远不相等，于是整段每次都写——这个文件要修的东西原样还在，
 	// 而日志看起来完全正常（2026-09-20 被 TestFullRecordIsWrittenOnlyWhenItChanges 抓住）。
 	fp := assemblyFingerprint(r.plain)[:12]
-	marker := fmt.Sprintf("assembly: fingerprint %s", fp)
-	if fp != r.prev {
-		for _, l := range r.lines {
-			fmt.Fprintln(r.out, l)
-		}
-		fmt.Fprintf(r.out, "%s%s — %s\n", stamp(), marker, i18n.T(
-			"the full assembly record above is new; it is written again only when the graph changes", nil))
+	if fp == r.prev {
+		// **一个字都不写**（2026-09-21 用户：日志里不要再出现这东西）。
+		//
+		// 原来这里留一行「与已有的记录相同」。它想解决的是日志被装配回音淹掉，
+		// 但留下的那一行**仍然是回音**：`status`、`doctor`、`tier` … 每敲一次就
+		// 往守护进程的日志里塞一行「什么都没变」。而这份日志是这个产品最主要的
+		// 排查面（`newgate logs`、alllogs 诊断包），它上面的每一行都该是**一次
+		// 跃迁**——这条政策本文件开头就写着（「只在状态跃迁时报」），那一行恰恰
+		// 不是跃迁，是自相矛盾。
+		//
+		// 什么都不写不会让人查不到东西：装配**变过**的那一段在日志里，它带着
+		// 指纹；要看此刻这一发现场有 `NEWGATE_TRACE=1`。而 `lastFingerprint`
+		// 靠的就是那条标记行——它还在，所以下一发照样认得出「没变」。
 		return
 	}
-	fmt.Fprintf(r.out, "%s%s — %s\n", stamp(), marker, i18n.T(
-		"unchanged from the record already in this log (run with NEWGATE_TRACE=1 to watch an assembly live)", nil))
+	for _, l := range r.lines {
+		fmt.Fprintln(r.out, l)
+	}
+	fmt.Fprintf(r.out, "%sassembly: fingerprint %s — %s\n", stamp(), fp, i18n.T(
+		"the full assembly record above is new; it is written again only when the graph changes", nil))
 }
 
 // stamp 是 log.LstdFlags 的格式，与 TraceTo 那条路径写出来的一模一样。

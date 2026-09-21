@@ -115,14 +115,21 @@ func TestFullRecordIsWrittenOnlyWhenItChanges(t *testing.T) {
 		t.Errorf("整段末尾应当留下指纹标记，实际:\n%s", out)
 	}
 
-	// 第二发：与第一发同内容（耗时不同而已）→ 只写一行。
+	// 第二发：与第一发同内容（耗时不同而已）→ **一个字都不写**。
+	//
+	// 原来这里留一行「与已有的记录相同」。那不是跃迁，是回音：敲一条
+	// `newgate status` 就往守护进程日志里加一行「什么都没变」（2026-09-21
+	// 用户的原话是「我不想要看到日志里出现这东西」）。
 	again, _ := record(t, fp[:12], assemblyA2...)
-	if again != "" && strings.Count(strings.TrimRight(again, "\n"), "\n") != 0 {
-		t.Errorf("同一份装配第二次应当只留一行，实际写了 %d 行:\n%s",
-			strings.Count(again, "\n"), again)
+	if strings.TrimSpace(again) != "" {
+		t.Errorf("同一份装配第二次不应该写任何东西，实际:\n%s", again)
 	}
-	if !strings.Contains(again, "assembly: fingerprint "+fp[:12]) {
-		t.Errorf("那一行里必须带指纹（否则下一发找不到它，又要重写整段）:\n%s", again)
+	// 而且「没写」不能把下一发坑了：指纹标记还在日志里（第一发留下的那一条），
+	// 所以第三发照样认得出「没变」。这一条是上面那条的前提——少了它，不写就
+	// 变成了「每发都重写整段」，正是这个机制要修的东西。
+	// （下面那一发验的就是这件事：prev 仍然是 fp，装配没变 → 还是不写。）
+	if third, _ := record(t, fp[:12], assemblyA2...); strings.TrimSpace(third) != "" {
+		t.Errorf("「没变就不写」之后，下一发应当同样不写（标记行还在日志里），实际:\n%s", third)
 	}
 
 	// 第三发：装配变了 → 又整段写。
@@ -188,7 +195,7 @@ func TestFingerprintSurvivesAWindowCutMidLine(t *testing.T) {
 // 打开——于是「生产路径用什么模式打开日志」这件事没有任何断言盖着。2026-09-20
 // 就是这么漏的：TraceToLogFile 用 O_WRONLY 开文件，回看必然 EBADF，每一发都被
 // 当成第一次，整段照写（实测每次 105 行，与改动之前一模一样），而上面四条全绿。
-func TestARepeatedInvocationWritesOneLine(t *testing.T) {
+func TestARepeatedInvocationWritesNothing(t *testing.T) {
 	env := testkit.Sandbox(t)
 
 	// 一次「调用」= 这个进程真的装配一遍整图并收尾，与 cmd/newgate 那条路同形。
@@ -216,9 +223,16 @@ func TestARepeatedInvocationWritesOneLine(t *testing.T) {
 	if first < 20 {
 		t.Fatalf("第一发应当写整段装配记录，实际只有 %d 行", first)
 	}
+	// 第二发：**一行都不该多**。
+	//
+	// 原来是「只留 1 行」（一行「与已有的记录相同」）。那一行仍然是回音：敲一条
+	// `newgate status` 就往守护进程的日志里加一行「什么都没变」，而这份日志上
+	// 每一行都该是**一次跃迁**。用户 2026-09-21 的原话是「我不想要看到日志里出现
+	// 这东西」。（这里是 0 行而不是 1 行——第一版改完这个测试还在断言 1 行，
+	// 于是它红了，红的正是它该红的地方。）
 	invoke()
-	if grew := lines() - first; grew != 1 {
-		t.Errorf("同一份装配的第二次调用应当只留 1 行，实际 %d 行——"+
+	if grew := lines() - first; grew != 0 {
+		t.Errorf("同一份装配的第二次调用不该写任何东西，实际多了 %d 行——"+
 			"回看没找到上一次的记录（日志文件的打开模式？指纹的写法？）", grew)
 	}
 }
