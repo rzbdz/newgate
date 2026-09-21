@@ -1,6 +1,7 @@
 package component
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/rzbdz/newgate/lib/i18n"
@@ -30,12 +31,46 @@ type Plan struct {
 	values     map[string][]any
 }
 
+// Precomputed 是**自带图纸**的 Loader：它交出来的组件出自一个**编译期就定死的
+// 模块集合**（没有 runtime 插拔），启动顺序在构建期已经算好。
+//
+// # 它为什么存在（2026-09-21）
+//
+// 用户的原话：「逻辑上，不应该跑个 cli 就触发装配的啊……这个依赖关系是编译期的
+// 包，你 runtime 去 resolve 他没用啊，build time 直接生成依赖关系啊。因为他本身
+// 就是静态固定的，他没有 runtime 插拔机制啊。」
+//
+// 他说得对。装的模块在**构建期**就定了（规格书选好、名字写进生成的清单），
+// 顺序只是那个集合的函数——所以它是编译期事实。而在这之前，每敲一条 `newgate
+// status`、每次起 web 后端，都要把那件事从头推一遍：建端口表、建依赖边、拓扑
+// 排序、查环，再把 24 个组件的声明和 55 条边写进日志。
+//
+// 装上这个口之后，那条路上只剩「按图纸摆好、从各自的 Provides 收齐端口值」——
+// 不建边、不排序、不查环、不写那些日志行。
+//
+// # 那校验去哪了
+//
+// 去**构建期**了，而且这才是它该在的地方：tools/distgen 在生成这份顺序时会跑一遍
+// 真的 Resolve，装不起来的规格书从此**构建就失败**，而不是等谁敲第一条命令。
+// 「重复的组件名」「Need 的端口没人提供」「图里有环」这三类错，构建期报出来比
+// 运行期报出来好得多——前者离「谁改坏了哪一行」只隔一次 build。
+//
+// 顺序与集合对不上时（生成的清单过期了），这里仍然**报错**：那是唯一必须在运行期
+// 拦的一条，因为它的症状（某个模块没启动）离原因太远。见 planFromOrder。
+type Precomputed interface {
+	Loader
+	// PrecomputedOrder 返回组件名，按启动顺序（被依赖的在前）。
+	// nil = 这份 Loader 没有图纸，运行期照常解析。
+	PrecomputedOrder() []string
+}
+
 // Resolve 收集组件、校验端口、拓扑排序，**不启动任何东西**。
 //
 // New() 就是「Resolve 之后逐个 Start」，两张脸对着同一份实现（见 NewContext）：
 // 校验与排序只有一份，不会漂移。
 func Resolve(loaders ...Loader) (*Plan, error) {
 	var components []Component
+	var precomputed []string
 	for i, loader := range loaders {
 		loaded, err := loader.Load()
 		if err != nil {
@@ -43,16 +78,64 @@ func Resolve(loaders ...Loader) (*Plan, error) {
 				i18n.A{"index": i + 1, "err": err}))
 			return nil, err
 		}
-		tracef("%s", i18n.T("assembly: loader {index} handed over {count} components",
-			i18n.A{"index": i + 1, "count": len(loaded)}))
 		components = append(components, loaded...)
+		if p, ok := loader.(Precomputed); ok && len(precomputed) == 0 {
+			precomputed = p.PrecomputedOrder()
+		}
 	}
+	if len(precomputed) > 0 {
+		// **构建期算好的图纸**：按它摆好，收齐端口值，完。见 Precomputed 的说明。
+		return planFromOrder(components, precomputed)
+	}
+	tracef("%s", i18n.T("assembly: {count} components, no precomputed plan — resolving at run time",
+		i18n.A{"count": len(components)}))
 	ordered, values, err := resolve(components)
 	if err != nil {
 		tracef("%s", i18n.T("assembly: graph build failed: {err}", i18n.A{"err": err}))
 		return nil, err
 	}
 	return &Plan{components: ordered, values: values}, nil
+}
+
+// planFromOrder 用**构建期算好的顺序**直接出图纸：不建边、不排序、不查环。
+//
+// 它只做三件事：按名字摆好、收齐每个端口的提供值、核对顺序与集合对得上。
+//
+// **核对是这里唯一还留着的校验**，理由：生成的清单会过期（改了规格书、加了模块
+// 却没重新生成），而过期的症状是「某个模块没启动」或者「启动顺序莫名其妙」——
+// 那离「清单过期」太远，运行期必须当场说清楚。其余三类错（重名、缺端口、环）
+// 都在构建期由 distgen 那一趟真的 Resolve 拦住了。
+func planFromOrder(components []Component, order []string) (*Plan, error) {
+	if len(order) != len(components) {
+		return nil, fmt.Errorf("precomputed plan lists %d components but %d were assembled "+
+			"— the generated manifest is out of date (rerun the generator)",
+			len(order), len(components))
+	}
+	byName := make(map[string]Component, len(components))
+	for _, c := range components {
+		byName[c.Name] = c
+	}
+	out := make([]Component, 0, len(components))
+	values := map[string][]any{}
+	seen := make(map[string]bool, len(components))
+	for _, name := range order {
+		c, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("precomputed plan names %q, which was not assembled "+
+				"— the generated manifest is out of date (rerun the generator)", name)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("precomputed plan names %q twice", name)
+		}
+		seen[name] = true
+		for _, prov := range c.Provides {
+			values[prov.spec.name] = append(values[prov.spec.name], prov.value)
+		}
+		out = append(out, c)
+	}
+	tracef("%s", i18n.T("assembly: precomputed plan used — {count} components, no resolution",
+		i18n.A{"count": len(out)}))
+	return &Plan{components: out, values: values}, nil
 }
 
 // MustResolve 是 Resolve 的 fail-fast 版本（组合根/测试里图必须是好的）。
