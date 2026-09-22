@@ -42,10 +42,58 @@ type RoleProvider = roleprov.RoleProvider
 // RoleWatchProvider 是 RoleProvider 的可选能力，用于声明哪些文件变化后需要重载。
 type RoleWatchProvider = roleprov.RoleWatchProvider
 
-// Config 是配置模块对外的最小端口。消费者只能注册扩展，
-// 不能绕过 store/resolve 边界直接修改配置内部状态。
+// Chains 是一次「链现状」查询的回答：某一份 profile 此刻每个键的链。
+//
+// 为什么一次给**全部键**而不是一个键一个键地问：读的人（`/ui` 的聚合主页、
+// `newgate tier`）看的是**一屏**——「这一份档位文件此刻把每一档解析成什么」。
+// 按键分开问的话，取十次快照会读到十个不同时刻的盘（中间被人改了一笔，屏幕上
+// 就是一份前后不一致的配置），而这里一次快照算完，那一屏是**同一个时刻**的。
+type Chains struct {
+	// Profile 是这次回答针对哪一份 profile（机器取值，不翻译）。
+	Profile string
+	// Default 为 true 表示它就是此刻生效的那一份（链头）。
+	Default bool
+	// Keys 按传入次序一一对应；顺序由调用方给（那是产品取舍——`domain.Roles`
+	// 是能力从高到低，界面照同一条排）。
+	Keys []Chain
+}
+
+// Chain 某一档在这一份 profile 下的解析结果。
+type Chain struct {
+	// Key 是档位名（heavy/normal/…），也可以是模块贡献的动态角色键。
+	Key string
+	// Steps 整条候选链，链头在内，按实际尝试顺序排。**不截断**：maxAttempts 是
+	// 单次请求的执行上限，不是 membership（见 chainsFor 里 MaxSteps: 0 那段）。
+	Steps []Step
+	// Skips 没进链的候选与原因。被跳过的候选常常一步都不在链上，所以它必须
+	// 单独交出来，而不是只能从 Steps 里推。
+	Skips []Skip
+}
+
+// Config 是配置模块对外的最小端口。
+//
+// 两条路各有各的用途，别混：
+//   - RegisterRoleProvider 是**写**——模块把自己那些动态档位键登记进来；
+//   - Chains 是**读**——把 resolve 的结论端出来（这一刻每一档解析成什么、谁被
+//     跳过、为什么）。
+//
+// 消费者不能绕过 store/resolve 边界直接修改配置内部状态；读也一样：调用方要
+// 那份结论就到这里来拿，别自己 import store/resolve 去拼（内核一重构，那种
+// 依赖会断在另一个仓库里，而且断得悄无声息）。
 type Config interface {
 	RegisterRoleProvider(RoleProvider) (modules.Release, error)
+
+	// Chains 报某一档位文件此刻解析出来的全部链。
+	//
+	// keys 是**要问的档位名**（空 = `domain.Roles` 那一套，按能力从高到低）；
+	// profile 空 = 此刻全局默认的那一份。profile 不存在时返回错误——那不是
+	// 「一份空配置」，是调用方问错了名字，静默给个空链会让人以为这份档位是空的。
+	//
+	// 它读**盘上此刻的样子**（不读 daemon 的内存态），所以 CLI 与浏览器拿到的是
+	// 同一份事实；健康表（熔断摘牌、probe 延迟）**不在这里**——那是另一本账，
+	// 且会随时间变，见下面 Chain。Steps 因此是「按配置解析出来的链」，不是
+	// 「此刻真的会走这条链」。
+	Chains(profile string, keys ...string) (*Chains, error)
 }
 
 // Capability 是配置端口的唯一身份；配置实现只能有一个，避免多份状态分叉。

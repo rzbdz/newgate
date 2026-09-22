@@ -1201,6 +1201,7 @@
         "err"
       ]
     },
+    "cannot read the configuration: {err}": {},
     "cannot read the default profile {name}: {err}": {
       "args": [
         "err",
@@ -1701,6 +1702,11 @@
       ]
     },
     "no such key at the top level": {},
+    "no such profile: {name}": {
+      "args": [
+        "name"
+      ]
+    },
     "no such profile: {name} (available: {list})": {
       "args": [
         "list",

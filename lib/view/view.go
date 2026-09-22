@@ -80,6 +80,15 @@ const (
 	KindRecords = "records"
 	// KindLog 日志流。
 	KindLog = "log"
+	// KindChains 一屏摊开的候选链：一份 profile 一张卡，卡里一档一行，行里是这条
+	// 链此刻的样子。
+	//
+	// 它和 KindTable 的分工：表是「一行一个事实」，读的人只看；这里每一行**带着
+	// 去处**（「这一档现在走这条链，还能换成谁」），而那条去处是本行的数据长出来
+	// 的（见 ChainRow.Actions）。与 KindRecords 的分工更明显：records 每条是一张
+	// **小表单**（编辑某个字段的值），而这里要的是**现场状态**——「这一档此刻解析
+	// 到什么」是 resolve 算出来的结论，不是文件里的某个字面量。
+	KindChains = "chains"
 )
 
 // Table 是 KindTable 的数据形状：几列 + 几行。
@@ -290,6 +299,89 @@ const (
 	ToggleSwitch = "switch"
 	ToggleText   = "text"
 )
+
+// Chains 是 KindChains 的数据形状：一叠 profile 卡，每张卡里按档位列出此刻的链。
+//
+// # 为什么一张卡是「一份 profile」
+//
+// 链不是全局的一条：同一份配置里可以有 `ark`、`kimi` 好几份 profile，各自给
+// 每一档配候选，谁是链头由 state.json 说了算（见 docs/04-configuration.md）。
+// 所以「一屏看到我这些链」的单位只能是 profile——合成一张大表的话，第一列就得
+// 是 profile 名，而那个重复十几遍的字符串是这个页面最不该让人读的东西。
+//
+// # 为什么行是「一档」
+//
+// 用户问的问题是「这一发会走谁」，而那一问是按档位问的（`newgate tier normal`）。
+// 每一行的 Head 就是那一问的答案，Steps 是答案的展开，Note 解释被跳过的那几位。
+type Chains struct {
+	Cards []ChainCard `json:"cards"`
+}
+
+// ChainCard 一份 profile 的链。
+type ChainCard struct {
+	// Profile 是这份 profile 的名字（机器取值，不翻译）。
+	Profile string `json:"profile"`
+	// File 是它写的是哪一份文件，相对配置根。与 Records.File 同义：界面拿它把
+	// 「控件」与「原文」两半配成一对并排（见 nav.ts 的 fileOf）。
+	File string `json:"file,omitempty"`
+	// Default 为 true 表示这份就是此刻生效的那一份（链头）。界面把它画成一个
+	// 标记，与 Concept.Note 那条「当前配置」是同一个意思、同一份语气。
+	Default bool `json:"default,omitempty"`
+	// Roles 按档位列。**顺序由贡献者给**（谁在前谁在后是产品取舍：`newgate
+	// status` 与 doctor 都按能力从高到低排，这里照同一条）。
+	Roles []ChainRow `json:"roles"`
+}
+
+// ChainRow 一份 profile 里**某一档**的链。
+type ChainRow struct {
+	// Tier 是档位名（机器取值，不翻译）。
+	Tier string `json:"tier"`
+	// Label 是给人看的名字（可以翻译）。空 = 直接显示 Tier。
+	Label string `json:"label,omitempty"`
+	// Head 是这一档此刻的第一站（`ark/deepseek-v3`），空 = 这一档没有可用候选。
+	//
+	// 它单独有一格而不是「Steps[0]」：用户唯一会问的问题是「为什么不是我想的
+	// 那个」，而那个答案的眼睛落点就是链头。让界面自己去取第一个，等于把「空链
+	// 怎么办」这条判断抄进了前端。
+	Head string `json:"head,omitempty"`
+	// Steps 是**整条**链，链头在内，按实际尝试顺序排。
+	Steps []ChainStep `json:"steps,omitempty"`
+	// Note 是链尾那种「还有谁被跳过、为什么」的一句话。空 = 一个都没跳过。
+	//
+	// 它与 Step.Note 的分工：那里是**某一步**为什么没能排更前，这里是**整条链**
+	// 的总结（今天就是 `newgate tier` 链尾那行「跳过 N 个候选」）。两者都要，因为
+	// 被跳过的候选常常一步都不在链上——只在 Step 上写说明的话，它们就无处可去。
+	Note string `json:"note,omitempty"`
+	// Tone 是这一行的语气（取 ToneOK/ToneWarn/ToneBad，空 = 不着色）。
+	//
+	// 今天只表达「有没有可用的链头」：空链是 bad（这一档此刻没得走），有链是
+	// 空的（正常态不着色）。**不表达健康度**——那需要探活，是另一本账。
+	Tone string `json:"tone,omitempty"`
+	// Actions 是这一行上的按钮（「把这一档换成 X」这类），形状见 Action。
+	//
+	// 与 Row.Actions 是同一条规矩的第四处：动作是**数据长出来的**（这一档的链上
+	// 有谁，取决于配置此刻的样子），所以「这一行能做什么」在构造这一行的时候才
+	// 定得下来。界面只把拿到的按钮画出来、把点击转回去。
+	Actions []Action `json:"actions,omitempty"`
+}
+
+// ChainStep 链上的一站。
+type ChainStep struct {
+	// Provider / Model 是这一站的绑定（机器取值，不翻译）。
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	// Profile 是这一站来自哪一份 profile。
+	//
+	// 为什么要它：一条链会**跨 profile**（本 profile 的候选之后接着别人的，见
+	// resolve.BuildChain 的「profile 为主序」）。不写出来源的话，用户会以为链上
+	// 每一站都写在他正在看的这份文件里，然后去找一个不存在的候选。
+	Profile string `json:"profile,omitempty"`
+	// Note 是这一站的一句话（今天只有 Skip.Reason：被降级/跳过之类的说明）。
+	Note string `json:"note,omitempty"`
+	// Tone 是这一站的语气（取 ToneOK/ToneWarn/ToneBad，空 = 不着色）。与 Cell.Tone
+	// 同一份词汇表，理由也同一条：颜色是渲染层的事，内核只给语义。
+	Tone string `json:"tone,omitempty"`
+}
 
 // Applier 把这个概念的一次修改落盘。
 //
