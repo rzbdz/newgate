@@ -2573,9 +2573,20 @@
         "row"
       ]
     },
-    "{concept} is not a table, so it has no rows to act on": {
+    "{concept} is a chain card but its data is not a Chains": {
       "args": [
         "concept"
+      ]
+    },
+    "{concept} is a table but its data is not a Table": {
+      "args": [
+        "concept"
+      ]
+    },
+    "{concept} is a {kind}, whose rows carry no actions (row actions live on tables and chain cards)": {
+      "args": [
+        "concept",
+        "kind"
       ]
     },
     "{concept}.{action} has nothing to run": {
@@ -2635,6 +2646,11 @@
     "{file} ({err})": {
       "args": [
         "err",
+        "file"
+      ]
+    },
+    "{file} changed on disk after this page read it — reload and try again": {
+      "args": [
         "file"
       ]
     },
@@ -2903,6 +2919,13 @@
       "args": [
         "quirks",
         "target"
+      ]
+    },
+    "{tier} in {profile} has no candidate called {target} any more — reload the page and try again": {
+      "args": [
+        "profile",
+        "target",
+        "tier"
       ]
     },
     "{tier} was set in the config (the default is {def})": {

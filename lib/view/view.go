@@ -334,6 +334,16 @@ type ChainCard struct {
 
 // ChainRow 一份 profile 里**某一档**的链。
 type ChainRow struct {
+	// ID 是**这一行**的机器标记：动作回传、以及前端做 key 都用它。
+	// 空 = 这一行没有动作（那就没人需要它稳定）。
+	//
+	// 与 Row.ID 是同一条规矩的第五处，理由更硬一点：表里一行是一条 binding，
+	// 而这里一行是**一份 profile 的一档**——`Tier` 在整张卡里唯一，在**整个概念
+	// 里不唯一**（十份 profile 就有十个 `heavy`）。所以「把这一档换成 X」这件事
+	// 光有档位名定位不到，行自己得带一个能对号的东西。
+	//
+	// 它是机器标记（`demo/heavy` 这种拼法），不翻译，也不该被界面拆开解释。
+	ID string `json:"id,omitempty"`
 	// Tier 是档位名（机器取值，不翻译）。
 	Tier string `json:"tier"`
 	// Label 是给人看的名字（可以翻译）。空 = 直接显示 Tier。
@@ -969,13 +979,20 @@ func (r *Registry) RunConceptAction(conceptID, actionID string) (string, error) 
 		i18n.A{"concept": conceptID})
 }
 
-// RunRowAction 跑表格里**某一行**上的一个动作（见 Row.Actions）。
+// RunRowAction 跑**一行**上的一个动作（见 Row.Actions 与 ChainRow.Actions）。
 //
-// 与 RunConceptAction 同一套：先问一遍贡献者把那张卡重新造出来（表里的行是**数据
-// 长出来的**，账本手里没有它们），再在那一行里找那个动作。
+// 与 RunConceptAction 同一套：先问一遍贡献者把那张卡重新造出来（行是**数据长出来
+// 的**，账本手里没有它们），再在那一行里找那个动作。
 //
-// 两步定位——概念 ID 然后是行 ID——不是啰嗦：一张表里可以有好几张卡（概念），而
-// 同一张表里每一行又是一条独立的 binding。少了行这一层，「测试」就不知道该打谁。
+// 两步定位——概念 ID 然后是行 ID——不是啰嗦：行是一条独立的 binding（表里），或者
+// 一份 profile 的一档（链卡里）。少了行这一层，「换成 X」就不知道该动谁。
+//
+// # 为什么它不写死 KindTable（2026-09-22 加的 chains）
+//
+// 第一版只认 Table，于是「一行上的动作」这件事被**形状**绑住了：链卡的行与表里的
+// 行说的是同一件事（「这一行的去处」），却因为渲染方式不同而无处可挂。分派按 Kind
+// 走之后，加一种带行的 Kind 不需要再动这个函数——它只多一个 case，而且漏了的那种
+// 情况会在**调用那一刻**报出一句说得通的话（下面那个 default）。
 func (r *Registry) RunRowAction(conceptID, rowID, actionID string) (string, error) {
 	r.mu.RLock()
 	reads := make([]Contributor, 0, len(r.sources))
@@ -993,35 +1010,69 @@ func (r *Registry) RunRowAction(conceptID, rowID, actionID string) (string, erro
 			if c.ID != conceptID {
 				continue
 			}
-			tbl, ok := c.Data.(Table)
-			if !ok {
-				return "", i18n.E("{concept} is not a table, so it has no rows to act on",
-					i18n.A{"concept": conceptID})
+			acts, err := rowActions(c, rowID)
+			if err != nil {
+				return "", err
 			}
-			for _, row := range tbl.Rows {
-				if row.ID != rowID {
+			for _, a := range acts {
+				if a.ID != actionID {
 					continue
 				}
-				for _, a := range row.Actions {
-					if a.ID != actionID {
-						continue
-					}
-					if a.Run == nil {
-						return "", i18n.E("{row}.{action} has nothing to run",
-							i18n.A{"row": rowID, "action": actionID})
-					}
-					return a.Run()
+				if a.Run == nil {
+					return "", i18n.E("{row}.{action} has nothing to run",
+						i18n.A{"row": rowID, "action": actionID})
 				}
-				return "", i18n.E("row {row} of {concept} has no action called {action} — "+
-					"the page is probably stale, reload it",
-					i18n.A{"row": rowID, "concept": conceptID, "action": actionID})
+				return a.Run()
 			}
-			return "", i18n.E("{concept} has no row called {row} — the page is probably stale, reload it",
-				i18n.A{"concept": conceptID, "row": rowID})
+			return "", i18n.E("row {row} of {concept} has no action called {action} — "+
+				"the page is probably stale, reload it",
+				i18n.A{"row": rowID, "concept": conceptID, "action": actionID})
 		}
 	}
 	return "", i18n.E("no view contributed a concept called {concept} — the page is probably stale, reload it",
 		i18n.A{"concept": conceptID})
+}
+
+// rowActions 从一张卡里按行 ID 取出那一行挂着的动作。
+//
+// 按 Kind 分派，不是按「能不能转成某一种类型」试探：形状与 Kind 的对应关系是**契约**
+// （前端也是按 Kind 挑渲染器），试探写法会在两种形状恰好都能转成功时安静地选错一个。
+func rowActions(c Concept, rowID string) ([]Action, error) {
+	switch c.Kind {
+	case KindTable:
+		tbl, ok := c.Data.(Table)
+		if !ok {
+			return nil, i18n.E("{concept} is a table but its data is not a Table", i18n.A{"concept": c.ID})
+		}
+		for _, row := range tbl.Rows {
+			if row.ID == rowID {
+				return row.Actions, nil
+			}
+		}
+		return nil, i18n.E("{concept} has no row called {row} — the page is probably stale, reload it",
+			i18n.A{"concept": c.ID, "row": rowID})
+	case KindChains:
+		ch, ok := c.Data.(Chains)
+		if !ok {
+			return nil, i18n.E("{concept} is a chain card but its data is not a Chains", i18n.A{"concept": c.ID})
+		}
+		// 行 ID 在一张链卡里是**全概念唯一**的（`demo/heavy`）：行是「一份 profile 的
+		// 一档」，而档位名单独一个在十份 profile 里会出现十次（见 ChainRow.ID）。
+		// 所以这里全卡扫一遍，不需要先挑 profile。
+		for _, card := range ch.Cards {
+			for _, role := range card.Roles {
+				if role.ID == rowID {
+					return role.Actions, nil
+				}
+			}
+		}
+		return nil, i18n.E("{concept} has no row called {row} — the page is probably stale, reload it",
+			i18n.A{"concept": c.ID, "row": rowID})
+	default:
+		return nil, i18n.E("{concept} is a {kind}, whose rows carry no actions "+
+			"(row actions live on tables and chain cards)",
+			i18n.A{"concept": c.ID, "kind": c.Kind})
+	}
 }
 
 // Snapshot 问一遍贡献者，返回这一刻的概念（按 Source, ID 排序）。

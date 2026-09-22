@@ -2,6 +2,7 @@ package config
 
 import (
 	modules "github.com/rzbdz/newgate/component"
+	"github.com/rzbdz/newgate/lib/view"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/resolve"
 	"github.com/rzbdz/newgate/modules/config/roleprov"
@@ -68,6 +69,17 @@ type Chain struct {
 	// Skips 没进链的候选与原因。被跳过的候选常常一步都不在链上，所以它必须
 	// 单独交出来，而不是只能从 Steps 里推。
 	Skips []Skip
+	// Actions 是**这一档能做的改动**（「把这一档的链头换成 X」），不是数据。
+	//
+	// 它由本模块构造，因为只有本模块知道这件事的另外几样东西：这一档写在哪一份
+	// 文件里、那个文件此刻的基线是什么、并发改到了要拿什么跟用户交代（CAS 冲突）。
+	// 调用方（某个界面节）只把它们原样挂到自己的行上——`view.Action` 的闭包跨包
+	// 传递是安全的，它在同一个进程里等着被 RunRowAction 调。
+	//
+	// 空的两种情况都正常，但意思不同：**这一档没有可换的候选**（文件里只写了一个
+	// 绑定、或者候选是别的 profile 顶上来的），以及**它已经是链头了**。两者都不该
+	// 画一个点了不改变任何事的按钮。
+	Actions []view.Action
 }
 
 // Config 是配置模块对外的最小端口。
@@ -94,6 +106,15 @@ type Config interface {
 	// 且会随时间变，见下面 Chain。Steps 因此是「按配置解析出来的链」，不是
 	// 「此刻真的会走这条链」。
 	Chains(profile string, keys ...string) (*Chains, error)
+
+	// AllChains 报**每一份** profile 的链，生效的那一份排在最前。
+	//
+	// 它是「一屏看全部」那条路：想要的是「我这些链长什么样」，而那是**一屏**上的
+	// 一个事实，不是十次分开查询。分开问的话，那一屏上会拼起十个时刻的配置——每张
+	// 卡单看都对，合起来前后不一致，而界面上看不出任何异样。
+	//
+	// keys 与 Chains 同义。
+	AllChains(keys ...string) ([]*Chains, error)
 }
 
 // Capability 是配置端口的唯一身份；配置实现只能有一个，避免多份状态分叉。

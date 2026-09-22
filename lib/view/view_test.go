@@ -448,3 +448,110 @@ func sectionsOf(t *testing.T, r *Registry) map[string]string {
 	}
 	return out
 }
+
+// Row 上的动作按**行**定位：跑哪一个行的按钮，就只跑那一个。
+//
+// 这条锁的是「行 ID 真的参与了定位」——少了它，「把这一档换成 X」在一张有十行的卡上
+// 会变成「跑第一行里叫这个名字的那个按钮」，而那种错的表现是**改错了别的行**。
+func TestRunRowActionFindsTheRightRow(t *testing.T) {
+	r := NewRegistry()
+	var ran string
+	btn := func(id string) Action {
+		return Action{ID: id, Label: func() string { return id },
+			Run: func() (string, error) { ran = id; return "", nil }}
+	}
+	mustRegister(t, r, "x", Concept{
+		ID: "t", Kind: KindTable,
+		Data: Table{Rows: []Row{
+			{ID: "a", Cells: map[string]Cell{}, Actions: []Action{btn("probe")}},
+			{ID: "b", Cells: map[string]Cell{}, Actions: []Action{btn("probe")}},
+		}},
+	})
+	// 两行上有一个**同名**的按钮：这正是「按行定位」要能区分的那种情况。
+	if _, err := r.RunRowAction("t", "b", "probe"); err != nil {
+		t.Fatal(err)
+	}
+	if ran != "probe" {
+		t.Fatalf("按钮没跑起来: %q", ran)
+	}
+	// 两行跑的都是同一个闭包，所以上面那条分不出 a/b——换一个能分的：每行各跑
+	// 它自己的那个闭包（Run 返回行 ID）。
+	var which string
+	rowBtn := func(row string) Action {
+		return Action{ID: "go", Label: func() string { return row },
+			Run: func() (string, error) { which = row; return "", nil }}
+	}
+	r2 := NewRegistry()
+	mustRegister(t, r2, "x", Concept{
+		ID: "t", Kind: KindTable,
+		Data: Table{Rows: []Row{
+			{ID: "a", Cells: map[string]Cell{}, Actions: []Action{rowBtn("a")}},
+			{ID: "b", Cells: map[string]Cell{}, Actions: []Action{rowBtn("b")}},
+		}},
+	})
+	if _, err := r2.RunRowAction("t", "b", "go"); err != nil {
+		t.Fatal(err)
+	}
+	if which != "b" {
+		t.Fatalf("跑的是 %q 行，要的是 b 行", which)
+	}
+}
+
+// 链卡（KindChains）上的行**也能挂动作**，而且行 ID 是全概念唯一的。
+//
+// 这条是 2026-09-22 加 chains 时的那个缺口：第一版 RunRowAction 只认 Table，于是
+// 「一行的去处」这件事被渲染形状绑住了。判据两条——链卡里的动作跑得起来，以及
+// **档位名单独一个不够用**（十份 profile 就有十个 heavy，只报 tie 会改错那一份）。
+func TestRunRowActionWorksOnChainCards(t *testing.T) {
+	r := NewRegistry()
+	var got string
+	head := func(row string, target string) Action {
+		return Action{ID: "head:" + target, Label: func() string { return target },
+			Run: func() (string, error) { got = row + "→" + target; return "", nil }}
+	}
+	mustRegister(t, r, "x", Concept{
+		ID: "chains", Kind: KindChains,
+		Data: Chains{Cards: []ChainCard{
+			{Profile: "demo", Default: true, Roles: []ChainRow{
+				{ID: "demo/heavy", Tier: "heavy", Actions: []Action{head("demo/heavy", "ark/lite")}},
+			}},
+			{Profile: "alt", Roles: []ChainRow{
+				{ID: "alt/heavy", Tier: "heavy", Actions: []Action{head("alt/heavy", "zhipu/glm-4")}},
+			}},
+		}},
+	})
+
+	if _, err := r.RunRowAction("chains", "alt/heavy", "head:zhipu/glm-4"); err != nil {
+		t.Fatal(err)
+	}
+	if got != "alt/heavy→zhipu/glm-4" {
+		t.Fatalf("跑错行了：%q（两边都有叫 heavy 的行，只有行 ID 能分开它们）", got)
+	}
+
+	// 一行上**没有**这个动作时，报错要说得清是哪一行——界面手里那份快照旧了，
+	// 而它唯一能拿到的线索就是这句话。
+	_, err := r.RunRowAction("chains", "demo/heavy", "head:nope")
+	if err == nil {
+		t.Fatal("那一行上没有这个按钮，该报错")
+	}
+	if !strings.Contains(err.Error(), "demo/heavy") || !strings.Contains(err.Error(), "head:nope") {
+		t.Errorf("报错该点明行与动作，实际: %v", err)
+	}
+}
+
+// 一种 Kind 的行上不可能有动作时，报错说的是**「这种形状没有行动作」**，而不是
+// 装作那一行存在过。
+//
+// 为什么这条值得有：加一种带行的 Kind 时忘了在 rowActions 里补一支，症状会是一句
+// 「这一行不存在」——排查的人于是去查数据，而真相是代码里少了一个 case。
+func TestRunRowActionOnAKindWithoutRows(t *testing.T) {
+	r := NewRegistry()
+	mustRegister(t, r, "x", Concept{ID: "c", Kind: KindCode, Data: struct{}{}})
+	_, err := r.RunRowAction("c", "whatever", "go")
+	if err == nil {
+		t.Fatal("code 那一种没有行，该报错")
+	}
+	if !strings.Contains(err.Error(), KindCode) {
+		t.Errorf("报错该说出是哪种 Kind 没有行动作，实际: %v", err)
+	}
+}

@@ -3496,10 +3496,6 @@
       "text": "{concept} 里没有叫 {row} 的行——页面大概是旧的，重新加载一下",
       "reviewed": true
     },
-    "{concept} is not a table, so it has no rows to act on": {
-      "text": "{concept} 不是一张表，没有行可以操作",
-      "reviewed": true
-    },
     "{concept}.{action} has nothing to run": {
       "text": "{concept}.{action} 没有可跑的东西",
       "reviewed": true
@@ -3771,6 +3767,10 @@
     },
     "● Running": {
       "text": "● 运行中",
+      "reviewed": true
+    },
+    "{concept} is a {kind}, whose rows carry no actions (row actions live on tables and chain cards)": {
+      "text": "{concept} 是 {kind} 那一种，它的行上没有动作可挂（行动作属于表格与链卡）",
       "reviewed": true
     }
   }
