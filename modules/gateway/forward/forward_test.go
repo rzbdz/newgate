@@ -336,12 +336,16 @@ func TestErrorResponseByteFaithful(t *testing.T) {
 // breaker 把形状 400 翻成判决的真值表在 modules/breaker/plane_test.go，判据从
 // 模块 Start 一路接到转发路径的**接线**在 testing/system（真组件图 + 假上游）；
 // 这里只锁 forward 与账本的契约——Evidence 非空时它该做什么。
-type shapeTestFilter struct{}
+// advance 表达的是这条策略对「认领之后要不要换站」的回答：零值（false）=
+// 「不换站」（链尾那一发，锁终局路径），true = 「继续沿链」（breaker 对形状
+// 400 的真实判决就是这一条：同一份 body 换谁发都一样错，但换一家校验更松的
+// 上游是唯一可能成功的路）。两条收场都必须留痕，用例各锁一边。
+type shapeTestFilter struct{ advance bool }
 
 func (shapeTestFilter) Name() string { return "shape-test" }
 func (shapeTestFilter) Why() string  { return "forward 单测：认 reasoning 回传 400" }
 
-func (shapeTestFilter) Judge(o policy.Outcome) policy.Verdict {
+func (f shapeTestFilter) Judge(o policy.Outcome) policy.Verdict {
 	if o.Kind != policy.RejectedStatus || o.Status != 400 {
 		return policy.Verdict{}
 	}
@@ -349,9 +353,9 @@ func (shapeTestFilter) Judge(o policy.Outcome) policy.Verdict {
 		!bytes.Contains(o.Body, []byte("must be passed back")) {
 		return policy.Verdict{}
 	}
-	// 形状错误：不换站（这是链尾那一发）、不记账，但留痕。
+	// 形状错误：不记账，但留痕。
 	return policy.Verdict{
-		Stop:     true,
+		Stop:     !f.advance,
 		Evidence: &policy.Evidence{Tag: "shape-400", Subject: "test-shape", Archive: true},
 	}
 }
@@ -456,6 +460,191 @@ func TestShapeErrorIsCountedThenLoggedWithEvidence(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, ents[0].Name(), want)); err != nil {
 			t.Errorf("证据目录里缺 %s: %v", want, err)
 		}
+	}
+}
+
+// TestShapeAdvanceKeepsClaimedEvidence 锁住**沿链转移**那一发的留痕：当裁决
+// 说「继续走」（fallback_on_400=true 那条路；形状判决本来就该换一家再试），
+// 而判据又认了这一发 400 时，`[shape-400]` 那行日志与专用目录归档**都必须
+// 发生**——哪怕这一发最终由下一站回了 200。
+//
+// 现场（2026-09-17，见 docs/11-troubleshooting.md）：形状 400 悄悄降级到别家、
+// 客户端拿到 200、日志里看不出来。旧实现把留痕留在终局分支里，而转移恰恰是
+// 它最常见的收场——于是既不归档也不打那行，docs 承诺的「不参与滚动清理、
+// 永不丢」就成了一句空话。
+//
+// 同时锁住「尽量少影响」那半边：转移路径**不落**通用 err-* 证据（整包 body
+// dump 会让每次 fallback 多几 MB 落盘/日志），所以这里断言 dump 里没有
+// err-400-*，也证明这次修复只动了日志与归档、没动裁决。
+func TestShapeAdvanceKeepsClaimedEvidence(t *testing.T) {
+	sandboxState(t, `{"port": 0, "chain": {"fallback_on_400": true}}`)
+	t.Cleanup(func() { testChain = nil })
+
+	reasoningErr := `{"type":"error","message":"The ` + "`reasoning_content`" +
+		` in the thinking mode must be passed back to the API."}`
+	var shapeHits, okHits int
+	shape := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		shapeHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = io.WriteString(w, reasoningErr)
+	}))
+	defer shape.Close()
+	okUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		okHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer okUp.Close()
+
+	// 两站链：第一站挑食（形状 400）→ 裁决为继续走 → 第二站收下。
+	testChain = func(role string) []resolve.Step {
+		return []resolve.Step{
+			{Profile: "ds", Binding: domain.Binding{Provider: "ds-shape", Model: "deepseek-flash"},
+				Provider: testProvider(shape.URL)},
+			{Profile: "other", Binding: domain.Binding{Provider: "other-ok", Model: "real-model-1"},
+				Provider: testProvider(okUp.URL)},
+		}
+	}
+	defer func() { testChain = nil }()
+
+	srv, logBuf := newLoggingTestServer()
+	if _, err := srv.Filters.Register(shapeTestFilter{advance: true}); err != nil {
+		t.Fatalf("注册策略: %v", err)
+	}
+	// 旁观者只记录事实，用来证明这一发确实走在 fallback_on_400 打开的链上。
+	watcher := newScriptedFilter()
+	if _, err := srv.Filters.Register(watcher); err != nil {
+		t.Fatalf("注册旁观策略: %v", err)
+	}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(`{"model":"newgate/heavy","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || string(got) != `{"ok":true}` {
+		t.Fatalf("应沿链转移到第二站拿到 200，得到 %d %q", resp.StatusCode, got)
+	}
+	if shapeHits != 1 || okHits != 1 {
+		t.Fatalf("上游命中数 = shape %d / ok %d, want 1/1（必须真的转移了一发）", shapeHits, okHits)
+	}
+	var sawFallback400 bool
+	for _, o := range watcher.seen() {
+		if o.Provider == "ds-shape" && o.Kind == policy.RejectedStatus && o.FallbackOn400 {
+			sawFallback400 = true
+		}
+	}
+	if !sawFallback400 {
+		t.Fatal("这一发没走在 fallback_on_400=true 的链上——夹具没生效，用例就锁不住转移路径")
+	}
+
+	// 标记与判据名必须进日志：形状判据是多家上游各自的，转发路径不认识那些
+	// 字符串，名字是它唯一的线索，所以只能原样打出来。
+	logs := logBuf.String()
+	if !strings.Contains(logs, "[shape-400]") || !strings.Contains(logs, "test-shape") {
+		t.Errorf("转移路径没有说清是被哪条判据认下的（这就是「悄悄降级」的形态）:\n%s", logs)
+	}
+	// 存档那一行的机器标记是证据目录名 `shape-400-<判据>`：文案跟语言走，
+	// 目录名不跟——这才是排障时 grep 得动的东西。
+	if !strings.Contains(logs, "shape-400-test-shape") {
+		t.Errorf("转移路径没有把现场归档（这类 400 偶发又致命，丢了就复现不了）:\n%s", logs)
+	}
+	dir := filepath.Join(os.Getenv("NEWGATE_HOME"), "dump", "shape-400-test-shape")
+	ents, err := ioutil.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("读证据目录 %s: %v（转移路径也必须归档）", dir, err)
+	}
+	if len(ents) != 1 {
+		t.Fatalf("转移一次应留下恰好一份现场，得到 %d 份", len(ents))
+	}
+	for _, want := range []string{"client-sent.json", "we-sent.json", "upstream-said.json", "audit.txt"} {
+		if _, err := os.Stat(filepath.Join(dir, ents[0].Name(), want)); err != nil {
+			t.Errorf("证据目录里缺 %s: %v", want, err)
+		}
+	}
+	// 「尽量少影响」那半边：转移路径不落通用 err-* 整包 body dump。
+	dumpDir := filepath.Join(os.Getenv("NEWGATE_HOME"), "dump")
+	if all, err := ioutil.ReadDir(dumpDir); err == nil {
+		for _, e := range all {
+			if strings.HasPrefix(e.Name(), "err-400-") {
+				t.Errorf("转移路径落了通用 err-* 证据（每次 fallback 多几 MB，违反尽量少影响）: %s", e.Name())
+			}
+		}
+	}
+}
+
+// TestShapeAdvanceWithoutClaimLeavesNoArchive 是反向用例：链上第一站回了一个
+// **没命中**形状判据的 400，裁决照样是「继续走」（fallback_on_400=true），
+// 但没人认领这一发——于是什么都不归档，`[shape-400]` 那行也不该出现。
+//
+// 它守着留痕的边界：证据是「判据认领」的结果，不是「看见 400」的结果。判据一
+// 宽，专用目录就会被普通校验错误塞满，docs/11-troubleshooting.md 承诺的那份
+// 「永不丢」的证据反而被淹没。
+func TestShapeAdvanceWithoutClaimLeavesNoArchive(t *testing.T) {
+	sandboxState(t, `{"port": 0, "chain": {"fallback_on_400": true}}`)
+	t.Cleanup(func() { testChain = nil })
+
+	schemaErr := `{"error":{"message":"Invalid schema: missing required field 'name'"}}`
+	var okHits int
+	badSchema := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = io.WriteString(w, schemaErr)
+	}))
+	defer badSchema.Close()
+	okUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		okHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer okUp.Close()
+
+	testChain = func(role string) []resolve.Step {
+		return []resolve.Step{
+			{Profile: "bad", Binding: domain.Binding{Provider: "schema-bad", Model: "real-model-1"},
+				Provider: testProvider(badSchema.URL)},
+			{Profile: "other", Binding: domain.Binding{Provider: "other-ok", Model: "real-model-1"},
+				Provider: testProvider(okUp.URL)},
+		}
+	}
+	defer func() { testChain = nil }()
+
+	srv, logBuf := newLoggingTestServer()
+	// 判据在册，只是这一份 body 不命中它——正是要锁的边界。
+	if _, err := srv.Filters.Register(shapeTestFilter{advance: true}); err != nil {
+		t.Fatalf("注册策略: %v", err)
+	}
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	resp, err := http.Post(front.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(`{"model":"newgate/heavy","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || string(got) != `{"ok":true}` {
+		t.Fatalf("非形状 400 应继续沿链拿到 200，得到 %d %q", resp.StatusCode, got)
+	}
+	if okHits != 1 {
+		t.Fatalf("第二站被打了 %d 次, want 1（用例没走到转移路径就会空过）", okHits)
+	}
+	logs := logBuf.String()
+	if strings.Contains(logs, "[shape-400]") {
+		t.Errorf("没命中判据却打了形状证据的日志:\n%s", logs)
+	}
+	if strings.Contains(logs, "scene archived to") {
+		t.Errorf("没命中判据却声称存了现场:\n%s", logs)
+	}
+	dir := filepath.Join(os.Getenv("NEWGATE_HOME"), "dump", "shape-400-test-shape")
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("没命中判据却建了专用证据目录 %s（err=%v）", dir, err)
 	}
 }
 

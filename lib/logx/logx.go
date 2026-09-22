@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
@@ -113,20 +115,45 @@ func (r *Rotator) Close() error {
 	return err
 }
 
-// PruneDir 只保留目录下按名字排序最新的 keep 个文件（按前缀分组计数）。
+// PruneDir 只保留目录下最新的 keep 组文件（按前缀分组计数）。
 // 用于限制错误证据 dump 的数量。
 func PruneDir(dir string, keep int) { PruneDirBy(dir, "", keep) }
 
 // PruneDirBy 只清理以 prefix 开头的文件组（空前缀 = 全部）。dump 的
 // req-* 和错误证据的 err-* 共用一个目录、各自设上限，互不删对方。
+//
+// 一组 = 同一个 base（"err-400-req001840" 这样，取到第一个 "." 为止）
+// 下的那几个文件；组的年龄取组内**最新**那个文件的 mtime——一组是刚落地
+// 的，只要还有一份文件在，这组就算「新」，所以用最新的那份代表它（用
+// os.Stat，不依赖文件系统给的目录顺序）。
+//
+// 原来那版把 base 按名字字典序排、删 names[:len-keep]，留下的是「名字
+// 最大」的 keep 组，不是「最新」的 keep 组。名字里带状态码时
+// err-400 < err-402 < … < err-502，字典序最小的那组永远第一个被删。
+// 2026-09-22 的现场：日志里 15 次「上游 400，完整证据已存」，磁盘上
+// err-400-* 一个不剩——因为 saveErrEvidence 结尾就调本函数，刚写完的
+// err-400-* 当场被自己删掉，那正是字典序最小的一组。
+//
+// 排序：mtime 降序；mtime 相同用名字升序做稳定 tiebreak。os.Stat 失败的
+// 那组算「年龄未知」，排在最新一侧（不会被优先删）：本函数存在的意义是
+// 给盘占住上限，而它保护的证据删掉就再也拿不回来（CLAUDE.md §5 说它是
+// 排查「是不是代理改坏了请求」唯一能拿出手的东西）。两害相权，宁可多留
+// 一组（下一次 prune 或人工清都能回收，总量也仍受 keep 约束），也不肯在
+// 没有任何年龄依据时先动手删掉可能正是刚落地的那组。
 func PruneDirBy(dir, prefix string, keep int) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	// 按 "err-400-req000003" 这样的前缀分组，一组是四个文件
-	groups := map[string]bool{}
-	var names []string
+	// 按 "err-400-req000003" 这样的前缀分组，一组是四个文件。组里只要
+	// 还有一份文件能 stat 到，这组就有年龄；全都 stat 不到才算未知。
+	type group struct {
+		base     string
+		mtime    time.Time
+		hasMtime bool
+	}
+	byBase := map[string]*group{}
+	var groups []*group
 	for _, e := range ents {
 		if e.IsDir() {
 			continue
@@ -139,18 +166,37 @@ func PruneDirBy(dir, prefix string, keep int) {
 		if i := indexAny(n, "."); i > 0 {
 			base = n[:i]
 		}
-		if !groups[base] {
-			groups[base] = true
-			names = append(names, base)
+		g := byBase[base]
+		if g == nil {
+			g = &group{base: base}
+			byBase[base] = g
+			groups = append(groups, g)
+		}
+		if fi, err := os.Stat(filepath.Join(dir, n)); err == nil {
+			if mt := fi.ModTime(); !g.hasMtime || mt.After(g.mtime) {
+				g.mtime, g.hasMtime = mt, true
+			}
 		}
 	}
-	if len(names) <= keep {
+	if len(groups) <= keep {
 		return
 	}
-	sortStrings(names)
-	for _, base := range names[:len(names)-keep] {
+	sort.SliceStable(groups, func(i, j int) bool {
+		a, b := groups[i], groups[j]
+		if a.hasMtime != b.hasMtime {
+			return !a.hasMtime // 年龄未知的排最新
+		}
+		if a.hasMtime && !a.mtime.Equal(b.mtime) {
+			return a.mtime.After(b.mtime)
+		}
+		return a.base < b.base
+	})
+	for _, g := range groups[keep:] {
 		for _, e := range ents {
-			if len(e.Name()) >= len(base) && e.Name()[:len(base)] == base {
+			if e.IsDir() {
+				continue
+			}
+			if len(e.Name()) >= len(g.base) && e.Name()[:len(g.base)] == g.base {
 				_ = os.Remove(filepath.Join(dir, e.Name()))
 			}
 		}
@@ -166,12 +212,4 @@ func indexAny(s, chars string) int {
 		}
 	}
 	return -1
-}
-
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
 }

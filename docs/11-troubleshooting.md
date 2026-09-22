@@ -1,26 +1,37 @@
 # 故障排查
 
-## 1. reasoning_content 400
+## 1. reasoning 回传 400（三种方言）
 
-**先别读这句话的字面意思。** 上游那句 `The \`reasoning_content\` in the
-thinking mode must be passed back to the API.` 是**误报**——它把「这一轮没有
-新指令」报成了「推理没回传」。真实判据有三条（缺一不可），完整推导在
-`docs/06-reasoning.md` §1，那里是唯一出处：
+**先别读这句话的字面意思。** 上游那句——OpenAI 方言
+`The \`reasoning_content\` … must be passed back to the API.`、Anthropic 方言
+`The \`content[].thinking\` …`、Responses 方言 `The \`reasoning_text\` …`——是
+**误报**：它把「这一轮没有新指令」报成了「推理没回传」。真实判据有三条（缺一
+不可），完整推导在 `docs/06-reasoning.md` §1，那里是唯一出处：
 
-1. **尾形**：最后一条 `role:"user"` 消息的 `content[]` 非空、且**全是**
-   `tool_result`；
+1. **裸尾**：`messages` 方言看最后一条 `role:"user"` 消息的 `content[]` 非空、
+   且**全是** `tool_result`；`Responses` 方言看顶层 `input[]` 的最后一项是不是
+   `function_call_output`；
 2. **锚点**：是「最后一条 `role:user`」不是数组最后一项——Claude Code 会在
-   `tool_result` 后面插一条 `role:"system"` 的 mid-turn 消息；
-3. **出身**：那条 `tool_result` 引用的 tool call 里，**至少有一个不是本聚合器
-   产的**（`call_00_…` 是它产的；`call_<hex>`、`toolu_…` 是别家来的）。
+   `tool_result` 后面插一条 `role:"system"` 的 mid-turn 消息（Responses 没有
+   这一层，锚点就是 `input[len-1]`）；
+3. **出身**：那条 `tool_result` / `function_call_output` 引用的 tool call 里，
+   **至少有一个不是本聚合器产的**（`call_NN_…` 是它产的——`NN` 是两位序号，
+   一轮里并行的几个 tool call 就是 00/01/02…；`call_<hex>`、`toolu_…` 是别家来
+   的）——否则是 200，不是 400。
+
+第三种方言补一句：`reasoning_text` 走的是 Responses 端点，插件按同一套判据认领
+（第 5 手，开关 `deepseek.tail-shape-responses`，见 `docs/06-reasoning.md` §2e）。
 
 ### 排查顺序
 
 1. 日志里有没有 `[shape-400] … 判据 deepseek`——有就是这类，往下走；
-2. 看 `dump/shape-400-deepseek/req-*/client-sent.json`：把 `messages` 里
-   `tool_use` 的 id 列出来，看**有没有非 `call_00_` 开头的**（一条就够）；
-   再看最后一条 user 的 `content[]` 是不是只有 `tool_result`；
-3. 两个都中 → 这条 400 是**必然**的，且它说明这一发之前的某一轮被 fallback
+2. 看 `dump/shape-400-deepseek/req-*/client-sent.json`：
+   - `messages` 方言：把 `messages` 里 `tool_use` 的 id 列出来，看**有没有不
+     是 `call_NN_`（`call_` + 两位序号 + `_`）形态的**（一条就够）；再看最后一条
+     user 的 `content[]` 是不是只有 `tool_result`；
+   - `Responses` 方言：看顶层 `input[]` 最后一项是不是 `function_call_output`，
+     并把 `call_id` 列出来，看**有没有不是 `call_NN_` 形态的**；
+3. 三条都中 → 这条 400 是**必然**的，且它说明这一发之前的某一轮被 fallback
    交给了别家上游。想看那一轮是谁：日志里往前找 `(已转移)` /
    `X-Newgate-Chain`。
 
@@ -37,8 +48,16 @@ thinking mode must be passed back to the API.` 是**误报**——它把「这�
 
 ### 插件做了什么、没做什么
 
-- **做**：命中「一族」（裸 `tool_result` 且那条 user 轮就是数组末尾）时，往它
-  的 `content[]` 追加**一条最简指令**（`"继续"`）。实测 400 → 200，每格 3/3。
+- **做（messages 方言，第 4 手）**：三条全中（裸 `tool_result` 收尾、那条 user
+  轮之后没有 assistant、历史里有外来 tool id）时，往它的 `content[]` 追加
+  **一条最简指令**（`"continue"`）。实测 400 → 200，每格 3/3。
+- **做（Responses 方言，第 5 手）**：`input[]` 最后一项是
+  `function_call_output` 且历史里有外来 `call_id` 时，往 `input[]` 末尾追加一条
+  普通 user 消息。开关点 `deepseek.tail-shape-responses`。
+- **出身这一维不能省**：裸尾 + 全部自产 id 本来就是 200，无条件注入改写的
+  是本来会成功的请求（旧判据的注入面：09-22 那半天 2930 发里 973 发被注入，约
+  1/3，全在 messages 方言；09-21 整天是 56%——见 `docs/06-reasoning.md` §1 那段
+  注与 §2b / §2e）。
 - **不做**：cache 未命中时**不编占位符**（上游自己没给过的推理，编了也只是烧
   token——实测对这条 400 毫无影响）；「二族」（裸尾之后还有 assistant）
   **故意不碰**——实测往那个 user 轮追加指令 **3/3 还是 400**，塞一句模型看不见
@@ -52,7 +71,7 @@ thinking mode must be passed back to the API.` 是**误报**——它把「这�
 **判据是对的，措辞是错的；只改措辞，别删判据。** 复现命令与全过程见
 `docs/06-reasoning.md` §2b 末段。
 
-### 归档留样：`dump/` 里的 15 份 `err-400-*`
+### 归档留样（历史）：`dump/` 里曾经那 15 份 `err-400-*`
 
 | 上游原文 | 份数 | 归属 |
 | --- | --- | --- |
@@ -69,6 +88,15 @@ user，那 2 份被漏修**，是重写判据的直接动因。另有两份（`r
 
 新出现的 400 仍按 §3 分类器处理（形状错误永不摘牌、只计数）。
 
+**2026-09-22 追记：上表这批 `err-400-*` 今天在磁盘上已经没有了。** 它们不是被
+正常滚动清掉的，而是被 dump 清理的排序 bug 整批删掉的：`logx.PruneDir` 那版按
+名字字典序「留最大」的 keep 组，`err-400-…` 字典序最小、永远第一个被删；而
+`saveErrEvidence` 结尾就调它，所以刚写完的 `err-400-*` 当场被自己清掉（日志里
+15 次「完整证据已存」，磁盘上一个 `err-400-*` 都没有）。现已改成**按 mtime 留
+最新的 keep 组**（同 mtime 用名字升序做稳定 tiebreak；stat 不到年龄的排最新、
+不先删），`req-*` 与 `err-*` 走同一份排序。样本本身回不来了，上面那几段因果是
+从当时的记录里复述的。
+
 **被形状判据认领的 400 会额外存一份专属证据**（2026-09-17 起）：
 `dump/shape-400-<判据名>/req-<id>-<纳秒>/`，里面是 client-sent / we-sent /
 upstream-said / audit.txt / meta.txt 五件。目录名里的判据名就是日志那行
@@ -79,12 +107,13 @@ upstream-said / audit.txt / meta.txt 五件。目录名里的判据名就是日�
 现场；`dump/err-400-*` 记的是「上游回了什么」，两者常常同时出现、看的角度
 不同。
 
-**注意形状 400 常常不落 `err-400-*`**：判据命中时决策表给的是「沿链走、
-不记账」，走的是转移分支，而 `saveErrEvidence` 只在定案分支调用。所以查这
-类问题时**日志那一行 `上游说:` 才是主证据**（形如
-`normal -> smt-deepseek/deepseek-flash -> 400  上游说: {…}`），
-`dump/shape-400-deepseek/` 是另一份；`err-400-*` 里有的那些反而是没被判据
-认领的。
+**形状 400 的证据不再依赖它落在链上哪一段**（2026-09-22 起）：形状证据归档与
+`[shape-400]` 日志改由**转移路径与终局路径共用同一份实现**——形状 400 沿链转移
+时也照样留 `dump/shape-400-deepseek/`、照样打那行 `[shape-400]`，不再「一转移就
+丢证据」。查这类问题时 `[shape-400]` 与 `dump/shape-400-deepseek/` 都在；日志
+那行 `上游说:`（形如 `normal -> smt-deepseek/deepseek-flash -> 400  上游说:
+{…}`）仍是快速定位的入口。`dump/err-400-*` 记的是「上游回了什么」，只在定案
+分支落，两者看的角度不同。
 
 ## 2. Probe 绿但请求 404 / 400
 

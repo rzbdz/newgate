@@ -392,6 +392,49 @@ func AppendArrayItemArrayAt(body []byte, arrayKey, field string, itemIndex int,
 	return out, true, nil
 }
 
+// AppendTopLevelArrayItem 往**顶层那个数组**追加一个元素，其余字节原样保留。
+//
+// 与 AppendLastArrayItemArray / AppendArrayItemArrayAt 的区别是「插进哪个数组」：
+// 那两个插进的是**某个元素内部的**数组字段（messages[i].content），这一个插进的是
+// 顶层数组本身。Responses 方言（Codex）的尾部形状修复要补的正好是后者——一条新的
+// 顶层 input[] 项，而不是某个项 content 里的一块。
+//
+// 空数组不补逗号（`[` 紧跟 `]` 时补出来的是 `[,x]`，不是合法 JSON）；非空数组插在
+// 收尾 `]` 之前，跳过 `]` 前的空白，所以原来那点缩进与换行逐字还在。
+func AppendTopLevelArrayItem(body []byte, arrayKey string, rawVal []byte) ([]byte, bool, error) {
+	s, e, err := findTopLevelValue(body, arrayKey)
+	if err != nil {
+		return body, false, err
+	}
+	arr := body[s:e]
+	spans, ok := arrayItemSpans(arr)
+	if !ok {
+		return body, false, errNotArray
+	}
+	close := len(arr) - 1
+	for close > 0 {
+		switch arr[close] {
+		case ' ', '\t', '\r', '\n':
+			close--
+			continue
+		}
+		break
+	}
+	if close <= 0 || arr[close] != ']' {
+		return body, false, errNotArray
+	}
+	off := s + close
+	ins := rawVal
+	if len(spans) > 0 {
+		ins = append([]byte(","), rawVal...)
+	}
+	out := make([]byte, 0, len(body)+len(ins))
+	out = append(out, body[:off]...)
+	out = append(out, ins...)
+	out = append(out, body[off:]...)
+	return out, true, nil
+}
+
 // ArrayItems 把一个 JSON 数组的原始字节切成各元素的原始字节（只读判断用，
 // 比如「这条 content[] 里有没有 thinking 块」）。切片指向原字节，不拷贝。
 func ArrayItems(arr []byte) ([][]byte, bool) {

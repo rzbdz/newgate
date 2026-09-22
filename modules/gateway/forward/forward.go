@@ -1178,6 +1178,18 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				s.logf("[proxy] %s", i18n.T("{route} -> {status}{note}  upstream said: {body}",
 					i18n.A{"route": routeStr, "status": resp.StatusCode, "note": v.Note,
 						"body": trim(string(eb))}))
+				// 沿链转移这一发也要留下认领证据。形状 400 换个校验更松的上游
+				// 是唯一可能成功的路，所以「裁决为继续走」是它最常见的收场；
+				// 不留痕就等于客户端最后拿到 200、日志里却看不出中间那家拒过
+				// （2026-09-17 那次静默降级正是这个形态）。
+				//
+				// 这里**刻意不落**通用 err-* 证据（整包 body dump 会让每次
+				// fallback 多几 MB 落盘/日志），所以 base 传空——专属日志照打，
+				// 锚点是标记与判据名，不是文件。
+				if ev := v.Evidence; ev != nil {
+					s.recordShapeEvidence(reqID, a.Binding.String(), ev, "", body, newBody, eb,
+						r.Header, resp.Header, routeStr)
+				}
 				s.logf("[proxy] %s", i18n.T("advancing to next chain step: {step}", i18n.A{"step": steps[i+1]}))
 				metrics.Default.Inc("chain.step_failed")
 				lastMsg, lastCode = trim(string(eb)), resp.StatusCode
@@ -1193,23 +1205,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			} else {
 				s.logf("[proxy] %s", i18n.T("#{req} upstream {code}, full evidence saved to {base}.*", i18n.A{"req": reqID, "code": resp.StatusCode, "base": base}))
 			}
-			if ev := v.Evidence; ev != nil && !advance(o, v) {
-				// 这类结局要能一眼 grep 出来，而且要留一份不被滚动清理挤掉的
-				// 现场。`[shape-400]` 那个字面量与目录前缀**由认领它的策略给**
-				// （见 policy.Evidence）：转发路径不认识任何上游专有字符串，
-				// 也不知道这条 400 是哪家的方言。
-				s.logf("[%s] %s", ev.Tag, i18n.T("#{req} {binding} request shape rejected (detector {detector}; evidence {base}.*)",
-					i18n.A{"req": reqID, "binding": a.Binding.String(), "detector": ev.Subject,
-						"base": filepath.Base(base)}))
-				if ev.Archive {
-					rdir, shErr := s.saveShapeEvidence(reqID, ev, body, newBody, eb,
-						r.Header, resp.Header, routeStr)
-					if shErr != nil {
-						s.logf("[%s] %s", ev.Tag, i18n.T("#{req} scene NOT saved (check permissions/disk): {err}", i18n.A{"req": reqID, "err": shErr}))
-					} else {
-						s.logf("[%s] %s", ev.Tag, i18n.T("#{req} scene archived to {dir}/", i18n.A{"req": reqID, "dir": rdir}))
-					}
-				}
+			// 终局这一发走的是和沿链转移**同一份**留痕实现（见
+			// recordShapeEvidence）：这里刚落了通用 err-* 证据，把它的基名
+			// 一并交给专属日志当锚点。
+			if ev := v.Evidence; ev != nil {
+				s.recordShapeEvidence(reqID, a.Binding.String(), ev, base, body, newBody, eb,
+					r.Header, resp.Header, routeStr)
 			}
 			s.logf("[proxy] %s", i18n.T("#{req} upstream raw: {body}", i18n.A{"req": reqID, "body": truncate(string(redact(eb)), 2000)}))
 			s.logf("[proxy] %s", i18n.T("#{req} body we sent ({bytes} bytes): {body}", i18n.A{"req": reqID,
@@ -1565,6 +1566,45 @@ func (s *Server) saveShapeEvidence(reqID uint64, ev *policy.Evidence, inBody, ou
 	}
 	pruneShapeEvidence(filepath.Dir(dir), 512<<20)
 	return dir, errors.Join(errs...)
+}
+
+// recordShapeEvidence 是「被形状判据认领」这一发**唯一**的留痕实现，终局与
+// 沿链转移两条路径共用它：先打 `[标记]` 的专属日志（判据名 + 通用证据基名），
+// 再按 Evidence.Archive 把现场归档进不参与滚动清理的专用目录。
+//
+// 为什么必须共用（2026-09-17 的现场，见 forward_test.go 的
+// TestShapeAdvanceKeepsClaimedEvidence）：形状 400 换个校验更松的上游是唯一
+// 可能成功的路，所以「裁决为继续沿链」恰恰是它最常见的收场。旧实现把这段
+// 只留在终局分支里，转移那一发就既不归档也不打日志——客户端最后拿到 200，
+// 日志里却看不出中间那家拒过、拒的是什么形状，正是这次事故的形态。
+//
+// base 是通用 err-* 证据的基名（终局路径刚落的）；沿链转移那一发刻意不落
+// 通用 err-*（整包 body dump 会让每次 fallback 多几 MB 落盘/日志，违反
+// 「尽量少影响」），于是基名为空——专属日志照打，锚点是标记与判据名，不是
+// 文件。判据名/标记都来自注册进来的策略，转发路径原样搬运、不解释。
+func (s *Server) recordShapeEvidence(reqID uint64, binding string, ev *policy.Evidence, base string,
+	inBody, outBody, respBody []byte, reqHdr, respHdr http.Header, routeStr string) {
+	if ev == nil {
+		return
+	}
+	// 这类结局要能一眼 grep 出来。转发路径不认识任何上游专有字符串，也不知道
+	// 这条 400 是哪家的方言——`[shape-400]` 那个字面量与目录前缀由认领它的策略
+	// 给（见 policy.Evidence）。
+	baseName := base
+	if baseName != "" {
+		baseName = filepath.Base(baseName)
+	}
+	s.logf("[%s] %s", ev.Tag, i18n.T("#{req} {binding} request shape rejected (detector {detector}; evidence {base}.*)",
+		i18n.A{"req": reqID, "binding": binding, "detector": ev.Subject, "base": baseName}))
+	if !ev.Archive {
+		return
+	}
+	rdir, shErr := s.saveShapeEvidence(reqID, ev, inBody, outBody, respBody, reqHdr, respHdr, routeStr)
+	if shErr != nil {
+		s.logf("[%s] %s", ev.Tag, i18n.T("#{req} scene NOT saved (check permissions/disk): {err}", i18n.A{"req": reqID, "err": shErr}))
+		return
+	}
+	s.logf("[%s] %s", ev.Tag, i18n.T("#{req} scene archived to {dir}/", i18n.A{"req": reqID, "dir": rdir}))
 }
 
 // shapeDirName 把「标记 + 判据名」压成一个安全的目录名：只留字母数字和
