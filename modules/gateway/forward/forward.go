@@ -851,7 +851,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// 分类器短路成批准。先于构链问：短路成功就没有「链」这回事了。热路径不
 	// 认识具体插件，只负责执行判决、留痕。
 	if resp, pluginName, short := special.Respond(body, req, st); short {
-		s.writeShortCircuit(w, r, reqID, pluginName, resp, special.RespondNote(pluginName, st))
+		s.writeShortCircuit(w, r, reqID, pluginName, resp,
+			special.RespondNote(pluginName, st), active)
 		return
 	}
 
@@ -1850,8 +1851,16 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 // messages JSON），这里补 HTTP 头、打日志、发 metric，让一次「根本没发出去的
 // 上游调用」同样在每一条观测带上留痕——这是「不静默」在短路路径上的落地：
 // 响应看得到，日志看得到，计数器看得到，用户永远知道这一发没走上游。
+//
+// `profile` 是这一发**本来会走**的那份（upstream 已在 /p/<profile> 覆盖之后算好）。
+// 短路发生在构链之前，所以「这一发解析到了哪条链」没有答案；但「调用方问的是哪
+// 份 profile」有——把它回显出来，调用方才能回答「我明明点了 ds，为什么这一发没
+// 有按 ds 走」。2026-09-23 之前这里写死 `n/a`：请求 `/a/claude/p/ds/...` 得回来
+// 一个 `X-Newgate-Profile: n/a`，看着像 profile 丢了，实际是短路本来就不经过链。
+// 回显之后 `n/a` 只留给「连默认 profile 都没有」的装配（骨架发行版没装 config
+// 的链那段时）。
 func (s *Server) writeShortCircuit(w http.ResponseWriter, _ *http.Request,
-	reqID uint64, plugin string, body []byte, note string) {
+	reqID uint64, plugin string, body []byte, note, profile string) {
 	metrics.Default.Inc("special." + plugin + ".shortcircuit")
 	if note == "" {
 		note = i18n.T("request short-circuited by special plugin {plugin} (no upstream call)", i18n.A{"plugin": plugin})
@@ -1860,7 +1869,10 @@ func (s *Server) writeShortCircuit(w http.ResponseWriter, _ *http.Request,
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Newgate-Route", "naked:"+plugin)
 	w.Header().Set("X-Newgate-Chain", plugin)
-	w.Header().Set("X-Newgate-Profile", "n/a")
+	if profile == "" {
+		profile = "n/a"
+	}
+	w.Header().Set("X-Newgate-Profile", profile)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 }
