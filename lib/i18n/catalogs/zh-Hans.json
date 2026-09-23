@@ -1676,6 +1676,10 @@
       "text": "配置读不出来，本次不注入真实模型名与窗口声明（代理仍按档位名路由）: {err}",
       "reviewed": true
     },
+    "cannot read the configuration: {err}": {
+      "text": "读不到配置: {err}",
+      "reviewed": true
+    },
     "cannot read the default profile {name}: {err}": {
       "text": "默认 profile {name} 读不出: {err}",
       "reviewed": true
@@ -2356,6 +2360,10 @@
       "text": "顶层找不到该字段",
       "reviewed": true
     },
+    "no such profile: {name}": {
+      "text": "没有这份 profile: {name}",
+      "reviewed": true
+    },
     "no such profile: {name} (available: {list})": {
       "text": "profile {name} 不存在（可用：{list}）",
       "reviewed": true
@@ -2734,6 +2742,14 @@
     },
     "real {agent}: {path}": {
       "text": "真实 {agent}: {path}",
+      "reviewed": true
+    },
+    "reasoning.effort \"{was}\" → \"{to}\" (this model always thinks and takes low/high/max only)": {
+      "text": "reasoning.effort \"{was}\" → \"{to}\"（这个模型始终思考，只收 low/high/max）",
+      "reviewed": true
+    },
+    "reasoning.effort left unchanged ({err})": {
+      "text": "reasoning.effort 原样不动（{err}）",
       "reviewed": true
     },
     "reasoning_effort not added ({err})": {
@@ -3496,6 +3512,18 @@
       "text": "{concept} 里没有叫 {row} 的行——页面大概是旧的，重新加载一下",
       "reviewed": true
     },
+    "{concept} is a chain card but its data is not a Chains": {
+      "text": "{concept} 宣称是一张链卡，但它的数据不是 Chains",
+      "reviewed": true
+    },
+    "{concept} is a table but its data is not a Table": {
+      "text": "{concept} 宣称是一张表，但它的数据不是 Table",
+      "reviewed": true
+    },
+    "{concept} is a {kind}, whose rows carry no actions (row actions live on tables and chain cards)": {
+      "text": "{concept} 是 {kind} 那一种，它的行上没有动作可挂（行动作属于表格与链卡）",
+      "reviewed": true
+    },
     "{concept}.{action} has nothing to run": {
       "text": "{concept}.{action} 没有可跑的东西",
       "reviewed": true
@@ -3534,6 +3562,10 @@
     },
     "{file} ({err})": {
       "text": "{file}（{err}）",
+      "reviewed": true
+    },
+    "{file} changed on disk after this page read it — reload and try again": {
+      "text": "{file} 在这一页读过之后被改过——刷新页面再试一次",
       "reviewed": true
     },
     "{file} has a begin marker but no end marker; not editing it automatically, please delete the lines after {mark} by hand": {
@@ -3717,6 +3749,10 @@
       "text": "{target}: 学到上游毛病 —— {quirks}",
       "reviewed": true
     },
+    "{tier} in {profile} has no candidate called {target} any more — reload the page and try again": {
+      "text": "{profile} 的 {tier} 档已经没有叫 {target} 的候选了——刷新页面再试一次",
+      "reviewed": true
+    },
     "{tier} was set in the config (the default is {def})": {
       "text": "{tier} 是配置里改的（缺省是 {def}）",
       "reviewed": true
@@ -3767,10 +3803,6 @@
     },
     "● Running": {
       "text": "● 运行中",
-      "reviewed": true
-    },
-    "{concept} is a {kind}, whose rows carry no actions (row actions live on tables and chain cards)": {
-      "text": "{concept} 是 {kind} 那一种，它的行上没有动作可挂（行动作属于表格与链卡）",
       "reviewed": true
     }
   }

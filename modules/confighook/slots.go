@@ -175,10 +175,17 @@ func (o SlotOverrides) Note(name, def string) string {
 // 一个字节都不会生效——那个命令根本不存在。界面据此把整张卡锁灰（见 Concept.Locked），
 // 用户就不会改完才发现白改。
 //
-// 用 a.OnPath() 而不是自己去查 PATH：那是**唯一**一份「装没装」的判据（扣掉我们
-// 自己的 shim 目录，见 OnPath），另写一份就会在两个界面上给出不同答案。
-func NotInstalled(a *Agent) string {
-	if a == nil || a.OnPath() {
+// 判据**由客户端自己交上来**（facts.Installed），没交才回落到 a.OnPath()。2026-09-22
+// 之前这里直接调 a.OnPath()，于是「客户端有自己的知识」这条通道在这张卡上被绕过去了：
+// codex 住在 nvm 的版本 bin 目录里，而 daemon 的 PATH 里没有那个目录，卡片就报了
+// 一句「这台机器上没有装 codex」——**对 daemon 的 PATH 是真话，对这台机器是假话**，
+// 而用户看到的只有后半句。`registry.Installed`（见 module.go）从一开始就是「事实优先」，
+// 这里漏掉那一步是两处判据分了家，症状正是两个界面给出不同答案。
+//
+// 用 a.OnPath() 而不是自己去查 PATH：那是**唯一**一份通用判据（扣掉我们自己的
+// shim 目录，见 OnPath），另写一份就会多出第三种答案。
+func NotInstalled(a *Agent, facts AgentFacts) string {
+	if a == nil || InstalledDefault(a, facts) {
 		return ""
 	}
 	return i18n.T("{agent} is not installed on this machine — nothing on this card takes effect yet. "+

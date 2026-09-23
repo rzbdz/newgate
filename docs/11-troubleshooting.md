@@ -206,3 +206,30 @@ profile 文本猜链。
 
 以 dump 三联文件为唯一报文证据。对比 client-sent 和 we-sent，找到具体 splice；
 再用日志 notes 确认是 schema repair、special treatment 还是 model rewrite。
+
+
+## 9. Codex 显示 `stream disconnected before completion`
+
+先看请求是否走 Responses 方言，以及错误正文是否包含「始终思考，不支持关闭思考；请使用
+low、high 或 max」。Codex 的 `model_reasoning_effort` 在 `~/.codex/config.toml` 中，
+不是 newgate 管理的档位；始终思考的上游使用 `low`、`high` 或 `max`。这里看的是
+`reasoning.effort`，不是旧路径的顶层 `reasoning_effort`，而且嵌套值优先。
+
+Responses 上游在 `stream: true` 时会用 HTTP 200 加 SSE `response.failed` 报这类错误，
+所以客户端把它误写成断流。它不是网络断开。先用 `newgate debug on` 保留三联报文，再
+检查 `client-sent` 里的嵌套对象；`newgate probe <profile>` 可以让网关提前学习模型
+的 quirk。学习发生前的第一次坏请求仍可能失败，重启后缓存不可用时也一样。
+
+## 10. Codex 的工具声明了，但模型说没有工具
+
+Codex 0.155.1 会把工具树放在 `input[]` 的 `additional_tools` 项中，例如其中再包
+一层 `namespace`。这属于 Codex 客户端方言，不是 Responses 上游普遍读取的顶层
+`tools`。DeepSeek、GLM 和 Ark 等上游可能因此返回 HTTP 200 和一段正常文本，却从未
+产生 `tool_result`；这种静默失败比 400 更难定位。
+
+修复的第一步是把工具树拍平抬到顶层 `tools`，但保留原来的 `input[0]` 项：实测上游
+不反对它，删除它没有依据。通用 lift 是 Codex 方言层的动作，应对所有上游生效；
+`codex_deepseek` 另有一条 DeepSeek 专属规则，把 `custom`（除 `apply_patch` 外）降成
+`function`，因为 DeepSeek 对其它 custom 工具返回 400。这两件事不要混为「DeepSeek
+才需要 lift」。看到没有 `tool_result`，先对比 dump 的 client-sent 与 we-sent，确认
+顶层 `tools` 是否出现，再看 `newgate st` 的插件开关和 notes。

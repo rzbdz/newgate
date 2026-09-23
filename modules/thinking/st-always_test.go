@@ -173,6 +173,151 @@ func TestAlwaysThinksApply(t *testing.T) {
 	})
 }
 
+// TestAlwaysThinksResponsesEffort 钉住 Codex（Responses 方言）那条路。
+//
+// 现场（2026-09-22，Codex 0.155.1 → smt-glm/glm-5.3，路径 /a/codex/v1/responses）：
+// 推理强度住在**嵌套的 reasoning 对象**里，不叫顶层 reasoning_effort，于是
+// 2026-09-22 之前本插件一个字节都不动地把它发出去，撞 1210。而症状是
+// **HTTP 200 + 事件流里一条 response.failed**，Codex 显示成
+// 「stream disconnected before completion」——只看状态码的判据在这里全绿。
+//
+// 每一格都是实测出来的（low/high/max → 200，medium/minimal/none → 400，
+// effort 缺席 → 200），所以这里逐格钉住：**收下的值一个字节都不许动**，
+// 不收的才换掉。
+func TestAlwaysThinksResponsesEffort(t *testing.T) {
+	markAlwaysThinks(t, "smt-glm", "glm-5.3")
+	r := req("glm-5.3", "smt-glm", "https://x/v1")
+	r.Path = "/responses"
+
+	apply := func(t *testing.T, body string) (string, []string) {
+		t.Helper()
+		out, notes, err := (alwaysThinks{}).Apply([]byte(body), r)
+		if err != nil {
+			t.Fatalf("Apply 出错: %v", err)
+		}
+		return string(out), notes
+	}
+
+	// 1) 上游不收的值 → 换成 low，并且**说明白**（不静默）。
+	for _, was := range []string{"medium", "minimal", "none"} {
+		t.Run("不收的 "+was+" → low", func(t *testing.T) {
+			body := `{"model":"glm-5.3","reasoning":{"effort":"` + was + `"},"input":[]}`
+			out, notes := apply(t, body)
+			var m map[string]interface{}
+			if err := json.Unmarshal([]byte(out), &m); err != nil {
+				t.Fatalf("改完不是合法 JSON: %v\n%s", err, out)
+			}
+			rz, _ := m["reasoning"].(map[string]interface{})
+			if rz["effort"] != "low" {
+				t.Fatalf("effort 应为 low，实际 %v（%s）", rz["effort"], out)
+			}
+			if len(notes) != 1 || !strings.Contains(notes[0], was) {
+				t.Fatalf("改了就要有一笔带原值的 note，实际 %v", notes)
+			}
+		})
+	}
+
+	// 2) 上游收下的值 → **逐字节不动**。多认一个值（high/max 也收）不是宽容，
+	//    是「不许替用户降档」：只认 low 会把用户明确设的 high 改成 low，那是
+	//    静默改变行为。
+	for _, keep := range []string{"low", "high", "max"} {
+		t.Run("收的 "+keep+" 一个字节都不动", func(t *testing.T) {
+			body := `{"model":"glm-5.3","reasoning":{"effort":"` + keep + `"},"input":[]}`
+			out, notes := apply(t, body)
+			if out != body || len(notes) != 0 {
+				t.Fatalf("收下的值不该被动: out=%s notes=%v", out, notes)
+			}
+		})
+	}
+
+	// 3) 形状不认识就不猜。effort 缺席是**常态**（实测 Codex 只发
+	//    {"summary":"auto"} 时上游 200），动它是无依据的。
+	for _, body := range []string{
+		`{"model":"glm-5.3","reasoning":{"summary":"auto"},"input":[]}`,
+		`{"model":"glm-5.3","reasoning":{},"input":[]}`,
+		`{"model":"glm-5.3","reasoning":{"effort":null},"input":[]}`,
+		`{"model":"glm-5.3","reasoning":{"effort":""},"input":[]}`,
+		`{"model":"glm-5.3","reasoning":"auto","input":[]}`,
+		`{"model":"glm-5.3","input":[]}`,
+	} {
+		t.Run("形状不认识就不动: "+body, func(t *testing.T) {
+			out, notes := apply(t, body)
+			if out != body || len(notes) != 0 {
+				t.Fatalf("不该动: out=%s notes=%v", out, notes)
+			}
+		})
+	}
+
+	// 4) 只动那一个值的字节区间：兄弟键（Codex 会把 summary 放在这儿）与
+	//    body 里其余每一个字节都原样保留——「请求体不做 JSON 往返」在
+	//    这一手上的落点。用一个刻意丑的排版来钉（JSON 往返会把它抹平）。
+	t.Run("兄弟键与其余字节原样保留", func(t *testing.T) {
+		body := `{"model":"glm-5.3","reasoning":{"summary":"auto","effort":"medium","n":1},` +
+			`"input":[{"role":"user","content":"hi"}],"metadata":{"z":1,"a":2}}`
+		out, notes := apply(t, body)
+		want := strings.Replace(body, `"effort":"medium"`, `"effort":"low"`, 1)
+		if out != want {
+			t.Fatalf("只该动 effort 那一段\n got: %s\nwant: %s", out, want)
+		}
+		if len(notes) != 1 {
+			t.Fatalf("要有一笔 note，实际 %v", notes)
+		}
+	})
+
+	// 5) 模型守卫：body 已被切到别的模型时不掺和（quirk 是 glm-5.3 的，
+	//    「glm-5.3 不收 medium」推不出「glm-4.5-air 不收」）。
+	t.Run("body 换成别的模型就不动", func(t *testing.T) {
+		r2 := req("glm-5.3", "smt-glm", "https://x/v1")
+		body := `{"model":"glm-4.5-air","reasoning":{"effort":"medium"},"input":[]}`
+		out, notes, err := (alwaysThinks{}).Apply([]byte(body), r2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(out) != body || len(notes) != 0 {
+			t.Fatalf("换模型之后不该按 glm-5.3 的 quirk 动手: out=%s notes=%v", out, notes)
+		}
+	})
+}
+
+// TestAlwaysThinksMatchFallsBackToProbeCache 钉住 Match 的**第二条**来源。
+//
+// 为什么它是必须的：quirk 表活内存里，进程重启就空了；而 codex 那条路
+// （HTTP 200 + 事件流里的 response.failed）根本走不到 learnQuirks（它只看
+// status>=400）。两条加起来 = 每次换版/重启后的第一发 Codex→GLM 必然 400，
+// 而用户看到的是一句「stream disconnected before completion」。2026-09-22
+// 实测到的正是这个形态。
+//
+// 所以 Match 除了手里那张表，还要问探活落盘的那份缓存（probe-capabilities.json）。
+// 这里把磁盘那一路换成假的——真读盘会依赖开发机上恰好探过什么，那种测试
+// 会因为别人的配置变红或变绿。
+func TestAlwaysThinksMatchFallsBackToProbeCache(t *testing.T) {
+	quirk.Default.Reset()
+	t.Cleanup(quirk.Default.Reset)
+
+	orig := cachedNoThinkingDisable
+	t.Cleanup(func() { cachedNoThinkingDisable = orig })
+
+	// 内存表空、缓存说有 → Match 必须绿。
+	cachedNoThinkingDisable = func(provider, model string) bool {
+		return provider == "smt-glm" && model == "glm-5.3"
+	}
+	r := req("glm-5.3", "smt-glm", "https://x/v1")
+	if !(alwaysThinks{}).Match(r) {
+		t.Fatal("内存表空、缓存有 → 必须匹配（否则重启后第一发必 400）")
+	}
+	if (alwaysThinks{}).Match(req("glm-4.5-air", "smt-glm", "https://x/v1")) {
+		t.Fatal("缓存里没有的模型不该匹配")
+	}
+
+	// 缓存读不出来（文件坏/权限不对）按「不知道」处理：少修一发（上游报错，
+	// 用户看得见原文）好过凭一份读不出来的文件去改请求体。
+	cachedNoThinkingDisable = func(string, string) bool { return false }
+	quirk.Default.Mark("smt-glm", "glm-5.3", quirk.NoThinkingDisable)
+	if !(alwaysThinks{}).Match(r) {
+		t.Fatal("缓存读不出来时，内存表学到的那些仍然要生效")
+	}
+}
+
 // TestAlwaysThinksSkipsRoutedClassifier 回归（2026-09-09 实抓 #12 的路由版）：
 // quirk 学到 glm-5.3 之后，分类器请求必须**整个改道 light 链**——Route
 // 在建链之前决定，forward 的链循环把 body 的 model 换成 light 链头

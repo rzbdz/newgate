@@ -2017,6 +2017,17 @@
         "path"
       ]
     },
+    "reasoning.effort \"{was}\" → \"{to}\" (this model always thinks and takes low/high/max only)": {
+      "args": [
+        "to",
+        "was"
+      ]
+    },
+    "reasoning.effort left unchanged ({err})": {
+      "args": [
+        "err"
+      ]
+    },
     "reasoning_effort not added ({err})": {
       "args": [
         "err"

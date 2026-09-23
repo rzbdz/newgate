@@ -2,6 +2,7 @@ package thinking
 
 import (
 	i18n "github.com/rzbdz/newgate/lib/i18n"
+	"github.com/rzbdz/newgate/modules/gateway/probe"
 	"github.com/rzbdz/newgate/modules/gateway/quirk"
 	"github.com/rzbdz/newgate/modules/gateway/rewrite"
 	"github.com/rzbdz/newgate/modules/gateway/special"
@@ -162,7 +163,44 @@ func (alwaysThinks) Match(r *special.Request) bool {
 	if r == nil {
 		return false
 	}
-	return noThinkingDisable(r, r.Provider, r.Model)
+	return matchTarget(r, r.Provider, r.Model)
+}
+
+// matchTarget 这个 (provider, model) 是不是「不支持关闭思考」——**判据只有这一处**，
+// Match 与 Apply 共用它。两边各写一遍的代价不是重复，是分家：Apply 少判一次的症状
+// 是「补丁打在一个从没表现出这个毛病的模型上」，而那是往用户的请求里加字段。
+//
+// 两个来源，任一命中即可：
+//
+//  1. **学到的那张表**（quirk.Flag）：转发撞一次 400 学会，或者 `newgate probe`
+//     主动探出来。它活**内存**里，进程重启就得重学一次。
+//  2. **探活写下的那份缓存**（probe-capabilities.json）：上面那张表的落盘版。少了
+//     这一条，每次换版/重启之后的第一发 Codex→GLM 请求必然 400（表是空的），而用户
+//     看到的是一句「stream disconnected before completion」——重启后必现、过一会儿
+//     自己好，是最难复现也最难解释的那类故障。2026-09-22 实测到的正是这个形态。
+//
+// 缓存那一路走 quirk.Default 的**只读**加载（`probe.LoadCachedCapabilities` 装的是
+// 同一份 Default，见 forward.Server.Start），而且按需问、不在 Apply 热路径上每次都读
+// 盘：命中表时（学过的那些）根本不碰磁盘。
+func matchTarget(r *special.Request, provider, model string) bool {
+	if noThinkingDisable(r, provider, model) {
+		return true
+	}
+	return cachedNoThinkingDisable(provider, model)
+}
+
+// cachedNoThinkingDisable 读探活缓存里那一位。
+//
+// 读失败（文件还没写、权限不对、内容坏）一律按「不知道」处理——**fail-open 的方向
+// 在这里是「不翻译」**：宁可少修一发（上游报错，用户能看见原文），也不能凭一份读不
+// 出来的文件去改请求体。同一条规矩见 noThinkingDisable 的说明。
+var cachedNoThinkingDisable = func(provider, model string) bool {
+	if err := probe.LoadCachedCapabilities(); err != nil {
+		// 不写日志：这里是热路径上的每次请求，而「缓存读不出来」这件事
+		// 网关启动时已经报过一次（forward.Server.Start 那条 [probe] 行）。
+		return false
+	}
+	return quirk.Default.Has(provider, model, quirk.NoThinkingDisable)
 }
 
 // noThinkingDisable 这个 (provider, model) 是不是「不支持关闭思考」。
@@ -221,5 +259,78 @@ func (alwaysThinks) Apply(body []byte, r *special.Request) ([]byte, []string, er
 		}
 	}
 
+	// Responses 方言（Codex）：推理强度住在**嵌套的 reasoning 对象**里，不叫顶层
+	// reasoning_effort。上面那些份判断在这一路上一条都不成立——2026-09-22 之前
+	// 本插件只看 thinking 与顶层 reasoning_effort，于是 Codex 的请求被一个字节都
+	// 不动地发出去，撞 400。
+	//
+	// 现场（2026-09-22，Codex 0.155.1 → smt-glm/glm-5.3，路径 /a/codex/v1/responses）：
+	//
+	//	reasoning.effort = medium | minimal | none → 400「该模型始终思考，不支持关闭思考；请使用 low、high 或 max。」
+	//	reasoning.effort = low | high | max        → 200
+	//	reasoning 缺席 / {"summary":"auto"} / {} / "effort":null → 200
+	//
+	// 而且**不挂在 tools 上**：不带 tools 的同一份 body 一样 400（实测），所以这
+	// 一条与 needsEffort 那条「带 tools 才有」的形态无关——判据只该是「这个模型
+	// 始终思考」＋「这个值它不收」。
+	//
+	// 症状为什么难查：`stream:true` 时上游把这件事报成 **HTTP 200 + 事件流里一条
+	// `response.failed`**，Codex 那边显示成「stream disconnected before completion:
+	// 该模型始终思考…」——看着像连接断了，其实是请求体里那个值它不收。只看 HTTP
+	// 状态码的判据在这里会全绿。
+	if nb, fixed, ns, err := fixResponsesEffort(out); err != nil {
+		notes = append(notes, i18n.T("reasoning.effort left unchanged ({err})", i18n.A{"err": err}))
+	} else if fixed {
+		out = nb
+		notes = append(notes, ns...)
+	}
+
 	return out, notes, nil
+}
+
+// acceptedEfforts 是「始终思考」的上游**收下**的推理强度。
+//
+// 上游报错原文自己点名了这三个（「请使用 low、high 或 max」），2026-09-22 在
+// Responses 方言上逐格复核过：low / high / max → 200，medium / minimal / none
+// → 400。三个都列上而不是只认 low，是因为这条判据的用途是「**上游不收**才动
+// 它」——只认 low 会把用户明确设的 high/max 也当成要修的，那是替用户降档，属于
+// 静默改变行为，比不修更糟。
+var acceptedEfforts = map[string]bool{"low": true, "high": true, "max": true}
+
+// effortForAlwaysThinks 是修一个「上游不收的值」时换上去的东西：low 最接近
+// 「别想太多」的本意，也是本仓库在 anthropic 方言那条路上一直用的取值
+// （见 noDisableTranslate）。high / max 虽然也收，但那是**替用户加码**——把一个
+// 它不认识的档位往「想得更多」的方向猜，代价是用户的钱和等待。
+const effortForAlwaysThinks = "low"
+
+// fixResponsesEffort 修 Responses 方言里那个「上游不收的」思考强度。
+//
+// 只动**一个值**的字节区间：reasoning.effort。同一个对象里别的东西（Codex 会把
+// summary 放在这儿）、以及 body 里其余每一个字节都原样保留——「请求体不做 JSON
+// 往返」那条规矩在这一手上的落点。
+//
+// 判据是**收不收**（acceptedEfforts），不是「像不像 low」：认得的值一个字节都不
+// 动。形状不认识（reasoning 不是对象、effort 不是字符串、effort 缺席）一律不改
+// 并返回 fixed=false——宁可让上游按原样报错，也不猜着改。effort 缺席是常态
+// （实测 Codex 只发 `{"summary":"auto"}` 时上游 200），动它是无依据的。
+func fixResponsesEffort(body []byte) (out []byte, fixed bool, notes []string, err error) {
+	raw, has := rewrite.TopLevelRaw(body, "reasoning")
+	if !has {
+		return body, false, nil, nil
+	}
+	eff, ok := rewrite.TopLevelString(raw, "effort")
+	if !ok || eff == "" || acceptedEfforts[eff] {
+		return body, false, nil, nil
+	}
+	inner, rerr := rewrite.ReplaceTopLevelString(raw, "effort", effortForAlwaysThinks)
+	if rerr != nil {
+		return body, false, nil, rerr
+	}
+	nb, rerr := rewrite.ReplaceTopLevelRaw(body, "reasoning", inner)
+	if rerr != nil {
+		return body, false, nil, rerr
+	}
+	return nb, true, []string{i18n.T(
+		`reasoning.effort "{was}" → "{to}" (this model always thinks and takes low/high/max only)`,
+		i18n.A{"was": eff, "to": effortForAlwaysThinks})}, nil
 }

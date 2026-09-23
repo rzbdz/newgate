@@ -425,6 +425,42 @@ id 不会拆开发，所以「全部自产 ⇒ 能过」在实测里成立；但
 字节不动、开关点真的停手）。它不模拟聚合器那份记忆，所以上游的 200/400 由本文
 两张表的实测数据背书，不由那条脚本断言。
 
+
+## 2f. Codex Responses 的嵌套 `reasoning.effort`（2026-09-22）
+
+前面的 `reasoning_effort` 是 messages/OpenAI 旧路径的**顶层**字段。Codex 0.155.1
+走 Responses 方言时，客户端自己的设置 `model_reasoning_effort`（位于
+`~/.codex/config.toml`）会变成顶层 `reasoning` 对象里的 `effort`。这两种字段不能
+混为一谈：嵌套值优先，body 同时带顶层 `reasoning_effort` 和坏的嵌套值时，仍按嵌套值
+判定并返回 400。
+
+真实上游 `smt-glm/glm-5.3` 的测量（2026-09-22，Responses `/v1/responses`，每格
+3/3）如下：
+
+| `reasoning` 形状 | `effort` | 结果 |
+| --- | --- | --- |
+| 对象 | `low` / `high` / `max` | **200** |
+| 对象 | `medium` / `minimal` / `none` | **400**，始终思考，不支持关闭思考 |
+| 缺席、`{"summary":"auto"}`、`{}`、`"effort":null` | 无可用值 | **200** |
+
+这个 Responses 规则**不以 tools 为条件**：带 tools 和不带 tools 都一样。不要把它和
+较早的 Anthropic/聚合器故事（「带 tools、没有显式顶层强度」）推广成所有方言的
+判据。
+
+`always-thinks` 只在 quirk 表已经标记该 `(provider, model)` 时改写，把被拒的
+`reasoning.effort` 改成 `low`；对象里的 `summary` 和其余字节保持不动，并在 notes
+中报告改写。客户端自己的 `model_reasoning_effort` 属于「档位之外的旋钮」，Codex
+接管目前不管理它；给始终思考的上游时把它设成 `low`、`high` 或 `max`，通常设
+`low` 最接近「少想一点」的原意。
+
+quirk 是从 4xx（或 `newgate probe`）学来的，探活结果还会进能力缓存。因此 daemon
+刚重启、缓存缺失或首次遇到新模型时，**第一发坏值仍可能先撞 400**；随后才会知道该
+模型始终思考并改写。若请求使用 `stream: true`，上游可能以 HTTP 200 发回一条
+SSE `response.failed`，Codex 会把它显示成
+`stream disconnected before completion: …`。这不是连接故障，而是请求里的
+nested effort 被拒绝。
+
+
 ## 3. 冷层
 
 内存 cache 支持快速查找，`thinkcache.bin` 保存重启后的冷层。冷层损坏时必须报告，
