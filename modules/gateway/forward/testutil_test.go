@@ -54,8 +54,32 @@ func newTestServer() *Server {
 // newLoggingTestServer 同 newTestServer，但把代理日志收进返回的 buffer——
 // 「不静默是硬要求」那一类断言（改写了什么、判据是谁认的、证据存哪了）只能
 // 在日志上验，不能只看响应和状态。
-func newLoggingTestServer() (*Server, *bytes.Buffer) {
-	buf := &bytes.Buffer{}
+//
+// 返回的是**带锁的** buffer，不是 bytes.Buffer：日志由 HTTP handler 那个
+// goroutine 写，断言由测试 goroutine 读，而「响应体读完」不等于 handler 已经
+// 退出——它后面还要打收尾那几行（stream ended normally 之类）。裸 bytes.Buffer
+// 在这里是一场必然会撞上的数据竞争（2026-09-23 `go test -race ./...` 实测：
+// `bytes.(*Buffer).String()` 撞 `log.(*Logger).output()`），而它红得还很有迷惑性
+// ——报的是**某一个**用到了新日志行的测试，看着像那行日志有问题。
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func newLoggingTestServer() (*Server, *syncBuffer) {
+	buf := &syncBuffer{}
 	s := newTestServer()
 	s.Logger = log.New(buf, "", 0)
 	return s, buf
