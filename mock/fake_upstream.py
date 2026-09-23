@@ -159,8 +159,8 @@ class Handler(BaseHTTPRequestHandler):
         pass  # 安静
 
     # ---------- helpers ----------
-    def _json(self, code, obj):
-        body = json.dumps(obj).encode()
+    def _json(self, code, obj, ensure_ascii=True):
+        body = json.dumps(obj, ensure_ascii=ensure_ascii).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -244,15 +244,22 @@ class Handler(BaseHTTPRequestHandler):
                                                   "code": "invalid_request_error"}})
             if responses_effort_violation(body):
                 print(f"[upstream] EFFORT 400: {u.path}", flush=True)
+                # 信封照实测复刻：同一个上游的不同节点给过两种（一个 `code` 是
+                # "invalid_request_error"、话是一句；另一个 `code` 是 "400001"、
+                # 话外面裹着 "The request is invalid: …. Please check …"）。
+                # **话里的判据一字不改**——newgate 的签名匹配 `bytes.Contains`
+                # 那句话，改了信封不会让 e2e 变绿（判据不在信封上），但改了话就会。
+                # 现场：dump/err-400-req000870.meta.txt（route normal ->
+                # smt-glm/glm-5.3，codex_cli_rs/0.155.1）。
                 err = {"error": {"message": RESPONSES_REASONING_EFFORT_ERR,
                                  "type": "invalid_request_error",
-                                 "code": "invalid_request_error"}}
+                                 "param": "", "code": "400001"}}
                 if body.get("stream"):
                     # 流式那一支**先 200 开流**，再把失败塞进事件流——真实上游就是
                     # 这样，客户端报的那句「stream disconnected before completion」
                     # 正是从这里来的。走 HTTP 状态码是错形状（见上面那段实测）。
                     return self._responses_failed(model, body, err["error"]["message"])
-                return self._json(400, err)
+                return self._json(400, err, ensure_ascii=False)
             if body.get("stream"):
                 return self._responses_stream(model, body, slow=bool(body.get("mock_slow")))
             return self._json(200, self._responses_body(model, body))

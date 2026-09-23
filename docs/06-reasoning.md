@@ -460,6 +460,31 @@ SSE `response.failed`，Codex 会把它显示成
 `stream disconnected before completion: …`。这不是连接故障，而是请求里的
 nested effort 被拒绝。
 
+## 2g. Thinkcache 观测 Responses 方言（2026-09-23）
+
+Codex 那一整条路走 `/v1/responses`，而上面 §2 那两段判据当初只写了另两种方言。
+三个症状一个根：**这条线上的请求与响应，我们的观测器一个都要不认**。
+
+**一、增量的形状。** `sseChunk` 把 `delta` 声明成对象，而 Responses 的推理增量是
+`{"type":"response.reasoning_text.delta","delta":"…"}`——`delta` 是个**裸字符串**。
+于是那个流的每一个 chunk 反序列化都整块失败、被计进 badChunks 丢掉：一轮 Codex
+下来一个推理字节都没记下，而日志上它和「上游真没给推理」长得一模一样（Wire 那行
+只会报一堆坏块）。现在 `delta` 是 `json.RawMessage`，各方言各自解自己的形状。
+
+**二、「未闭合的 tool loop」在 responses 里不算数。** `ContinuationOrigin` 只认
+Anthropic 的 `content[]` 与 OpenAI 尾部连续的 `role:"tool"`；Responses 把对话挂在
+顶层 `input[]`、**根本没有 `messages`**。于是一个 Codex 的 tool loop 在这条判据眼里
+压根不算工具循环——那一轮 tool call 是哪家产的**从来没被记过**，`forward` 也就不
+会去调 `special.RebaseToolLoop`，中途切到 DeepSeek 的那一发带着别家产的 tool 状态
+直接上去，上游 400（§4）。补的那一支与 OpenAI 那支同形：从 `input[]` 末尾往回走
+连续的 `function_call_output`，中间夹了别的项就说明这一轮已经闭合。
+
+**三、同一段推理来两遍。** 这条线上推理文本有两条来路——增量事件，以及
+`output_item.done` 里那份**完整**原文。两条都收，下一轮补回去的就是重复内容，而上游
+要的是逐字原文。所以按 item id 记「这个 item 吐过增量没有」：吐过就以增量为准。
+`response.completed` 里那份 `response.output` 只在**整条流一个推理字节都没收到**时
+兜底。`summary_text` 有意不认——它是给人看的摘要，不是上游要求回传的那份原文
+（§2d「不编」）。
 
 ## 3. 冷层
 
