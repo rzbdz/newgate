@@ -178,6 +178,36 @@ func TestContinuationOriginOnlyWhileToolLoopIsOpen(t *testing.T) {
 	if _, ok := c.ContinuationOrigin(newTurn); ok {
 		t.Fatal("普通 user 新回合不该继续锁定旧 provider")
 	}
+
+	// Responses 方言（Codex 走的那条）：对话在顶层 input[]，工具输出是
+	// function_call_output 项。少了这一支的话，Codex 的 tool loop 在这条判据
+	// 眼里根本不算未闭合——跨上游迁移永远不触发，而 DeepSeek 接手别家未闭合的
+	// reasoning/tool 状态是要 400 的。
+	responses := []byte(`{"model":"normal","input":[
+			{"type":"function_call","call_id":"call_b","name":"exec","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_b","output":"ok"}
+		]}`)
+	if got, ok := c.ContinuationOrigin(responses); !ok || got != origin {
+		t.Fatalf("Responses tool loop 来源错误: ok=%v got=%+v", ok, got)
+	}
+
+	// 并行调用：末尾连着两条输出，两条都算这一轮。
+	parallel := []byte(`{"input":[
+			{"type":"function_call_output","call_id":"call_a","output":"1"},
+			{"type":"function_call_output","call_id":"call_b","output":"2"}
+		]}`)
+	if _, ok := c.ContinuationOrigin(parallel); !ok {
+		t.Fatal("连着两条 function_call_output 仍是未闭合的一轮")
+	}
+
+	// 尾部已经不是 function_call_output → 这一轮闭合了（客户端在等新指令）。
+	responsesClosed := []byte(`{"input":[
+			{"type":"function_call_output","call_id":"call_b","output":"ok"},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"接着做"}]}
+		]}`)
+	if _, ok := c.ContinuationOrigin(responsesClosed); ok {
+		t.Fatal("尾部是普通消息时不该继续锁定旧 provider")
+	}
 }
 
 // 非流式响应也要能观测到。
@@ -191,5 +221,79 @@ func TestObserveBody(t *testing.T) {
 	}
 	if k := o.Keys(); len(k) == 0 || k[0] != ToolKey("call_z") {
 		t.Fatalf("key 不对: %v", k)
+	}
+}
+
+// Responses 方言（Codex 走的那条）也要能被观测到。
+//
+// 这条链上曾经有一处静默的断点（2026-09-23）：sseChunk 的 `delta` 声明成了对象，
+// 而 `response.reasoning_text.delta` 的 delta 是**字符串**——每一个推理增量事件都
+// 让整个 chunk 反序列化失败，于是 Codex 那一路一个推理字节都记不下。它的表现与
+// 「上游真没给推理」完全一样（推理 0 字节），只有 Wire 那行的坏块计数能分辨。
+//
+// 顺带钉住去重：同一段推理在增量事件与 output_item.done 里各出现一次，收两遍
+// 下一轮补回去的就是重复内容。
+func TestObserverResponsesDialect(t *testing.T) {
+	stream := `event: response.created` + "\n" + `data: {"type":"response.created"}` + "\n\n" +
+		`event: response.output_item.added` + "\n" +
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}` + "\n\n" +
+		`event: response.reasoning_text.delta` + "\n" +
+		`data: {"type":"response.reasoning_text.delta","output_index":0,"item_id":"rs_1","delta":"先看 \"main.go\"\n"}` + "\n\n" +
+		`event: response.reasoning_text.delta` + "\n" +
+		`data: {"type":"response.reasoning_text.delta","output_index":0,"item_id":"rs_1","delta":"再看 src\\a"}` + "\n\n" +
+		// 收尾那条带着**同一份**完整原文：不能重复计入。
+		`event: response.output_item.done` + "\n" +
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","content":[{"type":"reasoning_text","text":"先看 \"main.go\"\n再看 src\\a"}]}}` + "\n\n" +
+		`event: response.output_item.done` + "\n" +
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"item_1","call_id":"call_00_abc","name":"exec","arguments":"{}"}}` + "\n\n"
+
+	o := NewObserver()
+	// 分块喂：事件边界与读边界无关这条约束对方言一视同仁。
+	for i := 0; i < len(stream); i += 7 {
+		j := i + 7
+		if j > len(stream) {
+			j = len(stream)
+		}
+		o.Write([]byte(stream[i:j]))
+	}
+	if o.badChunks != 0 {
+		t.Fatalf("有 %d 个块解析不了——delta 又被声明成了对象？", o.badChunks)
+	}
+	if got := o.Reasoning(); got != reasoning {
+		t.Fatalf("推理内容不对（重复计入或漏收）\n want %q\n got  %q", reasoning, got)
+	}
+	keys := o.Keys()
+	if len(keys) == 0 || keys[0] != ToolKey("call_00_abc") {
+		t.Fatalf("key 该挂在 call_id 上（不是 item id）：%v", keys)
+	}
+	if !strings.Contains(o.Wire(), "responses") {
+		t.Fatalf("Wire 该认出这是 responses 方言: %s", o.Wire())
+	}
+}
+
+// 非流式的 Responses 响应（一个 response 对象，与流式收尾同形状）。
+func TestObserveResponsesBody(t *testing.T) {
+	o := NewObserver()
+	o.ObserveBody([]byte(`{"id":"resp_1","object":"response","output":[` +
+		`{"type":"reasoning","id":"rs_1","content":[{"type":"reasoning_text","text":"先看 \"main.go\"\n再看 src\\a"}]},` +
+		`{"type":"function_call","id":"item_1","call_id":"call_00_abc","name":"exec","arguments":"{}"}]}`))
+	if got := o.Reasoning(); got != reasoning {
+		t.Fatalf("want %q got %q", reasoning, got)
+	}
+	if k := o.Keys(); len(k) == 0 || k[0] != ToolKey("call_00_abc") {
+		t.Fatalf("key 不对: %v", k)
+	}
+}
+
+// Responses 的 summary 不是「要求回传的那份原文」，一个字节都不该收。
+//
+// 现场：上游的 reasoning 项同时带 content[]（原文）与 summary[]（给人看的摘要）。
+// 拿摘要当原文补回去就是编内容——正是 st-reasoning.go 那条「不编」要防的事。
+func TestObserverResponsesIgnoresSummary(t *testing.T) {
+	o := NewObserver()
+	o.ObserveBody([]byte(`{"output":[{"type":"reasoning","id":"rs_1",` +
+		`"summary":[{"type":"summary_text","text":"一段摘要"}],"content":[]}]}`))
+	if got := o.Reasoning(); got != "" {
+		t.Fatalf("summary 不该被当成推理原文，实际收了 %q", got)
 	}
 }

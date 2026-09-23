@@ -114,9 +114,21 @@ func (c *Cache) Lookup(item []byte) ([]byte, bool) {
 // 的产生上游。只看请求尾部：普通 user 新回合即使历史里有 tool calls，也不应
 // 被永久粘住。
 //
-// 两种方言：
+// 三种方言：
 //   - Anthropic：最后一条 user.content[] 含 tool_result
 //   - OpenAI：请求末尾连续的 role=tool 消息
+//   - Responses（Codex 走的那条）：顶层 input[] 末尾连续的 function_call_output
+//
+// 为什么 Responses 那一支必须补上（2026-09-23）：少了它，Codex 的 tool loop
+// 在这条判据眼里**根本不算未闭合**——于是「这一轮的 tool call 是哪家产的」
+// 无处可查，跨上游迁移（special.RebaseToolLoop）永远不被触发，而 DeepSeek
+// 接手别家未闭合的 reasoning/tool 状态是要 400 的（见 modules/deepseek/
+// st-reasoning.go 的 A/B 实测）。症状与「补丁没生效」一样，但根因在观测侧：
+// 请求里那个 call_id 我们从来没记过出身。
+//
+// 形状以真实流量为准（dump/err-429-req001474.client-sent.json，2026-09-23）：
+// 顶层 input[] 里每一项都是 `{"type":"message"|"function_call"|"function_call_output", …}`，
+// 工具输出那一项带 `call_id`。
 func (c *Cache) ContinuationOrigin(body []byte) (Origin, bool) {
 	var req struct {
 		Messages []struct {
@@ -124,35 +136,57 @@ func (c *Cache) ContinuationOrigin(body []byte) (Origin, bool) {
 			Content    json.RawMessage `json:"content"`
 			ToolCallID string          `json:"tool_call_id"`
 		} `json:"messages"`
+		// Responses 方言：对话在顶层 input[]，没有 messages。
+		Input []struct {
+			Type   string `json:"type"`
+			CallID string `json:"call_id"`
+		} `json:"input"`
 	}
-	if json.Unmarshal(body, &req) != nil || len(req.Messages) == 0 {
+	if json.Unmarshal(body, &req) != nil {
 		return Origin{}, false
 	}
 
 	var ids []string
-	last := req.Messages[len(req.Messages)-1]
-	switch last.Role {
-	case "tool": // OpenAI 方言；一次并行调用可能有多条连续 tool 消息
-		for i := len(req.Messages) - 1; i >= 0 && req.Messages[i].Role == "tool"; i-- {
-			if id := req.Messages[i].ToolCallID; id != "" {
+	switch {
+	case len(req.Messages) > 0:
+		last := req.Messages[len(req.Messages)-1]
+		switch last.Role {
+		case "tool": // OpenAI 方言；一次并行调用可能有多条连续 tool 消息
+			for i := len(req.Messages) - 1; i >= 0 && req.Messages[i].Role == "tool"; i-- {
+				if id := req.Messages[i].ToolCallID; id != "" {
+					ids = append(ids, id)
+				}
+			}
+		case "user": // Anthropic 方言；多个 tool_result 在同一个 content[] 里
+			if len(last.Content) == 0 || last.Content[0] != '[' {
+				return Origin{}, false
+			}
+			var blocks []struct {
+				Type      string `json:"type"`
+				ToolUseID string `json:"tool_use_id"`
+			}
+			if json.Unmarshal(last.Content, &blocks) != nil {
+				return Origin{}, false
+			}
+			for _, b := range blocks {
+				if b.Type == "tool_result" && b.ToolUseID != "" {
+					ids = append(ids, b.ToolUseID)
+				}
+			}
+		default:
+			return Origin{}, false
+		}
+	case len(req.Input) > 0:
+		// Responses 方言：末尾连续的 function_call_output。与 OpenAI 那一支同形
+		// ——一次并行调用会有连续几条，而中间夹一条别的（user 消息、function_call）
+		// 就说明这一轮已经闭合（客户端在等新指令，不是在等工具结果）。
+		for i := len(req.Input) - 1; i >= 0 && req.Input[i].Type == "function_call_output"; i-- {
+			if id := req.Input[i].CallID; id != "" {
 				ids = append(ids, id)
 			}
 		}
-	case "user": // Anthropic 方言；多个 tool_result 在同一个 content[] 里
-		if len(last.Content) == 0 || last.Content[0] != '[' {
+		if len(ids) == 0 {
 			return Origin{}, false
-		}
-		var blocks []struct {
-			Type      string `json:"type"`
-			ToolUseID string `json:"tool_use_id"`
-		}
-		if json.Unmarshal(last.Content, &blocks) != nil {
-			return Origin{}, false
-		}
-		for _, b := range blocks {
-			if b.Type == "tool_result" && b.ToolUseID != "" {
-				ids = append(ids, b.ToolUseID)
-			}
 		}
 	default:
 		return Origin{}, false

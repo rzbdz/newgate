@@ -8,6 +8,7 @@
 路由：
   POST /v1/chat/completions   openai 方言（支持 stream）
   POST /v1/messages           anthropic 方言（支持 stream）
+  POST /v1/responses          responses 方言（codex 走的那条，支持 stream）
   GET  /__mock/requests       返回收到的全部请求（JSON）
   POST /__mock/reset          清空记录
   GET  /__mock/fail?code=429  下一个请求返回该状态码
@@ -112,6 +113,45 @@ def responses_custom_violation(body):
     return None
 
 
+# OpenAI Responses 的 `reasoning.effort` 白名单：这一家**始终思考**，只收这三档。
+#
+# 现场（2026-09-22，打真实 smt-glm/glm-5.3，`POST /v1/responses` 逐格实测）：
+#
+#   effort = low | high | max      → 200
+#   effort = medium | minimal | none → 400「该模型始终思考，不支持关闭思考；
+#                                      请使用 low、high 或 max。」
+#   reasoning 字段缺席 / {} / {"effort": null} / {"summary":"auto"} → 200
+#
+# 另外两条实测到的形状（假上游**必须**照做，否则 e2e 会锁在错的形状上）：
+#   * 嵌套优先：`reasoning.effort` 压过顶层的 `effort`，两者都看顶层是错的；
+#   * 只在 `stream=true` 时，这条 400 **不走 HTTP 状态码**——先 200 开流，再把
+#     失败塞进流里（`response.failed`），客户端看到的原话是
+#     「stream disconnected before completion」，即用户报的那句。
+#
+# 报错原文一字不改：它是 newgate 那个补丁的**匹配判据**之一，也是这条 e2e 断言
+# 「上游真的会这么拒」的证据。翻译或改写它等于把判据换掉。
+RESPONSES_REASONING_EFFORT_ERR = (
+    "该模型始终思考，不支持关闭思考；请使用 low、high 或 max。")
+RESPONSES_ACCEPTED_EFFORTS = ("low", "high", "max")
+
+
+def responses_effort_violation(body):
+    """这个 reasoning.effort 会被上游 400 吗？是则返回 True。
+
+    只看**嵌套**那一层（`reasoning.effort`）——顶层 `effort` 不是这一家的读取位置，
+    把它当判据会造出一个真实上游不存在的 400。
+    """
+    if not isinstance(body, dict):
+        return False
+    reasoning = body.get("reasoning")
+    if not isinstance(reasoning, dict):
+        return False
+    effort = reasoning.get("effort")
+    if effort is None:  # 字段在但值是 null：实测 200（不思考的诉求落空了，但不报错）
+        return False
+    return effort not in RESPONSES_ACCEPTED_EFFORTS
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -202,6 +242,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": {"message": message,
                                                   "type": "invalid_request_error",
                                                   "code": "invalid_request_error"}})
+            if responses_effort_violation(body):
+                print(f"[upstream] EFFORT 400: {u.path}", flush=True)
+                err = {"error": {"message": RESPONSES_REASONING_EFFORT_ERR,
+                                 "type": "invalid_request_error",
+                                 "code": "invalid_request_error"}}
+                if body.get("stream"):
+                    # 流式那一支**先 200 开流**，再把失败塞进事件流——真实上游就是
+                    # 这样，客户端报的那句「stream disconnected before completion」
+                    # 正是从这里来的。走 HTTP 状态码是错形状（见上面那段实测）。
+                    return self._responses_failed(model, body, err["error"]["message"])
+                return self._json(400, err)
             if body.get("stream"):
                 return self._responses_stream(model, body, slow=bool(body.get("mock_slow")))
             return self._json(200, self._responses_body(model, body))
@@ -360,6 +411,34 @@ class Handler(BaseHTTPRequestHandler):
                 "summary": [], "encrypted_content": "mock-encrypted",
                 "content": [{"type": "reasoning_text",
                              "text": "MOCK-REASONING-ORIGINAL"}]}
+
+    def _responses_failed(self, model, body, message):
+        """**流式**的拒绝：先 200 开流，再把失败塞进事件流。
+
+        这是 responses 这条路上最坑的形状，也是这条 e2e 非要有它不可的理由：按
+        HTTP 状态码写的探针/补丁在流式路径上**完全看不到**这个失败（状态码是
+        200，连接也是正常建起来的），客户端看到的只是一句
+        「stream disconnected before completion」——用户 2026-09-22 报的就是这句。
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def send(ev):
+            self.wfile.write(
+                f"event: {ev['type']}\ndata: {json.dumps(ev)}\n\n".encode())
+            self.wfile.flush()
+
+        send({"type": "response.created",
+              "response": {"id": "resp_mock", "object": "response",
+                           "status": "in_progress", "model": model, "output": []}})
+        send({"type": "response.failed",
+              "response": {"id": "resp_mock", "object": "response",
+                           "status": "failed", "model": model, "output": [],
+                           "error": {"code": "invalid_request_error",
+                                     "message": message}}})
 
     def _responses_stream(self, model, body, slow=False):
         delay = 0.5 if slow else 0.05

@@ -26,6 +26,10 @@ type Observer struct {
 	text    bytes.Buffer // 累积的正文（纯文本轮的 key 靠它）
 	toolIDs []string
 	seenID  map[string]bool
+	// responsesDeltaItem 记「这个 Responses 推理项已经吐过增量了」。见
+	// feedResponses 的说明：增量与 output_item.done 里那份完整原文是同内容，
+	// 两条都收会让下一轮补回去的推理翻倍。
+	responsesDeltaItem map[string]bool
 
 	// ---- 计数（2026-09-18 加，只为日志取证）----
 	//
@@ -39,10 +43,11 @@ type Observer struct {
 	textDeltas   int
 	sawOpenAI    bool
 	sawAnthropic bool
+	sawResponses bool
 }
 
 func NewObserver() *Observer {
-	return &Observer{seenID: map[string]bool{}}
+	return &Observer{seenID: map[string]bool{}, responsesDeltaItem: map[string]bool{}}
 }
 
 // Write 喂原始响应字节。调用方可以任意分块——SSE 的事件边界由这里自己找。
@@ -88,8 +93,15 @@ func (o *Observer) feedEvent(event []byte) {
 	}
 }
 
-// sseChunk 同时容纳两种方言。用 json.Unmarshal 是安全的：这里只读、不回写，
+// sseChunk 同时容纳**三种**方言。用 json.Unmarshal 是安全的：这里只读、不回写，
 // 不存在「往返把请求改坏」的问题（那条规矩管的是转发的字节）。
+//
+// `Delta` 必须是 RawMessage，不能声明成对象：三种方言里它有两种形状——OpenAI 与
+// Anthropic 是对象，Responses（`response.reasoning_text.delta`）是**字符串**。
+// 写成对象的话，Responses 的每一个增量事件都会让**整个 chunk** 反序列化失败
+// （badChunks++ 然后整块丢掉），症状是 Codex 那一路一个推理字节都观测不到——
+// 而日志上它看起来与「上游真没给推理」一模一样（Wire 那行只会报一堆坏块）。
+// 现场：2026-09-23，Codex 走 /responses 时 thinkcache 一条都记不下。
 type sseChunk struct {
 	// OpenAI 方言
 	Choices []struct {
@@ -103,19 +115,74 @@ type sseChunk struct {
 		} `json:"delta"`
 	} `json:"choices"`
 
-	// Anthropic 方言
-	Type  string `json:"type"`
-	Delta struct {
-		Type     string `json:"type"`
-		Text     string `json:"text"`
-		Thinking string `json:"thinking"`
-	} `json:"delta"`
+	// Anthropic 与 Responses 共用：类型名都在顶层。
+	Type string `json:"type"`
+
+	// Anthropic 方言：delta 是对象
+	Delta json.RawMessage `json:"delta"`
+
 	ContentBlock struct {
 		Type     string `json:"type"`
 		ID       string `json:"id"`
 		Thinking string `json:"thinking"`
 		Text     string `json:"text"`
 	} `json:"content_block"`
+
+	// Responses 方言：增量事件用 item_id 指认自己属于哪个推理项（`id` 是 item
+	// 身份，`output_index` 只是位置——改写器按后者记账，观测按前者去重）。
+	ItemID string `json:"item_id"`
+
+	// Responses 方言：output_item.added / .done 带一个 item。
+	Item responsesItem `json:"item"`
+
+	// Responses 方言：收尾的 response.completed 带着整份 response 对象
+	// （非流式那条路走的是同一个形状，见 ObserveBody）。
+	Response responsesBody `json:"response"`
+}
+
+// responsesItem 是 Responses 的一个 output 项。
+//
+// `id` 与 `call_id` 是两个不同的东西：前者是 item 身份（推理项的 id 长这样），
+// 后者是**工具调用**的 id——也就是客户端下一轮会放进 function_call_output 的
+// 那个值，是 thinkcache 挂 key / 记出身的键。
+type responsesItem struct {
+	Type    string `json:"type"`
+	ID      string `json:"id"`
+	CallID  string `json:"call_id"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+// anthropicDelta 是 Anthropic 的 delta 对象。
+type anthropicDelta struct {
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	Thinking string `json:"thinking"`
+}
+
+// responsesBody 是 Responses 的 response 对象（流式收尾与非流式共用形状）。
+type responsesBody struct {
+	Output []responsesItem `json:"output"`
+}
+
+// responsesReasoning 把一个 Responses output 项里的推理原文拼出来。
+//
+// 形状是 `{"type":"reasoning","content":[{"type":"reasoning_text","text":…}]}`。
+// **summary 那一路（`summary_text`）不算**：它是给人看的摘要，不是上游要求回传的
+// 那份原文，拿它补回去就是编内容（见 modules/deepseek/st-reasoning.go 的「不编」）。
+func responsesReasoning(item responsesItem) string {
+	if item.Type != "reasoning" {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range item.Content {
+		if c.Type == "reasoning_text" {
+			b.WriteString(c.Text)
+		}
+	}
+	return b.String()
 }
 
 func (o *Observer) feedChunk(payload []byte) {
@@ -161,13 +228,88 @@ func (o *Observer) feedChunk(payload []byte) {
 		}
 	case "content_block_delta":
 		o.sawAnthropic = true
-		switch c.Delta.Type {
-		case "thinking_delta":
+		var d anthropicDelta
+		if len(c.Delta) > 0 && json.Unmarshal(c.Delta, &d) == nil {
+			switch d.Type {
+			case "thinking_delta":
+				o.reasonDeltas++
+				o.reason.WriteString(d.Thinking)
+			case "text_delta":
+				o.textDeltas++
+				o.text.WriteString(d.Text)
+			}
+		}
+	}
+
+	o.feedResponses(c)
+}
+
+// feedResponses 观测 Responses 方言（Codex 走的那条）的事件。
+//
+// 事件名是 `response.<x>` 三段式，与 Anthropic 的 `content_block_*` 在同一个
+// `type` 字段上不重叠，所以单独一支，不把上面那些 case 撑长。
+//
+// 推理文本有**两条**来路，必须去重：
+//
+//	response.reasoning_text.delta   增量（正常路径）
+//	response.output_item.done       item.content[] 里那份**完整**原文
+//
+// 两条都收就会把同一段推理记两遍，而下一轮补回去的就是重复内容（上游要的是原文，
+// 多一份就变了）。所以按 item id 记「这个 item 吐过增量没有」：吐过就以增量为准，
+// 没吐过才用 done 里那份完整的。`response.completed` 里那份 response.output 只在
+// **整条流一个推理字节都没收到**时兜底——正常流到那儿时早就记完了。
+func (o *Observer) feedResponses(c sseChunk) {
+	if !strings.HasPrefix(c.Type, "response.") {
+		return
+	}
+	o.sawResponses = true
+	switch c.Type {
+	case "response.reasoning_text.delta":
+		var s string
+		if len(c.Delta) > 0 && json.Unmarshal(c.Delta, &s) == nil && s != "" {
 			o.reasonDeltas++
-			o.reason.WriteString(c.Delta.Thinking)
-		case "text_delta":
+			if c.ItemID != "" {
+				o.responsesDeltaItem[c.ItemID] = true
+			}
+			o.reason.WriteString(s)
+		}
+	case "response.output_text.delta":
+		var s string
+		if len(c.Delta) > 0 && json.Unmarshal(c.Delta, &s) == nil && s != "" {
 			o.textDeltas++
-			o.text.WriteString(c.Delta.Text)
+			o.text.WriteString(s)
+		}
+	case "response.output_item.added", "response.output_item.done":
+		if c.Item.Type == "function_call" && c.Item.CallID != "" {
+			o.addTool(c.Item.CallID)
+		}
+		if c.Item.Type == "reasoning" && !o.responsesDeltaItem[c.Item.ID] {
+			if s := responsesReasoning(c.Item); s != "" {
+				o.reasonDeltas++
+				o.reason.WriteString(s)
+			}
+		}
+	case "response.completed":
+		if o.reason.Len() == 0 {
+			o.absorbResponsesBody(c.Response)
+		}
+		for _, item := range c.Response.Output {
+			if item.Type == "function_call" && item.CallID != "" {
+				o.addTool(item.CallID)
+			}
+		}
+	}
+}
+
+// absorbResponsesBody 把一份 Responses response 对象里的推理与工具调用吸收进来。
+func (o *Observer) absorbResponsesBody(r responsesBody) {
+	for _, item := range r.Output {
+		if s := responsesReasoning(item); s != "" {
+			o.reasonDeltas++
+			o.reason.WriteString(s)
+		}
+		if item.Type == "function_call" && item.CallID != "" {
+			o.addTool(item.CallID)
 		}
 	}
 }
@@ -201,6 +343,8 @@ func (o *Observer) ObserveBody(body []byte) {
 			Thinking string `json:"thinking"`
 			ID       string `json:"id"`
 		} `json:"content"`
+		// Responses（非流式那份就是一个 response 对象，与流式收尾同一形状）
+		Output []responsesItem `json:"output"`
 	}
 	if json.Unmarshal(body, &r) != nil {
 		return
@@ -227,6 +371,10 @@ func (o *Observer) ObserveBody(body []byte) {
 			o.addTool(b.ID)
 		}
 	}
+	if len(r.Output) > 0 {
+		o.sawResponses = true
+		o.absorbResponsesBody(responsesBody{Output: r.Output})
+	}
 }
 
 // Wire 汇报这条响应**线路层**看到了什么，供日志取证。
@@ -250,6 +398,8 @@ func (o *Observer) Wire() string {
 		dialect = "anthropic"
 	case o.sawOpenAI:
 		dialect = "openai"
+	case o.sawResponses:
+		dialect = "responses"
 	}
 	if o.badChunks > 0 {
 		return i18n.T("{dialect} {chunks} chunks / {reasoning} reasoning deltas / {text} text deltas / **{bad} chunks unparsable**",
