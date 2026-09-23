@@ -3372,6 +3372,10 @@
       "text": "未评分",
       "reviewed": true
     },
+    "upstream quirks learned from traffic could not be saved; the next restart relearns them: {err}": {
+      "text": "转发路上学到的上游毛病存不下来；下次重启会重新学一遍：{err}",
+      "reviewed": true
+    },
     "upstream {provider} connect failed: {err}": {
       "text": "上游 {provider} 连接失败: {err}",
       "reviewed": true

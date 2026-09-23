@@ -87,6 +87,16 @@ type Server struct {
 	stopOnce sync.Once
 	stopCh   chan struct{}
 
+	// pendingQuirks 是「转发路上撞出来、还没落盘」的上游毛病（见 probe 包的
+	// PendingQuirks）。字段在 Server 上而不是 probe 包里：落盘的时刻是**停机**
+	// （见 Shutdown），而数据面才是那个知道「这台机器要走了」的人。
+	//
+	// 为什么不是「撞到就立刻落盘」：那是在每一次上游 4xx 上写一次盘，而 4xx
+	// 是热路径上完全正常的一种结局（形状 400、参数错、配额），代价与收益不成
+	// 比例。为什么不是「原样留着不管」：那正是用户 2026-09-22 报的那个必现窗口
+	// ——重启后内存表是空的，第一发 Codex → GLM 重新撞一次 400。
+	pendingQuirks probe.PendingQuirks
+
 	// 优雅交接的排空状态（交接后的**旧**进程用）：
 	//   draining=1 之后，本进程的 pid/lock 已改写到新进程名下——任何
 	//   退出路径都不许再清它们；主循环（Serve 返回处）要等在途请求
@@ -359,6 +369,8 @@ func (s *Server) Shutdown() {
 	// 有账没落盘的策略在这里被叫一次（顺序在关 listener 之前：关掉之后进程
 	// 可能就退了，那笔账就丢了）。落盘失败按「不静默」报出来，但不阻断停机。
 	s.Filters.Flush(s.logf)
+	// 转发路上学到的上游毛病同理（见 flushPendingQuirks）。
+	s.flushPendingQuirks()
 	if s.srv != nil {
 		_ = s.srv.Close()
 	}
@@ -548,6 +560,13 @@ func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logf("[proxy] %s", i18n.T("graceful handoff: socket handed to new process pid {pid}, draining in-flight requests", i18n.A{"pid": info.PID}))
+	// 学到的东西**先落盘再交棒**，顺序不能反：swap 之后这个进程只剩「把在途
+	// 请求流完」这一件事，而此刻它手里那一笔（换版之前那几个小时里撞出来的上游
+	// 毛病）只有它知道——新进程的 Start 已经跑完了，它读盘时看到的是**旧的**
+	// 那一份。落盘放后面的话，这一笔要等到「下一个新进程起来」才生效，也就是
+	// 「换版后的第一发」仍然撞 400——而那正是用户 2026-09-22 报的那一次。
+	// （2026-09-23 实测踩过：先 swap 的版本，B 进程第一发仍是 400。）
+	s.flushPendingQuirks()
 	writeJSON(w, 200, map[string]interface{}{"ok": true, "new_pid": info.PID})
 	// 排空：等在途请求（含 SSE 流）自然结束，上限 10 分钟，然后退。
 	// 两个关键点：
@@ -565,6 +584,10 @@ func (s *Server) handleControlUpgrade(w http.ResponseWriter, r *http.Request) {
 			_ = s.srv.Shutdown(ctx)
 		}
 		s.drainOnce.Do(func() { close(s.drainCh) })
+		// 排空完了才落盘：排空期里在途请求可能又学到新的毛病，而那几发正是
+		// 交接前后最可能撞上的（见 flushPendingQuirks 的说明——换版路径上
+		// 只有这一处会叫它）。
+		s.flushPendingQuirks()
 		s.logf("[proxy] %s", i18n.T("drain complete, exiting (socket continues under pid {pid})", i18n.A{"pid": info.PID}))
 		os.Exit(0)
 	}()
@@ -1413,6 +1436,26 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// flushPendingQuirks 把「转发路上学到、还没落盘」的上游毛病写出去。
+//
+// 这一笔以前只活在内存里，重启就丢，于是「重启后第一发 Codex → GLM」必然重新
+// 撞一次 400——用户 2026-09-22 报的那个「必现、过一会儿自己好」的形态
+// （见 Server.pendingQuirks 与 probe.PendingQuirks）。
+//
+// **两条停机路径都要叫它**，这一点是这个函数单独存在的唯一理由：`Shutdown`
+// （收到信号／控制端点）与**优雅交接**（把 socket 交给新进程）走的是两段代码，
+// 而换版用的正是后者——只补前者的话，「换版之后第一发」这个最常发生的场景
+// 一个字节都没存下来，而这正是用户报的那一次（见 handoff 那段）。
+//
+// 落盘失败只报不改行为：磁盘写不进去时，最坏的情况不过是从前那种「重启后重学
+// 一次」，而不是停机被拦住（fail-open）。
+func (s *Server) flushPendingQuirks() {
+	if err := s.pendingQuirks.Flush(); err != nil {
+		s.logf("[probe] %s", i18n.T("upstream quirks learned from traffic could not be saved; the next restart relearns them: {err}",
+			i18n.A{"err": err}))
+	}
+}
+
 // learnQuirks 从上游的报错里学它的毛病，下次请求自动带上补丁。
 //
 // 只在**新学到**的时候打日志——同一件事每个请求刷一行就没人看了。
@@ -1422,6 +1465,14 @@ func (s *Server) learnQuirks(reqID uint64, provider, model string, status int, b
 	for _, what := range quirk.Default.Learn(provider, model, status, body) {
 		s.logf("[proxy] %s", i18n.T("#{req} learned {provider}/{model} {what} — applied to later requests automatically (turn off with `newgate st`)",
 			i18n.A{"req": reqID, "provider": provider, "model": model, "what": what}))
+		// 学到的东西**同时记进待落盘那一份**：这一笔只活在内存里的话，重启之后
+		// 它会连带这个窗口一起消失（见 Server.pendingQuirks 的说明）。
+		//
+		// 记的是**这一个目标此刻全部已知的毛病位**，不是这一次新学的那一位：
+		// 并集写进缓存，少写一位的症状是重启后多撞一次 400，而那是可恢复的
+		// （见 probe.MergeQuirks）。
+		s.pendingQuirks.Record(probe.Target{Provider: provider, Model: model},
+			probe.QuirksOf(probe.Target{Provider: provider, Model: model}))
 	}
 }
 

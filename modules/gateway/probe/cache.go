@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -72,6 +73,130 @@ func (c *capabilityCache) apply(t Target) bool {
 		quirk.Default.Mark(t.Provider, t.Model, flags)
 	}
 	return true
+}
+
+// QuirksOf 把「我们此刻知道这个目标的哪些毛病」报成一份可以交给别的模块的形状。
+//
+// 谁需要它：数据面自己（转发时撞出来的 4xx 与我们**探**出来的结论一样有价值，
+// 而探出来的那份会落盘，撞出来的那份以前只活在内存里——见 forward 的 Shutdown）。
+//
+// 报告的量本身就是「探索出来的」（`quirk.Flags`）——从已知的毛病位里逐位问，
+// 而不是自己去读那张表。**这张表归 gateway/quirk 所有**，这里只借它的判据，
+// 不复制它的一份内部形状：表改了这里跟着改，不会分家。
+//
+// 只管内存里那张表（`quirk.Default`），不读盘也不写盘——落盘是 Load/Save 那一对
+// 的事，而「读一次盘来回答一个内存问题」在这里会变成热路径上的 IO（见
+// forward.learnQuirks 的调用点：那在每一次上游 4xx 上）。
+func QuirksOf(t Target) quirk.Flag {
+	var flags quirk.Flag
+	for _, f := range quirk.AllFlags() {
+		if quirk.Default.Has(t.Provider, t.Model, f) {
+			flags |= f
+		}
+	}
+	return flags
+}
+
+// MergeQuirks 把一份「此刻已知的毛病」并进落盘缓存。
+//
+// 它是**并集、不是覆盖**：缓存里那些位可能来自一次真探活（那份结论更新，因为
+// 探活打的是 provider 声明的协议），而并进来的这些来自转发路上真撞出来的报错
+// ——两者都对同一个 (provider, model) 成立，谁都不该把对方抹掉。只增不减是这条
+// 路唯一安全的写法：**少记一位**的后果是重启后又多撞一次 400（可恢复），**多抹
+// 一位**的后果是这个补丁从此不再生效（不可恢复，而且没有任何症状指向它）。
+//
+// 没读过盘、盘上也没有这个目标时，会新建一条：`supports`/`known` 留 0 是**正确**
+// 的——那两位说的是方言能力，而这里一个字节的结论都没有。丢了它不会让 apply 做
+// 错事：`known` 为 0 时 apply 一个方言位都不标（见上面那个 switch 的第一支）。
+//
+// 只写这一份缓存，绝不碰 providers.json：那是用户的配置文件，我们不该悄悄往里
+// 写东西（同一条判断见 gateway/quirk 文件头对「表为什么不落盘」的说明）。
+//
+// 返回这份缓存里剩下的目标数，供调用方写日志。
+func MergeQuirks(entries map[Target]quirk.Flag) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	c, _ := loadCapabilityCache()
+	for t, flags := range entries {
+		if flags == 0 {
+			continue
+		}
+		// 盘上已经有这一条就保着它的方言那两位（见上面），没有就新建。
+		e := c.Targets[t.String()]
+		e.Quirks |= uint32(flags)
+		e.Checked = time.Now()
+		c.Targets[t.String()] = e
+	}
+	if err := c.save(); err != nil {
+		return 0, err
+	}
+	return len(c.Targets), nil
+}
+
+// PendingQuirks 是**已知、但还没落盘**的毛病。
+//
+// 为什么要有这一层：转发路上撞出来的毛病（learnQuirks）以前只活在内存里，
+// 而这条路上有一个**一定会复发**的窗口——进程重启。重启后内存表是空的，于是
+// 「换版/重启后的第一发」重新撞一遍同一个 400（用户 2026-09-22 报的就是它：
+// Codex → GLM 的第一发，`stream disconnected before completion`）。
+//
+// 只记「还没落盘的」：已经写进缓存的目标不该被反复重写。盘上已经有的那几位在
+// 这里算「已落盘」，所以正常跑起来之后待写集合是空的，落盘只在真学到新东西时
+// 发生一次。
+type PendingQuirks struct {
+	mu      sync.Mutex
+	entries map[Target]quirk.Flag
+}
+
+// Record 记一笔「这个目标此刻有这些毛病」。返回 true 表示这是新学到的
+// （调用方据此决定要不要打日志，免得同一件事每个请求刷一行）。
+func (p *PendingQuirks) Record(t Target, flags quirk.Flag) bool {
+	if t.Provider == "" || t.Model == "" || flags == 0 {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.entries == nil {
+		p.entries = map[Target]quirk.Flag{}
+	}
+	if p.entries[t]&flags == flags {
+		return false
+	}
+	p.entries[t] |= flags
+	return true
+}
+
+// Flush 把待写的那几笔落盘。
+//
+// 由数据面在停机时叫一次（见 forward.Server.Shutdown）。**必须是一次原子写**：
+// 进程已经走到停机这一步，写到一半被打断的文件读回来是坏缓存——
+// 而那正好发生在「换版之后」这个最需要它对的时刻（同一条理由见
+// forward 里那份「停机落盘」的说明）。
+func (p *PendingQuirks) Flush() error {
+	p.mu.Lock()
+	entries := p.entries
+	p.entries = nil
+	p.mu.Unlock()
+	if len(entries) == 0 {
+		return nil
+	}
+	_, err := MergeQuirks(entries)
+	return err
+}
+
+// DiskQuirks 报告盘上此刻记着的、带毛病位的目标——启动时用它回答「缓存里有没有
+// 值得装回来的东西」，不花 token（同一条见 LoadCachedCapabilities）。
+func DiskQuirks() []Target {
+	c, _ := loadCapabilityCache()
+	var out []Target
+	for raw, e := range c.Targets {
+		if e.Quirks != 0 {
+			out = append(out, splitTarget(raw))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out
 }
 
 func (c *capabilityCache) capture(t Target) {

@@ -2474,6 +2474,11 @@
     },
     "unprobed": {},
     "unrated": {},
+    "upstream quirks learned from traffic could not be saved; the next restart relearns them: {err}": {
+      "args": [
+        "err"
+      ]
+    },
     "upstream {provider} connect failed: {err}": {
       "args": [
         "err",
