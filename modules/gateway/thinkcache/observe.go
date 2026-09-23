@@ -31,6 +31,16 @@ type Observer struct {
 	// 两条都收会让下一轮补回去的推理翻倍。
 	responsesDeltaItem map[string]bool
 
+	// streamFailure / streamFailed 记「上游在**事件流里**报的那次失败」。
+	//
+	// 为什么观测者要管这件事：Responses 方言的上游把失败塞在流里
+	// （`response.failed`），HTTP 状态码是 **200**。于是数据面那条 learnQuirks
+	// （只看 status >= 400）永远学不到，证据也没人留——用户看到的是「必现、
+	// 过一会儿自己好」，而日志里连一句「上游拒了这一发」都没有。这条流只有
+	// 这里在读，所以这件事只能在这里做（见 StreamFailure 与防抖那个判据）。
+	streamFailure string
+	streamFailed  bool
+
 	// ---- 计数（2026-09-18 加，只为日志取证）----
 	//
 	// 存在的理由：线上出现「上游没给推理内容」时，只看结果（推理字节数 0）
@@ -138,6 +148,9 @@ type sseChunk struct {
 	// Responses 方言：收尾的 response.completed 带着整份 response 对象
 	// （非流式那条路走的是同一个形状，见 ObserveBody）。
 	Response responsesBody `json:"response"`
+
+	// 顶层那个错误对象：`response.failed` 的变体里有的是这一种（不带 response）。
+	Error json.RawMessage `json:"error"`
 }
 
 // responsesItem 是 Responses 的一个 output 项。
@@ -165,6 +178,10 @@ type anthropicDelta struct {
 // responsesBody 是 Responses 的 response 对象（流式收尾与非流式共用形状）。
 type responsesBody struct {
 	Output []responsesItem `json:"output"`
+	// 失败那一支带的错误（`response.failed` 的 response.error）。
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
 // responsesReasoning 把一个 Responses output 项里的推理原文拼出来。
@@ -242,6 +259,24 @@ func (o *Observer) feedChunk(payload []byte) {
 	}
 
 	o.feedResponses(c)
+	o.noteStreamFailure(c)
+}
+
+// noteStreamFailure 记下「上游在流里报的这次失败」。
+//
+// 两种形状都认：`response.failed` 事件本身带的 `response.error.message`，以及
+// 只带一个错误对象的变体。取不到原文时留一句兜底的话——**有失败这件事本身**
+// 比那句话更重要（那句话是给日志和判据用的，而「上游拒了」这个事实才是数据面
+// 要拿去学的东西）。
+func (o *Observer) noteStreamFailure(c sseChunk) {
+	if c.Type != "response.failed" || o.streamFailed {
+		return
+	}
+	o.streamFailed = true
+	o.streamFailure = strings.TrimSpace(c.Response.Error.Message)
+	if o.streamFailure == "" {
+		o.streamFailure = strings.TrimSpace(string(c.Error))
+	}
 }
 
 // feedResponses 观测 Responses 方言（Codex 走的那条）的事件。
@@ -376,6 +411,9 @@ func (o *Observer) ObserveBody(body []byte) {
 		o.absorbResponsesBody(responsesBody{Output: r.Output})
 	}
 }
+
+// StreamFailure 报这一发上游在**流里**报的那个失败：原文 + 有没有。
+func (o *Observer) StreamFailure() (string, bool) { return o.streamFailure, o.streamFailed }
 
 // Wire 汇报这条响应**线路层**看到了什么，供日志取证。
 //

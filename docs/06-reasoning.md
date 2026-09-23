@@ -453,12 +453,12 @@ id 不会拆开发，所以「全部自产 ⇒ 能过」在实测里成立；但
 接管目前不管理它；给始终思考的上游时把它设成 `low`、`high` 或 `max`，通常设
 `low` 最接近「少想一点」的原意。
 
-quirk 是从 4xx（或 `newgate probe`）学来的，探活结果还会进能力缓存。因此 daemon
-刚重启、缓存缺失或首次遇到新模型时，**第一发坏值仍可能先撞 400**；随后才会知道该
-模型始终思考并改写。若请求使用 `stream: true`，上游可能以 HTTP 200 发回一条
-SSE `response.failed`，Codex 会把它显示成
-`stream disconnected before completion: …`。这不是连接故障，而是请求里的
-nested effort 被拒绝。
+quirk 有三个来源：转发时撞上的 4xx、**事件流里报的那次失败**（见 §2i）、以及
+`newgate probe`；后两者都会进能力缓存。因此 daemon 刚重启、缓存缺失或首次遇到新
+模型时，**第一发坏值仍可能先被上游拒一次**；随后才会知道该模型始终思考并改写。
+若请求使用 `stream: true`，上游可能以 HTTP 200 发回一条 SSE `response.failed`，
+Codex 会把它显示成 `stream disconnected before completion: …`。这不是连接故障，
+而是请求里的 nested effort 被拒绝。
 
 ## 2g. Thinkcache 观测 Responses 方言（2026-09-23）
 
@@ -509,6 +509,34 @@ Codex 那条路上的失败是「HTTP 200 + 事件流里一条 `response.failed`
 来自一次真探活，而这里并进去的是转发撞出来的毛病位，谁都不该抹掉对方。只增不减
 是唯一安全的写法——少记一位的后果是重启后多撞一次 400（可恢复），多抹一位的
 后果是这个补丁从此不生效（不可恢复，且没有症状指向它）。
+
+## 2i. 上游把失败塞在**流里**时，我们照样学得到（2026-09-23）
+
+§2f 那条实测表里最坑的一行是：`stream: true` 时上游**先 200 开流**，再把拒绝塞进
+事件流（`response.failed`）。于是数据面那条 `learnQuirks`（判据是 `status >= 400`）
+在 Codex 这条路上**一次都不会触发**——表永远是空的，`always-thinks` 的 Match 永远
+不绿，用户看到的是「必现、过一会儿自己好」（「好」是因为恰好有人 `probe` 过那一家，
+那是运气，不是机制）。
+
+现在这条失败由**观测者**报给数据面：`thinkcache.Observer` 本来就在读这条流
+（§2g），`response.failed` 到它就记下来，流结束时 `forward` 问一次
+（`learnStreamFailure`），把那份**原文**按「上游拒了这一发」交给 `quirk.Learn`。
+传进去的状态码是构造出来的 400——4xx 表达的是「上游拒了你的请求形状」（与 5xx 的
+「上游自己挂了」相对），而这个失败**就是**这一族，只是它没走状态码；真正重要的是
+原文，它是签名的匹配输入。
+
+三处刻意的取舍：
+
+- **观测者不做 egress。** 它一开始被写成实现 `special.Egressor` 去想认领这条流，
+  那是错的：`special.ClaimEgress` 里只有一个认领者能赢，观测者赢了就等于把真正的
+  响应改写挤掉。而它本来就能拿到上游的**原字节**（`Observer.Write`），一个认领
+  都不需要。
+- **`Observer.StreamFailure` 只记第一条**，且 HTTP 200 也照报——「上游拒了这一发」
+  这件事本身比那句话重要：取不到原文时留一句兜底的，不能当没发生。
+- **`ContinuationOrigin` 那条路上没有信箱。** 曾经设计过一份「上游刚在流里报过
+  失败」的内存信箱（`RecordStreamFailure`/`TakeStreamFailure`），想给「预测下一发
+  会不会被拒」用。实测下来没必要：`quirk.Default.Learn` 在流结束那一瞬就标上了，
+  下一发的 Match 直接绿——多一层信箱只多一处能在重启时出错的形状。
 
 ## 3. 冷层
 

@@ -1402,6 +1402,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 							ntc, i18n.A{"req": reqID, "thinking": thinkingTagOf(newBody),
 								"keys": keysForLog(ob.Keys()), "wire": ob.Wire()}))
 					}
+					s.learnStreamFailure(reqID, a.Binding.Provider, a.Binding.Model, ob)
 					if stream {
 						s.logf("[proxy] %s", i18n.T("#{req} stream ended normally: {chunks} chunks / {bytes} bytes / {ms} ms total",
 							i18n.A{"req": reqID, "chunks": chunks, "bytes": bytesOut,
@@ -1429,11 +1430,51 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					}
 					s.logf("[proxy] %s", i18n.T("#{req} upstream stream cut (forwarded {chunks} chunks / {bytes} bytes): {err}{note}",
 						i18n.A{"req": reqID, "chunks": chunks, "bytes": bytesOut, "err": rderr, "note": v.Note}))
+					// 断流之前也可能已经报过一句「我拒了这一发」（Responses 的
+					// response.failed 之后就是 close）。这一句与断流本身是两件事：
+					// 断流进健康账本（上面那个 policy.Outcome），**拒发的理由**
+					// 进 quirk 表——后者才是下一发不再撞的东西，而它只有顺着
+					// 观测者才看得见（见 learnStreamFailure）。
+					s.learnStreamFailure(reqID, a.Binding.Provider, a.Binding.Model, ob)
 				}
 				return
 			}
 		}
 	}
+}
+
+// learnStreamFailure 处置「上游在**事件流里**报的那次拒绝」。
+//
+// # 为什么这条路上必须有它
+//
+// Responses 方言的上游在 `stream: true` 时不走 HTTP 状态码：先 200 开流，再把
+// 失败塞进事件流（`response.failed`）。于是数据面那条按状态码走的 learnQuirks
+// （`status >= 400` 才学）在 Codex 这条路上**一次都不会触发**——用户看到的是
+// 「必现、过一会儿自己好」：第一发撞，第二发起就好了？不，是**永远撞**，除非
+// 进程里恰好有人 probe 过那一家。2026-09-22 报的那句
+// 「stream disconnected before completion: 该模型始终思考…」正是这个形态。
+//
+// 观测者（thinkcache.Observer）是这条路上**唯一**读到那些字节的地方，所以
+// 「上游拒了这一发」这个事实只能从它那里问（见 Observer.StreamFailure）。
+//
+// # 为什么把状态码写成 400
+//
+// `quirk.Table.Learn` 的判据是「4xx + 报错原文」：4xx 表达的是「上游拒了你的
+// 请求形状」（与 5xx 的「上游自己挂了」相对），而这个失败**就是**这一族——只是
+// 它没走状态码。真正重要的是原文，它是签名的匹配输入，一字不差地传下去。
+//
+// 学到的结果与撞上真 400 完全一样：`quirk.Default` 立刻标上，下一个请求
+// `always-thinks` 的 Match 就绿了，请求体里那个上游不收的值被就地改掉
+// （见 modules/thinking/st-always.go 的 fixResponsesEffort）；同时记进
+// `pendingQuirks`，停机/换版时落盘，下一个进程的第一发不再撞。
+func (s *Server) learnStreamFailure(reqID uint64, provider, model string, ob *thinkcache.Observer) {
+	msg, failed := ob.StreamFailure()
+	if !failed {
+		return
+	}
+	s.logf("[proxy] %s", i18n.T("#{req} {provider}/{model} reported a failure inside the event stream (HTTP 200, so the status code says nothing): {msg}",
+		i18n.A{"req": reqID, "provider": provider, "model": model, "msg": trim(msg)}))
+	s.learnQuirks(reqID, provider, model, 400, []byte(msg))
 }
 
 // flushPendingQuirks 把「转发路上学到、还没落盘」的上游毛病写出去。

@@ -333,6 +333,14 @@
         "req"
       ]
     },
+    "#{req} {provider}/{model} reported a failure inside the event stream (HTTP 200, so the status code says nothing): {msg}": {
+      "args": [
+        "model",
+        "msg",
+        "provider",
+        "req"
+      ]
+    },
     "#{req} {route}  {path}  {status}  first byte {ms} ms  stream={stream}  profile={profile}{failover}": {
       "args": [
         "failover",

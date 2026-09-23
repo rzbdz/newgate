@@ -268,6 +268,10 @@
       "text": "#{req} {note}（{bytes} 字节）",
       "reviewed": true
     },
+    "#{req} {provider}/{model} reported a failure inside the event stream (HTTP 200, so the status code says nothing): {msg}": {
+      "text": "#{req} {provider}/{model} 在事件流**里面**报了一次失败（HTTP 状态码是 200，所以它什么也没说明）：{msg}",
+      "reviewed": true
+    },
     "#{req} {route}  {path}  {status}  first byte {ms} ms  stream={stream}  profile={profile}{failover}": {
       "text": "#{req} {route}  {path}  {status}  首字节{ms}ms  stream={stream}  profile={profile}{failover}",
       "reviewed": true

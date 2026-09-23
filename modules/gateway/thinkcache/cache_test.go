@@ -297,3 +297,63 @@ func TestObserverResponsesIgnoresSummary(t *testing.T) {
 		t.Fatalf("summary 不该被当成推理原文，实际收了 %q", got)
 	}
 }
+
+// TestObserverNotesStreamFailure 钉住「上游把失败塞在流里」这件事被抓到了。
+//
+// 为什么它必须存在：Responses 方言在 stream:true 时先 200 开流，再把失败塞进
+// 事件流（response.failed）。这条流只有 Observer 在读，所以「上游拒了这一发」
+// 这个事实**只能**从这里问出来——它接不上，数据面那条 learnQuirks（只看
+// status>=400）就永远学不到，用户看到的是「必现、过一会儿自己好」。2026-09-22
+// 报的那句「stream disconnected before completion」正是这个形态。
+func TestObserverNotesStreamFailure(t *testing.T) {
+	o := NewObserver()
+	if _, failed := o.StreamFailure(); failed {
+		t.Fatal("正常流不该报失败")
+	}
+	o.Write([]byte(`event: response.created` + "\n" +
+		`data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}` + "\n\n"))
+	o.Write([]byte(`event: response.failed` + "\n" +
+		`data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","output":[],` +
+		`"error":{"code":"invalid_request_error","message":"该模型始终思考，不支持关闭思考；请使用 low、high 或 max。"}}}` + "\n\n"))
+	msg, failed := o.StreamFailure()
+	if !failed {
+		t.Fatal("流里那条 response.failed 没被记下来")
+	}
+	// 原文一字不改：它是 quirk 签名的**匹配输入**（judged by bytes.Contains），
+	// 改一个字节就等于这条签名永远匹配不上。
+	if !strings.Contains(msg, "始终思考") {
+		t.Fatalf("原文丢了：%q", msg)
+	}
+}
+
+// TestObserverStreamFailureTakesTheFirstOnly 只记**第一条**。
+//
+// 一条流里报两次失败时，第一次那句才是失败的原因，后面那些是它的回声（上游
+// 有时会补一条 aborted/错误摘要）。取第一条也意味着这件事不会被后面的正常
+// 事件覆盖掉。
+func TestObserverStreamFailureTakesTheFirstOnly(t *testing.T) {
+	o := NewObserver()
+	for _, m := range []string{"第一次的原因", "后面的回声"} {
+		o.Write([]byte(`data: {"type":"response.failed","response":{"error":{"message":"` + m + `"}}}` + "\n\n"))
+	}
+	if msg, _ := o.StreamFailure(); msg != "第一次的原因" {
+		t.Fatalf("该留第一条，实际 %q", msg)
+	}
+}
+
+// TestObserverStreamFailureWithoutResponseObject 认另一种信封。
+//
+// 实测见过两种：失败那句话有的在 `response.error.message` 里，有的只带一个
+// 顶层的 `error` 对象。**「上游拒了这一发」这件事本身**比那句话重要——取不到
+// 原文时留一句兜底的，但不能当没发生。
+func TestObserverStreamFailureWithoutResponseObject(t *testing.T) {
+	o := NewObserver()
+	o.Write([]byte(`data: {"type":"response.failed","error":{"code":"server_error","message":"upstream exploded"}}` + "\n\n"))
+	msg, failed := o.StreamFailure()
+	if !failed {
+		t.Fatal("带顶层 error 的变体没被认出来")
+	}
+	if !strings.Contains(msg, "upstream exploded") {
+		t.Fatalf("兜底那句该带上原文，实际 %q", msg)
+	}
+}
