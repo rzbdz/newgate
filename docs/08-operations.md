@@ -41,6 +41,11 @@ newgate claude --profile=ds
 
 该覆盖编码到 Gateway URL，不修改全局默认。
 
+**点名 profile 的调用不换人**：`--profile=xx` 说的是「这次就用它」，所以链在链头
+就被截断——glm 挂了就如实报 glm 的错，不会悄悄从 ds 那儿拿个 200 回来。要全局关掉
+换人（网页、curl、别的 agent 一起关），用 `newgate fallback off`；见
+`docs/05-gateway.md` §3。
+
 ### 直接用：把 newgate 当 LLM 后端
 
 ```bash

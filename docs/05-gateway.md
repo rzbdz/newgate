@@ -141,6 +141,35 @@ verifier 为 nil（默认）时行为与以前完全一致——这一步是纯�
 Route headers 和日志记录实际 profile、链和最终 provider/model。Fallback 不得
 静默发生。
 
+### 谁让链停下来：点名 profile 与全局开关
+
+上面那张决策表管的是「一次收场该不该换人」。还有两个**上游的事**让它根本不换：
+链在进数据面之前就被**截断到链头**，于是「有没有下一站」这个问题的答案是「没有」，
+决策表照常判、只是没得可判。两条路，一个截断点，措辞不同（日志里能分开验）：
+
+| 谁 | 什么时候 | 粒度 |
+| --- | --- | --- |
+| `newgate <agent> --profile=xx` | launch 只在**用户点了名**时才把 `/p/<name>` 写进 base URL，代理从路径里读回来 | 这一次调用 |
+| `newgate fallback off` | `state.json` 的 `ModuleConfig["gateway"].fallback` | **全局**：所有没点名 profile 的请求（网页、curl、别的 agent 都从这儿过） |
+
+点名的语义是「这次就用这个 profile」。它**不需要**新状态——URL 路径已经把 profile
+钉住了，代理原来只是没据此动手。所以点名的运行现在如实报链头自己的错，而不是悄悄
+从别人那儿拿个 200——那正是最坏的形状：配置显示 glm、界面显示 glm、实际跑的是 ds。
+
+**「无视所有 timeout」是推出来的，不是写的**。超时预算的守卫带着 `i > 0`，而一步
+的链里 `i` 只可能是 0，所以 `budget-exhausted` 那条分支**不可能**触发；`Budget()`
+与 `Timeouts` 一个字节都没动。单次尝试自己的传输超时照旧生效。
+
+**为什么不是 `Opts.MaxSteps = 1`**：路由插件给出 override binding 时（`OverrideChain`），
+那条路会先把档位链截到 1 再**前插**override 那一步，于是链又有两步、照样换人。切片
+截断没有这道缝。
+
+截断必须留痕，而且砍掉了谁要说得出来（`profile glm is pinned, dropping 1 fallback
+step: ds:ds/deepseek-chat` / `fallback is off, dropping 1 chain step: glm:glm/glm-4.5-air`）。
+`status` 也报 `fallback=off`：**这一行尤其要报**，因为它关掉的是「换人」这件事，
+症状只在上游真挂了的时候才显形——平时请求照常 200，忘了自己拨过这个开关的人会把
+「没有 fallback」读成「链上没人可换」。
+
 ## 4. Special treatment
 
 上游或客户端怪癖通过插件注册：
