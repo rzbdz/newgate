@@ -163,7 +163,7 @@ func New() modules.Component {
 				return nil
 			}
 			for _, cmd := range []cliapi.Command{
-				specialCommand{}, schemaRepairCommand{}, debugCommand{},
+				specialCommand{}, schemaRepairCommand{}, fallbackCommand{}, debugCommand{},
 				// 观测面也归数据面自己：计数器怎么分组、探活探出了什么，
 				// 都是网关的语义（见 command_metrics.go / command_probe.go）。
 				metricsCommand{}, probeCommand{}, logsCommand{},

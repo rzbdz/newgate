@@ -49,6 +49,78 @@ func TestParseFallsBackToFactory(t *testing.T) {
 	}
 }
 
+// TestFallbackDefaultsOn 没表过态 = **开**（换人照旧）。
+//
+// 这条守的是 fail-open 的那一半：没有这一段、JSON 坏了、老文件里根本没这个键，
+// 都必须落在「照旧换人」上。落在「关掉」上的话，一台机器升级后会**静默地不再
+// 换人**，而症状只在某个 provider 真的挂了的那天才显形——平时请求照常 200，
+// 谁也不会去查（这正是 status 里那一行存在的理由，见 modules/gateway/status.go）。
+func TestFallbackDefaultsOn(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		st   *domain.State
+	}{
+		{"nil state", nil},
+		{"空 ModuleConfig", st(nil)},
+		{"这一段的 JSON 是坏的", st(map[string][]byte{Key: []byte("{不是 json")})},
+		{"这一段在，但没写过 fallback", st(map[string][]byte{Key: raw(t, Config{SchemaRepair: boolp(true)})})},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if FallbackOff(c.st) {
+				t.Fatal("没表过态就该是「照旧换人」——读不出来时尤其不能把 fallback 关掉")
+			}
+		})
+	}
+}
+
+// TestFallbackRoundTrip 写侧走一遍真 store：`newgate fallback off` 之后，
+// **另一个进程**（守护进程）读到的必须也是关。
+//
+// 为什么值得单独立一条：这个开关的写端与读端分居两个进程，中间只隔着这次写下的
+// JSON 原文，谁也不会当场发现两边分家了。所以这里断言两件事——解析出来的布尔，
+// 以及**那段 JSON 的形状**：字段名或嵌套写错时，前者可能被「默认开」蒙对，
+// 后者不会（`FallbackOff` 只看 `Gateway.fallback`，写在别处它照样报「关」，
+// 而真实读路径与展示层看的是同一份 Parse，谁也发现不了）。
+func TestFallbackRoundTrip(t *testing.T) {
+	testkit.Sandbox(t)
+	if _, err := store.Init(false); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if FallbackOff(store.LoadState()) {
+		t.Fatal("出厂态该是「照旧换人」")
+	}
+
+	if err := SetFallback(false); err != nil {
+		t.Fatalf("SetFallback(false): %v", err)
+	}
+	after := store.LoadState()
+	if !FallbackOff(after) {
+		t.Fatal("关掉之后读到的还是开——CLI 与守护进程会分家")
+	}
+	var got struct {
+		Fallback *bool `json:"fallback"`
+	}
+	if err := json.Unmarshal(after.ModuleConfig[Key], &got); err != nil {
+		t.Fatalf("gateway 段解不开: %v（原文 %s）", err, after.ModuleConfig[Key])
+	}
+	if got.Fallback == nil || *got.Fallback {
+		t.Fatalf("落盘形状不对：gateway 段 = %s, want fallback:false", after.ModuleConfig[Key])
+	}
+	// 顺带守一条：写这个开关不该碰到同一段里的别的指针字段。Config 里三个 *bool
+	// 长得一样，`c.Fallback = &on` 抄错成别人是很容易发生、且**只在下次读的时候**
+	// 才显形的那种错（症状是「我关的是 fallback，schema 修补怎么没了」）。
+	if !RepairEnabled(after) || !SpecialEnabled(after) {
+		t.Fatal("写 fallback 把同一段里别的开关带翻了")
+	}
+
+	if err := SetFallback(true); err != nil {
+		t.Fatalf("SetFallback(true): %v", err)
+	}
+	if FallbackOff(store.LoadState()) {
+		t.Fatal("拨回 on 之后还关着")
+	}
+}
+
 // TestParseReadsLegacyKeys 老文件（顶层 typed 字段）必须还能读出来。
 //
 // 这条守的是一次**静默的**行为反转：store 对顶层不认识的键是无损保留的，老键

@@ -940,6 +940,68 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	// 短路：这次调用只走链头，不许换人（2026-09-28）。
+	//
+	// 两个来由，合在同一处截断——它们要的**结果**完全一样（只发第一步、不
+	// 换人、不等超时预算），分成两处只会让下面那三条推论要证明两遍：
+	//
+	//   - `--profile=xx`（tgt.Profile 非空）：用户点名了一个 profile，意思是
+	//     「就用这个」。此前它只把 profile 钉成链头，链尾照样按 profile 优先级
+	//     接上别人——用户点名的那个挂了就**静默换到别的 profile**，配置、界面
+	//     显示的真名、实际跑的上游三者对不上。判据零新增状态：launch 只在
+	//     `--profile=xx` 时把 `/p/<name>` 写进 base URL，parseTarget 读出来
+	//     就是它，所以「有 /p/ 段」⟺「用户点了名」。
+	//   - `newgate fallback off`（全局开关）：全局关掉所有 fallback 链。
+	//
+	// 位置在这一处不是随意的，三条：
+	//
+	//  1. **在 882-942 那段路由/取链之后**：`testChain != nil` 的两个分支也
+	//     在这段里，放前面会被测试注入的链绕过——那些测试就测不到这条了。
+	//     截断放在**唯一**的出口，所有来路（路由链、覆盖链、档位链、注入链）
+	//     都必然经过它。
+	//  2. **在下面 deadline 那条之前**：budget 那条判断（`i > 0`）只在链上
+	//     还有下一步时才成立，链只剩一步时 i 恒为 0——于是「无视所有 timeout」
+	//     不是另写一条分支，而是**推出来的**。`st.Chain.Budget()` 与
+	//     `st.Timeouts` 一个字都不用动（后者是每次尝试的传输超时，本来就该
+	//     照常生效，见下面 `tr.ResponseHeaderTimeout`）。
+	//  3. **绝不往 st 里写**：`st := snap.State`（841）是指向 watcher 那份共享
+	//     快照的**指针**。在这里 `st.Chain.MaxAttempts = 1` 会改掉所有并发请求、
+	//     所有 agent 的活配置——数据竞争 + 跨请求污染。截断只发生在本地切片上。
+	//
+	// 还要说明为什么不能用 `Opts.MaxSteps = 1` 代替：那条路在
+	// `OverrideChain`（路由插件给了覆盖绑定时）下会先按 1 截断 tier 链、再把
+	// 覆盖步**插到最前**，结果是 2 步、fallback 照打。切片截断没有这个缝。
+	//
+	// 末尾必须留痕（不静默）：被砍掉的那几步连同原因写进日志，用户能回答
+	// 「为什么这次没换人」。
+	//
+	// **`why` 为空就是没砍**：这个变量不是排版用的中间量，它是「砍不砍」的
+	// 唯一判据。写成 `switch { case …: log }` 再把 `steps = steps[:1]` 摆在
+	// switch 外面，读起来像是「截断」，实际是**每一发多站请求都只走链头**——
+	// 2026-09-28 就是这么写错了一版：下面三条「没换人」的用例照样全绿（它们
+	// 要的结果正是截断），只有 TestFallbackOnByDefaultStillSwaps 那条对照红
+	// 了。它存在的理由就是这个：三个绿不能证明开关接上了，只能证明截断发生了。
+	if len(steps) > 1 {
+		var why string
+		switch {
+		case tgt.Profile != "":
+			why = i18n.N(
+				"#{req} profile {profile} is pinned, dropping {n} fallback step: {dropped}",
+				"#{req} profile {profile} is pinned, dropping {n} fallback steps: {dropped}",
+				len(steps)-1, i18n.A{"req": reqID, "profile": tgt.Profile, "n": len(steps) - 1,
+					"dropped": formatSteps(steps[1:])})
+		case gatewaystate.FallbackOff(st):
+			why = i18n.N(
+				"#{req} fallback is off, dropping {n} chain step: {dropped}",
+				"#{req} fallback is off, dropping {n} chain steps: {dropped}",
+				len(steps)-1, i18n.A{"req": reqID, "n": len(steps) - 1,
+					"dropped": formatSteps(steps[1:])})
+		}
+		if why != "" {
+			s.logf("[proxy] %s", why)
+			steps = steps[:1]
+		}
+	}
 	if len(steps) == 0 {
 		s.logf("[proxy] %s", i18n.T("#{req} no usable candidate; skipped: {skips}", i18n.A{"req": reqID, "skips": fmtSkips(skips)}))
 		if tier == "" {
@@ -1800,6 +1862,17 @@ func fmtSkips(skips []resolve.Skip) string {
 		parts = append(parts, t+"="+sk.Reason)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// formatSteps 把链上的几步列成一行，给「被短路砍掉了谁」那条日志用。
+// 用 Step 自己那套 `profile:provider/model` 写法——与 `newgate tier`、
+// X-Newgate-Chain 同一个词汇，日志里不该有第二种认法。
+func formatSteps(steps []resolve.Step) string {
+	parts := make([]string, 0, len(steps))
+	for _, s := range steps {
+		parts = append(parts, s.String())
+	}
+	return strings.Join(parts, ", ")
 }
 
 func truncate(s string, n int) string {

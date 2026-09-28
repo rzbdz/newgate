@@ -11,16 +11,22 @@ import (
 	"github.com/rzbdz/newgate/modules/gateway/special"
 )
 
-// switchStatus 把本模块的三个补丁开关报给 `newgate status`。
+// switchStatus 把本模块的开关（schema 修补、special 层、fallback 链、debug）
+// 报给 `newgate status`。
 //
-// **为什么由 gateway 自己报、而不是让 cli 读 state**：这三个键现在住在
+// **为什么由 gateway 自己报、而不是让 cli 读 state**：这些键现在住在
 // state.json 的 ModuleConfig["gateway"] 里（见 gatewaystate 的包说明），
 // 是 gateway 自己的词汇；cli 若为了这一行去解析它们，就等于换了个地方
 // 继续认识 gateway 的内部结构。谁的状态谁自己报——与 plugin-manager 报
 // 它那份开关账本是同一个口（RegisterStatus）。
 //
-// 只列**离开出厂态**的：三个开关全都默认开，一行「全开」不占版面也没信息量，
-// 与 status 那一屏「一眼看有没有被关掉东西」的定位一致。
+// 只列**离开出厂态**的：补丁、special 层、fallback 默认都开，debug 默认关，
+// 一行「和出厂一样」不占版面也没信息量，与 status 那一屏「一眼看有没有被
+// 关掉东西」的定位一致。
+//
+// **fallback=off 尤其要报**：它关掉的是「换人」这件事，症状只在**上游挂了**
+// 的时候才显形（平时请求照常 200）。用户如果忘了自己拨过这个开关，会把
+// 「没有 fallback」误读成「链上没人可换」——所以这一行是他唯一的线索。
 // status 行的位置（Rank 小的在前）。这几行在 status 那一屏上排在接管/配置之前
 // ——代理挂了所有走 newgate 的工具一起挂，所以它第一。
 const rankStatusPatch = 40 // 排在代理（10）之后
@@ -63,6 +69,9 @@ func (switchStatus) Status() []cliapi.StatusLine {
 	case gatewaystate.Parse(st).Debug != nil && *gatewaystate.Parse(st).Debug:
 		parts = append(parts, i18n.T("debug=expired", nil))
 	}
+	if gatewaystate.FallbackOff(st) {
+		parts = append(parts, "fallback=off")
+	}
 	if !gatewaystate.RepairEnabled(st) {
 		parts = append(parts, "schema-repair=off")
 	}
@@ -77,7 +86,7 @@ func (switchStatus) Status() []cliapi.StatusLine {
 			Rank:  rankStatusPatch,
 			Label: i18n.T("Patch switches", nil),
 			Value: strings.Join(parts, "   ") +
-				i18n.T("   restore: newgate st on · newgate schema-repair on · newgate debug off", nil),
+				i18n.T("   restore: newgate st on · newgate schema-repair on · newgate fallback on · newgate debug off", nil),
 		})
 	}
 	return out

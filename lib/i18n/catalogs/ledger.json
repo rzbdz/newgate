@@ -18,11 +18,13 @@
       ]
     },
     "      newgate leaves no record of it in its log.": {},
+    "   A failing candidate hands the request to the next one in the chain": {},
     "   Adds an empty array when a tool schema lacks required": {},
+    "   Every request stops at the head of the chain, timeouts included": {},
     "   Requests forwarded unchanged, upstream quirks no longer patched": {},
     "   Tool schemas are forwarded unchanged": {},
     "   old .json → .json.bak": {},
-    "   restore: newgate st on · newgate schema-repair on · newgate debug off": {},
+    "   restore: newgate st on · newgate schema-repair on · newgate fallback on · newgate debug off": {},
     "   these bindings are still in the chain": {},
     "   ✓ supported  ✗ probed and unsupported  ? not probed": {},
     "  (failover)": {},
@@ -182,6 +184,14 @@
         "req"
       ]
     },
+    "#{req} fallback is off, dropping {n} chain step: {dropped}": {
+      "args": [
+        "dropped",
+        "n",
+        "req"
+      ],
+      "other": "#{req} fallback is off, dropping {n} chain steps: {dropped}"
+    },
     "#{req} learned {name} has no count_tokens endpoint (upstream {code}); falling back to local rough estimate, no retry": {
       "args": [
         "code",
@@ -209,6 +219,15 @@
         "ms",
         "req"
       ]
+    },
+    "#{req} profile {profile} is pinned, dropping {n} fallback step: {dropped}": {
+      "args": [
+        "dropped",
+        "n",
+        "profile",
+        "req"
+      ],
+      "other": "#{req} profile {profile} is pinned, dropping {n} fallback steps: {dropped}"
     },
     "#{req} recorded {bytes} bytes of reasoning and {n} key {keys} this round; replaying them to the client next round": {
       "args": [
@@ -892,6 +911,7 @@
         "port"
       ]
     },
+    "Try the next candidate in the chain when one fails": {},
     "Turn it off with newgate debug off": {},
     "Unknown agent {agent} (known: {list})": {
       "args": [
@@ -907,6 +927,7 @@
     "Upstream quirk patches": {},
     "Upstream quirk patches: they apply only to the upstream that claimed the request, and every change is logged": {},
     "Usage: newgate debug on [minutes] [--forever] | off (no argument changes anything)": {},
+    "Usage: newgate fallback on|off (no argument changes anything)": {},
     "Usage: newgate lang <tag>  (see `newgate lang` for the list)": {},
     "Usage: newgate schema-repair on|off (no argument changes anything)": {},
     "Usage: newgate shim install <agent> (known: {names})": {

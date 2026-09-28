@@ -1,6 +1,6 @@
 // Package gatewaystate 是 gateway 在 state.json 里自己那一段。
 //
-// 为什么单开一个叶子包（2026-09-18）：这三个开关（schema 修补、special 层总开关、
+// 为什么单开一个叶子包（2026-09-18）：网关的开关（schema 修补、special 层总开关、
 // 单插件开关）原来声明成 `domain.State` 上的 typed 字段。那等于把**网关的开关词汇
 // 写进了共享配置**——同一个 struct 里躺着所有模块的键，加一个网关开关就要动 config。
 // 现在它们住在 `state.json` 的 `ModuleConfig["gateway"]` 里，与
@@ -25,8 +25,8 @@ const Key = "gateway"
 
 // Config 是 gateway 的运行期开关。
 //
-// 三个字段都是「可缺席」的：SchemaRepair / SpecialTreatment 用指针以区分
-// 「没配」和「显式关闭」，SpecialOff 空切片与 nil 等价。缺席 = 出厂态（开）。
+// 每个字段都是「可缺席」的：SchemaRepair / SpecialTreatment / Fallback 用指针以
+// 区分「没配」和「显式关闭」，SpecialOff 空切片与 nil 等价。缺席 = 出厂态（开）。
 type Config struct {
 	// ParseErr 是解析 ModuleConfig[Key] 时出的错。非 nil 意味着**下面所有字段都
 	// 是回退出来的**（读过老键，或落回出厂态），而不是用户当前的选择。展示层
@@ -39,6 +39,15 @@ type Config struct {
 	// SpecialOff 单独关掉的插件名。排查「是不是 newgate 改坏了请求」时
 	// 关掉某一个比关掉整层更精确。名字见 `newgate st`。
 	SpecialOff []string `json:"special_treatment_off,omitempty"`
+
+	// Fallback fallback 链总开关（默认开）。关 = 一次请求只走链头，
+	// 不换人、不等超时预算。意义在转发侧：**它是全局的**，与
+	// `--profile=xx` 那条「这次调用只走这个 profile」是两回事，后者不需要
+	// 这个开关（URL 路径已经把 profile 钉住了，见 forward.handleProxy）。
+	//
+	// 为什么默认开：fallback 是网关存在的理由之一，出厂关掉等于把产品
+	// 阉了。指针的语义与 SchemaRepair 同：nil = 没表过态 = 开。
+	Fallback *bool `json:"fallback,omitempty"`
 
 	// Debug 全量请求日志（转发侧逐条 dump）。**必须限时**：一发请求的
 	// body 可以到 8KB 以上（opencode 的 system prompt 单独就 ~97KB），
@@ -147,7 +156,7 @@ func legacyConfig(st *domain.State) Config {
 // Marshal 编码成要写进 ModuleConfig 的字节。
 func (c Config) Marshal() ([]byte, error) { return json.Marshal(c) }
 
-// 下面三个是**读侧**的便捷函数，直接收 `*domain.State`：调用点遍布热路径，
+// 下面这些是**读侧**的便捷函数，直接收 `*domain.State`：调用点遍布热路径，
 // 让它们各自 Parse 一次比要求每个调用方先解好再传进来清楚得多（小 JSON，
 // 与 claudecode 每请求调 ParseNakedConfig 同一量级）。
 
@@ -165,6 +174,16 @@ func SpecialEnabled(st *domain.State) bool {
 // PluginOff 某个插件是否被单独关掉。
 func PluginOff(st *domain.State, name string) bool {
 	return Parse(st).pluginOff(name)
+}
+
+// FallbackOff fallback 链是否被全局关掉（`newgate fallback off`）。默认 false。
+//
+// 名字是「关」而不是「开」：转发侧唯一的用法是
+// `if tgt.Profile != "" || FallbackOff(st) { 截断链 }`，
+// 一个肯定式的 `FallbackEnabled` 会让每个调用点都写成 `!FallbackEnabled(st)`，
+// 而否定散落在调用点上正是这种开关最容易看反的地方。
+func FallbackOff(st *domain.State) bool {
+	return Parse(st).fallbackOff()
 }
 
 // DebugActive 全量请求日志现在开着吗。**懒过期**：Debug 为真但到点了就算没开，
@@ -196,6 +215,8 @@ func DebugUntilDisplay(st *domain.State) string { return Parse(st).DebugUntil }
 func (c Config) repairOn() bool  { return c.SchemaRepair == nil || *c.SchemaRepair }
 func (c Config) specialOn() bool { return c.SpecialTreatment == nil || *c.SpecialTreatment }
 
+func (c Config) fallbackOff() bool { return c.Fallback != nil && !*c.Fallback }
+
 func (c Config) pluginOff(name string) bool {
 	for _, n := range c.SpecialOff {
 		if n == name {
@@ -215,6 +236,11 @@ func SetSchemaRepair(on bool) error {
 // SetSpecialTreatment 开关整个 special_treatment 层。
 func SetSpecialTreatment(on bool) error {
 	return update(func(c *Config) { c.SpecialTreatment = &on })
+}
+
+// SetFallback 开关 fallback 链。关 = 所有 gateway 只走链头。
+func SetFallback(on bool) error {
+	return update(func(c *Config) { c.Fallback = &on })
 }
 
 // SetDebug 开关全量请求日志。untilRFC3339 空 = 不限时。
