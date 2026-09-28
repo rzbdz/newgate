@@ -168,6 +168,61 @@ func TestBuildInjectModelNames(t *testing.T) {
 	})
 }
 
+// TestModelSuffixSurvivesBothModes 槽位声明的模型名后缀（客户端的能力标记）
+// 在**两种命名模式**下都必须跟着值走，且**只**跟着模型名走。
+//
+// 为什么这条要单独锁（2026-09-28）：标记的落点是「注入出去的模型名」，而这条
+// 注入在代码里有**两处**——BuildEnv（动态：档位名）与 buildInject 的钉死分支
+// （真实模型名）。用户点名要优先支持的是后者（`newgate claude --profile=xx`），
+// 而它恰好是后加的那一处：动态模式对了、钉死模式丢了标记，症状是「切了 profile
+// 之后 1M 上下文又没了」，而配置看起来一切正常。
+//
+// 标记本身是**合成的**（`@1m`）：内核不认识任何一家的真实标记——真实那个由客户端
+// 模块给（发行版 modules/claudecode 用 gateway/protocol.OneMMarker）。这里测的是
+// 机制：「声明了就拼、两种模式都拼、数字变量不拼」。
+func TestModelSuffixSurvivesBothModes(t *testing.T) {
+	sandboxStore(t)
+	st := &domain.State{Port: 8899}
+	a := testAgent()
+	const mark = "@1m"
+	for i := range a.Slots {
+		a.Slots[i].ModelSuffix = mark
+	}
+
+	t.Run("动态模式：档位名带标记", func(t *testing.T) {
+		inject, _ := buildInject(a, nil, st, "glm", "")
+		if got := inject["TEST_NORMAL_MODEL"]; got != "normal"+mark {
+			t.Errorf("NORMAL_MODEL = %q，应为 normal%s", got, mark)
+		}
+		if got := inject["TEST_LIGHT_MODEL"]; got != "light"+mark {
+			t.Errorf("LIGHT_MODEL = %q，应为 light%s", got, mark)
+		}
+	})
+
+	t.Run("钉死模式：真实模型名带标记（--profile=xx 那条路）", func(t *testing.T) {
+		inject, _ := buildInject(a, nil, st, "glm", "glm")
+		if got := inject["TEST_NORMAL_MODEL"]; got != "glm-5.3"+mark {
+			t.Errorf("NORMAL_MODEL = %q，应为 glm-5.3%s", got, mark)
+		}
+		if got := inject["TEST_LIGHT_MODEL"]; got != "glm-4.5-air"+mark {
+			t.Errorf("LIGHT_MODEL = %q，应为 glm-4.5-air%s", got, mark)
+		}
+	})
+
+	// 窗口声明是**数字**（strconv.Itoa 出来的），拼上标记会写进去一个解析不了的
+	// 值——失败的样子是「窗口声明静默失效、又回到 200k 假设」，看起来像这条注入
+	// 根本不存在。所以数字变量一次都不许过 Apply。
+	t.Run("窗口声明不沾标记", func(t *testing.T) {
+		inject, _ := buildInject(a, nil, st, "glm", "glm")
+		if got := inject["TEST_MAX_CONTEXT_TOKENS"]; got != "1000000" {
+			t.Errorf("MAX_CONTEXT_TOKENS = %q，应为 1000000（不带标记）", got)
+		}
+		if got := inject["TEST_AUTO_COMPACT_WINDOW"]; got != "500000" {
+			t.Errorf("AUTO_COMPACT_WINDOW = %q，应为 500000（不带标记）", got)
+		}
+	})
+}
+
 // TestBuildInjectOverridesInherited execReal 的 env 白名单保证注入值赢过
 // 用户 shell 里残留的同名变量——「切了没生效」最常见的成因。
 // 这里只验证 buildInject 产出正确；覆盖发生在 execReal，由 e2e 盖着。

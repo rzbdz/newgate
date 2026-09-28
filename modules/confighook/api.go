@@ -67,9 +67,40 @@ type Slot struct {
 	// 被静默忽略（看着像没生效，而说明里明明写着可以这么写）。
 	//
 	// 取值归**客户端模块**声明（那是它的知识）；内核与配置层只负责「这些也是合法的」。
-	Also   []string
-	EnvVar string
-	Desc   string
+	Also []string
+	// ModelSuffix 是注入这个槽位时**无条件**拼在模型名后面的后缀——同样也是
+	// **客户端自己的能力标记**，不是我们的档位语义。
+	//
+	// 出现的理由（2026-09-28）：Claude Code 用 `[1m]` 后缀声明「这个模型有 100 万
+	// 上下文」。它是客户端侧的一个开关，不是上游模型 id 的一部分——数据面转发前
+	// 会把它剥掉（见 gateway/protocol.NormalizeRole），反向解析则靠这一层：剥掉
+	// 之后剩下的模型名正是配置里那个名字，所以点名解析照旧命中。
+	//
+	// 为什么装在槽位上、而不是「整个 agent 一个开关」：槽位之间可以不同。Claude
+	// Code 的 subagent 槽位允许取 `inherit`（见 Also），给那个值加后缀会注入一个
+	// 它不认识的模型名；开关挂在槽位上，客户端自己按槽位表态。
+	//
+	// 为什么内核不校验它、也不认识 `[1m]`：后缀是个**字符串**，含义归声明它的
+	// 客户端模块。我们绕开内核 import 客户端模块的那条线，于是契约只剩「注入时
+	// 拼在值后面」这一件事——两端用的是同一个常量，谁也没在核心里写死 `[1m]`。
+	//
+	// 空 = 不拼。它**只作用于模型名**，窗口声明那两个变量是数字，永远不沾它
+	// （见 Agent.ContextWindowEnv 与 modules/runtime/launch）。
+	ModelSuffix string
+	EnvVar      string
+	Desc        string
+}
+
+// Apply 把要注入这个槽位的值补成最终形态：拼上客户端自己的能力标记。
+//
+// 动态模式（值 = 档位名）与钉死模式（值 = 真实模型名）都走这里，所以「标记一定
+// 在」这条只写一次。空值不拼——一个空的槽位变量注入进去等于告诉客户端「模型叫
+// 空字符串」，那是另一个 bug，不该被这里顺手制造出来。
+func (s Slot) Apply(model string) string {
+	if model == "" || s.ModelSuffix == "" {
+		return model
+	}
+	return model + s.ModelSuffix
 }
 
 // Agent 是一个可接管 AI CLI 的完整描述符。
@@ -193,7 +224,9 @@ func (a *Agent) BuildEnv(port int, authToken string, facts AgentFacts) map[strin
 		env[a.AuthEnv] = authToken
 	}
 	for _, slot := range a.EnvSlots() {
-		env[slot.EnvVar] = TierOf(facts, slot)
+		// Apply：客户端的**能力标记**（`[1m]` 那类）在这里拼上去，两种模式
+		// 共用同一次拼接——标记只写一遍，见 Slot.ModelSuffix。
+		env[slot.EnvVar] = slot.Apply(TierOf(facts, slot))
 	}
 	return env
 }

@@ -130,10 +130,12 @@ func buildInject(a *agentapi.Agent, facts agentapi.AgentFacts, st *domain.State,
 	} else {
 		// 钉死模式：槽位换成该 profile 链头的真实模型名。解析不出就保留
 		// 档位名（fail-open，docs/05-gateway.md）：代理仍能按档位路由。
+		// 两者都过 Slot.Apply——客户端的能力标记（`[1m]` 那类）必须跟着走，
+		// 否则钉死模式恰好把它丢了，而这正是用户点名要的那条路（--profile=xx）。
 		if explicit != "" {
 			for _, s := range a.EnvSlots() {
 				if b, ok := resolve.PrimaryBinding(agentapi.TierOf(facts, s), snap.Profiles, snap.Providers, active); ok {
-					inject[s.EnvVar] = b.Model
+					inject[s.EnvVar] = s.Apply(b.Model)
 				}
 			}
 		}
@@ -142,6 +144,10 @@ func buildInject(a *agentapi.Agent, facts agentapi.AgentFacts, st *domain.State,
 		// 话，它对不认识的模型名（档位名或真实名都一样）按 200k 窗口假设
 		// 提前 compact（2026-09 实测）。两个 env 都只在配置 >0 时注入；
 		// 其他 agent（如 opencode）不认识这些变量，忽略之，无害。
+		//
+		// 这两个是**数字**，所以永远不过 Slot.Apply：把客户端的模型名标记
+		// 拼到窗口上会写进去一个解析不了的值，而失败的样子是「窗口声明静默
+		// 失效、又回到 200k 假设」——看起来像这条注入根本不存在。
 		for _, p := range snap.Profiles {
 			if p.Name != active {
 				continue
