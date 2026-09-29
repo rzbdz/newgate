@@ -449,7 +449,11 @@ type OverviewAgent struct {
 	// Ready 为 false 表示这台机器上**没有这个客户端**（判据由报这个 agent 的人给，
 	// 今天走 confighook 的「装没装」那一问）。没装的那一栏照常画出来——藏掉的话
 	// 用户会以为这个客户端不被支持，而真相是「它在，只是这台机器上没有」。
-	Ready bool `json:"ready,omitempty"`
+	//
+	// **不能加 `omitempty`**：这句话的两个取值都是有意义的，省掉 `false` 之后
+	// 「没装」与「装了」在报文上一模一样（都是字段缺席），界面于是既画不出那一栏的
+	// 灰、也画不出「未安装」那个记号——而它不会报任何错，只是那两处**永远不出现**。
+	Ready bool `json:"ready"`
 }
 
 // OverviewCard 一份 profile 在这个首页上的那张卡。

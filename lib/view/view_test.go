@@ -607,3 +607,34 @@ func TestRunConceptActionOnAMismatchedOverview(t *testing.T) {
 		t.Errorf("报错该说出形状不对，实际: %v", err)
 	}
 }
+
+// 「这个客户端装没装」在报文上必须是**两个能分开的取值**。
+//
+// 它防的是 `omitempty` 这类看着无害的省字节：`Ready` 的两头都有意义（true = 装了、
+// false = 这台机器上没有），省掉 `false` 之后两者在 JSON 里都是「字段缺席」，界面
+// 于是既画不出那一栏的灰、也画不出「未安装」那个记号。它不报任何错——那两处只是
+// 永远不出现。实测过：线上快照里没装的那个客户端报出来是 `None`。
+func TestOverviewAgentSaysWhetherItIsInstalled(t *testing.T) {
+	raw, err := json.Marshal(Overview{Agents: []OverviewAgent{
+		{ID: "claude", Name: "claude", Profile: "production", Ready: true},
+		{ID: "codex", Name: "codex", Profile: "production", Ready: false},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Agents []map[string]any `json:"agents"`
+	}
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []bool{true, false} {
+		v, ok := back.Agents[i]["ready"]
+		if !ok {
+			t.Fatalf("第 %d 个客户端的报文里没有 ready：%s", i, raw)
+		}
+		if v != want {
+			t.Errorf("第 %d 个的 ready 该是 %v，实际 %v", i, want, v)
+		}
+	}
+}
