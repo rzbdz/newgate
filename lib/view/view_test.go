@@ -709,3 +709,30 @@ func TestRunConceptActionReachesTheAutoCard(t *testing.T) {
 		t.Errorf("「跟着默认走」没被跑到，实际 %q", got)
 	}
 }
+
+// 一个下拉的取值是空串时，那一格**也必须出现在报文里**。
+//
+// 「跟随系统」「跟随全局缺省」这些档位的机器取值就是空串，而空串对 select 是一个
+// **合法取值**，不是「没有这一格」。省掉它，前端拿到 undefined，只能自己 `?? ""`；
+// 那个兜底恰好对，但它是运气——选项表里不含空串的下拉会因此显示成第一项，而实际
+// 存的是空，屏幕上说的与盘上存的不一样，且没有任何东西会红。
+func TestToggleValueIsAlwaysOnTheWire(t *testing.T) {
+	raw, err := json.Marshal(Toggles{Items: []ToggleItem{
+		{ID: "theme", Kind: ToggleSelect, Label: "Theme", Options: []string{"", "dark"}},
+		{ID: "on", Kind: ToggleSwitch, Label: "On", On: true},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	for i, it := range back.Items {
+		if _, ok := it["value"]; !ok {
+			t.Errorf("第 %d 格的报文里没有 value：%s", i, raw)
+		}
+	}
+}

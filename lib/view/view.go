@@ -276,7 +276,16 @@ type ToggleItem struct {
 	// Kind 决定怎么渲染：select（Options 里挑一个）/ switch（On）/ text（单行）。
 	Kind string `json:"kind"`
 	// Value 是 select/text 格的当前值；On 是 switch 格的状态。
-	Value string `json:"value,omitempty"`
+	//
+	// **空串也发**（没有 omitempty）：对 select 来说空串是一个**合法取值**，而不是
+	// 「没有这一格」——本仓库里就有这样的下拉（语言那格的「跟随系统」是空串，皮肤
+	// 那格同）。省掉它，前端拿到的是 undefined，只能自己 `?? ""` 兜一下；那个兜底
+	// 恰好对，但它是运气：一个选项表里**不含空串**的下拉会因此显示成第一项，而真实
+	// 取值是空——屏幕上说的与实际存的不一样，且没有任何东西会红。
+	//
+	// switch 格会因此多带一个 `"value": ""`。那点字节换的是「取值永远在报文里」这
+	// 一条能靠得住的规矩（与 OverviewAgent 的 ready / own 同一条）。
+	Value string `json:"value"`
 	On    bool   `json:"on,omitempty"`
 	// Options 是 select 格的候选（**机器取值**，不翻译）。
 	Options []string `json:"options,omitempty"`
