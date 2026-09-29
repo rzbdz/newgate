@@ -673,3 +673,39 @@ func TestOverviewAgentSaysWhetherItIsPinned(t *testing.T) {
 		}
 	}
 }
+
+// 「默认」那张卡上的动作**也必须够得着**。
+//
+// 它不在 Cards 里（它不是一个 profile），而在 Overview.Auto 上，所以遍历 Cards 的
+// 那一版会漏掉它——症状是那张卡上每个按钮点下去都回一句「没有这个动作」：成员
+// （`use:global:<profile>`）与「跟着默认走」（`auto:<agent>`）**只**长在它身上，
+// 漏掉它等于把「改默认」和「改回自动」两条路一起断掉。
+func TestRunConceptActionReachesTheAutoCard(t *testing.T) {
+	r := NewRegistry()
+	var got string
+	mustRegister(t, r, "x", Concept{
+		ID: "overview", Kind: KindOverview,
+		Data: Overview{
+			Auto: &OverviewCard{Auto: true, Profile: "production", Actions: []Action{
+				{ID: "use:global:cheap", Label: func() string { return "cheap" },
+					Run: func() (string, error) { got = "global"; return "", nil }},
+				{ID: "auto:claude", Label: func() string { return "use for claude" },
+					Run: func() (string, error) { got = "auto"; return "", nil }},
+			}},
+			Cards: []OverviewCard{{Profile: "cheap"}},
+		},
+	})
+
+	if _, err := r.RunConceptAction("overview", "use:global:cheap"); err != nil {
+		t.Fatal(err)
+	}
+	if got != "global" {
+		t.Errorf("「默认」那张卡的成员动作没被跑到，实际 %q", got)
+	}
+	if _, err := r.RunConceptAction("overview", "auto:claude"); err != nil {
+		t.Fatal(err)
+	}
+	if got != "auto" {
+		t.Errorf("「跟着默认走」没被跑到，实际 %q", got)
+	}
+}

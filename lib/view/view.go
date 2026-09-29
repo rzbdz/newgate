@@ -430,6 +430,15 @@ type Overview struct {
 	// Agents 是顶上的标签，**顺序由贡献者给**（今天按 agent 的机器标记排，跨重启
 	// 稳定——标签会跳动的界面，用户每次都要重新找一遍）。
 	Agents []OverviewAgent `json:"agents"`
+	// Auto 是网格最前面那一张**「自动」**卡（见 OverviewCard.Auto）。
+	//
+	// 它是一个**间接引用**：它自己不是一个 profile，而是「全局默认」这条引用。
+	// 它此刻指向哪一份由 Profile 说；它**能指向**哪几份由它自己 Actions 里那组
+	// `use:<global>:<profile>` 说（选一个 = 改全局默认）。
+	//
+	// 为空的场合：这个进程里没有可选的 profile（一份档位都没有）。那时不该画一
+	// 张没有任何成员的空卡。
+	Auto *OverviewCard `json:"auto,omitempty"`
 	// Cards 是一份 profile 一张。
 	Cards []OverviewCard `json:"cards"`
 }
@@ -471,7 +480,20 @@ type OverviewAgent struct {
 
 // OverviewCard 一份 profile 在这个首页上的那张卡。
 type OverviewCard struct {
+	// Auto 为 true 表示**这一张是「自动」那张卡，不是一份 profile**。
+	//
+	// 它与别的卡是两类东西，而它们**长得几乎一样**（都是「一个名字 + 一张表 + 一组
+	// 动作」），所以这个标记必须有：界面据此决定标题写什么、这一张被选中时意味着
+	// 什么（别的卡是「这一家固定用它」，这一张是「这一家跟着全局默认走」）。
+	//
+	// 「自动」与「固定到某一份」是**两个状态**，哪怕此刻解析出来的 profile 一模一样：
+	// 改掉全局默认之后，前者的路由会跟着变，后者不会。把它们合成一张卡，用户就没法
+	// 表达「我就是要它」这件事——那正是这一格存在的理由（Clash 里同一个 group 既能
+	// 直接选节点、又能引用另一个 group，是同一件事）。
+	Auto bool `json:"auto,omitempty"`
 	// Profile 是这份 profile 的名字（机器取值，不翻译）。
+	//
+	// 在「自动」那张卡上它是**此刻指向的那一份**（空 = 一份都没有）。
 	Profile string `json:"profile"`
 	// File 是它写的是哪一份文件，相对配置根（空 = 取不到）。与 Records.File 同义。
 	File string `json:"file,omitempty"`
@@ -1169,8 +1191,15 @@ func conceptActions(c Concept) ([]Action, error) {
 	if !ok {
 		return nil, i18n.E("{concept} is an overview but its data is not an Overview", i18n.A{"concept": c.ID})
 	}
-	out := make([]Action, 0, len(c.Actions)+len(ov.Cards))
+	out := make([]Action, 0, len(c.Actions)+len(ov.Cards)+1)
 	out = append(out, c.Actions...)
+	// 「自动」那张卡上的动作**也必须在这一摞里**：它的成员（`use:global:<profile>`）
+	// 与「这一家跟着全局走」（`auto:<agent>`）都只在它身上，漏掉它等于那张卡上每个
+	// 按钮点了都没反应——而 `RunConceptAction` 找不到时会报「没有这个动作」，
+	// 界面上的表现是「点了弹一句看不懂的话」。
+	if ov.Auto != nil {
+		out = append(out, ov.Auto.Actions...)
+	}
 	for _, card := range ov.Cards {
 		out = append(out, card.Actions...)
 	}
