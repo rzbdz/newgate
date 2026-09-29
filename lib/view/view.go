@@ -89,6 +89,24 @@ const (
 	// **小表单**（编辑某个字段的值），而这里要的是**现场状态**——「这一档此刻解析
 	// 到什么」是 resolve 算出来的结论，不是文件里的某个字面量。
 	KindChains = "chains"
+	// KindOverview 是**首屏**：按 agent 分栏的路由总览——顶上一条 agent 标签，
+	// 下面一叠「一份 profile 一张」的卡，每张卡上是它的链此刻的样子**加上**每一站
+	// 的健康。
+	//
+	// 它和 KindChains 的分工：chains 回答「这一档解析成什么」（纯配置结论，与谁说、
+	// 在哪一屏说无关，`newgate tier` 要的是同一份）；overview 回答「我现在该让这个
+	// agent 走哪一份」——那要把**两本账**摆在一起（配置算出来的链 + 探活记下来的
+	// 健康），还要一个「就用它」的动作。合起来才是「切一条链」这件事。
+	//
+	// # 为什么健康必须由贡献者合，而不是让前端去 join
+	//
+	// 链的结论在 config（`configapi.AllChains`），每条 binding 的延迟与探活结论在
+	// breaker（它自己的账本）。让前端按 `provider/model` 把两张表拼起来确实能画出
+	// 同样的画面，代价是**两件只有拥有者知道的事被抄进了界面**：链卡上哪一格是
+	// 「链头」（空链怎么办）、延迟多少算慢（阈值在 breaker/status 里，只有一处）。
+	// 这两条都会在各自的模块里改，而前端那份抄件没有任何东西会红。所以 join 发生在
+	// **后端**，由一个同时看得见两本账的贡献者产出（见 overview.go 的注释）。
+	KindOverview = "overview"
 )
 
 // Table 是 KindTable 的数据形状：几列 + 几行。
@@ -391,6 +409,137 @@ type ChainStep struct {
 	// Tone 是这一站的语气（取 ToneOK/ToneWarn/ToneBad，空 = 不着色）。与 Cell.Tone
 	// 同一份词汇表，理由也同一条：颜色是渲染层的事，内核只给语义。
 	Tone string `json:"tone,omitempty"`
+}
+
+// Overview 是 KindOverview 的数据形状：**按 agent 分的路由总览**。
+//
+// # 为什么是两个轴
+//
+// 用户要做的决定是「让**这个**客户端走**哪一份**档位」。前者是几台机器上装着的
+// 客户端（claude / codex / …，一份机器上通常两三个），后者是配置里那十几份 profile。
+// 所以这张页面的形状就是这两个轴：Agents 是顶上的标签，Cards 是下面的卡，每张卡
+// 是一份 profile 的链此刻的样子。卡按 Profile 排（贡献者给的顺序，与
+// `configapi.AllChains` 一致：生效的那一份在前）。
+//
+// # 为什么「这个 agent 现在走谁」在 Agent 上而不是在卡上
+//
+// 因为它是**agent 的属性**，不是 profile 的属性（同一份 profile 可以同时是 claude
+// 的链头、而 codex 走别的）。把它写进卡里，一份 profile 就得分身成「for claude 的
+// 那张」和「for codex 的那张」，而它们的数据除了那一个布尔以外完全一样。
+type Overview struct {
+	// Agents 是顶上的标签，**顺序由贡献者给**（今天按 agent 的机器标记排，跨重启
+	// 稳定——标签会跳动的界面，用户每次都要重新找一遍）。
+	Agents []OverviewAgent `json:"agents"`
+	// Cards 是一份 profile 一张。
+	Cards []OverviewCard `json:"cards"`
+}
+
+// OverviewAgent 是顶上的一个标签：一个客户端此刻被指到哪一份 profile。
+type OverviewAgent struct {
+	// ID 是机器标记（`claude` / `codex`，与 `newgate <agent>` 那个名字同一个）：
+	// 它同时是**动作 ID 的后半截**（见 OverviewCard.Actions 的 `use:<agent>`），
+	// 所以界面在这一栏里要挑哪个按钮，判据就是它。不翻译。
+	ID string `json:"id"`
+	// Name 是给人看的名字（可以翻译）。
+	Name string `json:"name"`
+	// Profile 是它此刻从哪一份 profile 起链（机器取值，不翻译）。空 = 没有指定过，
+	// 也就是**跟随全局默认**——那不是「没有链」，界面上要说清楚（见 Docs 里的
+	// `ActiveFor`）。
+	Profile string `json:"profile,omitempty"`
+	// Ready 为 false 表示这台机器上**没有这个客户端**（判据由报这个 agent 的人给，
+	// 今天走 confighook 的「装没装」那一问）。没装的那一栏照常画出来——藏掉的话
+	// 用户会以为这个客户端不被支持，而真相是「它在，只是这台机器上没有」。
+	Ready bool `json:"ready,omitempty"`
+}
+
+// OverviewCard 一份 profile 在这个首页上的那张卡。
+type OverviewCard struct {
+	// Profile 是这份 profile 的名字（机器取值，不翻译）。
+	Profile string `json:"profile"`
+	// File 是它写的是哪一份文件，相对配置根（空 = 取不到）。与 Records.File 同义。
+	File string `json:"file,omitempty"`
+	// Default 为 true 表示这份就是**全局默认**（没单配过的 agent 都从它起链）。
+	Default bool `json:"default,omitempty"`
+	// Roles 按档位列。**顺序由贡献者给**（与 KindChains 同一条）。
+	Roles []OverviewRow `json:"roles"`
+	// Actions 是这张卡上的按钮。今天是一组 `use:<agent>:<profile>`：把这份 profile
+	// 指给某个客户端（见 OverviewAgent.ID），`global` 是「所有客户端都用它」那一档。
+	//
+	// # 为什么是「一个客户端一个动作」而不是一个带参数的「用它」
+	//
+	// 动作**不接参数**（见 Action.Run）：界面能提供的只有「用户点了这个按钮」，
+	// 别的都得由实现者在构造这个闭包的时候定下来。所以「给 claude 用」与「给 codex
+	// 用」必然是**两个动作**，各带各的闭包。
+	//
+	// # 为什么 ID 里还要带 profile
+	//
+	// 因为同一个 agent 的同一个动作在**十几张卡上各有一个**（每份 profile 一个「用它」
+	// 按钮），而账本按概念 ID + 动作 ID 找人——`RunConceptAction` 取的是**第一个匹配**
+	// （见 Registry.RunConceptAction）。只写 `use:claude` 的话，那十几个动作里只有
+	// 排在最前面的那张卡能被点到，其余的点了会落到**别人**身上：用户想切到 cheap，
+	// 实际改的可能是 balanced。加上 profile 之后它在整个概念里唯一，查找才落在对的
+	// 那一张卡上。
+	//
+	// 界面据此挑按钮的判据是 ID 里那两段机器标记（`use:` 后面先 agent 后 profile），
+	// 与链卡那边拼行 ID 是同一条规矩：机器标记两边各拼一次，就必须拼成同一个串
+	// （见 ChainRow.ID）。所以这个写法是**契约**，不是实现细节；改它要两边一起改。
+	//
+	// 当前这一栏的 agent 已经用着这份 profile 时，那个动作**不出现**（把它指给
+	// 它自己是一件没有意义的事），界面于是只画一句「正在用它」的陈述。
+	Actions []Action `json:"actions,omitempty"`
+}
+
+// OverviewRow 一份 profile 里**某一档**的链，加上这一档链头的健康。
+type OverviewRow struct {
+	// ID 是**这一行**的机器标记（动作回传用）。拼法与 ChainRow.ID 完全相同：
+	// `profile/tier`。行 ID 在整张卡里唯一、在整个概念里也唯一。
+	ID string `json:"id,omitempty"`
+	// Tier 是档位名（机器取值，不翻译）。
+	Tier string `json:"tier"`
+	// Label 是给人看的名字（可以翻译）。空 = 直接显示 Tier。
+	Label string `json:"label,omitempty"`
+	// Head 是这一档此刻的第一站（`ark/deepseek-v3`），空 = 这一档没有可用候选。
+	// 与 ChainRow.Head 同义、同一条理由（空链是一条判断，不该由界面去做）。
+	Head string `json:"head,omitempty"`
+	// Steps 是**整条**链，链头在内，按实际尝试顺序排。
+	Steps []OverviewStep `json:"steps,omitempty"`
+	// Note 是链尾那句「还有谁被跳过、为什么」。空 = 一个都没跳过。
+	Note string `json:"note,omitempty"`
+	// Tone 是这一行的语气（空 = 不着色）。与 ChainRow.Tone 同义：只表达「有没有
+	// 可用的链头」，**不表达健康度**——健康度在每一站的 LatencyTone 上，那两者的
+	// 判据完全不同（一个是「配置里有没有人」、一个是「这个人此刻快不快」）。
+	Tone string `json:"tone,omitempty"`
+}
+
+// OverviewStep 链上的一站，外加**这一站此刻的健康**。
+//
+// 它与 ChainStep 是两份形状（而不是给 ChainStep 加两个字段）是刻意的：那一份是
+// **配置的结论**（「解析出来会走谁」），这一份是**配置 + 健康**（「走起来会怎样」）。
+// 把它们合成一份，等于让 `newgate tier` 那条纯粹的解析路径也背上一个「探活记过账
+// 没有」的参数——而那个参数它永远用不上。
+type OverviewStep struct {
+	// Provider / Model 是这一站的绑定（机器取值，不翻译）。
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	// Profile 是这一站来自哪一份 profile（跨 profile 的链要写出来源，理由同
+	// ChainStep.Profile）。
+	Profile string `json:"profile,omitempty"`
+	// LatencyMs 是最近一次样本的首字节延迟（毫秒）。0 = **没有样本**（从没探过、
+	// 也没有真实流量），界面在那种情况下什么都不画——画一个 `0ms` 是在说
+	// 「它快得没有延迟」，而真相是「不知道」。
+	LatencyMs int64 `json:"latency_ms,omitempty"`
+	// LatencyTone 是那个延迟该上的颜色（取 ToneOK/ToneWarn/ToneBad，空 = 不着色）。
+	//
+	// **阈值不在这里**：快/可用/慢是 breaker 的判据（`breaker/status.Grade`），
+	// 只有一处实现。这一格只是把那个判断的**结果**搬过来，界面照着上色，不自己
+	// 比数字——把 3000/12000 这两个数抄进前端，等于让改阈值的那一天有两处要改，
+	// 而漏掉的那一处不会有任何东西变红。
+	LatencyTone string `json:"latency_tone,omitempty"`
+	// Probe 是上一次探活的结论（`fluent` / `laggy` / …，机器标记，不翻译）。
+	// 空 = 没探过。它与 LatencyMs 是两件事：延迟是「多快」，结论是「通不通」。
+	Probe string `json:"probe,omitempty"`
+	// Note 是这一站的一句话（今天只有 Skip.Reason：被降级/跳过之类的说明）。
+	Note string `json:"note,omitempty"`
 }
 
 // Applier 把这个概念的一次修改落盘。
@@ -961,7 +1110,11 @@ func (r *Registry) RunConceptAction(conceptID, actionID string) (string, error) 
 			if c.ID != conceptID {
 				continue
 			}
-			for _, a := range c.Actions {
+			acts, err := conceptActions(c)
+			if err != nil {
+				return "", err
+			}
+			for _, a := range acts {
 				if a.ID != actionID {
 					continue
 				}
@@ -977,6 +1130,34 @@ func (r *Registry) RunConceptAction(conceptID, actionID string) (string, error) 
 	}
 	return "", i18n.E("no view contributed a concept called {concept} — the page is probably stale, reload it",
 		i18n.A{"concept": conceptID})
+}
+
+// conceptActions 是「这个概念上能点的按钮」。
+//
+// 绝大多数 Kind 就是 Concept.Actions 本身（贡献者在产出那张卡时构造的那一份）。有
+// 一种例外：**数据本身是一叠子对象的 Kind**——那些按钮长在子对象上（一个 profile
+// 一个「用它」），因为它们说的是「这一份」，而概念级那一栏装不下这个身份。
+//
+// 判据与 rowActions 那条一样：按 Kind 分派，不用「能不能转成某一种类型」试探——
+// 形状与 Kind 的对应关系是契约，试探写法会在两种形状恰好都能转成功时安静地选错。
+//
+// 为什么这些按钮仍然走**概念动作**这条路（而不是行动作）：它们改的是**这一屏之外**
+// 的东西（state.json 里那个客户端的链头），卡片本身一个字都不变，跑完重读一遍就对
+// ——那正是概念动作的语义（见 Concept.Actions 与 RunRowAction 的分工）。
+func conceptActions(c Concept) ([]Action, error) {
+	if c.Kind != KindOverview {
+		return c.Actions, nil
+	}
+	ov, ok := c.Data.(Overview)
+	if !ok {
+		return nil, i18n.E("{concept} is an overview but its data is not an Overview", i18n.A{"concept": c.ID})
+	}
+	out := make([]Action, 0, len(c.Actions)+len(ov.Cards))
+	out = append(out, c.Actions...)
+	for _, card := range ov.Cards {
+		out = append(out, card.Actions...)
+	}
+	return out, nil
 }
 
 // RunRowAction 跑**一行**上的一个动作（见 Row.Actions 与 ChainRow.Actions）。
@@ -1068,6 +1249,10 @@ func rowActions(c Concept, rowID string) ([]Action, error) {
 		}
 		return nil, i18n.E("{concept} has no row called {row} — the page is probably stale, reload it",
 			i18n.A{"concept": c.ID, "row": rowID})
+	// KindOverview **故意没有分支**：总览那张卡的行上没有动作。这一屏的探活是
+	// 卡片级与节级的（见 OverviewCard.Actions），行级要再开一层身份（哪一张卡的
+	// 哪一档），而链上真的要探的是链头——卡片级的那个按钮已经覆盖了它。落到下面
+	// 那句会如实说出「这一种 Kind 的行不带动作」，比一个悄悄返回空表的空分支强。
 	default:
 		return nil, i18n.E("{concept} is a {kind}, whose rows carry no actions "+
 			"(row actions live on tables and chain cards)",

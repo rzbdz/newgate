@@ -72,9 +72,9 @@ func healthTable(rows []Status, g gatewayapi.Gateway) view.Table {
 		t.Rows = append(t.Rows, view.Row{
 			// 行的身份就是 binding 键（`provider/model`）：它同时是这张表的第一列
 			// 内容、也是探活要打的那个目标。
-			ID: b.Provider + "/" + b.Model,
+			ID: BindingKey(b.Provider, b.Model),
 			Cells: map[string]view.Cell{
-				"binding": {Text: b.Provider + "/" + b.Model},
+				"binding": {Text: BindingKey(b.Provider, b.Model)},
 				"state":   {Text: state, Tone: stateTone},
 				"rule":    {Text: ruleText(b)},
 				"fails":   failsCell(b),
@@ -169,11 +169,17 @@ func failsCell(b Status) view.Cell {
 	return view.Cell{Text: strings.Join(parts, " · "), Tone: tone}
 }
 
+// latencyCell 是这一条的延迟那一格：数字 + 颜色。
+//
+// 着色从 2026-09-28 起（在这之前这一格是**唯一没有语气**的一格，而这恰恰是看表的人
+// 唯一会去比大小的那个数）。判据与颜色都由 LatencySample 一处给出——它同时被首屏的
+// 路由总览用（见 modules/breaker/latency.go 的注释）。
 func latencyCell(b Status) view.Cell {
-	if b.Checked.IsZero() {
+	ms, tone, ok := LatencySample(b)
+	if !ok {
 		return view.Cell{Text: "-"}
 	}
-	return view.Cell{Text: i18n.T("{ms}ms", i18n.A{"ms": b.Latency})}
+	return view.Cell{Text: i18n.T("{ms}ms", i18n.A{"ms": ms}), Tone: tone}
 }
 
 // ---------- 文字与着色分家 ----------

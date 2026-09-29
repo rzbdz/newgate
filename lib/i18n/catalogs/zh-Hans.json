@@ -3548,6 +3548,10 @@
       "reviewed": true,
       "text": "{concept} 是 {kind} 那一种，它的行上没有动作可挂（行动作属于表格与链卡）"
     },
+    "{concept} is an overview but its data is not an Overview": {
+      "reviewed": true,
+      "text": "{concept} 是总览，但它的数据不是 Overview"
+    },
     "{concept}.{action} has nothing to run": {
       "reviewed": true,
       "text": "{concept}.{action} 没有可跑的东西"

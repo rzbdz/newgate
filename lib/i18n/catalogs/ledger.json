@@ -2634,6 +2634,11 @@
         "kind"
       ]
     },
+    "{concept} is an overview but its data is not an Overview": {
+      "args": [
+        "concept"
+      ]
+    },
     "{concept}.{action} has nothing to run": {
       "args": [
         "action",

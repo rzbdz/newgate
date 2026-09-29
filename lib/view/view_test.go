@@ -555,3 +555,55 @@ func TestRunRowActionOnAKindWithoutRows(t *testing.T) {
 		t.Errorf("报错该说出是哪种 Kind 没有行动作，实际: %v", err)
 	}
 }
+
+// 总览那一张卡上的按钮长在**卡片**上（一个 profile 一个「用它」），而
+// RunConceptAction 找的是概念上的动作——所以它得按 Kind 往数据里看一眼。
+//
+// 为什么这条值得有两条断言：**十几张卡上都有同一族动作**（每份 profile 一个「给
+// claude 用」），而账本按 ID 取的是第一个匹配。ID 里不带 profile 的话，用户想切到
+// 第三张卡，实际改的是第一张——那是静默改错东西，界面上一点异样都没有。
+func TestRunConceptActionReachesOverviewCards(t *testing.T) {
+	r := NewRegistry()
+	var got string
+	use := func(id, profile string) Action {
+		return Action{ID: id, Label: func() string { return "use " + profile },
+			Run: func() (string, error) { got = profile; return "", nil }}
+	}
+	mustRegister(t, r, "x", Concept{
+		ID: "overview", Kind: KindOverview,
+		Data: Overview{Cards: []OverviewCard{
+			{Profile: "production", Actions: []Action{use("use:claude:production", "production")}},
+			{Profile: "cheap", Actions: []Action{use("use:claude:cheap", "cheap")}},
+		}},
+	})
+
+	if _, err := r.RunConceptAction("overview", "use:claude:cheap"); err != nil {
+		t.Fatal(err)
+	}
+	if got != "cheap" {
+		t.Fatalf("跑错卡了：改到了 %q（两段机器标记缺一段就会这样）", got)
+	}
+
+	// 卡片上**没有**这个按钮时，报错要说得清是哪个动作——界面手里那份快照旧了，
+	// 而它唯一能拿到的线索就是这句话。
+	_, err := r.RunConceptAction("overview", "use:codex:cheap")
+	if err == nil {
+		t.Fatal("没有这个按钮，该报错")
+	}
+	if !strings.Contains(err.Error(), "use:codex:cheap") {
+		t.Errorf("报错该点明动作，实际: %v", err)
+	}
+}
+
+// 数据形状与 Kind 对不上时要**说出这句话**，不装作那一张卡上没有这个按钮。
+func TestRunConceptActionOnAMismatchedOverview(t *testing.T) {
+	r := NewRegistry()
+	mustRegister(t, r, "x", Concept{ID: "c", Kind: KindOverview, Data: struct{}{}})
+	_, err := r.RunConceptAction("c", "any")
+	if err == nil {
+		t.Fatal("形状对不上，该报错")
+	}
+	if !strings.Contains(err.Error(), "Overview") {
+		t.Errorf("报错该说出形状不对，实际: %v", err)
+	}
+}
