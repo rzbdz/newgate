@@ -445,6 +445,12 @@ type Overview struct {
 
 // OverviewAgent 是顶上的一个标签：一个客户端此刻被指到哪一份 profile。
 type OverviewAgent struct {
+	// Icon 是这个客户端在界面上的图标：SVG path 的 `d` 那一串，`24 24` 视口。
+	// **空 = 它没给**——界面那时画自己的通用记号，不是画一个空白。
+	//
+	// 由客户端自己声明、原样带到这里（见 confighook.Agent.Icon）：界面不认识任何
+	// 客户端，它只把这一串放进一个 `<svg>` 里，颜色走 `currentColor`（于是跟着皮肤）。
+	Icon string `json:"icon,omitempty"`
 	// ID 是机器标记（`claude` / `codex`，与 `newgate <agent>` 那个名字同一个）：
 	// 它同时是**动作 ID 的后半截**（见 OverviewCard.Actions 的 `use:<agent>`），
 	// 所以界面在这一栏里要挑哪个按钮，判据就是它。不翻译。

@@ -109,7 +109,19 @@ type Agent struct {
 	ID      string
 	Bin     []string
 	Dialect string
-	Slots   []Slot
+	// Icon 是这个客户端在界面上的图标，SVG **path 的 d 那一串**（`24 24` 视口）。
+	//
+	// 为什么是「一串路径数据」而不是一个文件名或一个 URL：图标是**客户端的知识**
+	// （与下面的 ContextWindowEnv 同一条），所以由它自己带；而带成路径数据，界面就
+	// 只需要一个 `<svg viewBox="0 0 24 24">` 把它放进去——不必认识任何一套图标库、
+	// 不必读盘、也不必联网。`currentColor` 由界面那一侧填，所以一套图标跟着皮肤走。
+	//
+	// 为什么不是前端按 ID 查一张表：那张表就是「界面认识客户端」，而这一层的规矩
+	// 正是它不认识——加一家客户端要改前端，就等于这一格从来没被设计过。
+	//
+	// 空 = 这个客户端没给图标（界面画它自己的通用记号，不是画一个空白）。
+	Icon  string
+	Slots []Slot
 
 	BaseURLEnv string
 	AuthEnv    string
