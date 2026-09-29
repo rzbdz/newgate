@@ -638,3 +638,38 @@ func TestOverviewAgentSaysWhetherItIsInstalled(t *testing.T) {
 		}
 	}
 }
+
+// 「这一家是固定住的，还是跟着全局默认走的」也必须在报文上是**两个能分开的取值**。
+//
+// 这两件事此刻可能解析成同一份 profile（固定选 ds、而全局恰好也是 ds），但改掉全局
+// 之后一个跟着变、一个不变——报文里只有 profile 的话，界面只能把它们说成同一句话，
+// 于是用户看不出「我改全局会不会连带改了这一家」，「把这一家改回自动」那个动作也
+// 没有前提可判（它成立的条件正是「它现在自己有设置」）。
+func TestOverviewAgentSaysWhetherItIsPinned(t *testing.T) {
+	raw, err := json.Marshal(Overview{Agents: []OverviewAgent{
+		{ID: "claude", Profile: "ds", Own: false},
+		{ID: "codex", Profile: "ds", Own: true},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Agents []map[string]any `json:"agents"`
+	}
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	// 两个人指向**同一份** profile，唯一分得开它们的就是这一格。
+	if back.Agents[0]["profile"] != back.Agents[1]["profile"] {
+		t.Fatalf("这一条的前提取的是两份 profile 一样：%s", raw)
+	}
+	for i, want := range []bool{false, true} {
+		v, ok := back.Agents[i]["own"]
+		if !ok {
+			t.Fatalf("第 %d 个客户端的报文里没有 own：%s", i, raw)
+		}
+		if v != want {
+			t.Errorf("第 %d 个的 own 该是 %v，实际 %v", i, want, v)
+		}
+	}
+}

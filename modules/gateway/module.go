@@ -207,6 +207,18 @@ func New() modules.Component {
 // Quirks 见 api.go 的说明（数据面用的就是这一个实例）。
 func (p *port) Quirks() *quirk.Table { return quirk.Default }
 
+// FallbackOn / SetFallback 见 api.go 的说明。
+//
+// 这里只做一层转发：开关的值与它的校验是 gatewaystate 的事（它要在**读**的那一侧
+// 解析 state.json 的那一段，见那里的 Parse），这一层只把它交给控制面。两份实现
+// 会在「网页上点了、命令行敲了」之间分家——而那种分家看得见的样子是两条路各说
+// 各话，没人能从界面上分辨谁对。
+func (p *port) FallbackOn() bool {
+	return !gatewaystate.FallbackOff(store.LoadState())
+}
+
+func (p *port) SetFallback(on bool) error { return gatewaystate.SetFallback(on) }
+
 // ProbeBinding 打一发最小请求，然后把结论灌进策略层（见 api.go 的说明）。
 //
 // 走到策略层那一步复用 `p.filters.ObserveProbes`——**与 `newgate probe` 那条路

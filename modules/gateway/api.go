@@ -74,6 +74,20 @@ type Gateway interface {
 	// 「网页上点一下」与「终端里敲一下」不会各说各话的原因。
 	ProbeBinding(provider, model string) (ProbeOutcome, error)
 
+	// FallbackOn 报 fallback 链此刻开着没有；SetFallback 开关它。
+	//
+	// **它为什么在控制面端口上**：`newgate fallback on|off` 是一条命令行，而网页上
+	// 那一格开关要点的是**同一件事**。开关本身住在 `gatewaystate`（那是 gateway
+	// 的内部实现包），而「谁能改它」是这一层的语义——界面不该 import 实现包去摸它，
+	// 与 ProbeBinding 上面那条同一条理由。两条路最终落到同一个
+	// `gatewaystate.SetFallback` 上，所以终端里敲的与网页上点的不会各说各话。
+	//
+	// 关掉 = **每发请求只走链头**：不换人、不等超时预算。它是排查手段（链上换人会
+	// 掩盖上游故障：provider 挂了请求照常 200，只是走了别人），不是省 token 的开关。
+	// 开了 `--profile=xx` 的那条路本来就只有一站，不受它影响。
+	FallbackOn() bool
+	SetFallback(on bool) error
+
 	// Quirks 是那张「上游毛病」表（见 modules/gateway/quirk）。
 	//
 	// 它暴露出来是因为**判据得由拥有补丁的模块注册**：`该模型始终思考` 这条
