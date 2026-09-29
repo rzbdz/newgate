@@ -200,7 +200,7 @@ mv -f /root/.local/bin/.newgate.new /root/.local/bin/newgate   # 换名覆盖
 /root/.local/bin/newgate restart         # 优先走优雅交接（socket fd 移交）
 ```
 
-**换完核一下模块数**：`newgate plugin | head -1` 应当是 **27 个模块 · 7 个可运行期
+**换完核一下模块数**：`newgate plugin | head -1` 应当是 **30 个模块 · 7 个可运行期
 开关点**（2026-09-29 实测）。少了就是装错了（内核自带的二进制只有 13 个模块、0 个
 开关点）。
 
