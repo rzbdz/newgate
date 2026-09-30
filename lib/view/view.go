@@ -166,10 +166,21 @@ const (
 	// 栏目（Section）的 Fields 取值：这一栏**是干什么的**。见 SectionInfo.Fields。
 	//
 	// 三个名字说的是界面上的三类事，不是模块的类别：「请求走哪条路」是看的那一半，
-	// 「能改的东西」是配置，「客户端的设置」是某一家客户端自己的格子。
-	FieldRoutes  = "routes"
-	FieldConfig  = "config"
-	FieldClients = "clients"
+	// 「能改的东西」是设置，「某一个客户端自己的格子」是第三类。
+	//
+	// # 词表要**避开模块名**（`config` 尤其不能当取值）
+	//
+	// 界面那边有一条棘轮：`web/src` 里出现任何模块名就红（见 nav_test.go 的
+	// moduleLiterals）。取值 `"config"` 撞上了那个模块名——而棘轮是对的：它无法
+	// 分辨「这是模块名」与「这是碰巧同名的词表」，而放它过去就等于给「前端认识模块」
+	// 开一个说不清的例外。所以这里叫 `settings`（2026-09-29 从 `config` 改的，
+	// 那时它才刚加上一天）。
+	//
+	// 这三个词与前端那边认的 Kind 名（`overview` / `chains` / …）是同一类东西：
+	// **界面自己的词表**，不是任何模块的身份。
+	FieldRoutes   = "routes"
+	FieldSettings = "settings"
+	FieldClients  = "clients"
 
 	ToneOK   = "ok"
 	ToneWarn = "warn"
@@ -981,7 +992,7 @@ type SectionInfo struct {
 	// `In("Clients")` 这种自由文本——两个发行版写 `Clients` 与 `客户端` 就分不到一起，
 	// 而界面也没有任何机器可判的东西可依。
 	//
-	// 取值：`view.FieldRoutes`（请求走哪条路）、`FieldConfig`（能改的东西）、
+	// 取值：`view.FieldRoutes`（请求走哪条路）、`FieldSettings`（能改的东西）、
 	// `FieldClients`（客户端的设置）。空 = 还没归类，界面排在最后。
 	Fields string `json:"fields,omitempty"`
 }

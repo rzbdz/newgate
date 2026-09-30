@@ -78,7 +78,7 @@ func New() modules.Component {
 				rel, err := v.Register("runtime",
 					viewapi.Title(func() string { return i18n.T("Takeover", nil) }).
 						In(func() string { return i18n.T("Runtime", nil) }).
-						Of(viewapi.FieldConfig), takeoverConcepts)
+						Of(viewapi.FieldSettings), takeoverConcepts)
 				if err != nil {
 					return err
 				}

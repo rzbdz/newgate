@@ -834,7 +834,7 @@ func TestSectionActionToneReachesTheWire(t *testing.T) {
 func TestSectionFieldsReachTheWire(t *testing.T) {
 	r := NewRegistry()
 	mustRegister(t, r, "x", Concept{ID: "c", Kind: KindRecords, Data: Records{}})
-	if _, err := r.Register("y", Title(func() string { return "y" }).Of(FieldConfig),
+	if _, err := r.Register("y", Title(func() string { return "y" }).Of(FieldSettings),
 		func() ([]Concept, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -844,8 +844,8 @@ func TestSectionFieldsReachTheWire(t *testing.T) {
 			continue
 		}
 		seen = true
-		if s.Fields != FieldConfig {
-			t.Errorf("Fields 该是 %q，实际 %q", FieldConfig, s.Fields)
+		if s.Fields != FieldSettings {
+			t.Errorf("Fields 该是 %q，实际 %q", FieldSettings, s.Fields)
 		}
 	}
 	if !seen {
