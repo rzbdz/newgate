@@ -845,6 +845,13 @@ type Action struct {
 	//
 	// 它**不开事务、不碰快照**：写完之后界面自己会重读一遍（与保存那条路一样）。
 	Run func() (focus string, err error)
+	// Tone 说这颗按钮**此刻是按下的**（空 = 平时的样子）。
+	//
+	// 取值与 Note.Tone 同一套。它存在的理由是有一类开关**是状态本身**：fallback 那个
+	// 按钮说的不是「去关掉它」，而是「它现在关着」——不把状态交出来的话，界面只能
+	// 从 label 的字面去猜（比现在这句是「禁用」还是「启用」），而那是在解析一句给人
+	// 看的、会翻译的话。加一个机器标记，界面就不必读文案。
+	Tone string
 }
 
 // MarshalJSON 让动作能跟着**数据**一起端出去（表里那些行就带着动作）。
@@ -861,7 +868,7 @@ func (a Action) MarshalJSON() ([]byte, error) {
 	if a.Label != nil {
 		label = a.Label()
 	}
-	return json.Marshal(ActionInfo{ID: a.ID, Label: label})
+	return json.Marshal(ActionInfo{ID: a.ID, Label: label, Tone: a.Tone})
 }
 
 // Does 给这一栏挂一个动作（可以链多个）。
@@ -939,6 +946,10 @@ type SectionInfo struct {
 type ActionInfo struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+	// Tone 是「这颗按钮此刻是按下的」（见 Action.Tone）。空 = 平时的样子，所以
+	// 这里可以省；不省是因为它是**状态**，而状态在报文里缺席过一次就够写一屏
+	// 猜谜的代码了（同 OverviewAgent.ready 那条）——省掉的是绝大部分动作。
+	Tone string `json:"tone,omitempty"`
 }
 
 // Service 是贡献者看到的那一面：登记一个产出函数。
@@ -1060,7 +1071,7 @@ func (r *Registry) Sections() []SectionInfo {
 			if a.Label != nil {
 				label = a.Label()
 			}
-			acts = append(acts, ActionInfo{ID: a.ID, Label: label})
+			acts = append(acts, ActionInfo{ID: a.ID, Label: label, Tone: a.Tone})
 		}
 		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group, Actions: acts, Default: s.def})
 	}

@@ -736,3 +736,36 @@ func TestToggleValueIsAlwaysOnTheWire(t *testing.T) {
 		}
 	}
 }
+
+// 栏目动作的 Tone **必须过到报文里**。
+//
+// 它有一条自己的转换路（SectionInfo 那里手工拼 ActionInfo），与 Action.MarshalJSON
+// 是两条——2026-09-29 实测：`auto fallback` 那颗状态按钮在卡片动作上是亮的、在栏目
+// 动作上永远不亮，因为那条路把 Tone 丢了。同一条信息有两条序列化路径时，「一条记得、
+// 一条忘了」是最容易长出来的错，而它的症状只是一个颜色不对。
+func TestSectionActionToneReachesTheWire(t *testing.T) {
+	r := NewRegistry()
+	bad := "bad"
+	if _, err := r.Register("x",
+		Title(func() string { return "x" }).Does(Action{
+			ID:    "fallback",
+			Label: func() string { return "auto fallback" },
+			Tone:  bad,
+			Run:   func() (string, error) { return "", nil },
+		}),
+		func() ([]Concept, error) {
+			return []Concept{{ID: "c", Kind: KindRecords, Data: Records{}}}, nil
+		}); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range r.Sections() {
+		if s.Source != "x" || len(s.Actions) != 1 {
+			continue
+		}
+		if s.Actions[0].Tone != bad {
+			t.Errorf("栏目动作的 Tone 该是 %q，实际 %q——那条手工拼 ActionInfo 的路漏了它", bad, s.Actions[0].Tone)
+		}
+		return
+	}
+	t.Fatal("账本里没有那一栏")
+}
