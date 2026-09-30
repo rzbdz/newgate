@@ -890,3 +890,43 @@ func TestRecordsBlankReachesTheWire(t *testing.T) {
 		t.Errorf("下拉的候选丢了：%+v", back.Blank[1])
 	}
 }
+
+// TestCellHrefReachesTheWire：一格里那个可点的地址必须真的到得了界面。
+//
+// 判据在这里而不是在贡献者那边：地址往往是**算出来的**（「这个远端界面挂在这个
+// 端口的这个前缀下」），贡献者把它一并交出来，界面只负责画成一个 <a>。少了这一格
+// 的搬运，那个地址在界面上就只是一段**长得像地址的文字**——用户全选、复制、粘到
+// 浏览器里，每一步都可能出错，而它看起来完全正常。
+func TestCellHrefReachesTheWire(t *testing.T) {
+	raw, err := json.Marshal(Table{
+		Columns: []Column{{ID: "route", Label: "route"}},
+		Rows: []Row{{ID: "r", Cells: map[string]Cell{
+			"route": {Text: "/ui/remote/ds/", Href: "/ui/remote/ds/"},
+			"plain": {Text: "no link here"},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Rows []struct {
+			Cells map[string]struct {
+				Text string `json:"text"`
+				Href string `json:"href"`
+			} `json:"cells"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("解不出来：%v（%s）", err, raw)
+	}
+	if got := back.Rows[0].Cells["route"].Href; got != "/ui/remote/ds/" {
+		t.Errorf("Href = %q（%s）", got, raw)
+	}
+	// 没有链接的格子不该凭空长出一个 href——空串是「这不是一个链接」。
+	if _, present := back.Rows[0].Cells["plain"]; !present {
+		t.Fatal("普通格子丢了")
+	}
+	if strings.Contains(string(raw), `"plain":{"text":"no link here","href"`) {
+		t.Errorf("普通格子被写上了 href：%s", raw)
+	}
+}
