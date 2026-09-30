@@ -845,13 +845,19 @@ type Action struct {
 	//
 	// 它**不开事务、不碰快照**：写完之后界面自己会重读一遍（与保存那条路一样）。
 	Run func() (focus string, err error)
-	// Tone 说这颗按钮**此刻是按下的**（空 = 平时的样子）。
+	// Tone 说这颗按钮**此刻是按下的**（空 = 平时的样子）。取值与 Note.Tone 同一套。
 	//
-	// 取值与 Note.Tone 同一套。它存在的理由是有一类开关**是状态本身**：fallback 那个
-	// 按钮说的不是「去关掉它」，而是「它现在关着」——不把状态交出来的话，界面只能
-	// 从 label 的字面去猜（比现在这句是「禁用」还是「启用」），而那是在解析一句给人
-	// 看的、会翻译的话。加一个机器标记，界面就不必读文案。
-	Tone string
+	// 它存在的理由是有一类开关**是状态本身**：fallback 那个按钮说的不是「去关掉它」，
+	// 而是「它现在关着」——不把状态交出来的话，界面只能从 label 的字面去猜（现在这
+	// 句是「禁用」还是「启用」），而那是在解析一句给人看的、会翻译的话。
+	//
+	// # 它是**闭包**，不是当场取的值
+	//
+	// 与 Label 同一条理由（见上面那句「登记发生在各模块的 Start 里」），但更硬：
+	// Label 是文案，取了就取了；Tone 是**状态**，而动作在 Start 里登记一次、快照每次
+	// 请求重算一次——当场取值的话，颜色会永远停在进程启动时那一刻。实测踩过
+	// （2026-09-30）：`newgate fallback off` 之后按钮还是绿的，看起来像界面在骗人。
+	Tone func() string
 }
 
 // MarshalJSON 让动作能跟着**数据**一起端出去（表里那些行就带着动作）。
@@ -868,7 +874,11 @@ func (a Action) MarshalJSON() ([]byte, error) {
 	if a.Label != nil {
 		label = a.Label()
 	}
-	return json.Marshal(ActionInfo{ID: a.ID, Label: label, Tone: a.Tone})
+	tone := ""
+	if a.Tone != nil {
+		tone = a.Tone()
+	}
+	return json.Marshal(ActionInfo{ID: a.ID, Label: label, Tone: tone})
 }
 
 // Does 给这一栏挂一个动作（可以链多个）。
@@ -1071,7 +1081,11 @@ func (r *Registry) Sections() []SectionInfo {
 			if a.Label != nil {
 				label = a.Label()
 			}
-			acts = append(acts, ActionInfo{ID: a.ID, Label: label, Tone: a.Tone})
+			tone := ""
+			if a.Tone != nil {
+				tone = a.Tone()
+			}
+			acts = append(acts, ActionInfo{ID: a.ID, Label: label, Tone: tone})
 		}
 		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group, Actions: acts, Default: s.def})
 	}

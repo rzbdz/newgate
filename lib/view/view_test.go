@@ -743,6 +743,63 @@ func TestToggleValueIsAlwaysOnTheWire(t *testing.T) {
 // 是两条——2026-09-29 实测：`auto fallback` 那颗状态按钮在卡片动作上是亮的、在栏目
 // 动作上永远不亮，因为那条路把 Tone 丢了。同一条信息有两条序列化路径时，「一条记得、
 // 一条忘了」是最容易长出来的错，而它的症状只是一个颜色不对。
+// Tone 是**每次快照求值**的，不是登记那一刻取下来的。
+//
+// 与 Label 同一条理由，但更硬：Label 是文案，取了就取了；Tone 是**状态**——动作在
+// Start 里登记一次，而快照每次请求重算一次。当场取值的话，颜色永远停在进程启动时
+// 那一刻，实测踩过（2026-09-30）：`newgate fallback off` 之后按钮还是绿的。
+func TestActionToneIsReadAtSnapshotTime(t *testing.T) {
+	r := NewRegistry()
+	on := true
+	mustRegister(t, r, "x", Concept{ID: "c", Kind: KindRecords, Data: Records{},
+		Actions: []Action{{
+			ID:    "fallback",
+			Label: func() string { return "auto fallback" },
+			Tone: func() string {
+				if on {
+					return ToneOK
+				}
+				return ToneBad
+			},
+			Run: func() (string, error) { return "", nil },
+		}},
+	})
+
+	toneOf := func() string {
+		t.Helper()
+		list, err := r.Snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range list {
+			if len(c.Actions) == 1 {
+				// 走一遍端出去的那条路（前端拿到的就是它）。
+				raw, err := json.Marshal(c.Actions[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				var back struct {
+					Tone string `json:"tone"`
+				}
+				if err := json.Unmarshal(raw, &back); err != nil {
+					t.Fatal(err)
+				}
+				return back.Tone
+			}
+		}
+		t.Fatal("找不到那颗动作")
+		return ""
+	}
+
+	if got := toneOf(); got != ToneOK {
+		t.Fatalf("开着时该是 %q，实际 %q", ToneOK, got)
+	}
+	on = false
+	if got := toneOf(); got != ToneBad {
+		t.Errorf("关掉之后**下一次快照**就该变红，实际 %q——Tone 是在登记那一刻取的？", got)
+	}
+}
+
 func TestSectionActionToneReachesTheWire(t *testing.T) {
 	r := NewRegistry()
 	bad := "bad"
@@ -750,7 +807,7 @@ func TestSectionActionToneReachesTheWire(t *testing.T) {
 		Title(func() string { return "x" }).Does(Action{
 			ID:    "fallback",
 			Label: func() string { return "auto fallback" },
-			Tone:  bad,
+			Tone:  func() string { return bad },
 			Run:   func() (string, error) { return "", nil },
 		}),
 		func() ([]Concept, error) {
