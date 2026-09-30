@@ -68,6 +68,7 @@ func registerView(v view.Service) (modules.Release, error) {
 	}
 	return v.Register("config",
 		view.Title(func() string { return i18n.T("Configuration", nil) }).
+			Of(view.FieldConfig).
 			Does(create).Does(applyAll), concepts)
 }
 

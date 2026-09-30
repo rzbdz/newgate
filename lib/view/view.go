@@ -163,6 +163,14 @@ type Cell struct {
 
 // Tone 的取值。前端按这几个词上色，其余一律当没给。
 const (
+	// 栏目（Section）的 Fields 取值：这一栏**是干什么的**。见 SectionInfo.Fields。
+	//
+	// 三个名字说的是界面上的三类事，不是模块的类别：「请求走哪条路」是看的那一半，
+	// 「能改的东西」是配置，「客户端的设置」是某一家客户端自己的格子。
+	FieldRoutes  = "routes"
+	FieldConfig  = "config"
+	FieldClients = "clients"
+
 	ToneOK   = "ok"
 	ToneWarn = "warn"
 	ToneBad  = "bad"
@@ -825,6 +833,8 @@ type Section struct {
 	//
 	// 它与 Group / Actions 同一条：**只影响界面怎么摆**，不参与任何身份（Source
 	// 才是身份：URL、草稿、路由都按它走）。所以「这一栏不再是落点」不搬任何东西。
+	// Fields 见 SectionInfo.Fields（声明用 Of）。
+	Fields  string
 	Default bool
 }
 
@@ -930,6 +940,17 @@ func (s Section) Landing() Section {
 	return s
 }
 
+// Of 声明这一栏**是干什么的**（见 SectionInfo.Fields 与 Field* 那几个常量）。
+//
+//	v.Register("home", view.Title(...).Landing().Of(view.FieldRoutes), concepts)
+//
+// 与 Landing / In / Does 同一个形状，理由也同一条：调用点有七八处，只有一部分需要
+// 说这件事，链式让其余的原地不动。
+func (s Section) Of(field string) Section {
+	s.Fields = field
+	return s
+}
+
 // SectionInfo 是栏目列表里的一行。
 //
 // Source 是机器标记（前端拿它跟概念对上、也拿它写进 URL），Title 是给人看的。
@@ -950,6 +971,19 @@ type SectionInfo struct {
 	//
 	// `omitempty` 是有意的：绝大多数栏目不是落点，那几行 JSON 不必带一个 false。
 	Default bool `json:"default,omitempty"`
+	// Fields 说这一栏「是干什么的」——界面据它在目录里分组。
+	//
+	// # 为什么需要它
+	//
+	// 侧栏原来把栏目按**贡献者的分组**聚在一起（「客户端」底下是 claude / codex /
+	// opencode）。那是贡献者自己知道的事，但它回答不了「**这一栏该归到哪一类**」：
+	// 一个模块注册栏目时想说的是「这是配置」「这是客户端的设置」，而它手上只有
+	// `In("Clients")` 这种自由文本——两个发行版写 `Clients` 与 `客户端` 就分不到一起，
+	// 而界面也没有任何机器可判的东西可依。
+	//
+	// 取值：`view.FieldRoutes`（请求走哪条路）、`FieldConfig`（能改的东西）、
+	// `FieldClients`（客户端的设置）。空 = 还没归类，界面排在最后。
+	Fields string `json:"fields,omitempty"`
 }
 
 // ActionInfo 是栏目动作给界面的那一面（见 Section.Actions）。
@@ -992,13 +1026,14 @@ type Registry struct {
 }
 
 type source struct {
-	id    int
-	name  string
-	title func() string // Register 拒绝 nil，所以这里一定非空
-	group func() string // 可空：没写就是不分组
-	def   bool          // 见 Section.Default：界面的落点
-	acts  []Action
-	read  Contributor
+	id     int
+	name   string
+	title  func() string // Register 拒绝 nil，所以这里一定非空
+	group  func() string // 可空：没写就是不分组
+	def    bool          // 见 Section.Default：界面的落点
+	fields string        // 见 Section.Fields：这一栏是干什么的
+	acts   []Action
+	read   Contributor
 }
 
 func NewRegistry() *Registry {
@@ -1025,7 +1060,7 @@ func (r *Registry) Register(name string, section Section, read Contributor) (mod
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := source{id: r.next, name: name, title: section.Title, group: section.Group,
-		def: section.Default, acts: section.Actions, read: read}
+		def: section.Default, fields: section.Fields, acts: section.Actions, read: read}
 	r.next++
 	r.sources = append(r.sources, s)
 	return func() error {
@@ -1087,7 +1122,7 @@ func (r *Registry) Sections() []SectionInfo {
 			}
 			acts = append(acts, ActionInfo{ID: a.ID, Label: label, Tone: tone})
 		}
-		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group, Actions: acts, Default: s.def})
+		out = append(out, SectionInfo{Source: s.name, Title: title, Group: group, Actions: acts, Default: s.def, Fields: s.fields})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Source < out[j].Source })
 	// 落点**最多一个**。多个人声明时按 Source 取最小的那个：不定这条的话，被选中

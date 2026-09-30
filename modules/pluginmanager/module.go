@@ -78,7 +78,8 @@ func New() modules.Component {
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
 				rel, err := v.Register("plugin-manager",
 					viewapi.Title(func() string { return i18n.T("Plugins", nil) }).
-						In(func() string { return i18n.T("Runtime", nil) }),
+						In(func() string { return i18n.T("Runtime", nil) }).
+						Of(viewapi.FieldConfig),
 					func() ([]viewapi.Concept, error) {
 						return viewConcepts(service)
 					})

@@ -27,7 +27,7 @@ import (
 // registerView 挂上语言卡。没有 web 界面时什么都不做（`newgate lang` 照常）。
 func registerView(v view.Service) (modules.Release, error) {
 	return v.Register("locale",
-		view.Title(func() string { return i18n.T("Language", nil) }),
+		view.Title(func() string { return i18n.T("Language", nil) }).Of(view.FieldConfig),
 		concepts)
 }
 

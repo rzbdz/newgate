@@ -826,3 +826,29 @@ func TestSectionActionToneReachesTheWire(t *testing.T) {
 	}
 	t.Fatal("账本里没有那一栏")
 }
+
+// 栏目的 Fields（这一栏是干什么的）要**一路到报文**。
+//
+// 它决定界面在目录里把这一栏归到哪一类——丢了它，侧栏就退回「按贡献者自己写的分组
+// 名聚堆」，而那种自由文本在两个发行版之间分不到一起。
+func TestSectionFieldsReachTheWire(t *testing.T) {
+	r := NewRegistry()
+	mustRegister(t, r, "x", Concept{ID: "c", Kind: KindRecords, Data: Records{}})
+	if _, err := r.Register("y", Title(func() string { return "y" }).Of(FieldConfig),
+		func() ([]Concept, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, s := range r.Sections() {
+		if s.Source != "y" {
+			continue
+		}
+		seen = true
+		if s.Fields != FieldConfig {
+			t.Errorf("Fields 该是 %q，实际 %q", FieldConfig, s.Fields)
+		}
+	}
+	if !seen {
+		t.Fatal("账本里没有那一栏")
+	}
+}

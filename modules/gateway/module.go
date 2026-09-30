@@ -118,7 +118,8 @@ func New() modules.Component {
 			if v, ok := modules.Get(ctx, viewapi.Capability); ok {
 				rel, err := v.Register("gateway",
 					viewapi.Title(func() string { return i18n.T("Gateway", nil) }).
-						In(func() string { return i18n.T("Data plane", nil) }), gatewayConcepts)
+						In(func() string { return i18n.T("Data plane", nil) }).
+						Of(viewapi.FieldRoutes), gatewayConcepts)
 				if err != nil {
 					return err
 				}
