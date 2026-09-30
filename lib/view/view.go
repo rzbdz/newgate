@@ -209,6 +209,19 @@ type Records struct {
 	// 装了哪些模块」），给它一个加了没用的按钮就是骗人。
 	CanAdd   bool   `json:"can_add,omitempty"`
 	AddLabel string `json:"add_label,omitempty"`
+	// Blank 是**新增一条时长什么样**：字段的形状（ID / Label / Kind / Options /
+	// Why），值一律被忽略（新的一条从空开始）。
+	//
+	// 为什么这件事需要单独一格：字段的形状长在**每一条记录**上（见 Record.Fields），
+	// 于是前端渲染一张新卡片时只能去抄一条现成的——它们全都一样，因为它们是同一
+	// 个贡献者按同一份声明造出来的。那个办法在**一条都没有**的时候失效：`Items`
+	// 为空、`CanAdd` 为真，点「新增」得到一张**一个输入框都没有的空卡片**，而
+	// 用户没有任何办法把内容填进去（`modules/ssh-tunnel` 第一次装配就撞上：一份
+	// 还没配过 target 的配置正是它的常态）。
+	//
+	// 所以形状由贡献者在这里明说。留空是合法的（老贡献者不必改），那时前端退回
+	// 去抄第一条——今天的行为不变。
+	Blank []Field `json:"blank,omitempty"`
 }
 
 // Record 是一条。

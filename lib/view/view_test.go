@@ -852,3 +852,41 @@ func TestSectionFieldsReachTheWire(t *testing.T) {
 		t.Fatal("账本里没有那一栏")
 	}
 }
+
+// TestRecordsBlankReachesTheWire：新增一条时的字段形状必须真的到得了界面。
+//
+// 这条防的是一个**只有空集才显形**的失效：字段的形状长在每一条记录上，所以前端
+// 渲染一张新卡片时只能去抄一条现成的。一条都没有的时候无处可抄——点「新增」得到
+// 一张一个输入框都没有的空卡片，而用户没有任何办法把内容填进去。
+//
+// 装机就是那个状态（一份还没配过任何东西的配置），所以它不是边角。
+func TestRecordsBlankReachesTheWire(t *testing.T) {
+	blank := []Field{
+		{ID: "host", Label: "host", Kind: FieldText},
+		{ID: "mode", Label: "mode", Kind: FieldSelect, Options: []string{"a", "b"}},
+	}
+	raw, err := json.Marshal(Records{CanAdd: true, AddLabel: "add", Blank: blank})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Blank []struct {
+			ID      string   `json:"id"`
+			Kind    string   `json:"kind"`
+			Options []string `json:"options"`
+		} `json:"blank"`
+	}
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("界面上读到的这一格解不出来：%v（%s）", err, raw)
+	}
+	if len(back.Blank) != 2 {
+		t.Fatalf("blank 该有 2 格，实际 %d（%s）", len(back.Blank), raw)
+	}
+	if back.Blank[0].ID != "host" || back.Blank[0].Kind != FieldText {
+		t.Errorf("第一格不对：%+v", back.Blank[0])
+	}
+	// Options 也要过去：下拉的候选只有贡献者知道（协议只有两家、档位只有四档）。
+	if len(back.Blank[1].Options) != 2 {
+		t.Errorf("下拉的候选丢了：%+v", back.Blank[1])
+	}
+}
