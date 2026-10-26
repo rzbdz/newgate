@@ -327,20 +327,17 @@ func profileNote(name string) *view.Note {
 // 过），但要逐个去点一遍就是十六次操作——第二个按钮把「设默认」与「收敛」一次做完，
 // 它不多做任何别的事。
 //
-// # 措辞：`apply` / `apply to all`（2026-09-21 用户定的）
+// # 措辞：`use` / `use globally`（2026-10-26 改，之前是 `apply` / `apply to all`）
 //
-// 第一版写的是 `set as the default profile` 与 `set as the default, and make every
-// client follow it`，第二版又写成 `force: …`。两个都不对，而且是**同一个**错：
-// 把「这个动作做了什么」当成按钮的字。
+// 2026-09-21 那一版写的是 `apply` / `apply to all`（中文「应用 / 应用到全部」）。
+// 2026-10-26 用户指出它**歧义**：`apply` 在这个界面里也能读成「把这份草稿保存
+// 下去」，而这两颗按钮做的是「把它变成当前生效的那一份」。所以动词改成 `use`：
 //
-// `force` 尤其糟——它是用户描述需求时的**口语**（「加个 force 功能，强制 apply」），
-// 而我把那个词直接搬到了界面上。用户的原话是：「你应该搞成 apply 和 apply all 啊。
-// 应用。应用到全部。」
+//	use           = 从现在起用它（成为全局默认）
+//	use globally  = 再往所有客户端推一遍（清掉每个客户端自己的链头）
 //
-// 于是这一对改成**同一个动词、只差作用域**：`apply` = 把这个档位应用起来（成为全局
-// 默认），`apply to all` = 再往所有客户端应用一遍。两个词都在说「应用」，差别写在
-// 后半截——这正是「同一件事的两个范围」该有的样子，而动词本身不必再解释一遍宾语：
-// 宾语就是**这张卡**（按钮长在这份档位的卡上，卡头写着它的名字）。
+// 两个词仍然是同一个动词、只差作用域——「同一件事的两个范围」该有的样子。
+// 宾语不必写出来：按钮就长在**这张档位的卡**上，卡头写着它的名字。
 func profileActions(name string) []view.Action {
 	if store.LoadState().DefaultProfile == name {
 		return nil
@@ -348,12 +345,12 @@ func profileActions(name string) []view.Action {
 	return []view.Action{
 		{
 			ID:    "set-default",
-			Label: func() string { return i18n.T("apply", nil) },
+			Label: func() string { return i18n.T("use", nil) },
 			Run:   func() (string, error) { return setDefaultProfile(name, false) },
 		},
 		{
 			ID:    "set-default-all",
-			Label: func() string { return i18n.T("apply to all", nil) },
+			Label: func() string { return i18n.T("use globally", nil) },
 			Run:   func() (string, error) { return setDefaultProfile(name, true) },
 		},
 	}

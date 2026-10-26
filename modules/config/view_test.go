@@ -55,7 +55,7 @@ func TestTheActiveProfileSaysSoAndTheOthersOfferToApply(t *testing.T) {
 
 	// 2. 别的那一张：反过来——两个按钮，且**没有** Note。
 	if len(other.Actions) != 2 {
-		t.Errorf("别的档位卡上有 %d 个按钮，应当是 2 个（apply / apply to all）", len(other.Actions))
+		t.Errorf("别的档位卡上有 %d 个按钮，应当是 2 个（use / use globally）", len(other.Actions))
 	}
 	if other.Note != nil {
 		t.Errorf("不是当前配置的那一张卡上也写了 Note（%q）：这句话是一句判词，"+

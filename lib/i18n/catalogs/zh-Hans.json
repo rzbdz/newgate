@@ -1496,17 +1496,9 @@
       "reviewed": true,
       "text": "缺 api_key"
     },
-    "apply": {
-      "reviewed": true,
-      "text": "应用"
-    },
     "apply the default to all clients": {
       "reviewed": true,
       "text": "把默认应用到全部客户端"
-    },
-    "apply to all": {
-      "reviewed": true,
-      "text": "应用到全部"
     },
     "argv0 dispatch: what runs when we are called by a client's name": {
       "reviewed": true,
@@ -3423,6 +3415,14 @@
     "usage: newgate profile restore <name> [version]": {
       "reviewed": true,
       "text": "用法：newgate profile restore <name> [版本号]"
+    },
+    "use": {
+      "reviewed": true,
+      "text": "使用"
+    },
+    "use globally": {
+      "reviewed": true,
+      "text": "全局使用"
     },
     "v1 only covers switches a module reports itself; a module that reports none cannot be toggled at runtime": {
       "reviewed": true,
