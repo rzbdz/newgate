@@ -76,6 +76,12 @@ func New() modules.Component {
 				return err
 			}
 			releases = append(releases, release)
+			// status 里的「每个客户端」一块：谁的状态谁自己报（见 status.go）。
+			statusRelease, err := ui.RegisterStatusBlocks(agentStatus{AgentCatalog(registry)})
+			if err != nil {
+				return err
+			}
+			releases = append(releases, statusRelease)
 			glossaryRelease, err := ui.RegisterGlossary(glossary{AgentCatalog(registry)})
 			if err != nil {
 				return err

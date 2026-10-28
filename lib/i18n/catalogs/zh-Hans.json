@@ -396,6 +396,10 @@
       "reviewed": true,
       "text": "工具 schema 缺 required 时补空数组"
     },
+    "Agents": {
+      "reviewed": true,
+      "text": "客户端"
+    },
     "All direct": {
       "reviewed": true,
       "text": "全部直连"
@@ -603,10 +607,6 @@
     "Enable: newgate st on {name}": {
       "reviewed": true,
       "text": "打开：newgate st on {name}"
-    },
-    "Env var": {
-      "reviewed": true,
-      "text": "环境变量"
     },
     "Environment": {
       "reviewed": true,
@@ -1676,6 +1676,10 @@
       "reviewed": true,
       "text": "读不到 mappings：{err}"
     },
+    "cannot read profile {name}: {err}": {
+      "reviewed": true,
+      "text": "读不了档位 {name}：{err}"
+    },
     "cannot read providers.json: {err}": {
       "reviewed": true,
       "text": "providers.json 读不出: {err}"
@@ -1783,6 +1787,10 @@
     "command name {name} is already taken": {
       "reviewed": true,
       "text": "命令名 {name} 已被占用"
+    },
+    "config": {
+      "reviewed": true,
+      "text": "配置"
     },
     "config dir": {
       "reviewed": true,
@@ -1936,6 +1944,10 @@
       "reviewed": true,
       "text": "已禁用：{why}"
     },
+    "discovered from its config at takeover": {
+      "reviewed": true,
+      "text": "接管时从它的配置文件里发现"
+    },
     "down": {
       "reviewed": true,
       "text": "挂"
@@ -2047,6 +2059,10 @@
     "following the global default ({profile})": {
       "reviewed": true,
       "text": "跟随全局缺省（{profile}）"
+    },
+    "follows the global default": {
+      "reviewed": true,
+      "text": "跟随全局缺省"
     },
     "forwarded upstream to get the true value": {
       "reviewed": true,
@@ -2184,9 +2200,9 @@
       "reviewed": true,
       "text": "键 {key} 被 {first} 和 {second} 同时注册，保留先登记的"
     },
-    "known agents and their model slots": {
+    "known agents: profile, model slots and their current bindings": {
       "reviewed": true,
-      "text": "已知 agent 及其模型槽位"
+      "text": "已知客户端：档位、模型槽位及当前绑定"
     },
     "laggy": {
       "reviewed": true,
@@ -2475,6 +2491,10 @@
     "only if the two dialects live on different bases": {
       "reviewed": true,
       "text": "只有两种方言不在同一个 base 上时才填"
+    },
+    "or use newgate tui to do the same thing": {
+      "reviewed": true,
+      "text": "或用 newgate tui 做同样的事"
     },
     "other": {
       "reviewed": true,
@@ -2896,9 +2916,17 @@
       "reviewed": true,
       "text": "serving：{name} 登记了一个空回调"
     },
+    "set": {
+      "reviewed": true,
+      "text": "单独设置"
+    },
     "set api_key in providers.json": {
       "reviewed": true,
       "text": "providers.json 里填 api_key"
+    },
+    "set for this client only": {
+      "reviewed": true,
+      "text": "仅此客户端单独设置"
     },
     "set for this client only (other clients follow the global default)": {
       "reviewed": true,
@@ -3014,7 +3042,7 @@
     },
     "switch a single agent only: newgate --set-profile <name> --agent <agent>": {
       "reviewed": true,
-      "text": "只切单个 agent：newgate --set-profile <名> --agent <agent>"
+      "text": "只切单个客户端：newgate --set-profile <名> --agent <agent>"
     },
     "switch profile; omit --agent to set the global default": {
       "reviewed": true,
@@ -3492,9 +3520,13 @@
       "reviewed": true,
       "text": "界面读的是哪份消息目录 —— 见 `newgate lang`"
     },
-    "who is going through newgate, with which profile": {
+    "which message catalog the interface reads; lang <tag> switches it": {
       "reviewed": true,
-      "text": "谁在走 newgate、用哪个 profile"
+      "text": "界面读的是哪份消息目录；lang <tag> 切换它"
+    },
+    "who is going through newgate, and which profile each client uses": {
+      "reviewed": true,
+      "text": "谁在走 newgate，以及每个客户端用哪个 profile"
     },
     "yes": {
       "reviewed": true,

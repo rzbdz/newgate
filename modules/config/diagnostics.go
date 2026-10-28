@@ -119,19 +119,23 @@ func checkChain() cliapi.Diagnostic {
 
 // ---------- status ----------
 
-// Status 一行说清用哪个 profile，有 per-agent 覆盖才展开。
+// Status 一行说清全局缺省，以及哪些客户端**单独定过**链头。
+//
+// 「单独定过」的判据是 state.Active 里**有没有一条记录**，不是「它跟缺省一不
+// 一样」。后者看起来更省字，却会把一件配置上完全不同的事藏起来：用户明确给
+// claude 选了 ds、而全局缺省恰好也是 ds 时，那一格在界面上和「什么都没设」长得
+// 一模一样——以后改全局缺省，它会不跟着走，而用户不知道（2026-09-29 在网页的
+// AgentProfile 上踩过同一条，这里漏了）。
 func (reporter) Status() []cliapi.StatusLine {
 	st := store.LoadState()
 	line := style.Cyan(st.DefaultProfile) + style.Dim(" "+i18n.T("default", nil))
-	over := 0
 	var parts []string
 	for _, id := range sortedAgentIDs(st) {
-		if p := st.Active[id]; p != "" && p != st.DefaultProfile {
+		if p := st.Active[id]; p != "" {
 			parts = append(parts, id+" → "+style.Cyan(p))
-			over++
 		}
 	}
-	if over > 0 {
+	if len(parts) > 0 {
 		line += "   " + strings.Join(parts, "   ")
 	}
 	return []cliapi.StatusLine{{Rank: rankStatusConfig, Label: i18n.T("Config", nil), Value: line}}

@@ -37,7 +37,7 @@ type statusCommand struct{ s *service }
 func (statusCommand) Names() []string { return []string{"status"} }
 func (statusCommand) Help() HelpLine {
 	return HelpLine{Section: SectionTakeover, Rank: rankTakeover,
-		Usage: "status", Summary: i18n.T("who is going through newgate, with which profile", nil)}
+		Usage: "status", Summary: i18n.T("who is going through newgate, and which profile each client uses", nil)}
 }
 func (c statusCommand) Run(_ Host, _ []string) int { return cmdStatus(c.s) }
 

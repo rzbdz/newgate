@@ -10,12 +10,14 @@ package confighook
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/lib/style"
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
+	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/store"
 )
 
@@ -31,7 +33,7 @@ func (agentsCommand) Names() []string { return []string{"agents"} }
 
 func (agentsCommand) Help() cliapi.HelpLine {
 	return cliapi.HelpLine{Section: cliapi.SectionRouting, Rank: 30,
-		Usage: "agents", Summary: i18n.T("known agents and their model slots", nil)}
+		Usage: "agents", Summary: i18n.T("known agents: profile, model slots and their current bindings", nil)}
 }
 
 func (c agentsCommand) Run(_ cliapi.Host, _ []string) int { return runAgents(c.agents) }
@@ -41,7 +43,6 @@ func (c agentsCommand) Run(_ cliapi.Host, _ []string) int { return runAgents(c.a
 // 每个 agent 一个小节：头一行是身份（方言 + 当前 profile），槽位一张表。
 // 以前是一张通铺大表，说明列又长，中文一撑就错位。
 func runAgents(agents AgentCatalog) int {
-	st := store.LoadState()
 	names := agents.Names()
 	sort.Strings(names)
 
@@ -53,47 +54,104 @@ func runAgents(agents AgentCatalog) int {
 		// 这个客户端交上来的运行时事实（可能没有）。取一次、往下传：它每次问都可能
 		// 读磁盘（见发行版 claudecode 的实现），而这里一个 agent 要问它好几遍。
 		facts := agents.Facts(n)
-		profile := st.ActiveFor(a.ID)
-		if profile == "" {
-			profile = st.DefaultProfile
+		ap := AgentProfile{AgentID: a.ID}
+		profile := ap.Active()
+		source := i18n.T("follows the global default", nil)
+		if ap.IsOverride() {
+			source = i18n.T("set for this client only", nil)
 		}
 		fmt.Println()
 		fmt.Println("  " + style.Bold(a.ID) +
 			style.Dim("   "+i18n.T("{dialect} dialect", i18n.A{"dialect": a.Dialect})) +
-			style.Dim("   profile ") + style.Cyan(profile))
+			style.Dim("   profile ") + style.Cyan(profile) +
+			style.Dim(" · "+source))
 		if a.Notes != "" {
 			fmt.Println(style.Hint(a.Notes))
 		}
 		if len(a.Slots) == 0 {
 			fmt.Println(style.Hint(i18n.T("slots are discovered from the config file at startup", nil)))
-			continue
-		}
-		t := style.NewTable(i18n.T("Slot", nil), i18n.T("Tier", nil), i18n.T("Env var", nil))
-		for _, s := range a.Slots {
-			// 这一列说的是「此刻实际走哪儿」（改过就用改的，见 AgentFacts）。
-			t.Row(s.Name, style.Cyan(TierOf(facts, s)), s.EnvVar)
-		}
-		fmt.Print(t.String())
-		// 说明单独一行：塞进表格会把整张表撑到一百多列，反而没法对读。
-		//
-		// 「改过没有」也在这行而不在表格里：第一版把它拼进档位那一格，结果一行的
-		// 宽度多出十来个**全角**字符，列宽是按字符数算的，整张表当场歪掉（实测）。
-		// 这行本来就是「这个槽位是干什么的」，改过没有属于同一类注脚。
-		for _, s := range a.Slots {
-			note := ""
-			if tier := TierOf(facts, s); tier != s.Tier {
-				note = " · " + i18n.T("{tier} was set in the config (the default is {def})",
-					i18n.A{"tier": tier, "def": s.Tier})
+		} else {
+			// 链头那一份 profile 只读一次：下面每个槽位都要拿它的绑定，而读盘 + 解析
+			// 是这一屏里最贵的两件事。读不出来时仍然把槽位表列出来（档位是描述符的
+			// 事实），只是 Binding 一列显示「未知」——不因为一个坏文件把整张表吞掉。
+			pr, profileErr := store.LoadProfile(profile)
+			if profileErr != nil {
+				fmt.Println(style.Item(style.Warn, i18n.T("cannot read profile {name}: {err}",
+					i18n.A{"name": profile, "err": profileErr.Error()})))
 			}
-			if s.Desc != "" || note != "" {
-				fmt.Println(style.Hint(s.Name + "  " + s.Desc + note))
+			provs, _ := store.LoadProviders()
+			t := style.NewTable(i18n.T("Slot", nil), i18n.T("Tier", nil), i18n.T("Binding", nil))
+			for _, s := range a.Slots {
+				// 这一列说的是「此刻实际走哪儿」（改过就用改的，见 AgentFacts）。
+				tier := TierOf(facts, s)
+				t.Row(s.Name, style.Cyan(tier), slotBinding(pr, provs, tier))
+			}
+			fmt.Print(t.String())
+			// 说明单独一行：塞进表格会把整张表撑到一百多列，反而没法对读。
+			//
+			// 「改过没有」也在这行而不在表格里：第一版把它拼进档位那一格，结果一行的
+			// 宽度多出十来个**全角**字符，列宽是按字符数算的，整张表当场歪掉（实测）。
+			// 这行本来就是「这个槽位是干什么的」，改过没有属于同一类注脚。
+			for _, s := range a.Slots {
+				note := ""
+				if tier := TierOf(facts, s); tier != s.Tier {
+					note += " · " + i18n.T("{tier} was set in the config (the default is {def})",
+						i18n.A{"tier": tier, "def": s.Tier})
+				}
+				if s.Desc != "" || note != "" {
+					fmt.Println(style.Hint(s.Name + "  " + s.Desc + note))
+				}
+			}
+		}
+		// 它自己的配置文件与此刻有没有被接管。Claude Code 走 shim/env，没有
+		// Config（所以这里什么都不打）；codex / opencode 走配置文件，这两行正是
+		// 「设置落到哪儿」的答案。TUI 的详情页读的是同一份 Targets/IsTakenOver。
+		if a.Config != nil {
+			for _, target := range a.Config.Targets() {
+				state := i18n.T("not taken over", nil)
+				mark := style.Skip
+				if a.Config.IsTakenOver(target) {
+					state = i18n.T("taken over", nil)
+					mark = style.OK
+				}
+				fmt.Println("  " + style.Dim(i18n.T("config", nil)) + "  " + filepath.Base(target) +
+					"  " + style.Mark(mark) + " " + state)
 			}
 		}
 	}
 
 	fmt.Println()
 	fmt.Println(style.Hint(i18n.T("switch a single agent only: newgate --set-profile <name> --agent <agent>", nil)))
+	fmt.Println(style.Hint(i18n.T("or use newgate tui to do the same thing", nil)))
 	return 0
+}
+
+// slotBinding 把一个槽位的档位解析成「落到哪家上游的哪个模型」。
+//
+// 这正是用户来 `newgate agents` 想看的最后一跳：档位（normal）是语义，binding
+// （provider/model）才是真正会发出去的请求目标。解析不了（profile 读坏了、这一档
+// 没绑）时返回一个明确的占位，而不是空白——空白看起来像「没配」和「读不出来」
+// 同一件事，而修复动作完全不同。
+func slotBinding(pr *domain.Profile, provs *domain.Providers, tier string) string {
+	if pr == nil {
+		return style.Dim(i18n.T("unknown", nil))
+	}
+	b, ok := pr.Resolve(tier)
+	if !ok {
+		return style.Dim(i18n.T("unbound", nil))
+	}
+	out := b.String()
+	if provs == nil || b.IsRef() {
+		return out
+	}
+	p, exists := provs.Providers[b.Provider]
+	switch {
+	case !exists:
+		out += " " + style.Red(i18n.T("provider is not defined", nil))
+	case p.Key() == "":
+		out += " " + style.Yellow(i18n.T("api_key missing", nil))
+	}
+	return out
 }
 
 // glossary 贡献帮助屏术语表里的「agent」一行。

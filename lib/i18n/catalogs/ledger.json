@@ -440,6 +440,7 @@
     "API key": {},
     "API key from env": {},
     "Add an empty array when a tool schema lacks required": {},
+    "Agents": {},
     "All direct": {},
     "All tools are back to direct connections; the PATH line still points at the empty shim dir, which is harmless": {},
     "Already exported in the shell: {names}": {
@@ -563,7 +564,6 @@
         "name"
       ]
     },
-    "Env var": {},
     "Environment": {},
     "Error evidence files": {},
     "Failed to acquire the lock: {err}": {
@@ -1217,6 +1217,12 @@
         "err"
       ]
     },
+    "cannot read profile {name}: {err}": {
+      "args": [
+        "err",
+        "name"
+      ]
+    },
     "cannot read providers.json: {err}": {
       "args": [
         "err"
@@ -1330,6 +1336,7 @@
         "name"
       ]
     },
+    "config": {},
     "config dir": {},
     "config file rewritten → local proxy": {},
     "config files": {},
@@ -1422,6 +1429,7 @@
         "why"
       ]
     },
+    "discovered from its config at takeover": {},
     "down": {},
     "drain complete, exiting (socket continues under pid {pid})": {
       "args": [
@@ -1482,6 +1490,7 @@
         "profile"
       ]
     },
+    "follows the global default": {},
     "forwarded upstream to get the true value": {},
     "forwarding, upstream quirk patches, and reasoning pass-through": {},
     "four-tier compatibility: a profile that does not write normal behaves like mid": {},
@@ -1578,7 +1587,7 @@
         "second"
       ]
     },
-    "known agents and their model slots": {},
+    "known agents: profile, model slots and their current bindings": {},
     "laggy": {},
     "language": {},
     "lay down the default configuration": {},
@@ -1785,6 +1794,7 @@
     "one per line": {},
     "only POST is accepted": {},
     "only if the two dialects live on different bases": {},
+    "or use newgate tui to do the same thing": {},
     "other": {},
     "over maxAttempts": {},
     "own command registration failed (assembly error): {err}": {
@@ -2189,7 +2199,9 @@
         "name"
       ]
     },
+    "set": {},
     "set api_key in providers.json": {},
+    "set for this client only": {},
     "set for this client only (other clients follow the global default)": {},
     "set in the config: {tier} (the default is {def}) — takes effect the next time {agent} is taken over (newgate on {agent})": {
       "args": [
@@ -2569,7 +2581,8 @@
     "which bindings are tripped, why, and for how long": {},
     "which language this process speaks: resolve it, install the tables, honour disk overrides": {},
     "which message catalog the interface reads — see `newgate lang`": {},
-    "who is going through newgate, with which profile": {},
+    "which message catalog the interface reads; lang <tag> switches it": {},
+    "who is going through newgate, and which profile each client uses": {},
     "yes": {},
     "you rarely need this command: configuration changes apply within a second": {},
     "{agent} is back to a direct connection; newgate start will no longer take it over (newgate on {agent} restores it)": {

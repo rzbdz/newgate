@@ -15,7 +15,22 @@ import (
 // 「谁的知识谁自己报」，与 plugin-manager 的命令同一形状。
 type command struct{ svc *service }
 
+var _ cliapi.Documented = (*command)(nil)
+
 func (c *command) Names() []string { return []string{"lang", "language"} }
+
+// Help 让 `newgate lang` 出现在 --help 里。
+//
+// 它以前只注册了命令、没声明 HelpLine，于是命令能用、帮助屏里一行都没有
+// ——用户不会去猜一个看不见的动词（2026-10-28 审计所有注册命令时发现，同时
+// 补上的还有 omo）。
+func (*command) Help() cliapi.HelpLine {
+	return cliapi.HelpLine{
+		Section: cliapi.SectionUI, Rank: 40,
+		Usage:   "lang [tag]",
+		Summary: i18n.T("which message catalog the interface reads; lang <tag> switches it", nil),
+	}
+}
 
 func (c *command) Run(host cliapi.Host, args []string) int {
 	want := cliapi.Positional(args, 0)

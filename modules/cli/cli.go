@@ -83,21 +83,38 @@ func usageText(service *service) string {
 	// 左列按显示宽度补齐（CJK 双宽），右列一律暗色——扫读时先看命令名，
 	// 需要时再看说明。
 	cmd := func(left, right string) {
-		prefix := "  " + style.Cyan(style.Pad(left, commandWidth))
+		// Usage 比左栏宽时**单独占一行**。上一版把它和 summary 硬拼在同一行，
+		// verify 那条长 flags 直接变成 `...--json]给每条…`——两个机器可读/人读的
+		// 东西粘在一起（2026-10-28 截图）。usage 是命令的写法，不该为了版面被截断，
+		// 也不该把右栏挤没。
+		if style.VisibleWidth(left) > commandWidth {
+			for _, line := range wrapWords(left, style.MaxColumns-2) {
+				b.WriteString("  " + style.Cyan(line) + "\n")
+			}
+			if right != "" {
+				for _, line := range wrapWords(right, style.MaxColumns-4) {
+					b.WriteString("    " + style.Dim(line) + "\n")
+				}
+			}
+			return
+		}
+		// 左栏补到固定宽度后**总是**再留一格：usage 恰好占满 commandWidth 时，
+		// 没有这一格，right 会紧贴着最后一个字符。
+		prefix := "  " + style.Cyan(style.Pad(left, commandWidth)) + " "
 		if right == "" {
 			b.WriteString(prefix)
 			b.WriteString("\n")
 			return
 		}
-		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-commandWidth)
+		lines := wrapWords(right, style.MaxColumns-2-commandWidth-1)
 		for i, line := range lines {
 			if i == 0 {
 				b.WriteString(prefix)
-				b.WriteString(line)
+				b.WriteString(style.Dim(line))
 				b.WriteString("\n")
 			} else {
-				b.WriteString(strings.Repeat(" ", 2+commandWidth))
-				b.WriteString(line)
+				b.WriteString(strings.Repeat(" ", 2+commandWidth+1))
+				b.WriteString(style.Dim(line))
 				b.WriteString("\n")
 			}
 		}
@@ -151,15 +168,15 @@ func usageText(service *service) string {
 	b.WriteString("\n")
 	term := func(left, right string) {
 		prefix := "  " + style.Pad(style.Cyan(left), termWidth)
-		lines := style.Wrap(style.Dim(right), style.MaxColumns-2-termWidth)
+		lines := wrapWords(right, style.MaxColumns-2-termWidth)
 		for i, line := range lines {
 			if i == 0 {
 				b.WriteString(prefix)
-				b.WriteString(line)
+				b.WriteString(style.Dim(line))
 				b.WriteString("\n")
 			} else {
 				b.WriteString(strings.Repeat(" ", 2+termWidth))
-				b.WriteString(line)
+				b.WriteString(style.Dim(line))
 				b.WriteString("\n")
 			}
 		}
@@ -168,6 +185,60 @@ func usageText(service *service) string {
 		term(line.Term, line.Definition)
 	}
 	return b.String()
+}
+
+// wrapWords 按**词边界**折行；一个词比整行还长时才退回按显示宽度切字符。
+//
+// 为什么不用 style.Wrap：那个是字符级的（CJK 没有空格，字符级是唯一可行的
+// 通用做法），但把它用在 help 的右栏会把 `<tag>` 断成 `<ta` / `g>`、
+// `--provider` 断成两截——那些是**机器标记**，断了就既 grep 不到也拷不走。
+// 这里先按空格分词：英文/flag 保持完整，中文整句作为一个词，超宽时才交给
+// style.Wrap 按宽度切。两边的取舍各自成立。
+func wrapWords(s string, width int) []string {
+	if width <= 0 {
+		return []string{s}
+	}
+	var lines []string
+	var cur strings.Builder
+	curW := 0
+	add := func(word string) {
+		ww := style.VisibleWidth(word)
+		if curW > 0 && curW+1+ww <= width {
+			cur.WriteByte(' ')
+			cur.WriteString(word)
+			curW += 1 + ww
+			return
+		}
+		if curW > 0 {
+			lines = append(lines, cur.String())
+			cur.Reset()
+			curW = 0
+		}
+		if ww <= width {
+			cur.WriteString(word)
+			curW = ww
+			return
+		}
+		parts := style.Wrap(word, width)
+		for i, part := range parts {
+			if i == len(parts)-1 {
+				cur.WriteString(part)
+				curW = style.VisibleWidth(part)
+				continue
+			}
+			lines = append(lines, part)
+		}
+	}
+	for _, word := range strings.Fields(s) {
+		add(word)
+	}
+	if cur.Len() > 0 {
+		lines = append(lines, cur.String())
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 func runCLI(service *service, args []string) int {
