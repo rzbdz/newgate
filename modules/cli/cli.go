@@ -167,15 +167,17 @@ func usageText(service *service) string {
 	b.WriteString(style.Bold(i18n.T("Glossary", nil)))
 	b.WriteString("\n")
 	term := func(left, right string) {
-		prefix := "  " + style.Pad(style.Cyan(left), termWidth)
-		lines := wrapWords(right, style.MaxColumns-2-termWidth)
+		// 与命令那栏同一个理由：词条恰好占满 termWidth 时（中文四字 = 8 列，
+		// 正好是下限）没有这一格，定义会紧贴着词条（`配置文件providers.json`）。
+		prefix := "  " + style.Pad(style.Cyan(left), termWidth) + " "
+		lines := wrapWords(right, style.MaxColumns-2-termWidth-1)
 		for i, line := range lines {
 			if i == 0 {
 				b.WriteString(prefix)
 				b.WriteString(style.Dim(line))
 				b.WriteString("\n")
 			} else {
-				b.WriteString(strings.Repeat(" ", 2+termWidth))
+				b.WriteString(strings.Repeat(" ", 2+termWidth+1))
 				b.WriteString(style.Dim(line))
 				b.WriteString("\n")
 			}
