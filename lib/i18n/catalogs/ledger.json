@@ -1457,6 +1457,11 @@
     },
     "entry: handler must have a Name()": {},
     "entry: handler must not be nil": {},
+    "env {var}": {
+      "args": [
+        "var"
+      ]
+    },
     "error {code}: {msg}": {
       "args": [
         "code",

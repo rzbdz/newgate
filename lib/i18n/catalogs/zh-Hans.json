@@ -2000,6 +2000,10 @@
       "reviewed": true,
       "text": "entry: 入口申报者不能为 nil"
     },
+    "env {var}": {
+      "reviewed": true,
+      "text": "环境变量 {var}"
+    },
     "error {code}: {msg}": {
       "reviewed": true,
       "text": "错误 {code}: {msg}"

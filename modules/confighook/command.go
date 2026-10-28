@@ -101,6 +101,12 @@ func runAgents(agents AgentCatalog) int {
 				if s.Desc != "" || note != "" {
 					fmt.Println(style.Hint(s.Name + "  " + s.Desc + note))
 				}
+				// 环境变量单独一行：它是**不可断的标识符**（ANTHROPIC_DEFAULT_…），
+				// 拼在说明后面会被 75 列切在中间（实测 `ANT` / `HROPIC…`）。
+				// 这一行是 Claude Code 那类「靠 env 注入」的客户端的真正设置。
+				if s.EnvVar != "" {
+					fmt.Println(style.Hint(i18n.T("env {var}", i18n.A{"var": s.EnvVar})))
+				}
 			}
 		}
 		// 它自己的配置文件与此刻有没有被接管。Claude Code 走 shim/env，没有
