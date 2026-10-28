@@ -238,7 +238,8 @@ Start: func(_ context.Context, ctx component.Context) error {
 **一个概念 = 数据 + 怎么改**（`Concept{ID, Kind, Title, Data, Broken, Live, Apply}`）：
 
 - `Kind` 是渲染方式（`mapping-editor` / `code` / `toggles` / `series` / `table` /
-  `log`）。前端**只认这几种**：加一个模块的面不需要改前端，除非它带来一种新的
+  `log` / `records` / `chains` / `overview` / `fingerprints`）。前端**只认这几种**：
+  加一个模块的面不需要改前端，除非它带来一种新的
   **形状**（那时两边都要动，这是诚实的代价）。`table` 的形状是 `view.Table`：
   几列 + 几行，**行是按列 ID 索引的 map**，不是数组——列顺序于是纯展示的事，
   前端按窄屏重排不会把格子串位。格子里的颜色走 `Cell.Tone`（`ok`/`warn`/`bad`）

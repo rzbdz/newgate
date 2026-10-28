@@ -7,8 +7,6 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +14,7 @@ import (
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 	"github.com/rzbdz/newgate/modules/config/domain"
 	"github.com/rzbdz/newgate/modules/config/store"
+	"github.com/rzbdz/newgate/modules/config/targets"
 	"github.com/rzbdz/newgate/modules/gateway/dialect"
 	"github.com/rzbdz/newgate/modules/gateway/quirk"
 )
@@ -53,13 +52,10 @@ func (r Result) Light() string {
 }
 
 // Target 是去重探活的最小身份；profile/role 只是引用它的配置视图。
-type Target struct {
-	Provider string
-	Model    string
-}
-
-// String 返回稳定的 provider/model 标识，用于排序和诊断。
-func (t Target) String() string { return t.Provider + "/" + t.Model }
+//
+// 类型本体住在 config/targets：`newgate verify` 也要同一份「profile 解析成
+// 哪些上游」的名单，而它不该 import 探针的实现包（见那边的包注释）。
+type Target = targets.Target
 
 // Options 控制一次探测。回调让调用方能实时渲染进展。
 type Options struct {
@@ -122,65 +118,23 @@ func Run(o Options) ([]Result, error) {
 			i18n.A{"err": cacheErr}))
 	}
 
+	// 配置视图与去重目标都由 config/targets 给：`newgate verify` 用的是同一份
+	// （见那个包的注释）。这里只把它的 Row 翻译成 Result 的字段。
+	rows, uniq, err := targets.Enumerate(targets.Options{Only: o.Only, OnlyTarget: o.OnlyTarget})
+	if err != nil {
+		return nil, err
+	}
+	// targets 只回答「哪些上游」；发请求还要 provider 的定义（base、key）。
 	provs, err := store.LoadProviders()
 	if err != nil {
 		return nil, err
 	}
-	names, err := store.ListProfiles()
-	if err != nil {
-		return nil, err
+	results := make([]Result, 0, len(rows))
+	for _, r := range rows {
+		results = append(results, Result{
+			Profile: r.Profile, Role: r.Role, Provider: r.Provider, Model: r.Model, Err: r.Err,
+		})
 	}
-	if o.Only != "" {
-		found := false
-		for _, n := range names {
-			if n == o.Only {
-				found = true
-			}
-		}
-		if !found {
-			return nil, i18n.E("profile {profile} does not exist (available: {names})", i18n.A{
-				"profile": strconv.Quote(o.Only),
-				"names":   strings.Join(names, ", "),
-			})
-		}
-		names = []string{o.Only}
-	}
-
-	// 收集去重后的探测目标
-	var results []Result
-	uniqSet := map[Target]bool{}
-	var uniq []Target
-	if o.OnlyTarget != nil {
-		// 点名了一条：不遍历 profile（理由见 Options.OnlyTarget）。
-		names = nil
-		uniq = append(uniq, *o.OnlyTarget)
-	}
-	for _, n := range names {
-		pr, err := store.LoadProfile(n)
-		if err != nil {
-			continue
-		}
-		for _, role := range domain.Roles {
-			b, ok := pr.Resolve(role)
-			if !ok {
-				results = append(results, Result{Profile: n, Role: role, Err: i18n.T("not bound", nil)})
-				continue
-			}
-			r := Result{Profile: n, Role: role, Provider: b.Provider, Model: b.Model}
-			if _, ok := provs.Providers[b.Provider]; !ok {
-				r.Err = i18n.T("provider undefined", nil)
-				results = append(results, r)
-				continue
-			}
-			t := Target{b.Provider, b.Model}
-			if !uniqSet[t] {
-				uniqSet[t] = true
-				uniq = append(uniq, t)
-			}
-			results = append(results, r)
-		}
-	}
-	sort.Slice(uniq, func(i, j int) bool { return uniq[i].String() < uniq[j].String() })
 	if o.OnPlan != nil {
 		o.OnPlan(uniq)
 	}
@@ -286,7 +240,7 @@ func Run(o Options) ([]Result, error) {
 		if r.Provider == "" || r.Err != "" {
 			continue
 		}
-		t := Target{r.Provider, r.Model}
+		t := Target{Provider: r.Provider, Model: r.Model}
 		o2 := got[t]
 		r.Status, r.Latency, r.Total = o2.status, o2.lat, o2.totalLat
 		r.OK = o2.err == nil && o2.status == 200
@@ -313,12 +267,7 @@ func Run(o Options) ([]Result, error) {
 		}
 	}
 
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].Profile != results[j].Profile {
-			return results[i].Profile < results[j].Profile
-		}
-		return roleIdx(results[i].Role) < roleIdx(results[j].Role)
-	})
+	// Rows 已经按（profile, 档位顺序）排好；结果沿用同一顺序。
 	return results, nil
 }
 
@@ -398,15 +347,6 @@ func extractErr(raw []byte) string {
 		s = s[:160] + "…"
 	}
 	return s
-}
-
-func roleIdx(r string) int {
-	for i, x := range domain.Roles {
-		if x == r {
-			return i
-		}
-	}
-	return 99
 }
 
 // Summary 按 profile 汇总，用于给出「该切哪个」的建议。
