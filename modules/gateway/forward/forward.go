@@ -808,6 +808,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	tgt := parseTarget(r.URL.Path)
 
+	// 带身份前缀的 `/a/<agent>[/p/<profile>]/v1/models` 与裸的 `/v1/models` 是
+	// 同一件事：列出可点名的档位。mux 只把裸路径挂给了 handleModels，带前缀的
+	// 会掉到这里、因为没有 model 字段被 400。2026-10-29 opencode 的 baseURL 补上
+	// `/a/opencode`（之前漏了，网关认不出它、按全局缺省选链）之后，它的 /models
+	// 正好走这条路。列表与客户端无关，所以直接交给同一个处理函数。
+	if tgt.Suffix == "/models" && r.Method == http.MethodGet {
+		s.handleModels(w, r)
+		return
+	}
+
 	// count_tokens：Anthropic 协议的私有端点，Claude Code 拿它算上下文水位。
 	// 必须在 model 检查**之前**拦——有客户端发这个请求时不带 model 字段。
 	// 上游有这个端点就转发拿真值（按 provider 学，见 forwardCountTokens），
