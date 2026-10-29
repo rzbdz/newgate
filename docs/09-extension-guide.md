@@ -110,6 +110,11 @@ component.Need(cliapi.Capability)       // 错，app 的棘轮当场红
 - `Unstyled(args)` —— **这一次**的输出不是版式（JSON、KV 原文、日志流）。收 args
   是因为同一条命令可能只有某种用法不排版（`probe --json`、`profile kv`）。
 
+**`<动词>@<值>` 是界面认的一种写法**（2026-10-29）：`newgate upgrade@v0.9.0` 被拆成
+动词 `upgrade` + 位置参数 `@v0.9.0` 再分派。界面不解释那个值——它是版本、tag 还是
+别的什么，归收它的命令；不认识 `@…` 的命令按自己的规矩报「多余的参数」。只有整串
+不是一条命令、而 `@` 前面那段是的时候才拆（`modules/cli` 的 `splitAtVerb`）。
+
 **界面里不许出现的东西**：任何一条命令的实现、任何一张数据表、任何一处「读某个
 模块的 state/配置文件」。`modules/cli` 的 `Requires` 是空的，`app/` 里两条棘轮测试
 （`TestCLIDependenciesOnlyShrink`、`TestUIStaysOutOfTheDependencyGraph`）守着它。

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	cliapi "github.com/rzbdz/newgate/modules/cli/extension"
@@ -65,6 +66,37 @@ func TestFlagIsExactAndStopsAtTerminator(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := cliapi.Flag(tt.args, "--force"); got != tt.want {
 				t.Errorf("Flag(%q, --force) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+// `newgate upgrade@v0.9.0` 拆成动词 + `@值`：值交给命令解释，界面不认识它。
+func TestSplitAtVerb(t *testing.T) {
+	s := &service{}
+	if _, err := s.RegisterCommand(fakeCommand{names: []string{"upgrade"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RegisterCommand(fakeCommand{names: []string{"odd@name"}}); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"拆开并保留后续参数", []string{"upgrade@v0.9.0", "--check"}, []string{"upgrade", "@v0.9.0", "--check"}},
+		{"前置选项照常跳过", []string{"--profile", "ds", "upgrade@main"}, []string{"--profile", "ds", "upgrade", "@main"}},
+		{"没有 @ 不动", []string{"upgrade", "binary"}, []string{"upgrade", "binary"}},
+		{"动词不认识就不拆（让未知命令照常报错）", []string{"nope@v1"}, []string{"nope@v1"}},
+		{"空值不拆", []string{"upgrade@"}, []string{"upgrade@"}},
+		{"名字里本来就带 @ 的命令按原样分派", []string{"odd@name"}, []string{"odd@name"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitAtVerb(s, tt.args)
+			if strings.Join(got, " ") != strings.Join(tt.want, " ") {
+				t.Errorf("splitAtVerb(%q) = %q, want %q", tt.args, got, tt.want)
 			}
 		})
 	}

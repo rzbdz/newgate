@@ -244,6 +244,7 @@ func wrapWords(s string, width int) []string {
 }
 
 func runCLI(service *service, args []string) int {
+	args = splitAtVerb(service, args)
 	if shouldAuditLayout(service, args) {
 		return auditLayout(args, func() int { return run(service, args) })
 	}
@@ -307,6 +308,42 @@ func dropName(args []string, name string) []string {
 		if a == name {
 			return append(append([]string{}, args[:i]...), args[i+1:]...)
 		}
+	}
+	return args
+}
+
+// splitAtVerb 把 `<动词>@<值>` 拆成 `<动词> @<值>` 两个 token。
+//
+// 为什么界面要认这个形状：`newgate upgrade@v0.9.0` 是用户会直接敲的写法（与
+// `pip install x==1`、`go install x@v1` 同一种肌肉记忆），而分派键是动词本身——
+// 不拆的话它是一条「未知命令 upgrade@v0.9.0」。拆开之后 `@v0.9.0` 作为**普通的
+// 位置参数**交给命令，它是什么意思（版本、tag、分支）归命令自己解释；界面不认识
+// 任何一个值，也不知道哪条命令收它——不认得 `@…` 的命令会按自己的规矩报错。
+//
+// 只在「整串不是一条命令、而 @ 前面那段是」时才拆：一条名字里本来就带 @ 的
+// 命令（今天没有）照常按原样分派，不会被这条语法糖抢走。
+func splitAtVerb(service *service, args []string) []string {
+	if service == nil || len(args) == 0 {
+		return args
+	}
+	name := lookupName(args)
+	verb, value, ok := strings.Cut(name, "@")
+	if !ok || verb == "" || value == "" {
+		return args
+	}
+	if _, exact := service.moduleCommand(name); exact {
+		return args
+	}
+	if _, known := service.moduleCommand(verb); !known {
+		return args
+	}
+	out := make([]string, 0, len(args)+1)
+	for i, a := range args {
+		if a == name {
+			out = append(out, verb, "@"+value)
+			return append(out, args[i+1:]...)
+		}
+		out = append(out, a)
 	}
 	return args
 }
