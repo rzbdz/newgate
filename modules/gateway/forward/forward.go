@@ -609,6 +609,20 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"id": id, "object": "model", "owned_by": "newgate",
 		})
 	}
+	// 客户端模块可以替自己的 URL 答这份清单（special.ModelLister 的注释说了为什么）。
+	// 没人答就是缺省：档位 + 动态角色键，与客户端无关。
+	tgt := parseTarget(r.URL.Path)
+	var st *domain.State
+	if snap := s.snap(); snap != nil {
+		st = snap.State
+	}
+	if ids, _, ok := special.ListModels(tgt.TaskCreate, tgt.Profile, st); ok {
+		for _, id := range ids {
+			add(id)
+		}
+		writeJSON(w, 200, map[string]interface{}{"object": "list", "data": data})
+		return
+	}
 	for _, tier := range domain.Roles {
 		add(tier)
 	}

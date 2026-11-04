@@ -440,6 +440,15 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 
 只存在于“客户端 × 模型”的逻辑放到 cross-component，不能污染任一单边模块。
 
+插件还可以按需实现几个可选接口（`modules/gateway/special/special.go`）：
+`Responder`（直接替上游回答，见 claudecode 的裸奔）、`RoutePlugin`（构链前给路由
+意图）、`ToolLoopMigrator`（跨上游接手未闭合的 tool loop），以及 **`ModelLister`**
+——替**自己那个客户端**的 URL 回答 `GET …/v1/models`。缺省清单（档位 + 动态角色键）
+与客户端无关；而有的客户端会拿这份清单**替换**它配置里的模型表（hermes 的 `/model`
+就是），钉在 `/p/<profile>` 上的 URL 下能点名的又不只是档位。哪些名字该给哪个
+客户端看是客户端模块的知识，所以由它答（见发行版的 `modules/hermes`），内核只负责
+问；没人答、插件被 `newgate st off`、或者 panic，都回缺省清单。
+
 ## 7. 数据面策略（gateway 的四个决策点）
 
 网关是**最小系统**：它按自己的状态机切出「必须做个决定」的四个地方，各留一个口

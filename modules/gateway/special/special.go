@@ -135,6 +135,23 @@ type NoteProvider interface {
 	RespondNote(state *domain.State) string
 }
 
+// ModelLister 是插件对 `GET …/v1/models` 的回答：**这个客户端、这个 URL 下面**
+// 能点名的模型有哪些。返回 (ids, true) 表示由它定案；false = 交回内核的缺省清单
+// （档位 + 模块登记的动态角色键）。
+//
+// 为什么要有它（2026-11-04 接 hermes）：缺省清单与客户端无关，而有的客户端会
+// **拿这份清单替换掉**它自己配置里的模型表——hermes 的 `/model` 对每个具名
+// provider 都去问一次 `<base>/models`，问到了就用问到的。钉在某份 profile 上的
+// URL（`/a/<agent>/p/<profile>/v1`）下面能点名的不只是档位，还有那份 profile 绑的
+// 每个具体模型；缺省清单里没有它们，却有 omo 那批对这个客户端毫无意义的键。
+// 「这个客户端该看见哪些」是客户端模块的知识，所以由它答，内核只负责问。
+//
+// 与 Responder 同一条 fail-open：插件 panic、或者被 `newgate st off` 关掉，就当它
+// 没答，回缺省清单。
+type ModelLister interface {
+	ListModels(agent, profile string) (ids []string, ok bool)
+}
+
 // RoutePlugin 是 special 层在构链前的扩展点。插件只返回路由意图；如何校验
 // binding、构造 fallback 链仍由 resolve 负责。
 type RoutePlugin interface {
@@ -428,6 +445,32 @@ func Plugins() []Plugin {
 	out := make([]Plugin, len(registry.plugins))
 	copy(out, registry.plugins)
 	return out
+}
+
+// ListModels 按注册顺序问 ModelLister；第一个定案的生效。返回 (ids, 插件名, ok)。
+func ListModels(agent, profile string, state *domain.State) ([]string, string, bool) {
+	if state == nil || !gatewaystate.SpecialEnabled(state) {
+		return nil, "", false
+	}
+	for _, p := range Plugins() {
+		if gatewaystate.PluginOff(state, p.Name()) {
+			continue
+		}
+		lister, is := p.(ModelLister)
+		if !is {
+			continue
+		}
+		var ids []string
+		var ok bool
+		func() {
+			defer func() { _ = recover() }()
+			ids, ok = lister.ListModels(agent, profile)
+		}()
+		if ok {
+			return ids, p.Name(), true
+		}
+	}
+	return nil, "", false
 }
 
 // Respond 按注册顺序询问短路插件；第一个能直接替上游回答的生效。
