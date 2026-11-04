@@ -844,6 +844,28 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 没有 body 的 GET / HEAD 不是模型调用：本地答 404，**不记成失败**。
+	//
+	// 2026-11-04 接 hermes 时实抓：它对本机地址的 base_url 会探一圈「这是哪种本地
+	// 推理服务」（`/api/v1/models`、`/api/tags`、`/v1/props`、`/props`、`/version`，
+	// 见 hermes 的 model_metadata.detect_local_server_type），每建一个会话一轮。这些
+	// 以前掉进下面的 model 解析，每一发记一条「错误 400：请求体顶层没有 model」、
+	// 失败计数 +1——status 里的 err 数于是跟着 hermes 的会话数涨，看起来像数据面在
+	// 出错。它们问的是「你有没有这个端点」，诚实的回答就是 404：探测方据此判断
+	// 「不是 ollama / lm-studio」，与它对一个普通 OpenAI 兼容服务的预期一致。
+	//
+	// 只认「GET/HEAD 且 body 为空」：带 body 的请求仍走下面那条路——缺 model 的
+	// POST 是真的形状不对，那一条 400 + 计数是该有的。
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && len(body) == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"error": map[string]interface{}{
+				"type":    "not_found",
+				"message": "[newgate] " + i18n.T("{method} {path} is not an endpoint newgate serves", i18n.A{"method": r.Method, "path": r.URL.Path}),
+			},
+		})
+		return
+	}
+
 	// count_tokens：Anthropic 协议的私有端点，Claude Code 拿它算上下文水位。
 	// 必须在 model 检查**之前**拦——有客户端发这个请求时不带 model 字段。
 	// 上游有这个端点就转发拿真值（按 provider 学，见 forwardCountTokens），

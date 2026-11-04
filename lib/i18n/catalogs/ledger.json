@@ -2790,6 +2790,12 @@
         "total"
       ]
     },
+    "{method} {path} is not an endpoint newgate serves": {
+      "args": [
+        "method",
+        "path"
+      ]
+    },
     "{modules} modules · {switches} runtime switch points": {
       "args": [
         "modules",

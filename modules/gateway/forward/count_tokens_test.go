@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/rzbdz/newgate/modules/config/domain"
@@ -269,5 +270,42 @@ func TestAPIHelloAnsweredLocally(t *testing.T) {
 		if resp.StatusCode != 200 {
 			t.Fatalf("%s /api/hello 应本地 200，实际 %d", method, resp.StatusCode)
 		}
+	}
+}
+
+// TestBodylessProbesAre404NotFailures 本机推理服务的探测（hermes 对 127.0.0.1 的
+// base_url 会问 /api/tags、/v1/props、/version …）本地答 404，且不计入失败数——
+// 以前它们掉进 model 解析，每一发一条「错误 400」+ 失败计数（2026-11-04 实抓）。
+// 带 body 却缺 model 的 POST 仍然是 400：那是真的形状不对。
+func TestBodylessProbesAre404NotFailures(t *testing.T) {
+	srv := newTestServer()
+	front := httptest.NewServer(http.HandlerFunc(srv.handleProxy))
+	defer front.Close()
+
+	for _, p := range []string{"/a/hermes/api/tags", "/a/hermes/v1/props", "/a/hermes/p/ds/version"} {
+		for _, method := range []string{"GET", "HEAD"} {
+			req, _ := http.NewRequest(method, front.URL+p, nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != 404 {
+				t.Fatalf("%s %s 应本地 404，实际 %d", method, p, resp.StatusCode)
+			}
+		}
+	}
+	if n := atomic.LoadUint64(&srv.failures); n != 0 {
+		t.Fatalf("探测不该计入失败，实际 %d", n)
+	}
+
+	resp, err := http.Post(front.URL+"/a/hermes/v1/chat/completions", "application/json",
+		strings.NewReader(`{"messages":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Fatalf("缺 model 的 POST 仍应 400，实际 %d", resp.StatusCode)
 	}
 }

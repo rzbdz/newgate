@@ -18,6 +18,12 @@ HTTP request
 请求体不做整体 JSON decode/encode。Gateway 使用 byte splice 原语只修改目标字段，
 保持大整数、未知键、字段顺序和原始表示。
 
+进入模型解析之前，有几类请求在本地就答掉：`/api/hello`（Claude Code 的连通性
+探针，200）、`/v1/models`（带不带 `/a/<agent>[/p/<profile>]` 前缀都一样，列档位）、
+以及**没有 body 的 GET/HEAD**——它们不是模型调用（hermes 会对本机 base_url 探
+`/api/tags`、`/v1/props`、`/version` 这类「你是不是 ollama / lm-studio」），一律
+404，且**不计入失败数**。带 body 却缺 `model` 的请求仍是 400：那是真的形状不对。
+
 ## 2. 方言
 
 Gateway 支持 Anthropic `/v1/messages` 与 OpenAI

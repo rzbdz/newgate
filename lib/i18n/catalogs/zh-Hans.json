@@ -3672,6 +3672,10 @@
       "reviewed": true,
       "text": "{mark} {target} {status} 主{main}ms 总{total}ms{msg}"
     },
+    "{method} {path} is not an endpoint newgate serves": {
+      "reviewed": true,
+      "text": "{method} {path} 不是 newgate 提供的端点"
+    },
     "{modules} modules · {switches} runtime switch points": {
       "reviewed": true,
       "text": "{modules} 个模块 · {switches} 个可运行期开关点"
