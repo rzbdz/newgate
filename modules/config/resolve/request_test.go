@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rzbdz/newgate/modules/config/domain"
@@ -85,6 +86,72 @@ func TestResolveRequest_UnknownModel(t *testing.T) {
 	if tier != "" || len(steps) != 0 {
 		t.Errorf("未知模型应返回空链和空 tier，得到 tier=%q steps=%v", tier, names(steps))
 	}
+}
+
+// TestResolveRequest_KnownModelUnavailableFallsBackToTier 锁 2026-11-04 现场：
+//
+//	model deepseek-flash 既不是已知档位（…），也不在任何 profile 的绑定里
+//
+// ——而它明明绑在 ds 里。触发条件是唯一绑定了它的那条 binding 被熔断：
+// 反查原先在**带准入过滤的链**上做，模型从链上被摘掉，于是「不可用」被
+// 误报成「不认识」。认出来的档位链还有别的可用候选时，就该按那条链走
+// （fallback 本来干这个），并把被摘掉的原因留在 skips 里（不静默）。
+func TestResolveRequest_KnownModelUnavailableFallsBackToTier(t *testing.T) {
+	ps := []*domain.Profile{
+		{Name: "a", Roles: map[string]domain.Candidates{
+			"mid": one("a", "a-model")}},
+		{Name: "ds", Priority: prio(19), Roles: map[string]domain.Candidates{
+			"mid": one("ds", "deepseek-flash")}},
+	}
+	deny := func(provider, model string) (bool, string) {
+		if model == "deepseek-flash" {
+			return false, "circuit open"
+		}
+		return true, ""
+	}
+	steps, skips, tier := ResolveRequest("deepseek-flash", "a", ps,
+		mkProvs("a", "ds"), Opts{Active: "a", Available: deny})
+	if tier != "mid" {
+		t.Fatalf("模型绑在 mid 上，tier 应为 mid（不可用不等于不认识），得到 %q", tier)
+	}
+	eq(t, names(steps), "a:a/a-model")
+	found := false
+	for _, sk := range skips {
+		if sk.Kind == SkipUnavailable && strings.Contains(sk.Reason, "circuit open") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("被摘掉的点名 binding 应留下跳过原因（circuit open），得到 %+v", skips)
+	}
+}
+
+// TestResolveRequest_KnownModelUnavailableIsNotUnknown：点名 profile 自己
+// （探活/点名的调用方会把 profile 集合收敛到这一份）唯一候选被摘掉时，tier
+// 仍然要认出来——链为空是「现在没有可用候选」，不是「这个名字不认识」。
+func TestResolveRequest_KnownModelUnavailableIsNotUnknown(t *testing.T) {
+	ps := []*domain.Profile{{Name: "ds", Roles: map[string]domain.Candidates{
+		"mid": one("ds", "deepseek-flash")}}}
+	deny := func(provider, model string) (bool, string) { return false, "circuit open" }
+	steps, _, tier := ResolveRequest("deepseek-flash", "ds", ps,
+		mkProvs("ds"), Opts{Active: "ds", Available: deny})
+	if tier != "mid" || len(steps) != 0 {
+		t.Errorf("应得到 tier=mid、空链（现在不可用），得到 tier=%q steps=%v", tier, names(steps))
+	}
+}
+
+// TestResolveRequest_KnownModelPastMaxSteps：反查不能先在截断后的链上做。
+// 点名模型排在 maxAttempts 之后时，它仍然是客户端**点名要的**那个，必须
+// 挪到链头；截断只决定后面还能跟几个 fallback。
+func TestResolveRequest_KnownModelPastMaxSteps(t *testing.T) {
+	ps := []*domain.Profile{{Name: "a", Roles: map[string]domain.Candidates{
+		"mid": list("pA/m1", "pB/m2", "pC/deepseek-flash")}}}
+	steps, _, tier := ResolveRequest("deepseek-flash", "a", ps,
+		mkProvs("pA", "pB", "pC"), Opts{Active: "a", MaxSteps: 2})
+	if tier != "mid" {
+		t.Fatalf("tier = %q，应为 mid", tier)
+	}
+	eq(t, names(steps), "a:pC/deepseek-flash", "a:pA/m1")
 }
 
 // TestResolveRequest_AmbiguousModelPrefersMid 一对多反查的优先级（2026-09-09

@@ -1336,9 +1336,9 @@
       "reviewed": true,
       "text": "[breaker] 健康表读写失败（继续使用内存状态）: {err}"
     },
-    "[probe] tripped {provider}/{model}: {grade} (at least 60s, and returning to the chain needs a successful probe)": {
+    "[probe] tripped {provider}/{model}: {grade} (at least 60s, or a successful probe brings it back immediately)": {
       "reviewed": true,
-      "text": "[probe] 熔断 {provider}/{model}：{grade}（至少 60s，之后须 probe 成功才回链）"
+      "text": "[probe] 熔断 {provider}/{model}：{grade}（至少 60s，或下一次 probe 成功就立刻回链）"
     },
     "a binding must be provider/model: {binding}": {
       "reviewed": true,
@@ -2303,6 +2303,10 @@
     "model health": {
       "reviewed": true,
       "text": "模型健康"
+    },
+    "model {model} is bound to tier {tier}, but that tier has no usable candidate under profile {profile}; run `newgate tier {tier}` to see why each candidate was skipped": {
+      "reviewed": true,
+      "text": "模型 {model} 绑在档位 {tier} 上，但这一档在 profile {profile} 下没有可用候选；跑 `newgate tier {tier}` 看每个候选为什么被跳过"
     },
     "model {model} is neither a known tier ({tiers}) nor bound in any profile; run `newgate tier` for available bindings": {
       "reviewed": true,

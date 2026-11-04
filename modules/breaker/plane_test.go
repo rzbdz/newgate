@@ -312,7 +312,7 @@ func TestPlaneDocKeepsTheWireKey(t *testing.T) {
 }
 
 // TestPlaneObserveProbesIsAuthoritative 锁住「探活是权威证据」：它不受连续失败
-// 阈值约束——结论差就当场摘，结论好且冷却期满就当场放。
+// 阈值约束——结论差就当场摘，结论好就当场放（隔离期内也一样，2026-11-04）。
 func TestPlaneObserveProbesIsAuthoritative(t *testing.T) {
 	table, _ := clocked()
 	p := plane{t: table}
@@ -332,8 +332,7 @@ func TestPlaneObserveProbesIsAuthoritative(t *testing.T) {
 		t.Error("probe 说不可用，binding 却还在链上")
 	}
 
-	// 好 probe + 冷却期满 → 当场放回来。
-	table.now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+	// 好 probe → 当场放回来，**不等冷却期满**（用户刚 probe 过就该能用）。
 	acks = p.ObserveProbes([]gwpolicy.ProbeObservation{{
 		Provider: "p", Model: "m", Status: 200, Latency: 100 * time.Millisecond,
 		SlowAfter: time.Second,

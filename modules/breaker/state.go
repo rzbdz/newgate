@@ -265,6 +265,12 @@ func (b *table) succeedLocked(r *record, now time.Time) {
 	if r.openedAt.IsZero() || now.Before(r.openUntil) {
 		return
 	}
+	b.unsealLocked(r)
+}
+
+// unsealLocked 立刻合闸并把退避归位。给**主动探活**的权威结论用：
+// 它不受隔离期约束（见 RecordProbe）。
+func (b *table) unsealLocked(r *record) {
 	r.openedAt = time.Time{}
 	r.openUntil = time.Time{}
 	r.halfOpenAt = time.Time{}
@@ -340,8 +346,8 @@ func (b *table) openLocked(r *record, rule Rule, now time.Time, reason string) {
 // RecordProbe 记录主动探活的四档结论，并返回评级和是否仍然熔断。
 //
 // probe 是主动、独立的健康请求，所以它**不受阈值约束**：结论差就当场摘，
-// 结论好且冷却期满就当场放。这与真实流量那条路不同——那条路上单次成功不足以
-// 证明什么，单次失败也不足以定案。
+// 结论好就当场放（隔离期内也一样，见下面那段）。这与真实流量那条路不同——
+// 那条路上单次成功不足以证明什么，单次失败也不足以定案。
 func (b *table) RecordProbe(provider, model string, status, contextBytes int,
 	latency, slowAfter time.Duration, probeErr string) (ProbeGrade, bool) {
 	b.mu.Lock()
@@ -378,13 +384,17 @@ func (b *table) RecordProbe(provider, model string, status, contextBytes int,
 		r.fails = rule.Threshold
 		return grade, true
 	}
-	if !r.openedAt.IsZero() && now.Before(r.openUntil) {
-		// 隔离期内的成功 probe 不能提前解封——最短隔离时间是硬下限，
-		// 否则上游抖一下就被 probe 立刻放回来了。
-		b.persistLocked()
-		return grade, true
-	}
-	b.succeedLocked(r, now)
+	// 成功的主动探活是**权威证据**：它刚刚真的把这条 binding 打通了，所以
+	// 当场合闸——**不等隔离期满**。
+	//
+	// 2026-11-04 现场：用户在熔断期间手敲 probe，结论是 fluent，请求却继续
+	// 404 到 60s 隔离期结束。最短隔离那层硬下限（2026-09-17 加的）防的是
+	// 「上游抖一下就被 probe 立刻放回来」，但今天 probe **只有人发起**
+	// （`newgate probe` / 界面上的测试按钮），不存在自动 probe 抖动的问题；
+	// 真实流量那条路仍然走半开试探，短时间的抖动照样不会突破隔离。
+	// 把用户唯一能做的恢复动作变成安慰剂，代价远大于那点抖动风险。
+	r.fails = 0
+	b.unsealLocked(r)
 	return grade, false
 }
 

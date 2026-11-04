@@ -309,7 +309,7 @@ func TestFailuresDuringIsolationAreNotNewEvidence(t *testing.T) {
 }
 
 // TestProbeBypassesThreshold：probe 是主动、独立的健康请求，结论是权威的
-// ——差就当场摘，好且冷却期满就当场放。
+// ——差就当场摘，好就当场放（**隔离期内也一样**）。
 func TestProbeBypassesThreshold(t *testing.T) {
 	b, advance := clocked()
 	if _, open := b.RecordProbe("p", "m", 503, 1024, time.Second, 12*time.Second, ""); !open {
@@ -319,19 +319,18 @@ func TestProbeBypassesThreshold(t *testing.T) {
 		t.Fatal("probe 摘牌后 binding 仍然可用")
 	}
 
-	// 隔离期内即使 probe 成功也不提前解封——最短隔离是硬下限，否则上游抖
-	// 一下就被 probe 立刻放回来了。
-	advance(30 * time.Second)
-	if grade, open := b.RecordProbe("p", "m", 200, 1024, time.Second, 12*time.Second, ""); grade != ProbeFluent || !open {
-		t.Fatalf("隔离期内 probe 不应提前解封: grade=%s open=%v", grade, open)
-	}
-
+	// 2026-11-04 现场：用户在隔离期里 probe 成功，请求却继续 404 到冷却期满
+	// ——唯一能做的恢复动作变成了安慰剂。成功的主动探活必须立刻回链。
 	advance(30 * time.Second)
 	if grade, open := b.RecordProbe("p", "m", 200, 1024, time.Second, 12*time.Second, ""); grade != ProbeFluent || open {
-		t.Fatalf("冷却期满的成功 probe 没有解封: grade=%s open=%v", grade, open)
+		t.Fatalf("成功的 probe 应立即解封: grade=%s open=%v", grade, open)
 	}
 	if !b.Available("p", "m") {
 		t.Fatal("probe 解封后 binding 仍不可用")
+	}
+	// 退避归位：下一次真失败重新从基准冷却开始，不背上一轮的账。
+	if got := state(t, b, "p", "m"); got.State != "closed" || got.Open {
+		t.Fatalf("解封后状态不对: %+v", got)
 	}
 }
 

@@ -964,7 +964,7 @@
         "err"
       ]
     },
-    "[probe] tripped {provider}/{model}: {grade} (at least 60s, and returning to the chain needs a successful probe)": {
+    "[probe] tripped {provider}/{model}: {grade} (at least 60s, or a successful probe brings it back immediately)": {
       "args": [
         "grade",
         "model",
@@ -1681,6 +1681,13 @@
     },
     "mixed dialects": {},
     "model health": {},
+    "model {model} is bound to tier {tier}, but that tier has no usable candidate under profile {profile}; run `newgate tier {tier}` to see why each candidate was skipped": {
+      "args": [
+        "model",
+        "profile",
+        "tier"
+      ]
+    },
     "model {model} is neither a known tier ({tiers}) nor bound in any profile; run `newgate tier` for available bindings": {
       "args": [
         "model",

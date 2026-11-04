@@ -126,15 +126,26 @@ func BuildChain(key string, profiles []*domain.Profile, provs *domain.Providers,
 				o.Rank(z.Binding.Provider, z.Binding.Model)
 		})
 	}
-	if o.MaxSteps > 0 && len(b.steps) > o.MaxSteps {
-		for _, s := range b.steps[o.MaxSteps:] {
-			b.skips = append(b.skips, Skip{Profile: s.Profile, Target: s.Binding.String(),
-				Kind:   SkipMaxSteps,
-				Reason: i18n.T("past maxAttempts={limit}", i18n.A{"limit": o.MaxSteps})})
-		}
-		b.steps = b.steps[:o.MaxSteps]
-	}
+	b.steps, b.skips = capSteps(b.steps, b.skips, o.MaxSteps)
 	return b.steps, b.skips
+}
+
+// capSteps 把链截到 maxAttempts（<=0 = 不限），被截掉的每一步都留一条跳过原因。
+//
+// 单独成函数是因为 ResolveRequest 还要在**不截断**的情况下反查具体模型名：
+// 名字可能排在 maxAttempts 之后，先截断会把一个配置里明明存在的模型判成
+// 「不认识」（2026-11-04 现场）。那里是「建整条 → 挪头 → 再截」，与这里
+// 「建整条 → 截断」共用同一段收尾，措辞才不会漂。
+func capSteps(steps []Step, skips []Skip, max int) ([]Step, []Skip) {
+	if max <= 0 || len(steps) <= max {
+		return steps, skips
+	}
+	for _, s := range steps[max:] {
+		skips = append(skips, Skip{Profile: s.Profile, Target: s.Binding.String(),
+			Kind:   SkipMaxSteps,
+			Reason: i18n.T("past maxAttempts={limit}", i18n.A{"limit": max})})
+	}
+	return steps[:max], skips
 }
 
 type chainBuilder struct {

@@ -659,6 +659,28 @@ func parseTarget(p string) Target {
 	}
 }
 
+// pinnedProfiles 把 profile 集合收敛到被点名的那一份（没点名 = 原样返回）。
+//
+// 点名（URL 里的 `/p/<name>`）的语义是「这次就用它」。那件事原先只在解析之后
+// 靠切片截断（steps[:1]）兑现，而它有一个缝：**被点名的 profile 一个可用候选
+// 都没有**时（唯一 binding 被熔断、被禁用），链头位置站的已经是别人的
+// profile，截断留下的恰是「静默换到别人」——点名最想禁止的东西。2026-11-04
+// 现场：ds 的唯一条 binding 熔断，`--profile=ds` 的请求要么 404（反查缺陷），
+// 要么在反查修好之后悄悄跑到别的 profile 上。
+//
+// 所以收敛放在**建链之前**：链里根本没有第二份 profile 的候选，后面的截断
+// 只负责「同一份 profile 内部也不换人」。被点名的那份不存在时返回空集合——
+// 由调用方报「这份 profile 没有可用候选」，而不是拿全局链顶上。
+func pinnedProfiles(profiles []*domain.Profile, name string) []*domain.Profile {
+	for _, p := range profiles {
+		if p.Name == name {
+			// 新切片：快照里的那份是共享的，不能因为调用方 append 而被改到。
+			return []*domain.Profile{p}
+		}
+	}
+	return nil
+}
+
 // testChain 仅供测试注入，绕过磁盘配置与真实上游。生产路径永远是 nil。
 // 有它才能保证单测不出网——docs/10-testing-security.md「测试不出网，出网即失败」。
 var testChain func(tier string) []resolve.Step
@@ -775,7 +797,11 @@ func (s *Server) mainLoopHead(tgt Target) (resolve.Step, bool) {
 	if active == "" {
 		active = snap.State.ActiveFor(tgt.TaskCreate)
 	}
-	b, ok := resolve.PrimaryBinding("normal", snap.Profiles, snap.Providers, active)
+	profiles := snap.Profiles
+	if tgt.Profile != "" {
+		profiles = pinnedProfiles(snap.Profiles, tgt.Profile)
+	}
+	b, ok := resolve.PrimaryBinding("normal", profiles, snap.Providers, active)
 	if !ok {
 		return resolve.Step{}, false
 	}
@@ -869,6 +895,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if active == "" {
 		active = st.ActiveFor(tgt.TaskCreate)
 	}
+	// 点名（/p/<name>）在建链前就把 profile 集合收敛到那一份，见 pinnedProfiles。
+	profiles := snap.Profiles
+	if tgt.Profile != "" {
+		profiles = pinnedProfiles(snap.Profiles, tgt.Profile)
+	}
 	suffix := tgt.Suffix
 	stream := stream0
 
@@ -909,13 +940,13 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		case route.Head != nil:
 			rs, skips, applied = resolve.OverrideChain("special:"+route.Plugin,
 				*route.Head, routeTier,
-				snap.Profiles, snap.Providers, opts)
+				profiles, snap.Providers, opts)
 			if !applied && route.OverrideFailNote != "" {
 				s.logf("[proxy] #%d special_treatment %s: %s",
 					reqID, route.Plugin, route.OverrideFailNote)
 			}
 		default:
-			rs, skips = resolve.BuildChain(routeTier, snap.Profiles, snap.Providers, opts)
+			rs, skips = resolve.BuildChain(routeTier, profiles, snap.Providers, opts)
 		}
 		if len(rs) > 0 {
 			steps, tier = rs, routeTier
@@ -942,7 +973,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// 档位名走档位链；具体模型名反解回它所属档位，并把点名的模型放最前
 			// （docs/04-configuration.md）——这支持「工具界面显示真实模型名」。
-			steps, skips, tier = resolve.ResolveRequest(norm, active, snap.Profiles, snap.Providers, resolve.Opts{
+			steps, skips, tier = resolve.ResolveRequest(norm, active, profiles, snap.Providers, resolve.Opts{
 				Active:    active,
 				Available: s.Filters.Admit,
 				Rank:      func(provider, model string) int { return s.Filters.Rank(provider, model, len(body)) },
@@ -961,6 +992,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	//     显示的真名、实际跑的上游三者对不上。判据零新增状态：launch 只在
 	//     `--profile=xx` 时把 `/p/<name>` 写进 base URL，parseTarget 读出来
 	//     就是它，所以「有 /p/ 段」⟺「用户点了名」。
+	//
+	//     2026-11-04 起 profile 集合在建链前就已经收敛到被点名的那一份
+	//     （见 pinnedProfiles），所以这里的截断只管「同一份 profile 内部也不
+	//     换人」。两者缺一不可：只收敛不截断 = 点名 profile 内部的 fallback
+	//     仍会换模型；只截断不收敛 = 点名 profile 全灭时截到的是别人的链头。
+	//
 	//   - `newgate fallback off`（全局开关）：全局关掉所有 fallback 链。
 	//
 	// 位置在这一处不是随意的，三条：
@@ -1018,6 +1055,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, 404, i18n.T(
 				"model {model} is neither a known tier ({tiers}) nor bound in any profile; run `newgate tier` for available bindings",
 				i18n.A{"model": norm, "tiers": strings.Join(domain.Roles, ", ")}))
+		} else if norm != tier {
+			// 名字认出来了（它绑在某个档位上），但那条档位链此刻一个可用候选
+			// 都没有。旧代码在这里说「不在任何 profile 的绑定里」——2026-11-04
+			// 现场：唯一绑定了 deepseek-flash 的 ds 被熔断，用户看到这句话后去
+			// 查配置，配置是对的，真正的原因（circuit open）在上一行的跳过原因里。
+			s.fail(w, 404, i18n.T(
+				"model {model} is bound to tier {tier}, but that tier has no usable candidate under profile {profile}; run `newgate tier {tier}` to see why each candidate was skipped",
+				i18n.A{"model": norm, "tier": tier, "profile": active}))
 		} else {
 			s.fail(w, 404, i18n.T(
 				"tier {tier} has no usable candidate under profile {profile} (tiers: {tiers}); run `newgate tier {tier}` to see why each candidate was skipped",

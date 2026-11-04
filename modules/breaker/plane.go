@@ -206,10 +206,10 @@ func (p plane) Doc() map[string]json.RawMessage {
 }
 
 // ObserveProbes 收下主动探活的结论。它是**权威证据**（主动、可控、可重复），
-// 所以不受连续失败阈值约束：差就当场摘，好且冷却期满就当场放。
+// 所以不受连续失败阈值约束：差就当场摘，好就当场放（隔离期内也一样）。
 //
-// 返回的 Note 由数据面原样打日志：那句「至少 60s，之后须 probe 成功才回链」
-// 讲的是健康表的退避语义，只有这里知道。
+// 返回的 Note 由数据面原样打日志：那句「至少 60s，或一次成功的 probe」讲的是
+// 健康表的退避语义，只有这里知道。
 func (p plane) ObserveProbes(obs []gwpolicy.ProbeObservation) []gwpolicy.ProbeAck {
 	out := make([]gwpolicy.ProbeAck, 0, len(obs))
 	for _, o := range obs {
@@ -219,7 +219,7 @@ func (p plane) ObserveProbes(obs []gwpolicy.ProbeObservation) []gwpolicy.ProbeAc
 		if opened {
 			ack.Note = i18n.T(
 				"[probe] tripped {provider}/{model}: {grade} (at least 60s, "+
-					"and returning to the chain needs a successful probe)",
+					"or a successful probe brings it back immediately)",
 				i18n.A{"provider": o.Provider, "model": o.Model, "grade": grade})
 		}
 		out = append(out, ack)

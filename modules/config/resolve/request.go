@@ -46,7 +46,8 @@ var realNameRoleOrder = []string{"mid", "normal", "light", "heavy", "vision"}
 // 同名填多档时按 realNameRoleOrder 的优先级取档（见其注释）——反查没有
 // 真值，别把这里的返回当客户端意图用。
 //
-// 返回 tier == "" 表示这个模型既不是档位名，也不在任何档位的绑定里。
+// 返回 tier == "" 表示这个模型既不是档位名，也不在**任何 profile 的配置**里。
+// 「配置里有、此刻不可用」不算未知——见下面反查那两段。
 func ResolveRequest(model string, active string, profiles []*domain.Profile,
 	provs *domain.Providers, o Opts) ([]Step, []Skip, string) {
 
@@ -57,18 +58,59 @@ func ResolveRequest(model string, active string, profiles []*domain.Profile,
 		return steps, skips, model
 	}
 
+	// 反查**不能在截断后的链上做**：点名的模型可能排在 maxAttempts 之后，
+	// 先截断会把它判成「不认识」。所以这里建整条链、挪头、再截断。
+	search := o
+	search.MaxSteps = 0
+	type built struct {
+		role  string
+		steps []Step
+		skips []Skip
+	}
+	var tried []built
 	for _, role := range realNameRoleOrder {
-		steps, skips := BuildChain(role, profiles, provs, o)
+		steps, skips := BuildChain(role, profiles, provs, search)
 		if idx := indexOfModel(steps, model); idx >= 0 {
-			// 点名模型放最前，其余保持原顺序（去重已由 BuildChain 保证）。
-			reordered := make([]Step, 0, len(steps))
-			reordered = append(reordered, steps[idx])
-			reordered = append(reordered, steps[:idx]...)
-			reordered = append(reordered, steps[idx+1:]...)
-			return reordered, skips, role
+			steps = moveToFront(steps, idx)
+			steps, skips = capSteps(steps, skips, o.MaxSteps)
+			return steps, skips, role
+		}
+		// 这一档现在能用的链（已按链长上限收过），反查失败时可能要原样交回去。
+		steps, skips = capSteps(steps, skips, o.MaxSteps)
+		tried = append(tried, built{role: role, steps: steps, skips: skips})
+	}
+
+	// 到这里还没找到，并不等于「这个名字不认识」：上面那把尺子带了运行期
+	// 事实（准入/熔断、禁用、链长上限），一条**配置里明明存在**的绑定会被它们
+	// 从链上摘掉。2026-11-04 现场：全局 profile 不是 ds、ds 的唯一 binding
+	// 被熔断，客户端发来 ds 注入的真实模型名 deepseek-flash，反查全空，于是
+	// 404 说「这个模型不在任何 profile 的绑定里」——而它就绑在 ds 里。
+	//
+	// 所以用一把只认配置的尺子再问一遍：哪个档位在配置里有这个名字？
+	// 认出来就按该档位**此刻能用的**那条链走——点名的那个不可用，不等于整条
+	// 档位链没有可用候选；fallback 本来就是干这个的。真的一点都不认识，
+	// 才返回 tier == ""。
+	ident := o
+	ident.Available, ident.Rank, ident.Disabled, ident.MaxSteps = nil, nil, nil, 0
+	for i, role := range realNameRoleOrder {
+		steps, _ := BuildChain(role, profiles, provs, ident)
+		if indexOfModel(steps, model) >= 0 {
+			return tried[i].steps, tried[i].skips, tried[i].role
 		}
 	}
 	return nil, nil, ""
+}
+
+// moveToFront 把第 idx 步挪到链头，其余保持原顺序（去重已由 BuildChain 保证）。
+func moveToFront(steps []Step, idx int) []Step {
+	if idx == 0 {
+		return steps
+	}
+	out := make([]Step, 0, len(steps))
+	out = append(out, steps[idx])
+	out = append(out, steps[:idx]...)
+	out = append(out, steps[idx+1:]...)
+	return out
 }
 
 func indexOfModel(steps []Step, model string) int {
