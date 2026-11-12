@@ -2688,6 +2688,10 @@
       "reviewed": true,
       "text": "profile kv|history|restore <name>"
     },
+    "profile {name} declares a {window}-token context window; {client} is capped at {cap} so a compaction request still fits under the upstream limit": {
+      "reviewed": true,
+      "text": "profile {name} 声明了 {window} tokens 的上下文窗口；{client} 封顶在 {cap}，好让压缩请求仍落在上游上限之内"
+    },
     "profile {name}: {err}": {
       "reviewed": true,
       "text": "profile {name}: {err}"

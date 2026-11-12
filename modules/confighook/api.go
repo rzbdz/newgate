@@ -141,6 +141,22 @@ type Agent struct {
 	// 客户端接入归发行版（见发行版的 modules/claudecode），内核只提供这张表。
 	ContextWindowEnv string
 	AutoCompactEnv   string
+
+	// ContextWindowCap / AutoCompactCap 是**客户端自己的安全上限**：无论
+	// profile 声明多大，注进去的窗口与 compact 数字都不超过它。0 = 不设上限。
+	//
+	// 为什么需要（2026-11-12 现场）：Claude Code 的 `[1m]` 名称后缀 + 1M 的
+	// 窗口声明会把会话顶到真实窗口的最后一格。一旦超了，上游的 400 连
+	// /compact 也一起拒——压缩请求本身也带着整段会话，于是**客户端没有自救
+	// 路径**，只能手工删历史。留出余量是唯一能自动恢复的做法；具体数字归
+	// 客户端模块（Claude Code 现在是 512K）。
+	//
+	// ContextWindowCap 在 profile **没声明**窗口时也当声明用：客户端对未知
+	// 模型的缺省假设通常更小（Claude Code 是 200k），而这台客户端明确能接受
+	// 这个上限。AutoCompactCap 不这样兜底——没声明 compact 就交给客户端按
+	// 它自己的窗口算压缩点，避免在窗口很小时注入一个比窗口还大的值。
+	ContextWindowCap int
+	AutoCompactCap   int
 }
 
 // AgentFacts 是贡献者对自己那个客户端的**运行时事实**：这一刻它装没装、某个槽位

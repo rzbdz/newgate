@@ -142,8 +142,11 @@ func buildInject(a *agentapi.Agent, facts agentapi.AgentFacts, st *domain.State,
 
 		// 主力模型的真实窗口（profile 里声明）。不给 Claude Code 声明的
 		// 话，它对不认识的模型名（档位名或真实名都一样）按 200k 窗口假设
-		// 提前 compact（2026-09 实测）。两个 env 都只在配置 >0 时注入；
-		// 其他 agent（如 opencode）不认识这些变量，忽略之，无害。
+		// 提前 compact（2026-09 实测）。两个 env 都只在得到 >0 的数时注入；
+		// 客户端可以在描述符里封顶（ContextWindowCap / AutoCompactCap），
+		// 那时窗口即便 profile 没声明也用上限值——缺省的 200k 假设更小，
+		// 而这台客户端明确接受更大的窗口。其他 agent（如 opencode）不认识
+		// 这些变量，忽略之，无害。
 		//
 		// 这两个是**数字**，所以永远不过 Slot.Apply：把客户端的模型名标记
 		// 拼到窗口上会写进去一个解析不了的值，而失败的样子是「窗口声明静默
@@ -152,11 +155,27 @@ func buildInject(a *agentapi.Agent, facts agentapi.AgentFacts, st *domain.State,
 			if p.Name != active {
 				continue
 			}
-			if p.ContextWindow > 0 && a.ContextWindowEnv != "" {
-				inject[a.ContextWindowEnv] = strconv.Itoa(p.ContextWindow)
+			// 客户端的封顶（见 agentapi.Agent.ContextWindowCap）。profile
+			// 声明得更大时**说一声**——把用户要的 1M 悄悄换成 512K，正是
+			// 「配置看着对、行为不一样」那一类最难归因的故障。
+			window := p.ContextWindow
+			if a.ContextWindowCap > 0 && (window == 0 || window > a.ContextWindowCap) {
+				if window > a.ContextWindowCap {
+					warns = append(warns, i18n.T(
+						"profile {name} declares a {window}-token context window; {client} is capped at {cap} so a compaction request still fits under the upstream limit",
+						i18n.A{"name": p.Name, "window": window, "client": a.ID, "cap": a.ContextWindowCap}))
+				}
+				window = a.ContextWindowCap
 			}
-			if p.AutoCompactWindow > 0 && a.AutoCompactEnv != "" {
-				inject[a.AutoCompactEnv] = strconv.Itoa(p.AutoCompactWindow)
+			if window > 0 && a.ContextWindowEnv != "" {
+				inject[a.ContextWindowEnv] = strconv.Itoa(window)
+			}
+			compact := p.AutoCompactWindow
+			if a.AutoCompactCap > 0 && compact > a.AutoCompactCap {
+				compact = a.AutoCompactCap
+			}
+			if compact > 0 && a.AutoCompactEnv != "" {
+				inject[a.AutoCompactEnv] = strconv.Itoa(compact)
 			}
 			break
 		}

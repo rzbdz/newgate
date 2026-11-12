@@ -43,7 +43,8 @@ func sandboxStore(t *testing.T) {
 // 真实模型名（glm-5.3），按「未知模型」默认 200k 窗口提前 compact——
 // profile 里声明了 context_window/auto_compact_window 才有 env（2026-09
 // 实测二进制 2.1.265 的解析链：MAX_CONTEXT_TOKENS 只对未知模型生效，
-// AUTO_COMPACT_WINDOW 优先级最高、window=min(两者)）。
+// AUTO_COMPACT_WINDOW 优先级最高、window=min(两者)）。客户端描述符还能给
+// 这两个数封顶（见 TestBuildInjectWindowCap）。
 // testAgent 是内核测试用的**合成**客户端定义：真实的 claude 定义住在发行版里
 // （客户端接入是产品取舍，2026-09-20 搬走）。窗口 env 的**名字**如今也来自定义
 // （agentapi.Agent.ContextWindowEnv / AutoCompactEnv）——内核不认识任何一家的变量名，
@@ -113,6 +114,65 @@ func TestBuildInjectWindowEnv(t *testing.T) {
 		}
 		if _, has := inject["TEST_AUTO_COMPACT_WINDOW"]; has {
 			t.Error("没配 auto_compact_window 就不该注入")
+		}
+	})
+}
+
+// TestBuildInjectWindowCap 客户端的封顶（ContextWindowCap / AutoCompactCap）：
+// profile 声明得再大也不超过客户端的数，且**超过时要说一声**。
+//
+// 现场（2026-11-12）：1M 窗口把会话顶到最后一格，400 之后连 /compact 都发不出去
+// ——压缩请求本身也超限。封顶的作用是给压缩留出余量；悄悄把用户要的 1M 换掉
+// 则会制造「配置看着对、/context 显示 512K」的困惑，所以要有一条 warn。
+func TestBuildInjectWindowCap(t *testing.T) {
+	sandboxStore(t)
+	st := &domain.State{Port: 8899}
+	a := testAgent()
+	a.ContextWindowCap = 512000
+	a.AutoCompactCap = 400000
+
+	t.Run("profile 声明 1M → 封到 512K/400K，并 warn", func(t *testing.T) {
+		inject, warns := buildInject(a, nil, st, "glm", "")
+		if got := inject["TEST_MAX_CONTEXT_TOKENS"]; got != "512000" {
+			t.Errorf("MAX_CONTEXT_TOKENS = %q，应封到 512000", got)
+		}
+		if got := inject["TEST_AUTO_COMPACT_WINDOW"]; got != "400000" {
+			t.Errorf("AUTO_COMPACT_WINDOW = %q，应封到 400000", got)
+		}
+		if len(warns) != 1 {
+			t.Errorf("把 1M 封成 512K 必须有一条 warn，实际 %v", warns)
+		}
+	})
+
+	t.Run("profile 没声明窗口 → 上限当声明，compact 不兜底", func(t *testing.T) {
+		inject, warns := buildInject(a, nil, st, "tiny", "")
+		if got := inject["TEST_MAX_CONTEXT_TOKENS"]; got != "512000" {
+			t.Errorf("没声明窗口时该用客户端上限 512000，实际 %q", got)
+		}
+		if _, has := inject["TEST_AUTO_COMPACT_WINDOW"]; has {
+			t.Error("没声明 compact 时不该注入——客户端会按自己的窗口算压缩点")
+		}
+		if len(warns) != 0 {
+			t.Errorf("没声明大窗口，不该 warn，实际 %v", warns)
+		}
+	})
+
+	t.Run("profile 声明得比上限小 → 原样", func(t *testing.T) {
+		dir := os.Getenv("NEWGATE_HOME")
+		if err := os.WriteFile(filepath.Join(dir, "mappings", "glm.json"),
+			[]byte(`{"name":"glm","priority":20,"context_window":200000,
+				"auto_compact_window":150000,"roles":{"heavy":"smt-glm/glm-5.3"}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		inject, warns := buildInject(a, nil, st, "glm", "")
+		if got := inject["TEST_MAX_CONTEXT_TOKENS"]; got != "200000" {
+			t.Errorf("MAX_CONTEXT_TOKENS = %q，应为 200000", got)
+		}
+		if got := inject["TEST_AUTO_COMPACT_WINDOW"]; got != "150000" {
+			t.Errorf("AUTO_COMPACT_WINDOW = %q，应为 150000", got)
+		}
+		if len(warns) != 0 {
+			t.Errorf("没超过上限，不该 warn，实际 %v", warns)
 		}
 	})
 }

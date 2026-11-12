@@ -36,6 +36,24 @@ role 和请求覆盖，输出有序步骤以及被跳过候选的原因。
 优先级由显式请求 profile、Agent profile 和全局默认共同决定。稀疏 profile
 只覆盖写出的 role，其余继续向基础层解析。
 
+### 窗口声明与客户端的封顶
+
+`profile` 可以声明 `context_window` / `auto_compact_window`（token 数），
+启动时按 agent 定义里的变量名注入（Claude Code 是
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`）。
+不声明的话，客户端对不认识的模型名按它自己的缺省假设（Claude Code 是 200k）。
+
+客户端还可以在描述符里给这两个数封顶（`Agent.ContextWindowCap` /
+`AutoCompactCap`，数字归客户端模块）。Claude Code 封在 **512K 窗口 / 400K
+compact**：2026-11-12 现场，1M 的声明让一个会话涨到 1.01M tokens，下一条请求
+400 `Input tokens exceed the model context limit`，而 `/compact` 也发不出去
+——压缩请求本身带着整段会话，同样超限，客户端于是没有自救路径。封顶留下的
+余量还要装下 newgate 的推理回填（实测能把请求再撑大约 14%）。
+
+profile 声明得比上限大时，注入的是上限值，并在启动时打一条 warn（不静默）。
+profile 没声明窗口时，`ContextWindowCap` 当声明用；没声明 compact 时留给客户端
+按窗口自己算——在窗口很小时注入一个比窗口还大的 compact 值只会更糟。
+
 ## 4. Role 规则
 
 ```text

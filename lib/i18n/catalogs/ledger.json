@@ -1999,6 +1999,14 @@
     },
     "profile": {},
     "profile kv|history|restore <name>": {},
+    "profile {name} declares a {window}-token context window; {client} is capped at {cap} so a compaction request still fits under the upstream limit": {
+      "args": [
+        "cap",
+        "client",
+        "name",
+        "window"
+      ]
+    },
     "profile {name}: {err}": {
       "args": [
         "err",
