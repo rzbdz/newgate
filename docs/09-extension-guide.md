@@ -146,6 +146,49 @@ gateway/special、config/roleprov、confighook 里那三份手写账本**暂时�
 它们各有真实差异（插件拓扑排序、`Refresh` 读侧、三张异质表共享一张 token），
 强行归并会造出更差的抽象。`Registry` 先在 `cli` 上验证，再逐个迁。
 
+## 3a. 接管与生命周期：`runtime.Control`
+
+`newgate on|off|start` 底下那件事（插 PATH shim、改写客户端配置、起代理）过去只有
+命令能调。想在一个自己的向导/脚本里做同一件事的模块，只能去 import
+`modules/runtime/takeover`（内核内部实现包，随时会动）或者 shell 出去跑
+`newgate start` 再解析它的输出（措辞一改就静默失效）。
+
+2026-11-17 起它是一个公开端口，**与 `runtime.Runtime` 分开**：
+
+| 端口 | 能力 | 谁需要 | 为什么分开 |
+| --- | --- | --- | --- |
+| `runtime.Capability` | `Launch` | 包装启动（wrapper、`newgate claude`） | 只启动，绝不修改磁盘上的接管状态 |
+| `runtime.ControlCapability` | `TakeOver` / `Release` / `TakeOverAll` / `TakeoverStatus` / `Start` | 发行版的首次配置向导 | 只接管与起代理，从不启动客户端 |
+
+分开的直接理由是**已存在的测试桩**：把五条方法加进 `Runtime` 之后，wrapper 那个
+只实现 `Launch` 的假实现当场编译不过——宽接口把「不关我事」变成了「我得知道」。
+
+```go
+Requires: []component.Requirement{
+    component.Optional(runtimeapi.ControlCapability),
+    ...
+},
+Start: func(_ context.Context, ctx component.Context) error {
+    ctl, ok := component.Get(ctx, runtimeapi.ControlCapability)
+    if !ok {
+        return nil // 骨架装配里没有它：这条功能没有入口，别的照常
+    }
+    ctl.TakeOver("codex", 8899)
+    ctl.Start(runtimeapi.StartOptions{SkipTakeover: true}) // 只起代理，不再全面接管
+    return nil
+},
+```
+
+两条规矩：
+
+- **`Start` 与命令走同一份实现**（`cmdStart` 调 `Control.Start`）。起代理有一串
+  不能错的先后（令牌先落盘、没 key 别接管、接管后写回 `TakenOver`），抄一份就会
+  漂移，而漂移的症状是「向导起来的代理和命令行起来的不一样」。
+- **`TakeoverStatus` 的 `Active` 才是「真的接管上了」**。配置型客户端（codex /
+  hermes）第一次接管会因为「配置文件还不存在」而跳过——那不是失败，但更不是成功。
+  需要区分「装上了」与「接管了」的调用方（向导就会）必须读它，别拿
+  `len(Result.Lines) > 0` 当判据。
+
 ## 3b. 共享端口：往网关那个端口上挂东西（porthub）
 
 网关监听的那个端口**不只属于数据面**。`/` 之外的前缀可以挂别的服务（web 界面、

@@ -491,11 +491,7 @@
         "err"
       ]
     },
-    "Cannot start the daemon: {err}": {
-      "args": [
-        "err"
-      ]
-    },
+    "Cannot start the daemon: {err}": {},
     "Cannot write the control token (a cross-user newgate stop will not work): {err}": {
       "args": [
         "err"

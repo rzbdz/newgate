@@ -13,6 +13,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -193,92 +194,24 @@ func shimStatus(agents confighookapi.AgentCatalog) int {
 }
 
 func cmdStart(agents confighookapi.AgentCatalog, force bool) int {
-	if _, err := os.Stat(paths.ProvidersFile()); os.IsNotExist(err) {
-		fmt.Println(style.Dim(i18n.T("First run, initializing the config", nil)))
-		if _, err := store.Init(false); err != nil {
-			return die(70, err.Error())
-		}
-	}
-	if i := daemon.Running(); i != nil {
-		fmt.Println(style.Item(style.OK, i18n.T("Proxy already running   pid {pid} · 127.0.0.1:{port}",
-			i18n.A{"pid": i.PID, "port": i.Port})))
-		return 0
-	}
-
-	// 令牌先于 Spawn 落盘：daemon 一起来就要能验 /__newgate/stop。
-	// 也是为了防竞态——下面 Spawn 之后 st 还会被 SaveState 写回，
-	// 先确保 st 里带着令牌，写回就不会把 daemon 已生成的令牌冲掉。
-	st, err := store.EnsureControlToken()
+	// 实现在 control.go 的 Start 里：命令行与 `newgate config` 那个向导走**同一份**
+	// 代码，因为「起代理 + 全面接管」只有一种正确行为（令牌先落盘、没 key 不接管、
+	// 接管后写回 TakenOver）。这里只负责把结局翻成退出码与那句 shell 环境提醒。
+	rep, err := (&service{}).Start(StartOptions{Force: force})
 	if err != nil {
-		// 不拦：用户要的是把代理起起来，为一行令牌拒绝启动更糟。但后果明说。
-		fmt.Fprintln(os.Stderr, style.Mark(style.Warn)+" "+i18n.T(
-			"Cannot write the control token (a cross-user newgate stop will not work): {err}",
-			i18n.A{"err": err.Error()}))
-	}
-	// 没 key 就别接管——接管了每个请求都是错误，而用户的配置已经被改了
-	if probs := activeProblems(st); len(probs) > 0 && !force {
-		fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T("Config is unusable, refusing to take over", nil))
-		for _, p := range probs {
-			fmt.Fprintf(os.Stderr, "  %s %s\n", style.Mark(style.Bad), p)
-		}
-		fmt.Fprintf(os.Stderr, "%s\n", style.Hint(i18n.T("Put a key in {file}, or set the matching environment variable",
-			i18n.A{"file": paths.ProvidersFile()})))
-		fmt.Fprintf(os.Stderr, "%s\n", style.Hint(i18n.T("Check: newgate doctor    Force takeover: newgate start --force", nil)))
-		return 65
-	}
-
-	info, err := daemon.Spawn(st.Port)
-	if err != nil {
-		return die(70, i18n.T("Cannot start the daemon: {err}", i18n.A{"err": err.Error()}))
-	}
-	ok := false
-	for k := 0; k < 60; k++ {
-		if pingProxy(st.Port) {
-			ok = true
-			break
-		}
-		time.Sleep(40 * time.Millisecond)
-	}
-	if !ok {
-		// 区分「进程没起来」和「起来了但我们连不上」——后者绝不能杀进程
-		if httpx.TCPAlive("127.0.0.1", st.Port, time.Second) {
-			fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T(
-				"Port {port} is listening but the HTTP probe failed; the proxy process is kept",
-				i18n.A{"port": st.Port}))
-			fmt.Fprintf(os.Stderr, "  %s\n", i18n.T(
-				"Most likely cause: an outbound proxy is hijacking loopback requests. Run newgate doctor", nil))
-		} else {
-			fmt.Fprintf(os.Stderr, "newgate: %s\n", i18n.T(
-				"The proxy did not come up (nothing is listening on port {port}); see the log {log}",
-				i18n.A{"port": st.Port, "log": paths.LogFile()}))
-			_, _ = daemon.Stop()
+		switch {
+		case errors.Is(err, ErrConfigUnusable):
+			return 65
+		case errors.Is(err, ErrProxyDidNotStart):
 			return 70
 		}
+		return die(70, err.Error())
 	}
-	fmt.Println(style.Item(style.OK, i18n.T("Proxy started   pid {pid} · 127.0.0.1:{port} · profile {profile}",
-		i18n.A{"pid": info.PID, "port": st.Port, "profile": st.DefaultProfile})))
-
-	// 全面接管：所有没被用户显式 off 掉的 agent，各按自己的机制插上。
-	fmt.Println()
-	rs := takeover.OnAll(st.Port)
-	printResults(rs)
-	for _, r := range rs {
+	for _, r := range rep.Takeover {
 		if r.Mechanism == takeover.MechShim && r.Err == nil && !r.Skipped && len(r.Lines) > 0 {
 			warnShellEnvConflict(agents, r.Agent)
 		}
 	}
-
-	st.TakenOver = true
-	// **不能吞这个错**：上面刚打印了「代理已启动」、下面还要打印「配置改动 1 秒内
-	// 自动热更新」。写盘失败（CLAUDE.md §3.1 记的那个 umask 权限坑就是现场）时
-	// TakenOver 没落盘，下次 start 的行为与用户以为的正相反，而屏幕上全是绿的。
-	if err := store.SaveState(st); err != nil {
-		return style.Die(70, i18n.T("Cannot write the takeover state back to state.json: {err}",
-			i18n.A{"err": err.Error()}))
-	}
-	fmt.Println()
-	fmt.Println(style.Hint(i18n.T("Config changes hot-reload within 1 second; no restart needed", nil)))
-	fmt.Println(style.Hint(i18n.T("Original config backup: {dir}/original/", i18n.A{"dir": paths.BackupDir()})))
 	return 0
 }
 

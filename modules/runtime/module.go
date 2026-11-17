@@ -57,6 +57,8 @@ func New() modules.Component {
 		},
 		Provides: []modules.Provision{
 			modules.Provide(Capability, Runtime(service)),
+			// 接管那半条端口：同一个 service，另一份契约（见 api.go 的 Control）。
+			modules.Provide(ControlCapability, Control(service)),
 		},
 		Start: func(_ context.Context, ctx modules.Context) error {
 			catalog := modules.MustGet(ctx, confighookapi.AgentCatalogCapability)
