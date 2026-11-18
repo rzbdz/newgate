@@ -99,12 +99,20 @@ func Resolve(loaders ...Loader) (*Plan, error) {
 
 // planFromOrder 用**构建期算好的顺序**直接出图纸：不建边、不排序、不查环。
 //
-// 它只做三件事：按名字摆好、收齐每个端口的提供值、核对顺序与集合对得上。
+// 它只做三件事：按名字摆好、收齐每个端口的提供值、核对图纸与源码对得上。
 //
 // **核对是这里唯一还留着的校验**，理由：生成的清单会过期（改了规格书、加了模块
 // 却没重新生成），而过期的症状是「某个模块没启动」或者「启动顺序莫名其妙」——
 // 那离「清单过期」太远，运行期必须当场说清楚。其余三类错（重名、缺端口、环）
 // 都在构建期由 distgen 那一趟真的 Resolve 拦住了。
+//
+// # 为什么要核到**边**，而不只是集合（2026-11-18）
+//
+// 一条已装配的依赖改成 `Need`（或新增一条 `Need`）而清单没重生成时，**组件集合
+// 一个都没变**：旧的校验到「名字集合相等」就放行了，于是按旧顺序启动——消费者
+// 可能排在提供者前面，`MustGet` 拿到零值或当场 panic。这条路径是整个进程的
+// **默认路径**（每一条 CLI 都走它），所以「顺序只由生成器保证」等于说这条不变式
+// 没有人守。代价是一次 O(边) 的扫描，买回「提供者一定先启动」这条唯一的硬保证。
 func planFromOrder(components []Component, order []string) (*Plan, error) {
 	if len(order) != len(components) {
 		return nil, fmt.Errorf("precomputed plan lists %d components but %d were assembled "+
@@ -117,6 +125,7 @@ func planFromOrder(components []Component, order []string) (*Plan, error) {
 	}
 	out := make([]Component, 0, len(components))
 	values := map[string][]any{}
+	providedBy := map[string][]string{}
 	seen := make(map[string]bool, len(components))
 	for _, name := range order {
 		c, ok := byName[name]
@@ -130,8 +139,49 @@ func planFromOrder(components []Component, order []string) (*Plan, error) {
 		seen[name] = true
 		for _, prov := range c.Provides {
 			values[prov.spec.name] = append(values[prov.spec.name], prov.value)
+			providedBy[prov.spec.name] = append(providedBy[prov.spec.name], c.Name)
 		}
 		out = append(out, c)
+	}
+	// Replay the graph's edges against the positions we just assigned. A need whose
+	// provider sits later (or is missing) is a stale plan — say so here, by name,
+	// instead of letting the consumer quietly receive nil.
+	pos := make(map[string]int, len(out))
+	for i, c := range out {
+		pos[c.Name] = i
+	}
+	for i, c := range out {
+		for _, req := range c.Requires {
+			providers := providedBy[req.spec.name]
+			if len(providers) == 0 {
+				// No provider at all: fatal for Need, fine for Optional. A precomputed
+				// plan is only ever generated from a successful Resolve, so a missing
+				// Need means the set drifted — same message family as below.
+				if req.optional {
+					continue
+				}
+				return nil, fmt.Errorf("precomputed plan: %s needs port %q but nothing "+
+					"in the assembled graph provides it — the generated manifest is out "+
+					"of date (rerun the generator)", c.Name, req.spec.name)
+			}
+			for _, provider := range providers {
+				j, ok := pos[provider]
+				if !ok {
+					return nil, fmt.Errorf("precomputed plan: %s needs port %q, provided "+
+						"by %s, which is not in the plan — the generated manifest is out "+
+						"of date (rerun the generator)", c.Name, req.spec.name, provider)
+				}
+				// Optional is a weak dependency but still an ordering edge when the
+				// provider is present (see Optional's comment), so backwards is stale
+				// either way — the module would Start before what it waits for.
+				if j >= i {
+					return nil, fmt.Errorf("precomputed plan: %s (position %d) needs port "+
+						"%q, but its provider %s starts at position %d — the generated "+
+						"manifest is out of date (rerun the generator)", c.Name, i,
+						req.spec.name, provider, j)
+				}
+			}
+		}
 	}
 	tracef("%s", i18n.T("assembly: precomputed plan used — {count} components, no resolution",
 		i18n.A{"count": len(out)}))

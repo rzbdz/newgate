@@ -130,3 +130,82 @@ func TestPlanComponentsIsACopy(t *testing.T) {
 		t.Error("Components() 给出去的是内部切片——调用方能改坏图纸")
 	}
 }
+
+// stalePlan 是「组件集合没变、边变了」的 Loader：它交出的组件与真装配一致，但
+// 图纸是旧的。
+type stalePlan struct {
+	components []Component
+	order      []string
+}
+
+func (s stalePlan) Load() ([]Component, error) { return s.components, nil }
+
+func (s stalePlan) PrecomputedOrder() []string { return s.order }
+
+// TestPrecomputedPlanRejectsAStaleOrder 锁住 2026-11-18 那条修补。
+//
+// 现场：一个已装配的依赖从 Optional 翻成 Need（或者新增一条 Need），而生成的
+// 清单没重生成——组件**集合一个都没变**，旧校验只比集合，于是放行，按旧顺序
+// 启动一个排在提供者前面的消费者。那条路是每一条 CLI 的默认路径，所以
+// 「提供者先启动」这条唯一的硬保证当时没有任何东西在守。
+//
+// 一个只会静默给出错顺序的校验比没有校验更坏：图看起来是好的。
+func TestPrecomputedPlanRejectsAStaleOrder(t *testing.T) {
+	leaf := NewCapability[struct{}]("leaf")
+	comps := []Component{
+		{Name: "user", Type: "test", Requires: []Requirement{Need(leaf)}},
+		{Name: "leaf", Type: "test", Provides: []Provision{Provide(leaf, struct{}{})}},
+	}
+	// 名字集合与组件表逐个对得上，只有顺序是反的——正是「清单过期」的形状。
+	_, err := Resolve(stalePlan{components: comps, order: []string{"user", "leaf"}})
+	if err == nil {
+		t.Fatal("图纸里消费者排在提供者前面时必须报错（否则它会拿到零值或 panic）")
+	}
+	if !strings.Contains(err.Error(), "out of date") || !strings.Contains(err.Error(), "user") {
+		t.Fatalf("报错要点名过期的那条边与消费者，实际: %v", err)
+	}
+}
+
+// TestPrecomputedPlanAcceptsTheRightOrder：同一条图，顺序对了就必须照样走快路径
+// ——修复不能把正常的那条路变成「每次都报错」。
+func TestPrecomputedPlanAcceptsTheRightOrder(t *testing.T) {
+	leaf := NewCapability[struct{}]("leaf")
+	comps := []Component{
+		{Name: "user", Type: "test", Requires: []Requirement{Need(leaf)}},
+		{Name: "leaf", Type: "test", Provides: []Provision{Provide(leaf, struct{}{})}},
+	}
+	plan, err := Resolve(stalePlan{components: comps, order: []string{"leaf", "user"}})
+	if err != nil {
+		t.Fatalf("顺序正确时不该报错: %v", err)
+	}
+	if got := plan.Names(); len(got) != 2 || got[0] != "leaf" {
+		t.Fatalf("顺序不对: %v", got)
+	}
+}
+
+// TestPrecomputedPlanRejectsAMissingNeedProvider：集合对得上、但某个 Need 的端口
+// 整张图里没人提供（另一个模块被摘掉却没重生成）——同样是过期，同样要说出来。
+func TestPrecomputedPlanRejectsAMissingNeedProvider(t *testing.T) {
+	_, err := Resolve(stalePlan{
+		components: []Component{
+			{Name: "user", Type: "test", Requires: []Requirement{Need(NewCapability[struct{}]("gone"))}},
+		},
+		order: []string{"user"},
+	})
+	if err == nil {
+		t.Fatal("图纸说能起、图上却没人提供这个端口，必须报错")
+	}
+}
+
+// TestPrecomputedPlanAllowsAnAbsentOptional：Optional 的提供者不在**不是**过期
+// ——那正是「这个发行版没装它」。修复不能把它误判成故障。
+func TestPrecomputedPlanAllowsAnAbsentOptional(t *testing.T) {
+	if _, err := Resolve(stalePlan{
+		components: []Component{
+			{Name: "user", Type: "test", Requires: []Requirement{Optional(NewCapability[struct{}]("ui"))}},
+		},
+		order: []string{"user"},
+	}); err != nil {
+		t.Fatalf("没人提供的 Optional 是合法装配: %v", err)
+	}
+}
