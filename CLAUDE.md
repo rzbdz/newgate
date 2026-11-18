@@ -55,8 +55,7 @@ go vet ./... && gofmt -l .
 | `component` | typed capability、依赖 DAG、生命周期（强依赖 `Need` / 弱依赖 `Optional`，单阶段装配）、装配图（`Plan`）/启动（`Manager`）的分离、trace 出口 | 组件框架本身 |
 | `component/entry` | **进程入口契约**：`Process` / `Handler` / `Registry` / `MakeProcess`。组合根与模块两侧唯一共用的词 | 入口类型、argv0 归一、rank |
 | `lib/i18n` | 本地化引擎：账本、目录、`T` / `N` / `E`、`Extend` | 翻译机制 |
-| `app` | 组合根逻辑：`Main`（trace → 起图 → 问入口）、`Selection`（由消费者决定装什么）、`CoreModules()`（**空的**） | 换装图方式、退出码 |
-| `tools/genmodules` | 构建期扫描 `modules/`，生成装配清单（**只看本仓库、完全离线**）；本仓库扫出来是空的 | 改模块发现规则 |
+| `app` | 组合根逻辑：`Main`（trace → 起图 → 问入口）、`Loader{}`（**空图**，内核一个模块都不带） | 换装图方式、退出码 |
 | `tools/genmodules/scan` | 「哪些目录算组件」+「目录名怎么拧成 import 别名」的唯一实现（发行版生成器用同一份） | 改组件判据 |
 | `tools/i18n` | 账本提取、校验、bundle、翻译（`sync` 只在本地跑） | 改本地化工具 |
 | `tools/ciyaml` | 校验 GitHub workflow 的结构（两个仓库共用一条判据） | 改 CI 棘轮 |
@@ -81,10 +80,11 @@ go vet ./... && gofmt -l .
 service」。端口不声明基数（没有 `One`/`Many`），需要唯一性由 owner 自己在注册
 逻辑里保证。
 
-**装配清单是构建期生成的**（`app/modules_gen.go`，由 `tools/genmodules` 扫描
-`modules/` 得到）：装一个模块 = 把目录复制进 `modules/`、重新编译。`make build`
-会自动重生成，`make check-generate` 只校验；`app` 里有一条测试跑它，拦住
-「加了模块忘了生成」的静默漏装配。
+**内核没有装配清单了**（2026-11-18 删掉了 `app/modules_gen.go` 与生成它的
+`tools/genmodules`）：一个模块都不带的仓库，「装哪些」这张表没有内容。发行版的表在
+它自己那儿生成（`tools/distgen`），并且**顺序就是那张表**——`Loader.Load()` 交出来
+的切片即启动序，`component.Resolve` 只校验不排序；要算顺序的人（生成器、testkit）
+调 `component.Ordered`。
 
 ### 发行版：另一个 Go module（2026-09-20 起，2026-11-18 完整落地）
 
@@ -94,11 +94,11 @@ submodule），并把自己那张表交给内核的组合根：
 
 ```go
 app.Main(ctx, app.Options{
-    Loader: app.Selection{Extra: []app.Entry{
-        {Dir: "entry",    Component: entry.New()},
-        {Dir: "gateway",  Component: gateway.New()},
-        {Dir: "deepseek", Component: deepseek.New()},
-    }},
+    Loader: modules.Static{
+        entry.New(),    // provider 在前
+        gateway.New(),
+        deepseek.New(),
+    },
     Trace: func() func() { return assembly.TraceToLogFile(paths.LogFile()) },
 })
 ```
@@ -107,9 +107,9 @@ app.Main(ctx, app.Options{
 
 **两条接缝**（2026-11-18）：
 
-- `app.Selection{AllCore, Disable, Extra}`：消费者的模块表。`AllCore` 与 `Disable`
-  今天对内核对空（内核没有模块），但语义保留着——第三方组合根如果自己往
-  `CoreModules()` 里放东西，规则照样生效。**本仓库的规格书已经不用 `Disable`。**
+- `modules.Loader`：消费者的模块表（`Load() ([]Component, error)`，切片即启动序）。
+  内核不再有自己的表、也不再提供「按目录名关掉某个模块」——那是内核还有模块时的
+  机制，2026-11-18 随 `app.Selection` 一起删掉。
 - `app.Options.Trace` / `OnAssemblyFailure`：装配记录与失败的落点。内核**不再**
   认识发行版的日志路径——那段逻辑（指纹、去重、写文件）在发行版的 `lib/assembly`。
 
@@ -126,13 +126,12 @@ app.Main(ctx, app.Options{
 内核因此**完全离线**，而且连「真起一张图」都做不到——它没有模块：
 
 ```bash
-make check                    # fmt / vet / 清单 / 单测（无 e2e：没有东西可服务）
+make check                    # fmt / vet / 生成物 / 单测（无 e2e：没有东西可服务）
 GOPROXY=off go test ./...     # 离线也全过——「不需要网络」是事实不是承诺
 ```
 
 `app/independence_test.go` 守着「内核不 import 发行版」；`app/core_test.go` 守着
-「内核不带模块」；`app/selection_test.go` 用一张换进来的假表守住 Selection 的规则
-（名字必须点得中、组合根自己的端口关不掉、AllCore 跟着表长）。
+「内核不带模块」；`app/direction_test.go` 守着「组合根不 import 任何具体模块」。
 
 - 官方发行版：`git@github.com:rzbdz/newgate-ext.git`，**只有 `main` 一条分支**。
   **fork 它 + `build/build.sh` 就是一个新发行版**；`dist-hello.json` 是活的最小样例
@@ -220,7 +219,7 @@ policy port, upstream-patch plugins, UI injection ports, module key registration
 now live with their modules in the distribution; see `newgate-ext/CLAUDE.md` §2.
 
 - **不静默**：任何失败、任何改写、任何「我跳过了」都要有一条可读的回报。这条是
-  框架级规矩（`component` 的 trace、`app` 的装配记录、`Selection` 的每一条报错
+  框架级规矩（`component` 的 trace、`app` 的装配记录、`Resolve` 的每一条报错
   都是它的落地），不是某个产品的偏好。
 - **fail-open**：框架自己的辅助路径（trace、catalog 交付、面板）出错不该让整条
   链断掉。`Start` 失败仍然要回滚（那是装配错误），但**诊断输出**永远不能成为
@@ -278,6 +277,6 @@ NEWGATE_TRACE=1 <二进制> …     # 装配过程逐行打到 stderr（不缓�
   `component.SetTrace` 的出口**产出——内核只提供事实，写去哪由产品决定。
 - 内核的每条报错都点名**端口**，不是模块名（内核不认识模块）。看到
   `component X requires missing capability Y` 时，缺的是端口 Y——哪个模块该提供它，
-  由产品的 `Selection` 和它的依赖图回答。
+  由产品的模块表和它的依赖图回答。
 
 产品侧排查（网关日志、dump、`newgate doctor`…）见发行版 `docs/11-troubleshooting.md`。

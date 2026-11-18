@@ -58,10 +58,11 @@ import，优雅交接期间新旧二进制混跑，控制面文档的形状是�
 它不得把「别人注册了什么」当作自己启动的输入**（见
 `docs/02-component-framework.md` 的三段法则）。
 
-箭头表示 capability 消费，不表示目录 import。实际启动顺序由 component Manager
-根据 `Requires`/`Provides` 计算：拓扑序把 `cli` 排在所有注入者**之前**，停止是
-逆序，于是注入者的 `Stop` 先把注册撤掉，界面最后停（`app/graph_test.go` 的
-`TestInjectorsStartAfterTheUI` 守着这条）。
+箭头表示 capability 消费，不表示目录 import。启动顺序是**声明的一部分**：模块表
+在构建期由 `component.Ordered` 按 `Requires`/`Provides` 算好、编译进二进制，
+provider 排在 consumer **之前**；运行时 `component.Resolve` 只校验、不排序。停止是
+逆序，于是注入者的 `Stop` 先把注册撤掉，界面最后停（发行版
+`testing/kernel/graph_test.go` 的 `TestInjectorsStartAfterTheUI` 守着这条）。
 
 **没有 ui 时一切照常**：把 `modules/cli` 摘掉，整张图仍然装配成功，上面那 9 条
 弱依赖因为**没有提供者而不建边**（各模块拿到 `ok == false` 就跳过），功能一个

@@ -26,7 +26,7 @@ remote design — see the distribution's `docs/`.
 | Component | A lifecycle node in the capability graph |
 | Capability | A typed port identity components use to reach each other |
 | Provision / Requirement | Static declaration that a component provides / needs a port (`Need` hard, `Optional` weak) |
-| Plan | A resolved graph: order fixed, no `Start` run |
+| Plan | The validated graph: order fixed (it came with the declaration), no `Start` run |
 | Selection | The table a composition root hands the kernel: which components to install |
 | Entry | The process-entry contract (`component/entry`): who claims this invocation |
 | Release | Undo handle for a runtime registration (`Register*` on an owner service) |

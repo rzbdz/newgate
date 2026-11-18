@@ -106,9 +106,15 @@ type Component struct {
 
 ### 装配是**一个**阶段
 
-Manager 只做一件事：按拓扑顺序跑完全部 `Start`。`Provides` 的绑定在**任何
-`Start` 之前**就全部完成（构图期），所以端口解析与启动顺序无关；受顺序影响的只
-有「谁在谁的 `Start` 里注册了什么」。弱依赖保证了这件事——注册者排在 owner 后面。
+Manager 只做一件事：按 **Loader 声明的顺序**跑完全部 `Start`。`Provides` 的绑定在
+**任何 `Start` 之前**就全部完成（构图期），所以端口解析与启动顺序无关；受顺序影响
+的只有「谁在谁的 `Start` 里注册了什么」。弱依赖保证了这件事——注册者排在 owner 后面。
+
+**顺序是声明的一部分，不是运行时算出来的**（2026-11-18）：模块集合在构建期就固定
+了，所以 `Loader.Load()` 交出来的那个切片**就是**启动序（provider 在前），
+`component.Resolve` 只做校验、不排序。要「算一个合法顺序」的是**写声明的人**——
+构建期的生成器、testkit 的临时组图——他们调 `component.Ordered`（唯一的实现，含环
+检测）。所以「两个实现漂移」这个故障模式在框架这一层不存在。
 
 停止是启动的严格逆序，所以**注册者的 `Stop` 一定先于被注册方**：撤注册时目标
 还活着。这条以前没有保证（见下），现在由依赖图给出。
@@ -121,7 +127,7 @@ Manager 只做一件事：按拓扑顺序跑完全部 `Start`。`Provides` 的�
 | 时刻 | 谁在跑 | 保证 |
 | --- | --- | --- |
 | **Bind** | 没有人（框架在构图） | 每个端口的**存储**已经就位。`Provides` 在任何 `Start` 之前全部绑好——界面那七本账（命令 / 状态行 / 体检 / 诊断包 / 术语 / 开关 / 详细模式）在界面的 `Start` 之前就存在了 |
-| **Start** | 各组件自己的代码，按拓扑序 | 硬依赖的提供者已经 `Start`；要往哪个 owner 注册，那个 owner 已经 `Start` |
+| **Start** | 各组件自己的代码，按声明序（provider 在前） | 硬依赖的提供者已经 `Start`；要往哪个 owner 注册，那个 owner 已经 `Start` |
 | **Serve** | 执行期：分派命令、处理请求、拉起客户端 | 全部 `Start` 都已返回 ⇒ **每本注册表必然是完整的** |
 
 由此得到一条规矩（比 §1.5 的「需要被启动吗」更常被违反）：
@@ -167,15 +173,16 @@ id）。这样还顺带更对：装配之后新注册的 agent 立刻可分派�
 留着它们的代价是实测出来的：
 
 - 不排序 ⇒ **谁先谁后没有任何保证**。当时 9 个注入者恰好都排在 cli 之后，靠的是
-  稳定拓扑排序 + 目录名字母序，是碰巧而不是机制。
+  稳定排序的平局规则 + 目录名字母序，是碰巧而不是机制。
 - 停止顺序跟着一起没了保证：实测 `breaker` 在 `cli` **之后**停，它的 `Stop` 会往
   一个已经停掉的界面账本里回写 `Release`。
 - 每个新模块作者都得先读懂 30 行注释才知道「往界面注册要写 `Attach` 而不是
   `Start`」。
 
 现在只有两种需求，语义各自单一。`component/component_test.go` 的
-`TestOptionalIsAWeakDependency` 守着弱依赖的两条语义，`app/graph_test.go` 的
-`TestInjectorsStartAfterTheUI` 守着「注入者排在界面之后」。
+`TestOptionalIsAWeakDependency` 守着弱依赖的两条语义，发行版的
+`testing/kernel/graph_test.go` 的 `TestInjectorsStartAfterTheUI` 守着「注入者排在
+界面之后」。
 
 ### Context
 
@@ -185,8 +192,9 @@ Manager 构图后把 capability table 作为 Context 交给 `Start`。`Get`/`Mus
 
 ### Manager
 
-Manager 校验组件名唯一、同名端口同型、缺失 provider 和依赖环；随后拓扑启动并
-逆序停止。
+Manager 校验组件名唯一、同名端口同型、`Need` 缺失、以及**每个依赖的 provider 确实
+排在它前面**；随后按声明序启动、逆序停止。（依赖环不在这里报：线性列表里表达不出
+环，它的症状就是「provider 不在前面」；真正计算顺序的 `Ordered` 会点名报环。）
 启动失败会对已经启动的节点做逆序 rollback。
 
 ## 2. 注册所有权
