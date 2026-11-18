@@ -7,14 +7,16 @@ name: CI
 # 可能同时动），靠记性守不住——尤其是端到端，它锁的正是「真实现场复现出来
 # 的那几条」，单测覆盖不到。
 #
-# 三档对应 docs/10-testing-security.md 的三层粒度：
+# 两档（2026-11-18 起）：
 #
 #   static  格式 / vet / 生成清单 / 单测      —— 秒级
 #   race    带竞态检测的单测                  —— 只跑并发相关包
-#   e2e     真二进制 + 假上游 + 假客户端      —— 零 token，覆盖真行为
 #
-# 需要真 token 的 `mock/e2e_reasoning_affinity.sh` **不在**这里：它会花真钱，
-# 只能人工按需跑。
+# 原来还有一档端到端（真二进制 + 假上游 + 假客户端）。它跟着产品模块搬走了：
+# 内核不再带网关、界面和客户端接入，它自己的二进制没有东西可以服务。每一章
+# 原来在这里跑的端到端，现在跑发行版的二进制（newgate-ext 的 mock/），因为
+# 那些模块住在那里。假上游（mock/fake_upstream.py）留在本仓库——发行版按**路径**
+# 复用它，不复制：复制品会漂移，漂移出来的绿测试什么也不证明。
 #
 # ---- 触发条件：push 到 main、有人开 PR、以及手动（2026-09-20 改）----
 #
@@ -122,47 +124,3 @@ jobs:
 
       - run: go test -race ./...
 
-  # 这一档不需要上面那个 env：mock/*.sh 各自 export 自己的沙箱。
-  e2e:
-    name: 零 token 端到端
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
-          # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
-          # 都报 "Some specified paths were not resolved, unable to cache
-          # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
-          cache-dependency-path: go.mod
-
-      # 两条脚本的依赖：python3（假上游）、curl（打代理）、md5sum（逐字节还原校验）。
-      - name: 装依赖
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq python3 curl coreutils
-
-      - name: 构建
-        run: make build
-
-      # 内核只剩一条端到端：`mock/e2e_claude.sh` 打的是**机制面**（档位解析、
-      # 上游严格性、停机与优雅交接、运行期开关）。claude 与 opencode 两个**客户端**
-      # 模块在 2026-09-20 搬去了发行版，所以 opencode 侧那条脚本也跟着走了
-      # （`newgate-ext/mock/e2e_opencode.sh`，由发行版的 CI 跑）。这里原来那一步的
-      # `run:` 在摊平 go/ 时被误删，留下一个没有 run/uses 的步骤——YAML 非法，
-      # GitHub 直接拒掉整个 workflow，一个 job 都没起（2026-09-20 修）。
-      - name: Claude Code 侧端到端
-        run: bash mock/e2e_claude.sh
-
-      # 失败时把沙箱日志带出来——脚本自己会清沙箱，所以只能靠它打到 stdout
-      # 的内容。这两步是兜底：把代理日志也捞一份，方便判断是网关行为变了
-      # 还是脚本环境不对。
-      - name: 失败时导出日志
-        if: failure()
-        run: |
-          for d in /tmp/newgate-e2e.* /tmp/newgate-claude-e2e.*; do
-            [ -d "$d" ] || continue
-            echo "=== $d ==="
-            find "$d" -name '*.log' -exec sh -c 'echo "--- {}"; tail -80 "{}"' \;
-          done

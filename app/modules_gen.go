@@ -10,20 +10,6 @@ package app
 
 import (
 	modules "github.com/rzbdz/newgate/component"
-	mod_ask "github.com/rzbdz/newgate/modules/ask"
-	mod_breaker "github.com/rzbdz/newgate/modules/breaker"
-	mod_cli "github.com/rzbdz/newgate/modules/cli"
-	mod_config "github.com/rzbdz/newgate/modules/config"
-	mod_confighook "github.com/rzbdz/newgate/modules/confighook"
-	mod_entry "github.com/rzbdz/newgate/modules/entry"
-	mod_gateway "github.com/rzbdz/newgate/modules/gateway"
-	mod_locale "github.com/rzbdz/newgate/modules/locale"
-	mod_pluginmanager "github.com/rzbdz/newgate/modules/pluginmanager"
-	mod_porthub "github.com/rzbdz/newgate/modules/porthub"
-	mod_runtime "github.com/rzbdz/newgate/modules/runtime"
-	mod_serving "github.com/rzbdz/newgate/modules/serving"
-	mod_thinking "github.com/rzbdz/newgate/modules/thinking"
-	mod_wrapper "github.com/rzbdz/newgate/modules/wrapper"
 )
 
 // coreModules 是内核自带的组件表，按目录名排序。
@@ -32,28 +18,13 @@ import (
 // 组件名不必与它相同（发行版里就有：claudecode_deepseek → claudecode-deepseek）。
 // 内核这一侧今天恰好个个同名，那是巧合、不是规矩。
 func coreModules() []Entry {
-	return []Entry{
-		{Dir: "ask", Component: mod_ask.New()},
-		{Dir: "breaker", Component: mod_breaker.New()},
-		{Dir: "cli", Component: mod_cli.New()},
-		{Dir: "config", Component: mod_config.New()},
-		{Dir: "confighook", Component: mod_confighook.New()},
-		{Dir: "entry", Component: mod_entry.New()},
-		{Dir: "gateway", Component: mod_gateway.New()},
-		{Dir: "locale", Component: mod_locale.New()},
-		{Dir: "pluginmanager", Component: mod_pluginmanager.New()},
-		{Dir: "porthub", Component: mod_porthub.New()},
-		{Dir: "runtime", Component: mod_runtime.New()},
-		{Dir: "serving", Component: mod_serving.New()},
-		{Dir: "thinking", Component: mod_thinking.New()},
-		{Dir: "wrapper", Component: mod_wrapper.New()},
-	}
+	return []Entry{}
 }
 
 // generatedComponents 是内核自己那张图要装的组件。
 // 顺序不是依赖声明——真实启动顺序由 capability 依赖图在构图期计算。
 func generatedComponents() []modules.Component {
-	out := make([]modules.Component, 0, 14)
+	out := make([]modules.Component, 0, 0)
 	for _, e := range coreModules() {
 		out = append(out, e.Component)
 	}

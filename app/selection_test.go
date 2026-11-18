@@ -2,7 +2,7 @@ package app
 
 import (
 	"path/filepath"
-	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -11,237 +11,233 @@ import (
 	modscan "github.com/rzbdz/newgate/tools/genmodules/scan"
 )
 
-// CoreModules 报的是「内核有哪些模块」，磁盘上 modules/ 是同一件事的另一份说法。
-// 两者必须逐字一致——不一致的症状是消费者按目录名关模块时关了个不存在的东西。
-func TestCoreModulesMatchesScannedDirs(t *testing.T) {
-	want, err := modscan.Dirs(filepath.Join(repoDir(t), "..", "modules"))
-	if err != nil {
-		t.Fatalf("扫描 modules/：%v", err)
-	}
-	entries := CoreModules()
-	got := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.Dir == "" {
-			t.Fatalf("装配表里有个没写目录名的组件（组件名 %q）——目录名是关掉它的唯一凭据", e.Component.Name)
-		}
-		if e.Component.Name == "" {
-			t.Fatalf("装配表里 %q 这个目录交出了一个没名字的组件", e.Dir)
-		}
-		got = append(got, e.Dir)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("CoreModules 的目录集合与扫描结果不一致\n表里:  %v\n磁盘上: %v", got, want)
-	}
+// The kernel ships **no modules** (2026-11-18). These tests therefore exercise the
+// Selection contract against a synthetic kernel table: what a distribution relies on
+// is the *rules* (names must hit, the root's own port cannot be disabled, duplicate
+// names and an empty graph are loud), not today's module list.
+//
+// The real product graph — "this distribution's spec assembles, the removal matrix
+// holds" — lives in the distribution's testing/kernel package.
 
-	// 组件名不能重复：重复的话构图期才会以一句 `duplicate component` 失败，
-	// 而那时离「表里多写了一行」已经很远了。
-	seen := map[string]string{}
-	for _, e := range entries {
-		if prev, dup := seen[e.Component.Name]; dup {
-			t.Errorf("组件 %q 出现了两次（目录 %s 与 %s）", e.Component.Name, prev, e.Dir)
-		}
-		seen[e.Component.Name] = e.Dir
+// TestKernelShipsNoModules is the migration's ratchet: the kernel's own table and
+// the disk must both be empty. If someone drops a module back into core/modules,
+// this fails instead of quietly reinstalling a product concern into the framework.
+func TestKernelShipsNoModules(t *testing.T) {
+	if got := CoreModules(); len(got) != 0 {
+		t.Fatalf("the kernel ships %d modules (%v) — a module belongs in a distribution", len(got), names(entriesToComponents(got)))
+	}
+	dirs, err := modscan.Dirs(filepath.Join(repoDir(t), "..", "modules"))
+	if err != nil {
+		t.Fatalf("scanning core/modules: %v", err)
+	}
+	if len(dirs) != 0 {
+		t.Fatalf("core/modules has %v — the kernel is a framework, not a product", dirs)
 	}
 }
 
-// Selection{} 是「内核全都要」，它必须与内核自己那张图逐组件相同。
-func TestEmptySelectionEqualsKernelGraph(t *testing.T) {
-	sel, err := Selection{}.Load()
-	if err != nil {
-		t.Fatalf("Selection{}.Load(): %v", err)
-	}
-	kernel, err := Loader{}.Load()
+// TestKernelLoaderIsEmpty: Loader{} is what the kernel's own binary and `go test`
+// see, and it installs nothing.
+func TestKernelLoaderIsEmpty(t *testing.T) {
+	comps, err := Loader{}.Load()
 	if err != nil {
 		t.Fatalf("Loader{}.Load(): %v", err)
 	}
-	if !reflect.DeepEqual(names(sel), names(kernel)) {
-		t.Errorf("空选择装出来的图与内核自带图不同\n空选择: %v\n内核:   %v", names(sel), names(kernel))
+	if len(comps) != 0 {
+		t.Fatalf("Loader{} installed %d components", len(comps))
 	}
 }
 
-// 关掉一个内核模块：按**目录名**关得掉，而且只关掉那一个。
+// TestSelectionDisablesByDirName works on a fake kernel table so the rule stays
+// testable now that the real table is empty.
 func TestSelectionDisablesByDirName(t *testing.T) {
-	sel, err := Selection{Disable: []string{"cli"}}.Load()
+	withCoreModules(t, map[string]modules.Component{"ui": fakeModule("ui"), "data": fakeModule("data")})
+	sel, err := Selection{Disable: []string{"ui"}}.Load()
 	if err != nil {
-		t.Fatalf("关掉 cli：%v", err)
+		t.Fatalf("disable ui: %v", err)
 	}
-	if contains(names(sel), "cli") {
-		t.Error("disable 点了 cli，图里还有 cli")
+	if contains(names(sel), "ui") {
+		t.Error("disable named ui, but ui is still in the graph")
 	}
-	// 别的模块一个都不该少：关掉界面之后内核剩下的一切照常（docs/03 的
-	// 「没装任何 ui 时一切功能照常」）。
-	kernel, err := Loader{}.Load()
-	if err != nil {
-		t.Fatalf("Loader{}.Load(): %v", err)
-	}
-	if len(sel) != len(kernel)-1 {
-		t.Errorf("关掉一个模块后组件数 = %d，想要 %d", len(sel), len(kernel)-1)
+	if !contains(names(sel), "data") {
+		t.Error("disabling one module dropped an unrelated one")
 	}
 }
 
-// 名字写错的三种写法都必须报错——它们最坏的症状是「以为关了，其实在跑」。
+// TestSelectionRejectsUnknownNames: every wrong spelling must be loud. The worst
+// symptom of a silent one is "I thought I turned it off, it is still running".
 func TestSelectionRejectsUnknownNames(t *testing.T) {
+	withCoreModules(t, map[string]modules.Component{"data": fakeModule("data"), "entry": rootModule()})
 	cases := []struct {
 		name string
 		sel  Selection
-		want string // 错误里必须出现的话
+		want string
 	}{
-		{"点了不存在的目录", Selection{Disable: []string{"nope"}}, "nope"},
-		{"写了组件名而不是目录名", Selection{Disable: []string{"config-hook"}}, "config-hook"},
-		{"点了组合根自己要用的那个模块", Selection{Disable: []string{"entry"}}, "entry"},
+		{"a directory that does not exist", Selection{Disable: []string{"nope"}}, "nope"},
+		{"a component name instead of a directory name", Selection{Disable: []string{"data-module"}}, "data-module"},
+		{"the module serving the root's own port", Selection{Disable: []string{"entry"}}, "root"},
 		{
-			"点了 Extra 里的模块（不要它就别列进去）",
-			Selection{Extra: []Entry{{Dir: "hello", Component: helloProbe()}}, Disable: []string{"hello"}},
-			"hello",
+			"a module from Extra (leave it out instead)",
+			Selection{Extra: []Entry{{Dir: "probe", Component: helloProbe()}}, Disable: []string{"probe"}},
+			"probe",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := c.sel.Load()
 			if err == nil {
-				t.Fatalf("没报错——这正是最坏的那种：用户以为关掉了，它其实还在跑")
+				t.Fatalf("no error — the exact silent failure this guards against")
 			}
 			if !strings.Contains(err.Error(), c.want) {
-				t.Errorf("错误里没点名 %q，实际是：%v", c.want, err)
+				t.Errorf("error does not name %q: %v", c.want, err)
 			}
 		})
 	}
 }
 
-// 重复装配、没写目录名、以及「把内核模块全关掉」也必须在装配前就报错。
+// TestSelectionRejectsDuplicatesAndEmptyGraph: duplicates, a missing directory name,
+// and disabling everything must all fail before anything is assembled.
 func TestSelectionRejectsDuplicatesAndEmptyGraph(t *testing.T) {
-	core := CoreModules()
-	if len(core) == 0 {
-		t.Fatal("内核一个模块都没有？")
+	withCoreModules(t, map[string]modules.Component{"data": fakeModule("data"), "entry": rootModule()})
+
+	if _, err := (Selection{Extra: []Entry{{Dir: "shadow", Component: fakeModule("data")}}}).Load(); err == nil {
+		t.Error("the same component installed twice did not fail")
 	}
-	dup := Selection{Extra: []Entry{{Dir: "shadow", Component: core[0].Component}}}
-	if _, err := dup.Load(); err == nil {
-		t.Error("同一个组件装了两次，没报错")
-	}
-	anonymous := Selection{Extra: []Entry{{Dir: "", Component: core[0].Component}}}
-	if _, err := anonymous.Load(); err == nil {
-		t.Error("Extra 里没写目录名，没报错")
+	if _, err := (Selection{Extra: []Entry{{Dir: "", Component: fakeModule("anon")}}}).Load(); err == nil {
+		t.Error("an Extra without a directory name did not fail")
 	}
 
-	// 全关掉：**必须**报错，而且得是因为组合根自己要用的那个关不掉——
-	// 不是"关成功了然后装出一张空图"（空图跑起来只会让人以为命令坏了）。
-	all := make([]string, 0, len(core))
-	for _, e := range core {
-		all = append(all, e.Dir)
-	}
-	_, err := Selection{Disable: all}.Load()
+	_, err := Selection{Disable: []string{"data", "entry"}}.Load()
 	if err == nil {
-		t.Fatal("把所有内核模块都关掉，没报错")
+		t.Fatal("disabling every module did not fail")
 	}
 	if !strings.Contains(err.Error(), modules.Name(entry.Capability)) {
-		t.Errorf("全关掉的报错该点名组合根要的那个端口 %q，实际：%v", modules.Name(entry.Capability), err)
+		t.Errorf("the error must name the root's own port %q: %v", modules.Name(entry.Capability), err)
 	}
 }
 
-// AllCore：内核自带的**全部可关模块**一次关掉——「这个发行版只要框架 + 我自己的模块」。
-//
-// 为什么值得一条自己的测试：这个字段的全部价值在于它**跟着 CoreModules() 一起长**
-// （内核加一个模块，写 AllCore 的发行版自动不装它）。所以判据不能是「关掉了某几个
-// 名字」，只能是「剩下的恰好是关不掉的那些」——两边的名字都从声明里读，不写死。
+// TestSelectionAllCoreDisablesEverythingRemovable: AllCore's whole value is that it
+// grows with CoreModules() — so the assertion is "what is left is exactly what the
+// root itself needs", never a list of names.
 func TestSelectionAllCoreDisablesEverythingRemovable(t *testing.T) {
+	withCoreModules(t, map[string]modules.Component{"data": fakeModule("data"), "ui": fakeModule("ui"), "entry": rootModule()})
 	sel, err := Selection{AllCore: true}.Load()
 	if err != nil {
-		t.Fatalf("AllCore：%v", err)
-	}
-	if len(sel) == 0 {
-		t.Fatal("AllCore 把图关空了——连入口账本都没了，进程起来也没人能认领调用")
+		t.Fatalf("AllCore: %v", err)
 	}
 	kept := 0
 	for _, c := range sel {
 		if _, serves := servesCompositionRoot(c); !serves {
-			t.Errorf("AllCore 之后图里还剩 %s——它不是组合根自己要用的那个：%v", c.Name, names(sel))
+			t.Errorf("AllCore left %s in the graph — it is not what the root itself needs", c.Name)
 			continue
 		}
 		kept++
 	}
 	if kept == 0 {
-		t.Error("AllCore 把提供组合根端口的组件也关掉了")
-	}
-
-	// 反过来：可关的那些必须**真的**不在图里（不是「我以为关了」）。
-	removable := 0
-	for _, e := range CoreModules() {
-		if _, serves := servesCompositionRoot(e.Component); serves {
-			continue
-		}
-		removable++
-		if contains(names(sel), e.Component.Name) {
-			t.Errorf("AllCore 之后 %s（目录 %s）还在图里", e.Component.Name, e.Dir)
-		}
-	}
-	if removable < 5 {
-		t.Fatalf("内核里可关的模块只剩 %d 个——这条测试退化了", removable)
+		t.Error("AllCore also disabled the root's own port")
 	}
 }
 
-// AllCore + Extra 就是骨架发行版那张图：框架 + 我自己的一个模块。
+// TestSelectionAllCoreKeepsExtra: AllCore + Extra is the skeleton distribution.
 func TestSelectionAllCoreKeepsExtra(t *testing.T) {
-	sel, err := Selection{
-		AllCore: true,
-		Extra:   []Entry{{Dir: "probe", Component: helloProbe()}},
-	}.Load()
+	withCoreModules(t, map[string]modules.Component{"data": fakeModule("data"), "entry": rootModule()})
+	sel, err := Selection{AllCore: true, Extra: []Entry{{Dir: "probe", Component: helloProbe()}}}.Load()
 	if err != nil {
-		t.Fatalf("AllCore + Extra：%v", err)
+		t.Fatalf("AllCore + Extra: %v", err)
 	}
-	got := names(sel)
-	if !contains(got, "hello-probe") {
-		t.Errorf("Extra 里的模块没装上：%v", got)
+	if !contains(names(sel), "hello-probe") {
+		t.Errorf("Extra was not installed: %v", names(sel))
 	}
-	for _, name := range []string{"cli", "gateway", "config"} {
-		if contains(got, name) {
-			t.Errorf("AllCore 之后 %s 还在图里：%v", name, got)
-		}
+	if contains(names(sel), "data") {
+		t.Errorf("AllCore left a module in: %v", names(sel))
 	}
 }
 
-// AllCore 与 Disable 同时给：报错。取并集是错的——那样 AllCore 旁边会留着一长串
-// Disable，而后者是前者的过时副本，正是这个字段要消掉的东西。
+// TestSelectionRejectsAllCoreWithDisable: both say the same thing; taking the union
+// would leave Disable as a stale copy of AllCore, which is what AllCore removed.
 func TestSelectionRejectsAllCoreWithDisable(t *testing.T) {
-	_, err := (Selection{AllCore: true, Disable: []string{"cli"}}).Load()
+	withCoreModules(t, map[string]modules.Component{"data": fakeModule("data"), "entry": rootModule()})
+	_, err := (Selection{AllCore: true, Disable: []string{"data"}}).Load()
 	if err == nil {
-		t.Fatal("AllCore 与 Disable 同时给，没报错")
+		t.Fatal("AllCore and Disable together did not fail")
 	}
 	if !strings.Contains(err.Error(), "AllCore") {
-		t.Errorf("报错该说清是 AllCore 与 Disable 撞了，实际：%v", err)
+		t.Errorf("the error must say AllCore and Disable collided: %v", err)
 	}
 }
 
-// helloProbe 冒充一个"消费者自己的模块"（Extra 那条路上来的），用来验证
-// 「disable 管不着 Extra」那条拒绝。
+// TestSelectionAppendsExtraLast: order is not a dependency declaration, but a
+// consumer's own modules come after the kernel's so kernel errors surface first.
+func TestSelectionAppendsExtraLast(t *testing.T) {
+	withCoreModules(t, map[string]modules.Component{"data": fakeModule("data"), "entry": rootModule()})
+	sel, err := Selection{Extra: []Entry{{Dir: "extra-probe", Component: helloProbe()}}}.Load()
+	if err != nil {
+		t.Fatalf("install an extra: %v", err)
+	}
+	if got := sel[len(sel)-1].Name; got != "hello-probe" {
+		t.Errorf("last component is %q, want hello-probe", got)
+	}
+}
+
+// ---- fakes ----
+
+func fakeModule(name string) modules.Component {
+	return modules.Component{Name: name, Type: "test"}
+}
+
+// rootModule provides the port the composition root itself needs, under the
+// directory name the production entry module uses.
+func rootModule() modules.Component {
+	return modules.Component{
+		Name:     "root",
+		Type:     "test",
+		Provides: []modules.Provision{modules.Provide(entry.Capability, entry.Registry(entry.NewTable()))},
+	}
+}
+
+// withCoreModules swaps the kernel's table for the duration of a test.
+//
+// coreModules is generated and empty; a rule about "how Selection treats a module
+// table" is testable only against a table that has modules in it. swapCoreEntries
+// is the seam (see manifest.go). Directories are named by the caller so Disable can
+// name them.
+func withCoreModules(t *testing.T, table map[string]modules.Component) {
+	t.Helper()
+	dirs := make([]string, 0, len(table))
+	for dir := range table {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	entries := make([]Entry, 0, len(dirs))
+	for _, dir := range dirs {
+		entries = append(entries, Entry{Dir: dir, Component: table[dir]})
+	}
+	restore := swapCoreEntries(func() []Entry { return entries })
+	t.Cleanup(restore)
+}
+
 func helloProbe() modules.Component {
 	return modules.Component{Name: "hello-probe", Type: "example"}
 }
 
-// Extra 装在自带的后面——顺序不是依赖声明，但「消费者自己的模块排在后面」让
-// 内核的错先于发行版的错暴露。
-func TestSelectionAppendsExtraLast(t *testing.T) {
-	probe := CoreModules()[0].Component
-	probe.Name = "extra-probe" // 换个名字，免得撞上「重复组件」那条
-	sel, err := Selection{Extra: []Entry{{Dir: "extra-probe", Component: probe}}}.Load()
-	if err != nil {
-		t.Fatalf("装一个 extra：%v", err)
+func entriesToComponents(entries []Entry) []modules.Component {
+	out := make([]modules.Component, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Component)
 	}
-	if got := sel[len(sel)-1].Name; got != "extra-probe" {
-		t.Errorf("最后一个组件是 %q，想要 extra-probe", got)
-	}
+	return out
 }
 
-func names(cs []modules.Component) []string {
-	out := make([]string, 0, len(cs))
-	for _, c := range cs {
+func names(components []modules.Component) []string {
+	out := make([]string, 0, len(components))
+	for _, c := range components {
 		out = append(out, c.Name)
 	}
 	return out
 }
 
-func contains(xs []string, want string) bool {
-	for _, x := range xs {
-		if x == want {
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
 			return true
 		}
 	}

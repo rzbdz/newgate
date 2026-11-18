@@ -18,18 +18,21 @@ import (
 
 //go:generate go run github.com/rzbdz/newgate/tools/genmodules
 
-// Loader 是默认产品装配清单：**就是扫描结果**，一个不多、一个不少。
+// Loader is the kernel's own assembly: **whatever the scan finds**, nothing more.
+//
+// It is empty on purpose. A composition root that wants a product passes an
+// app.Selection (a distribution does); Loader{} is what `go test ./...` and the
+// kernel's own binary see when nobody has chosen anything.
 type Loader struct{}
 
-// Load 返回组件集合；第三方组合根可以替换这个 Loader，而无需修改框架。
+// Load returns the component set; a third-party composition root can replace this
+// Loader without touching the framework.
 //
-// 这里没有"额外塞进来"的组件（2026-09-20 之前有一个：入口账本的拥有者由组合根
-// 显式装入，因为当时它住在 modules/ 之外、不参与扫描）。现在它在 modules/ 里，
-// 与别的模块一样被扫描——「图 = 扫描清单」于是成了一条**没有例外**的等式
-// （见 graph_test.go 的 TestGraphCoversEveryModule）。
-//
-// 它摘不掉这件事与这里无关：那是 app.Selection 的判断，判据是「组合根自己要用
-// 它提供的端口」（见 manifest.go），而不是「组合根额外装了它」。
+// "The graph is the scanned list" stays an equation with no exceptions: the entry
+// ledger used to be installed explicitly by the composition root, which made it the
+// one module the root knew by name. It is a normal scanned module now, and what
+// makes it unremovable is not this file but the root's own dependency on its port
+// (see compositionRootPorts in manifest.go).
 func (Loader) Load() ([]modules.Component, error) {
 	return generatedComponents(), nil
 }

@@ -35,8 +35,8 @@ func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	// 双保险：-check 是拿生成器和自己的输出比，若生成器逻辑本身退化成空，
 	// 它会自我一致。所以这里再断言清单非空且覆盖 modules/ 下的每个目录。
 	generated := generatedComponents()
-	if len(generated) == 0 {
-		t.Fatal("装配清单为空：生成器没有扫到任何组件")
+	if len(generated) != 0 {
+		t.Fatalf("the kernel generated %d components — the framework must ship none", len(generated))
 	}
 	// 清单**就是** modules/ 下的目录快照——内核的装配只有一个来源（2026-09-20
 	// 删掉了第二个：发行版的模块不再由内核在构建期 clone 进来）。逐个对账，

@@ -32,7 +32,6 @@ import (
 	"sync"
 
 	"github.com/rzbdz/newgate/component"
-	"github.com/rzbdz/newgate/lib/buildinfo"
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
@@ -227,14 +226,15 @@ func errEmptyName() error {
 	return i18n.E("entry: handler must have a Name()", nil)
 }
 
-// MakeProcess 把「进程是怎么被调起来的」装成一个 Process，并把链接期版本信息
-// 落到 buildinfo 叶子上（守护进程的启动日志、doctor 的版本行都读它）。
+// MakeProcess 把「进程是怎么被调起来的」装成一个 Process。
+//
+// 版本号落在进程自己身上（Process.Version 等），**不再写进某个全局叶子**：那个
+// 叶子（buildinfo）属于发行版的模块，内核不该认识它。谁需要版本号就向 Process 要。
 //
 // **只有组合根该调它**，而且只在 main 里调一次。它做两件必须成对发生的事：
 // 归一 argv0（basename、剥 .exe、剥路径）、注入版本——两者都是「这个二进制
 // 这一趟的事实」，模块自己各读各的就会漂移。
 func MakeProcess(argv []string, env []string, version, buildTime, commitTime string) Process {
-	buildinfo.Set(version, buildTime, commitTime)
 	name := ""
 	var args []string
 	if len(argv) > 0 {

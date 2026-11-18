@@ -27,7 +27,22 @@ type Entry struct {
 //
 // 实现必须是生成物：app 的非测试源码不许 import 任何业务模块（见 direction_test.go），
 // 而这份清单列的就是全部模块名——modules_gen.go 是它唯一合法的住处。
-func CoreModules() []Entry { return coreModules() }
+func CoreModules() []Entry { return coreTable() }
+
+// coreTable is the swappable view over the generated table.
+//
+// Why a seam at all: the kernel ships no modules, so every rule about how Selection
+// treats a module table (names must hit, the root's own port cannot be disabled,
+// AllCore grows with the table) is only testable against a table that has modules
+// in it. Production reads the generated coreModules(); tests swap this and restore.
+var coreTable = coreModules
+
+// swapCoreEntries replaces the kernel table for a test and returns the restore.
+func swapCoreEntries(replace func() []Entry) func() {
+	prev := coreTable
+	coreTable = replace
+	return func() { coreTable = prev }
+}
 
 // Selection 是**由消费者决定**的一组组件：内核自带的减去关掉的、加上 Extra。
 //

@@ -20,7 +20,7 @@ STATIC_LD    := $(LDFLAGS) -extldflags '-static'
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 .PHONY: all build static release test test-race fmt check-fmt vet clean install \
-         verify-static e2e check ci help generate check-generate
+         verify-static check ci help generate check-generate
 
 all: build
 
@@ -125,14 +125,19 @@ install-static: static
 clean:
 	rm -rf $(OUT) $(DIST)
 
-## e2e: 零 token 端到端（内核的**机制面**）
+## e2e is gone from the kernel (2026-11-18).
 ##
-## 内容是：真二进制起来当代理 → curl 打数据面（档位解析、上游严格性）→ 控制端点
-## （停机、优雅交接）→ 运行期开关与 schema-repair。**产品面**（真客户端接管、后台
-## 分类器改道、窗口注入、DeepSeek 尾部形状）跟着那些模块住在发行版里，由发行版的
-## mock/ 脚本锁——那边跑的是同一份内核机制，只是经过了产品的装配。
-e2e: build
-	@bash mock/e2e_claude.sh
+## The kernel ships no gateway, no CLI and no client adapters, so its own binary
+## cannot serve a request — there is nothing for an end-to-end test to exercise.
+## Every chapter that used to run here (data plane, takeover, control endpoint,
+## handoff, runtime switches) now exercises the **distribution's** binary, because
+## that is where those modules live:
+##
+##   newgate-ext/build/build.sh && newgate-ext/mock/e2e_claude.sh
+##
+## What the kernel keeps is mock/fake_upstream.py: the byte-exact upstream stand-in
+## is reused *by path* from the distribution's scripts (copying it would let the two
+## drift, and a drifted fake upstream produces green tests that mean nothing).
 
 ## check-i18n: 账本是否过期 + 本地化静态检查（不出网、不花钱，CI 里跑的就是它）
 check-i18n:
@@ -146,7 +151,7 @@ i18n-sync:
 	@go run ./tools/i18n sync --lang zh-Hans
 
 ## check: 换版本之前跑这个。全绿才有资格谈上线。
-check: check-generate check-fmt vet check-i18n test e2e
+check: check-generate check-fmt vet check-i18n test
 	@echo
 	@echo "✓ 全绿：静态检查 + 单测 + 零 token 端到端（机制面）"
 
@@ -173,11 +178,9 @@ ci:
 	$(MAKE) --no-print-directory check-i18n && \
 	echo "── static: 单测" && go test ./... && \
 	echo "── race: 竞态检测" && go test -race ./... && \
-	echo "── e2e: 零 token 端到端" && \
-	$(MAKE) --no-print-directory e2e && \
-	echo && echo "✓ CI 三档本地全绿（static / race / e2e）"
+	echo && echo "✓ 全部本地全绿（static / race）"
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
 	@echo "  build / install / test / test-race / fmt / vet / clean"
-	@echo "  e2e / check / ci / generate / check-generate / check-i18n / i18n-sync"
+	@echo "  check / ci / generate / check-generate / check-i18n / i18n-sync"

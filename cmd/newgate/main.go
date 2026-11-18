@@ -1,13 +1,15 @@
-// Command newgate 是**内核自带**的二进制：进程组合根 + 内核 `modules/` 下的全部
-// 模块（现在是十一个），一个外部模块都不装。
+// Command newgate is the **kernel's own** binary: the process composition root
+// with no modules installed at all.
 //
-// 它存在的理由是「内核自己可以被构建、被测试」——`make e2e` 需要**一个**二进制，
-// 内核的单元/系统测试也需要一张能起来的真图。**它不是产品**：产品的模块集合由
-// 发行版决定（发行版是另一个 Go module，见 docs/09-extension-guide.md §8），
-// 所以别把这里的产物装到线上——那是个没有上游怪癖补丁的降级版。
+// Its only reason to exist is that the kernel can be built and tested on its own.
+// **It is not a product**: a real binary installs a graph chosen by a distribution
+// (another Go module that depends on this one and passes app.Selection). Running
+// this build serves nothing — literally: there is no gateway, no CLI, no data
+// plane, because the kernel ships none (2026-11-18).
 //
-// 组合根的逻辑（留痕 → 起图 → 问入口 → 交出去）全在 app.Main 里，本文件只负责
-// 说「哪张图、什么版本」。发行版的 main 也只是同样十几行，两份不会漂移。
+// The composition root's logic (trace → start the graph → ask the entry ledger →
+// hand off) all lives in app.Main; this file only says "which graph, which
+// version". A distribution's main is the same few lines.
 package main
 
 import (

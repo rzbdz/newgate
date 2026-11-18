@@ -10,46 +10,72 @@ import (
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
-// Options 是进程组合根的输入：装哪张图 + 版本三件套。
+// Options is the composition root's input: which graph to install, the version
+// triple, and two optional hooks that let a product decide where assembly facts go.
 //
-// Loader 为 nil 表示内核自带的那张图（Loader{}）——内核自己的二进制、
-// 以及只想知道「内核默认装什么」的调用方走这条。
+// A nil Loader means the kernel's own (empty) graph — the kernel's binary and tests
+// that only want "what does the framework do" take that path.
 type Options struct {
 	Loader     modules.Loader
 	Version    string
 	BuildTime  string
 	CommitTime string
+
+	// Trace decides where the assembly record goes. Nil = nowhere.
+	//
+	// It is a hook and not a kernel default because "which file, what format,
+	// dedupe repeated identical assemblies or not" is a product decision, not a
+	// mechanism. The kernel used to hardcode the distribution's log path here,
+	// which meant the framework could not be used without a distribution and the
+	// distribution could not change its log policy.
+	Trace func() (stop func())
+
+	// OnAssemblyFailure, if set, is called with the assembly error before Main
+	// prints it and returns 70. Nil = just print.
+	OnAssemblyFailure func(error)
 }
 
-// Main 是组合根的全部逻辑，按顺序做三件事：
+// Main is the whole composition root, in order:
 //
-//  1. 装配留痕（TraceToLogFile）——谁装了什么、什么顺序，每个进程都记；
-//  2. 起图——失败就是 70，绝不带着半张图往下走；
-//  3. 问入口——没人认领时说一句人话退出（69），不是崩。
+//  1. trace assembly (opts.Trace) — who was installed, in what order, every process;
+//  2. start the graph — failure is 70, never run on half a graph;
+//  3. ask the entry ledger — nobody claiming the call is a human sentence and 69,
+//     not a crash.
 //
-// 为什么这段逻辑住在内核而不是各家的 main 里：**它不认识任何模块**，所以它对
-// 每个消费者都一模一样。抄一份到发行版的 main 里，两份就会开始漂移——而漂移的
-// 症状是「发行版里留痕没了 / 退出码不一样」，属于最难注意到的那类差异。
-// 各家 main 因此只剩「传哪张图 + 版本号」这一件事。
+// Why this lives in the kernel instead of each product's main: **it knows no
+// module**, so it is identical for every consumer. Copying it into a
+// distribution's main would let the two drift — and the symptom would be "the
+// distribution lost its assembly record / returns a different exit code", the
+// hardest kind of difference to notice. Each main is therefore only "which graph,
+// which version".
 //
-// 优雅交接那次最需要留痕（新进程在后台装配，用户全程看不见），而那时判不出
-// 「我是守护进程」（见 TraceToLogFile 的注释），所以它在这里无条件记。
+// The graceful handoff is where the record matters most (the new process assembles
+// in the background while the user sees nothing), so it is recorded here
+// unconditionally whenever a product supplies a tracer.
 func Main(ctx context.Context, opts Options) int {
-	stopTrace := TraceToLogFile()
+	stopTrace := func() {}
+	if opts.Trace != nil {
+		stopTrace = opts.Trace()
+	}
 	defer stopTrace()
 
 	built, err := New(ctx, opts.Loader)
 	if err != nil {
+		if opts.OnAssemblyFailure != nil {
+			opts.OnAssemblyFailure(err)
+		}
 		fmt.Fprintln(os.Stderr, "newgate:", err)
 		return 70
 	}
 	defer built.Stop(context.Background())
 
-	// 这次进程调用的事实：argv0 归一、版本注入都在 MakeProcess 里一次做完。
+	// The facts of this invocation: argv0 normalization and version injection both
+	// happen in MakeProcess, once.
 	p := entry.MakeProcess(os.Args, os.Environ(), opts.Version, opts.BuildTime, opts.CommitTime)
 
-	// 记第一行日志：**这次调用 route 给谁**。它是排查「我敲的明明是 newgate，
-	// 为什么起的是别的壳」的唯一现场——判据是模块申报的，不是这里猜的。
+	// The first log line: **who this invocation routes to**. It is the only record
+	// of "I typed newgate, why did another shell start" — the criterion is declared
+	// by modules, not guessed here.
 	registry := modules.MustGet(built.Context(), entry.Capability)
 	handler, why, ok := registry.Resolve(p)
 	if !ok {
