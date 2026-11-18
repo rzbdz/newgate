@@ -18,7 +18,7 @@ import (
 // feature, much harder to find than a compile error, so it fails explicitly here once.
 func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	if testing.Short() {
-		t.Skip("需要跑子进程重新生成，-short 下跳过")
+		t.Skip("requires running a subprocess to regenerate; skipped under -short")
 	}
 	_, current, _, ok := runtime.Caller(0)
 	if !ok {
@@ -30,7 +30,7 @@ func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("装配清单已过期，请运行 `make generate`：\n%s", output)
+		t.Fatalf("the assembly list is stale, run `make generate`:\n%s", output)
 	}
 
 	// Second line of defense: -check compares the generator against its own output, so if the
@@ -46,11 +46,11 @@ func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	// but not assembled" goes red right here.
 	dirs := moduleDirs(t, filepath.Join(root, "modules"))
 	if len(generated) != len(dirs) {
-		t.Fatalf("装配了 %d 个组件，modules/ 下有 %d 个目录——数量对不上", len(generated), len(dirs))
+		t.Fatalf("assembled %d components, modules/ has %d directories -- the counts do not match", len(generated), len(dirs))
 	}
 	for _, dir := range dirs {
 		if !strings.Contains(string(mustReadGenerated(t)), "/modules/"+dir+"\"") {
-			t.Fatalf("modules/%s 是组件，但生成清单里没有它的 import", dir)
+			t.Fatalf("modules/%s is a component, but the generated list has no import for it", dir)
 		}
 	}
 }

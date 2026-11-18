@@ -26,7 +26,7 @@ func TestLocalizationStaysConsistent(t *testing.T) {
 		Allowlist:  "tools/i18n/allowlist.json",
 	})
 	if err != nil {
-		t.Fatalf("本地化检查跑不起来: %v", err)
+		t.Fatalf("the localization check cannot run: %v", err)
 	}
 	for _, f := range findings {
 		if f.Level == "error" {
@@ -39,16 +39,16 @@ func TestLocalizationStaysConsistent(t *testing.T) {
 	// worse than no check.
 	cats, cerr := check.LoadCatalogs(filepath.Join(root, "lib/i18n/catalogs"))
 	if cerr != nil {
-		t.Fatalf("读不了译文目录——判据退化了: %v", cerr)
+		t.Fatalf("cannot read the translation catalog directory -- the check has degenerated: %v", cerr)
 	}
 	if len(cats) == 0 {
-		t.Fatal("一份译文都没有——判据退化了（目录挪了？catalogs 里只剩账本？）")
+		t.Fatal("not a single translation -- the check has degenerated (did the directory move? is only the ledger left in catalogs?)")
 	}
 	led, lerr := check.LoadLedger(filepath.Join(root, "lib/i18n/catalogs"))
 	if lerr != nil {
-		t.Fatalf("账本读不出来——判据退化了: %v", lerr)
+		t.Fatalf("cannot read the ledger -- the check has degenerated: %v", lerr)
 	}
 	if len(led.Messages) == 0 {
-		t.Fatal("账本是空的——扫描器坏了，或者源码里一条 i18n.T 都没有了")
+		t.Fatal("the ledger is empty -- the scanner is broken, or there is not a single i18n.T left in the source")
 	}
 }

@@ -48,31 +48,31 @@ func TestABundleRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Language != want.Language || got.Source != want.Source {
-		t.Errorf("语言/来源对不上: %+v", got)
+		t.Errorf("language/source do not match: %+v", got)
 	}
 	if len(got.Widths) != len(want.Widths) || got.Widths["label"] != 8 {
-		t.Errorf("版式尺寸对不上: %+v", got.Widths)
+		t.Errorf("layout widths do not match: %+v", got.Widths)
 	}
 	if len(got.Messages) != len(want.Messages) {
-		t.Fatalf("条数对不上: %d vs %d", len(got.Messages), len(want.Messages))
+		t.Fatalf("entry counts do not match: %d vs %d", len(got.Messages), len(want.Messages))
 	}
 	for id, w := range want.Messages {
 		g, ok := got.Messages[id]
 		if !ok {
-			t.Errorf("少了一条 %q", id)
+			t.Errorf("one entry is missing: %q", id)
 			continue
 		}
 		if g != w && !(g.Empty() && w.Empty()) {
-			t.Errorf("%q 对不上:\n  想要 %+v\n  实际 %+v", id, w, g)
+			t.Errorf("%q does not match:\n  want %+v\n  got %+v", id, w, g)
 		}
 	}
 	// Plurals and flags are the two things **easily lost in a binary** (they are not text, they
 	// are shape).
 	if e := got.Messages["plural {n}"]; !e.plural() || !e.Reviewed {
-		t.Errorf("复数/复核标记丢了: %+v", e)
+		t.Errorf("the plural/reviewed flags were lost: %+v", e)
 	}
 	if e := got.Messages["noted"]; !e.Machine || e.Note != "给译者看" {
-		t.Errorf("机翻标记/备注丢了: %+v", e)
+		t.Errorf("the machine flag/note was lost: %+v", e)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestABundleIsDeterministic(t *testing.T) {
 	a := EncodeCatalog(sampleCatalog())
 	b := EncodeCatalog(sampleCatalog())
 	if string(a) != string(b) {
-		t.Error("同一份目录编出来的字节不一样（map 遍历序漏进输出里了？）")
+		t.Error("the same catalog encodes to different bytes (did map iteration order leak into the output?)")
 	}
 }
 
@@ -97,19 +97,19 @@ func TestABundleIsDeterministic(t *testing.T) {
 func TestABundleRefusesGarbage(t *testing.T) {
 	good := EncodeCatalog(sampleCatalog())
 	cases := map[string][]byte{
-		"不是 bundle":  []byte("hello"),
-		"魔数对、身子截断":   good[:20],
-		"砍掉最后 10 字节": good[:len(good)-10],
-		"长度字段是垃圾":    append(append([]byte(nil), bundleMagic...), 'c', 0xff, 0xff, 0xff, 0xff),
+		"not a bundle":                  []byte("hello"),
+		"magic matches, body truncated": good[:20],
+		"the last 10 bytes chopped off": good[:len(good)-10],
+		"the length field is garbage":   append(append([]byte(nil), bundleMagic...), 'c', 0xff, 0xff, 0xff, 0xff),
 	}
 	for name, raw := range cases {
 		if _, err := DecodeCatalog(raw); err == nil {
-			t.Errorf("%s：该报错，却读成功了", name)
+			t.Errorf("%s: expected an error, but it read successfully", name)
 		}
 	}
 	// A type mismatch must error too (reading a ledger as a catalog).
 	if _, err := DecodeCatalog(EncodeLedger(Ledger{Messages: map[string]LedgerEntry{"x": {Args: []string{"y"}}}})); err == nil {
-		t.Error("账本被当成译文读成功了，该报错")
+		t.Error("the ledger was read successfully as a catalog; it must error")
 	}
 }
 
@@ -139,11 +139,11 @@ func TestAHostileCountDoesNotAllocate(t *testing.T) {
 	}
 	huge := uint32(0xFFFFFFF0)
 	if _, err := DecodeCatalog(mk(bundleKindCatalog, huge)); err == nil {
-		t.Error("条数是天文数字时该报错")
+		t.Error("an astronomical entry count must error")
 	}
 	// Same for the ledger: its count field is earlier, and goes through a different make.
 	if _, err := DecodeLedger(mk(bundleKindLedger, huge)); err == nil {
-		t.Error("账本条数是天文数字时该报错")
+		t.Error("an astronomical ledger entry count must error")
 	}
 }
 
@@ -159,26 +159,26 @@ func TestTheEmbeddedBundlesMatchTheJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(led.Messages) == 0 || len(cats) == 0 {
-		t.Fatal("内嵌的目录表是空的")
+		t.Fatal("the embedded catalog tables are empty")
 	}
 	fromJSON, err := ledgerFromFS(catalogsJSONForTest(), "catalogs")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(fromJSON.Messages) != len(led.Messages) {
-		t.Fatalf("账本条数：bundle %d，JSON %d —— 改了 JSON 没跑 `tools/i18n bundle`？",
+		t.Fatalf("ledger entries: bundle %d, JSON %d -- edited the JSON without running `tools/i18n bundle`?",
 			len(led.Messages), len(fromJSON.Messages))
 	}
 	for id, want := range fromJSON.Messages {
 		got, ok := led.Messages[id]
 		if !ok {
-			t.Errorf("账本里少了 %q（bundle 落后于 JSON？）", id)
+			t.Errorf("%q is missing from the ledger (bundle behind the JSON?)", id)
 			continue
 		}
 		if got.One != want.One ||
 			got.Other != want.Other || got.Note != want.Note ||
 			!slices.Equal(got.Args, want.Args) {
-			t.Errorf("账本 %q 对不上（bundle 落后于 JSON？）\n  想要 %+v\n  实际 %+v", id, want, got)
+			t.Errorf("ledger entry %q does not match (bundle behind the JSON?)\n  want %+v\n  got %+v", id, want, got)
 		}
 	}
 	jsonCats, err := CatalogsFromFS(catalogsJSONForTest(), "catalogs")
@@ -186,17 +186,17 @@ func TestTheEmbeddedBundlesMatchTheJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(jsonCats) != len(cats) {
-		t.Fatalf("语言份数：bundle %d，JSON %d", len(cats), len(jsonCats))
+		t.Fatalf("language counts: bundle %d, JSON %d", len(cats), len(jsonCats))
 	}
 	for i := range jsonCats {
 		want, got := jsonCats[i], cats[i]
 		if want.Language != got.Language || len(want.Messages) != len(got.Messages) {
-			t.Fatalf("%s 对不上（bundle 落后于 JSON？）", want.Language)
+			t.Fatalf("%s does not match (bundle behind the JSON?)", want.Language)
 		}
 		for id, we := range want.Messages {
 			ge, ok := got.Messages[id]
 			if !ok || ge != we {
-				t.Errorf("%s / %q 对不上（bundle 落后于 JSON？）\n  想要 %+v\n  实际 %+v", want.Language, id, we, ge)
+				t.Errorf("%s / %q does not match (bundle behind the JSON?)\n  want %+v\n  got %+v", want.Language, id, we, ge)
 			}
 		}
 	}

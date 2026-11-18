@@ -32,10 +32,10 @@ func TestReleasingOneHandlerDoesNotRemoveAnother(t *testing.T) {
 		names[h.Name()] = true
 	}
 	if !names["b"] {
-		t.Fatalf("撤销 c 时把 b 也删掉了——seq 又变成位置了: %v", table.Handlers())
+		t.Fatalf("releasing c deleted b too -- seq has become a position again: %v", table.Handlers())
 	}
 	if names["a"] || names["c"] {
-		t.Fatalf("该留下的只有 b: %v", names)
+		t.Fatalf("only b should be left: %v", names)
 	}
 }
 

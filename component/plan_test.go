@@ -44,13 +44,13 @@ func TestResolveDoesNotStartAnything(t *testing.T) {
 		s.component("user", Need(NewCapability[struct{}]("leaf"))),
 	})
 	if err != nil {
-		t.Fatalf("解析失败: %v", err)
+		t.Fatalf("resolution failed: %v", err)
 	}
 	if starts != 0 {
-		t.Fatalf("Resolve 启动了 %d 个组件——图纸不该有生命周期", starts)
+		t.Fatalf("Resolve started %d components -- the blueprint must have no lifecycle", starts)
 	}
 	if got := plan.Names(); len(got) != 2 || got[0] != "leaf" || got[1] != "user" {
-		t.Fatalf("顺序不对（被依赖的要在前）: %v", got)
+		t.Fatalf("wrong order (dependencies must come first): %v", got)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestPlanOrderMatchesStartOrder(t *testing.T) {
 
 	fromPlan, fromStart := plan.Names(), mgr.ComponentNames()
 	if strings.Join(fromPlan, ",") != strings.Join(fromStart, ",") {
-		t.Fatalf("图纸顺序 %v 与启动顺序 %v 不一致——两份实现开始漂了", fromPlan, fromStart)
+		t.Fatalf("the blueprint order %v disagrees with the start order %v -- the two implementations are drifting", fromPlan, fromStart)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestResolveStillValidates(t *testing.T) {
 		{Name: "user", Type: "test", Requires: []Requirement{Need(NewCapability[struct{}]("nothing-provides-this"))}},
 	})
 	if err == nil {
-		t.Fatal("缺 provider 的 Need 必须在解析期就报错")
+		t.Fatal("a Need whose provider is missing must error at resolve time")
 	}
 }
 
@@ -109,17 +109,17 @@ func TestDependenciesReportsBothKindsOfEdge(t *testing.T) {
 	}
 	deps := plan.Dependencies()["user"]
 	if len(deps) != 2 {
-		t.Fatalf("user 该有两条依赖，实际 %+v", deps)
+		t.Fatalf("user should have two dependencies, got %+v", deps)
 	}
 	byCap := map[string]Dependency{}
 	for _, d := range deps {
 		byCap[d.Capability] = d
 	}
 	if d := byCap["leaf"]; d.Optional || d.ProvidedBy != "leaf" {
-		t.Errorf("leaf 该是硬边且由 leaf 提供: %+v", d)
+		t.Errorf("leaf should be a hard edge provided by leaf: %+v", d)
 	}
 	if d := byCap["ui"]; !d.Optional || d.ProvidedBy != "" {
-		t.Errorf("ui 该是弱边且没人提供（没装界面）: %+v", d)
+		t.Errorf("ui should be a weak edge that nobody provides (no UI installed): %+v", d)
 	}
 }
 
@@ -133,7 +133,7 @@ func TestPlanComponentsIsACopy(t *testing.T) {
 	got := plan.Components()
 	got[0].Name = "tampered"
 	if plan.Names()[0] != "leaf" {
-		t.Error("Components() 给出去的是内部切片——调用方能改坏图纸")
+		t.Error("Components() hands out the internal slice -- the caller can corrupt the blueprint")
 	}
 }
 
@@ -168,10 +168,10 @@ func TestPrecomputedPlanRejectsAStaleOrder(t *testing.T) {
 	// the shape of a stale list.
 	_, err := Resolve(stalePlan{components: comps, order: []string{"user", "leaf"}})
 	if err == nil {
-		t.Fatal("图纸里消费者排在提供者前面时必须报错（否则它会拿到零值或 panic）")
+		t.Fatal("when a consumer comes before its provider in the blueprint it must error (otherwise it gets a zero value or panics)")
 	}
 	if !strings.Contains(err.Error(), "out of date") || !strings.Contains(err.Error(), "user") {
-		t.Fatalf("报错要点名过期的那条边与消费者，实际: %v", err)
+		t.Fatalf("the error must name the stale edge and the consumer, got: %v", err)
 	}
 }
 
@@ -185,10 +185,10 @@ func TestPrecomputedPlanAcceptsTheRightOrder(t *testing.T) {
 	}
 	plan, err := Resolve(stalePlan{components: comps, order: []string{"leaf", "user"}})
 	if err != nil {
-		t.Fatalf("顺序正确时不该报错: %v", err)
+		t.Fatalf("a correct order must not error: %v", err)
 	}
 	if got := plan.Names(); len(got) != 2 || got[0] != "leaf" {
-		t.Fatalf("顺序不对: %v", got)
+		t.Fatalf("wrong order: %v", got)
 	}
 }
 
@@ -203,7 +203,7 @@ func TestPrecomputedPlanRejectsAMissingNeedProvider(t *testing.T) {
 		order: []string{"user"},
 	})
 	if err == nil {
-		t.Fatal("图纸说能起、图上却没人提供这个端口，必须报错")
+		t.Fatal("the blueprint says it can start but nobody in the graph provides this port; it must error")
 	}
 }
 
@@ -217,7 +217,7 @@ func TestPrecomputedPlanAllowsAnAbsentOptional(t *testing.T) {
 		},
 		order: []string{"user"},
 	}); err != nil {
-		t.Fatalf("没人提供的 Optional 是合法装配: %v", err)
+		t.Fatalf("an Optional nobody provides is a valid assembly: %v", err)
 	}
 }
 
@@ -239,14 +239,14 @@ func TestProvidersAgreesWithGetOnMultipleProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := plan.Providers()["port"]; got != "first" {
-		t.Fatalf("Providers 说 %q 提供 port，但 Get 拿到的是 first", got)
+		t.Fatalf("Providers says %q provides port, but Get gets first", got)
 	}
 	if all := plan.AllProviders()["port"]; len(all) != 2 || all[0] != "first" || all[1] != "second" {
-		t.Fatalf("AllProviders 要按启动顺序列出全部: %v", all)
+		t.Fatalf("AllProviders must list everything in start order: %v", all)
 	}
 	got, ok := Get(Context{values: collectValues(plan.Components())}, port)
 	if !ok || got != "from-first" {
-		t.Fatalf("Get 应该是 first-wins，实际 %q/%v", got, ok)
+		t.Fatalf("Get should be first-wins, got %q/%v", got, ok)
 	}
 }
 
@@ -270,6 +270,6 @@ func TestPrecomputedAndResolvedAgreeOnValues(t *testing.T) {
 	r1, _ := Get(Context{values: resolved.values}, port)
 	r2, _ := Get(Context{values: replayed.values}, port)
 	if r1 != r2 {
-		t.Fatalf("resolved 给 %q、precomputed 给 %q——快路径改变了行为", r1, r2)
+		t.Fatalf("resolved gives %q, precomputed gives %q -- the fast path changed behavior", r1, r2)
 	}
 }

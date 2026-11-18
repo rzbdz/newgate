@@ -169,22 +169,22 @@ func parseCall(fset *token.FileSet, call *ast.CallExpr, pkg, rel string) (*Call,
 		return nil, nil
 	}
 	if len(call.Args) <= msgIdx {
-		return nil, fmt.Errorf("%s: %s() 没给消息", where, sel.Sel.Name)
+		return nil, fmt.Errorf("%s: %s() was given no message", where, sel.Sel.Name)
 	}
 	msg, ok := literal(call.Args[msgIdx])
 	if !ok {
-		return nil, fmt.Errorf("%s: %s() 的第一个参数不是字符串字面量——"+
-			"消息必须是字面量，拼接出来的句子没法翻译（也不该翻译：那是数据不是文案）",
+		return nil, fmt.Errorf("%s: the first argument of %s() is not a string literal --"+
+			"the message must be a literal; a concatenated sentence cannot be translated (and should not be: that is data, not copy)",
 			where, sel.Sel.Name)
 	}
 	if strings.TrimSpace(msg) == "" {
-		return nil, fmt.Errorf("%s: %s() 的消息是空串", where, sel.Sel.Name)
+		return nil, fmt.Errorf("%s: the message of %s() is an empty string", where, sel.Sel.Name)
 	}
 	out := &Call{Msg: msg, Method: sel.Sel.Name, Where: where}
 	if pluralIdx >= 0 && len(call.Args) > pluralIdx {
 		plural, ok := literal(call.Args[pluralIdx])
 		if !ok {
-			return nil, fmt.Errorf("%s: N() 的复数形式不是字符串字面量", where)
+			return nil, fmt.Errorf("%s: the plural form of N() is not a string literal", where)
 		}
 		out.Plural = plural
 	}

@@ -59,7 +59,7 @@ func main() {
 		usage()
 		return
 	default:
-		err = fmt.Errorf("不认识的子命令 %q（见 `i18n help`）", cmd)
+		err = fmt.Errorf("unknown subcommand %q (see `i18n help`)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "i18n:", err)
@@ -68,10 +68,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Print(`用法：go run ./tools/i18n <子命令> [选项]
+	fmt.Print(`Usage: go run ./tools/i18n <subcommand> [options]
 
-  extract [-check]      扫源码重建账本（-check 只校验是否过期，不写文件）
-  check [-strict]       静态检查：账本 / 占位符 / 孤儿键 / 覆盖率 / 中文残留
+  extract [-check]      rebuild the ledger by scanning the source (-check only verifies staleness, writes no file)
+  check [-strict]       static checks: ledger / placeholders / orphan keys / coverage / leftover Chinese
   bundle [-check]       compile catalogs/*.json into a .bin read at runtime (-check: staleness only)
   status                coverage and machine-translation counts per language
   audit [-seed]         read/write the "not yet migrated files" list (-seed seeds it)

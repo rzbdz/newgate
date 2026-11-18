@@ -74,10 +74,10 @@ func Run(opts Options) ([]Finding, error) {
 	}
 	gotRaw, err := os.ReadFile(ledgerPath)
 	if err != nil {
-		add("error", ledgerPath, "读不到账本："+err.Error())
+		add("error", ledgerPath, "cannot read the ledger: "+err.Error())
 	} else if !bytes.Equal(gotRaw, wantRaw) {
-		add("error", ledgerPath, "账本已过期：源码里的消息与它对不上。"+
-			"运行 `go run ./tools/i18n extract` 后重新提交")
+		add("error", ledgerPath, "the ledger is stale: the messages in the source do not match it. "+
+			"run `go run ./tools/i18n extract` and commit the result")
 	}
 
 	// The arguments given at the call site must cover the placeholders in the message.
@@ -114,8 +114,8 @@ func Run(opts Options) ([]Finding, error) {
 		}
 		if len(missing) > 0 {
 			add("error", call.Where, fmt.Sprintf(
-				"%q 里的占位符 %v 在调用点没有对应实参——界面上会原样显示 {%s}。"+
-					"（N() 注入 n、Ef() 注入 err，其余都要写进 i18n.A{…}）",
+				"placeholder %v of %q has no matching argument at the call site -- the UI will show {%s} verbatim."+
+					" (N() injects n, Ef() injects err, everything else must be written into i18n.A{...})",
 				msg, missing, missing[0]))
 		}
 	}
@@ -128,7 +128,7 @@ func Run(opts Options) ([]Finding, error) {
 	total := len(msgs)
 	for _, cat := range catalogs {
 		if cat.Language == i18n.SourceLang {
-			add("error", cat.Language, "源语言不该有译文文件——它的文本就是源码里那句")
+			add("error", cat.Language, "the source language must not have a translation file -- its text is the sentence in the source")
 			continue
 		}
 		translated := 0
@@ -137,7 +137,7 @@ func Run(opts Options) ([]Finding, error) {
 			call, known := msgs[msg]
 			if !known {
 				add("error", cat.Language, fmt.Sprintf(
-					"孤儿译文 %q：源码里已经没有这条消息了（改了英文措辞？）——删掉它，或改回去", msg))
+					"orphan translation %q: the source no longer has this message (changed the English wording?) -- delete it, or change it back", msg))
 				continue
 			}
 			if e.Empty() {
@@ -145,7 +145,7 @@ func Run(opts Options) ([]Finding, error) {
 			}
 			translated++
 			if e.Machine && !e.Reviewed && opts.Strict {
-				add("error", cat.Language, fmt.Sprintf("机翻未复核：%q", msg))
+				add("error", cat.Language, fmt.Sprintf("machine translation not reviewed: %q", msg))
 			}
 			want := i18n.Placeholders(msg)
 			if call.Plural != "" {
@@ -154,7 +154,7 @@ func Run(opts Options) ([]Finding, error) {
 			got := i18n.EntryPlaceholders(e)
 			if strings.Join(want, ",") != strings.Join(got, ",") {
 				add("error", cat.Language, fmt.Sprintf(
-					"占位符对不上：%q\n      原文要 %v，译文给了 %v（漏一个占位符，界面上就会永远显示 {name}）",
+					"placeholders do not match: %q\n      the source wants %v, the translation gives %v (miss one placeholder and the UI will show {name} forever)",
 					msg, want, got))
 			}
 		}
@@ -164,7 +164,7 @@ func Run(opts Options) ([]Finding, error) {
 			if opts.Strict {
 				level = "error"
 			}
-			add(level, cat.Language, fmt.Sprintf("缺 %d 条译文（共 %d 条）", missing, total))
+			add(level, cat.Language, fmt.Sprintf("%d translations missing (%d in all)", missing, total))
 		}
 	}
 
@@ -174,7 +174,7 @@ func Run(opts Options) ([]Finding, error) {
 		for _, msg := range i18n.SortedKeys(cat.Messages) {
 			if forbidden[msg] {
 				add("error", cat.Language, fmt.Sprintf(
-					"%q 是机器标记（控制流判据/协议名），不该出现在目录里", msg))
+					"%q is a machine marker (a control-flow criterion/protocol name) and must not appear in a catalog", msg))
 			}
 		}
 	}
@@ -364,13 +364,13 @@ func auditCJK(root, path string) ([]Finding, error) {
 	var out []Finding
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("读不到未迁移清单 %s: %w", path, err)
+		return nil, fmt.Errorf("cannot read the unmigrated list %s: %w", path, err)
 	}
 	var al allowlistFile
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&al); err != nil {
-		return nil, fmt.Errorf("%s 解不出来: %w", path, err)
+		return nil, fmt.Errorf("cannot decode %s: %w", path, err)
 	}
 	seen, err := CJKFiles(root)
 	if err != nil {
@@ -379,14 +379,14 @@ func auditCJK(root, path string) ([]Finding, error) {
 	for file, n := range seen {
 		if _, ok := al.Files[file]; !ok {
 			out = append(out, Finding{"error", file, fmt.Sprintf(
-				"这里有 %d 处中文字面量，但不在未迁移清单里——用户可见的文案请走 "+
-					"i18n.T(\"English\", …)；确实是机器标记的话，说明这条检查的判据该改了", n)})
+				"there are %d Chinese string literals here, but this file is not in the unmigrated list -- user-visible copy must go through "+
+					"i18n.T(\"English\", ...); if it really is a machine marker, this check's criterion needs changing", n)})
 		}
 	}
 	for file := range al.Files {
 		if _, ok := seen[file]; !ok {
-			out = append(out, Finding{"error", file, "未迁移清单里列着它，但它已经没有中文字面量了——" +
-				"把它从清单里删掉（清单只减不增）"})
+			out = append(out, Finding{"error", file, "the unmigrated list still lists it, but it no longer has any Chinese string literals --" +
+				" remove it from the list (the list only shrinks)"})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Where < out[j].Where })

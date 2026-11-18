@@ -41,19 +41,19 @@ func cmdTranslate(args []string) error {
 func runTranslate(args []string, name string) error {
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	c := commonFlags(fs)
-	lang := fs.String("lang", "zh-Hans", "翻成哪门语言")
-	endpoint := fs.String("url", envOr("NEWGATE_I18N_URL", defaultEndpoint), "网关地址（默认本机 8899）")
-	model := fs.String("model", envOr("NEWGATE_I18N_MODEL", defaultModel), "用哪个模型")
-	batch := fs.Int("batch", defaultBatch, "一次请求翻几条")
-	dry := fs.Bool("dry-run", false, "只列出要翻什么，不调网关、不写文件")
-	onlyKey := fs.String("key", "", "只翻这一条（源语言原文）")
-	timeout := fs.Duration("timeout", 120*time.Second, "单次请求超时")
+	lang := fs.String("lang", "zh-Hans", "which language to translate into")
+	endpoint := fs.String("url", envOr("NEWGATE_I18N_URL", defaultEndpoint), "gateway address (default: local port 8899)")
+	model := fs.String("model", envOr("NEWGATE_I18N_MODEL", defaultModel), "which model to use")
+	batch := fs.Int("batch", defaultBatch, "how many entries per request")
+	dry := fs.Bool("dry-run", false, "only list what would be translated; do not call the gateway or write files")
+	onlyKey := fs.String("key", "", "translate only this entry (the source-language text)")
+	timeout := fs.Duration("timeout", 120*time.Second, "timeout for one request")
 	fs.Parse(args)
 	if err := c.resolve(); err != nil {
 		return err
 	}
 	if *lang == i18n.SourceLang {
-		return fmt.Errorf("源语言（%s）不需要翻译：代码里写的就是它", i18n.SourceLang)
+		return fmt.Errorf("the source language (%s) needs no translation: the code is written in it", i18n.SourceLang)
 	}
 
 	fresh, err := check.FreshLedger(c.root, c.catalogDir)
@@ -84,18 +84,18 @@ func runTranslate(args []string, name string) error {
 		}
 	}
 	if len(orphans) > 0 {
-		fmt.Fprintf(os.Stderr, "i18n: 有 %d 条孤儿译文（源码里已经没有这条消息了，改了英文措辞？）——"+
-			"它们不会被自动处理，请人工决定删掉还是改回去：\n", len(orphans))
+		fmt.Fprintf(os.Stderr, "i18n: %d orphan translations (the source no longer has these messages -- changed the English wording?) -- "+
+			"they are not handled automatically; delete them or change the wording back by hand:\n", len(orphans))
 		for _, msg := range orphans {
 			fmt.Fprintf(os.Stderr, "  %s\n", msg)
 		}
 	}
 	if len(todo) == 0 {
-		fmt.Printf("i18n: %s 没有要翻的（共 %d 条）\n", *lang, len(cat.Messages))
+		fmt.Printf("i18n: %s has nothing to translate (%d in all)\n", *lang, len(cat.Messages))
 		return nil
 	}
 	if *dry {
-		fmt.Printf("i18n: 要翻 %d 条（dry-run）：\n", len(todo))
+		fmt.Printf("i18n: %d to translate (dry-run):\n", len(todo))
 		for _, msg := range todo {
 			fmt.Println("  " + msg)
 		}
@@ -115,19 +115,19 @@ func runTranslate(args []string, name string) error {
 			// One failed batch does not abandon the whole run: record this batch, continue to the next,
 			// and report them all at the end. One network hiccup should not throw away dozens already
 			// translated.
-			fmt.Fprintf(os.Stderr, "i18n: 这一批失败（%d 条）：%v\n", len(chunk), err)
+			fmt.Fprintf(os.Stderr, "i18n: this batch failed (%d entries): %v\n", len(chunk), err)
 			failed += len(chunk)
 			continue
 		}
 		for _, msg := range chunk {
 			text, ok := got[msg]
 			if !ok || strings.TrimSpace(text) == "" {
-				fmt.Fprintf(os.Stderr, "i18n: 模型没给这一条的译文：%s\n", msg)
+				fmt.Fprintf(os.Stderr, "i18n: the model gave no translation for this entry: %s\n", msg)
 				failed++
 				continue
 			}
 			if err := validate(msg, text, fresh); err != nil {
-				fmt.Fprintf(os.Stderr, "i18n: 丢弃一条（%v）：%s\n", err, msg)
+				fmt.Fprintf(os.Stderr, "i18n: dropped one entry (%v): %s\n", err, msg)
 				failed++
 				continue
 			}
@@ -152,12 +152,12 @@ func runTranslate(args []string, name string) error {
 	if err := writeCatalog(c.root, c.catalogDir, cat); err != nil {
 		return err
 	}
-	fmt.Printf("i18n: 翻好 %d 条、失败 %d 条 → %s\n", done, failed,
+	fmt.Printf("i18n: translated %d, failed %d -> %s\n", done, failed,
 		filepath.Join(c.catalogDir, *lang+".json"))
 	if failed > 0 {
-		return fmt.Errorf("%d 条没翻成（见上面每一行的原因）；重跑一次会只补这些", failed)
+		return fmt.Errorf("%d were not translated (see the reason on each line above); a rerun will fill in only those", failed)
 	}
-	fmt.Println("i18n: 记得人工过一遍——机翻条目标着 machine，复核后改成 reviewed")
+	fmt.Println("i18n: remember to review by hand -- machine entries are marked machine; change them to reviewed after review")
 	return nil
 }
 
@@ -170,11 +170,11 @@ func validate(msg, text string, fresh i18n.Ledger) error {
 	}
 	got := i18n.Placeholders(text)
 	if strings.Join(want, ",") != strings.Join(got, ",") {
-		return fmt.Errorf("占位符对不上（要 %v，给了 %v）", want, got)
+		return fmt.Errorf("placeholders do not match (want %v, got %v)", want, got)
 	}
 	for _, p := range want {
 		if !strings.Contains(text, "{"+p+"}") {
-			return fmt.Errorf("占位符 %s 丢了", p)
+			return fmt.Errorf("placeholder %s is missing", p)
 		}
 	}
 	return nil
@@ -227,12 +227,12 @@ func translateChunk(client *http.Client, endpoint, model string, chunk []string,
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("连不上网关（%s）——`newgate status` 看看它跑着没: %w", endpoint, err)
+		return nil, fmt.Errorf("cannot reach the gateway (%s) -- check whether it is running with `newgate status`: %w", endpoint, err)
 	}
 	defer resp.Body.Close()
 	payloadOut, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("网关回了 %d: %s", resp.StatusCode, truncate(string(payloadOut), 300))
+		return nil, fmt.Errorf("the gateway returned %d: %s", resp.StatusCode, truncate(string(payloadOut), 300))
 	}
 	var parsed struct {
 		Choices []struct {
@@ -242,10 +242,10 @@ func translateChunk(client *http.Client, endpoint, model string, chunk []string,
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(payloadOut, &parsed); err != nil {
-		return nil, fmt.Errorf("网关回的报文解不出来: %w", err)
+		return nil, fmt.Errorf("cannot decode the response from the gateway: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
-		return nil, fmt.Errorf("网关没给候选")
+		return nil, fmt.Errorf("the gateway gave no candidates")
 	}
 	return parseTranslation(parsed.Choices[0].Message.Content)
 }
@@ -265,7 +265,7 @@ func parseTranslation(content string) (map[string]string, error) {
 	}
 	raw := map[string]json.RawMessage{}
 	if err := json.Unmarshal([]byte(s), &raw); err != nil {
-		return nil, fmt.Errorf("模型没按 JSON 回（%v）: %s", err, truncate(s, 200))
+		return nil, fmt.Errorf("the model did not reply with JSON (%v): %s", err, truncate(s, 200))
 	}
 	out := make(map[string]string, len(raw))
 	for k, v := range raw {
@@ -284,7 +284,7 @@ func parseTranslation(content string) (map[string]string, error) {
 			Other string `json:"other"`
 		}
 		if err := json.Unmarshal(v, &forms); err != nil {
-			return nil, fmt.Errorf("键 %q 的值既不是字符串、也不是译文对象: %s",
+			return nil, fmt.Errorf("the value of key %q is neither a string nor a translation object: %s",
 				k, truncate(string(v), 80))
 		}
 		// Chinese does not distinguish singular and plural: if there is other, use other -- that is

@@ -145,7 +145,7 @@ func TestOptionalIsAWeakDependency(t *testing.T) {
 					if !ok {
 						// The port should already be usable at Start -- "wait for the injected" is exactly this
 						// point.
-						t.Fatal("Optional 命中时端口应当已提供（排序边没生效？）")
+						t.Fatal("when the Optional is present the port should already be provided (did the ordering edge fail?)")
 					}
 					events = append(events, "start registrant sees "+value)
 					return nil
@@ -165,7 +165,7 @@ func TestOptionalIsAWeakDependency(t *testing.T) {
 		_ = manager.Stop(context.Background())
 		want := []string{"start ui", "start registrant sees surface"}
 		if !reflect.DeepEqual(events, want) {
-			t.Fatalf("事件序列 = %v，应为 %v（弱依赖命中必须建排序边）", events, want)
+			t.Fatalf("event sequence = %v, want %v (a weak dependency hit must add an ordering edge)", events, want)
 		}
 	})
 
@@ -177,14 +177,14 @@ func TestOptionalIsAWeakDependency(t *testing.T) {
 				Start: func(_ context.Context, ctx Context) error {
 					// Absence is not an error, it just means no port: the registrant must still start fine.
 					if _, ok := Get(ctx, ui); ok {
-						t.Fatal("没有提供者时不该拿到端口")
+						t.Fatal("with no provider the port must not be handed out")
 					}
 					return nil
 				},
 			},
 		}})
 		if err != nil {
-			t.Fatalf("弱依赖缺席不该让装配失败: %v", err)
+			t.Fatalf("an absent weak dependency must not make assembly fail: %v", err)
 		}
 		_ = manager.Stop(context.Background())
 	})

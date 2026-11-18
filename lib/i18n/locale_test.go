@@ -62,7 +62,7 @@ func TestNormalize(t *testing.T) {
 	}
 	for in, want := range cases {
 		if got := Normalize(in); got != want {
-			t.Errorf("Normalize(%q) = %q，期望 %q", in, got, want)
+			t.Errorf("Normalize(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -86,7 +86,7 @@ func TestMatch(t *testing.T) {
 	}
 	for in, want := range cases {
 		if got := Match(in, avail); got != want {
-			t.Errorf("Match(%q) = %q，期望 %q", in, got, want)
+			t.Errorf("Match(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -96,30 +96,30 @@ func TestSourceLanguageIsIdentity(t *testing.T) {
 	// Source language path: the sentence in the code is the final text, not a character of catalog
 	// data is used
 	if got := T("Proxy", nil); got != "Proxy" {
-		t.Errorf("源语言该恒等: %q", got)
+		t.Errorf("the source language must be identity: %q", got)
 	}
 	if got := N("Saved {n} file", "Saved {n} files", 3, nil); got != "Saved 3 files" {
-		t.Errorf("源语言复数: %q", got)
+		t.Errorf("source-language plural: %q", got)
 	}
 	if got := N("Saved {n} file", "Saved {n} files", 1, nil); got != "Saved 1 file" {
-		t.Errorf("源语言单数: %q", got)
+		t.Errorf("source-language singular: %q", got)
 	}
 	// A sentence that is not in the catalog at all still comes out as is -- there is no such thing
 	// as a "key", so there is no misspelled key
 	if got := T("Never listed anywhere", nil); got != "Never listed anywhere" {
-		t.Errorf("未登记的消息该原样输出: %q", got)
+		t.Errorf("an unregistered message must come out as is: %q", got)
 	}
 }
 
 func TestTranslationAndFallback(t *testing.T) {
 	install(t, "zh-Hans")
 	if got := T("Proxy", nil); got != "代理" {
-		t.Errorf("中文表没生效: %q", got)
+		t.Errorf("the Chinese table did not take effect: %q", got)
 	}
 	// Missing translation -> falls back to the English sentence in the source (not the key name,
 	// because the key is that sentence)
 	if got := T("Only in the source language", nil); got != "Only in the source language" {
-		t.Errorf("缺译文时该回退源语言: %q", got)
+		t.Errorf("a missing translation must fall back to the source language: %q", got)
 	}
 }
 
@@ -128,28 +128,28 @@ func TestPlaceholders(t *testing.T) {
 	got := T("An external file {names} is still in {dir}", A{"dir": "/usr/local/bin", "names": "claude"})
 	want := "同名外部文件仍在 /usr/local/bin：claude" // 语序与英文不同，具名占位符才做得到
 	if got != want {
-		t.Errorf("具名占位符替换错了:\n got %q\nwant %q", got, want)
+		t.Errorf("named placeholder substituted wrong:\n got %q\nwant %q", got, want)
 	}
 	// One argument too few: that placeholder is **left as is** (pinpointing what is missing here),
 	// not silently emptied
 	got = T("An external file {names} is still in {dir}", A{"dir": "/x"})
 	if !strings.Contains(got, "{names}") {
-		t.Errorf("缺实参时该留下占位符，实际 %q", got)
+		t.Errorf("a missing argument must leave the placeholder in place, got %q", got)
 	}
 }
 
 func TestPlural(t *testing.T) {
 	install(t, "zh-Hans")
 	if got := N("Saved {n} file", "Saved {n} files", 1, nil); got != "已保存 1 个文件" {
-		t.Errorf("中文不分单复数: %q", got)
+		t.Errorf("Chinese does not distinguish singular and plural: %q", got)
 	}
 	if got := N("Saved {n} file", "Saved {n} files", 5, nil); got != "已保存 5 个文件" {
-		t.Errorf("中文不分单复数: %q", got)
+		t.Errorf("Chinese does not distinguish singular and plural: %q", got)
 	}
 	// The n given at the call site and the {n} in the translation are the same one (withN fills it
 	// in)
 	if got := N("Saved {n} file", "Saved {n} files", 1, A{"n": 7}); got != "已保存 7 个文件" {
-		t.Errorf("显式给的 n 该优先: %q", got)
+		t.Errorf("an explicitly given n must win: %q", got)
 	}
 }
 
@@ -163,13 +163,13 @@ func TestEnglishPluralForms(t *testing.T) {
 		},
 	})
 	if got := N("Saved {n} file", "Saved {n} files", 1, nil); got != "Saved 1 file" {
-		t.Errorf("英文单数: %q", got)
+		t.Errorf("English singular: %q", got)
 	}
 	if got := N("Saved {n} file", "Saved {n} files", 0, nil); got != "Saved 0 files" {
-		t.Errorf("英文 0 用复数: %q", got)
+		t.Errorf("English 0 uses the plural: %q", got)
 	}
 	if got := N("Saved {n} file", "Saved {n} files", 2, nil); got != "Saved 2 files" {
-		t.Errorf("英文复数: %q", got)
+		t.Errorf("English plural: %q", got)
 	}
 }
 
@@ -181,10 +181,10 @@ func TestRequestedLanguageFallsBackToSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	if eff != SourceLang {
-		t.Fatalf("该回退到源语言，实际 %q", eff)
+		t.Fatalf("must fall back to the source language, got %q", eff)
 	}
 	if got := T("Proxy", nil); got != "Proxy" {
-		t.Errorf("回退后该是英文: %q", got)
+		t.Errorf("after the fallback it must be English: %q", got)
 	}
 }
 
@@ -197,17 +197,17 @@ func TestAvailableAndMissing(t *testing.T) {
 		}
 	}
 	if zhInfo.Total != 4 {
-		t.Errorf("账本里共 4 条，实际报 %d", zhInfo.Total)
+		t.Errorf("the ledger has 4 entries in all, reported %d", zhInfo.Total)
 	}
 	if zhInfo.Translated != 3 {
-		t.Errorf("中文翻了 3 条，实际报 %d", zhInfo.Translated)
+		t.Errorf("3 entries are translated into Chinese, reported %d", zhInfo.Translated)
 	}
 	miss := Missing("zh-Hans")
 	if len(miss) != 1 || miss[0] != "Only in the source language" {
-		t.Errorf("缺的消息报错了: %v", miss)
+		t.Errorf("a missing message reported an error: %v", miss)
 	}
 	if len(Missing(SourceLang)) != 0 {
-		t.Error("源语言不该缺任何消息")
+		t.Error("the source language must not be missing any message")
 	}
 	// The source language is always in the available list (it needs no catalog file)
 	var sawSource bool
@@ -217,7 +217,7 @@ func TestAvailableAndMissing(t *testing.T) {
 		}
 	}
 	if !sawSource {
-		t.Error("源语言必须在可选列表里")
+		t.Error("the source language must be in the available list")
 	}
 }
 
@@ -240,24 +240,24 @@ func TestMachineAndReviewedAreCounted(t *testing.T) {
 		}
 	}
 	if info.Translated != 3 || info.Machine != 1 || info.Reviewed != 1 {
-		t.Errorf("机翻/已复核统计不对: %+v", info)
+		t.Errorf("machine/reviewed counts are wrong: %+v", info)
 	}
 	if got := Missing("de"); len(got) != 1 || got[0] != "An external file {names} is still in {dir}" {
-		t.Errorf("缺的消息报错了: %v", got)
+		t.Errorf("a missing message reported an error: %v", got)
 	}
 }
 
 func TestWidthComesFromTheCatalog(t *testing.T) {
 	install(t, "zh-Hans")
 	if got := Width("label", 99); got != 8 {
-		t.Errorf("中文 label 宽度该是 8，实际 %d", got)
+		t.Errorf("the Chinese label width must be 8, got %d", got)
 	}
 	install(t, "en")
 	if got := Width("label", 99); got != 10 {
-		t.Errorf("英文 label 宽度该是 10，实际 %d", got)
+		t.Errorf("the English label width must be 10, got %d", got)
 	}
 	if got := Width("nope", 99); got != 99 {
-		t.Errorf("没标定的尺寸该用缺省值，实际 %d", got)
+		t.Errorf("an uncalibrated size must use the default, got %d", got)
 	}
 }
 
@@ -273,15 +273,15 @@ func TestDiskOverlayOverridesBuiltin(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := T("Proxy", nil); got != "代理（本地改的）" {
-		t.Errorf("磁盘覆盖没生效: %q", got)
+		t.Errorf("the disk overlay did not take effect: %q", got)
 	}
 	if got := Overlaid(); got != 1 {
-		t.Errorf("覆盖计数该是 1（账本里没有的消息不算），实际 %d", got)
+		t.Errorf("the overlay count must be 1 (messages not in the ledger do not count), got %d", got)
 	}
 	// The overlay cannot change a message that is not in the ledger -- it does not take effect,
 	// and it must not break anything else either
 	if got := T("Saved {n} file", A{"n": 2}); got != "已保存 2 个文件" {
-		t.Errorf("别的消息被覆盖搞坏了: %q", got)
+		t.Errorf("another message was broken by the overlay: %q", got)
 	}
 }
 
@@ -291,10 +291,10 @@ func TestBrokenOverlayIsIgnoredLoudly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := Install("zh-Hans", testLedger(), []Catalog{testEn(), testZh()}, dir); err != nil {
-		t.Fatalf("坏掉的覆盖文件不该挡住启动: %v", err)
+		t.Fatalf("a broken overlay file must not block startup: %v", err)
 	}
 	if got := T("Proxy", nil); got != "代理" {
-		t.Errorf("坏覆盖之后内置表该照常工作: %q", got)
+		t.Errorf("after a broken overlay the builtin table must still work: %q", got)
 	}
 }
 
@@ -303,21 +303,21 @@ func TestErrorCarriesIdentityNotProse(t *testing.T) {
 	base := errors.New("permission denied")
 	err := Ef(base, "Cannot read mappings: {err}", A{"path": "/x"})
 	if got := ID(err); got != "Cannot read mappings: {err}" {
-		t.Errorf("错误身份该是源语言原文，实际 %q", got)
+		t.Errorf("the error identity must be the source-language text, got %q", got)
 	}
 	if got := err.Error(); got != "Cannot read mappings: permission denied" {
-		t.Errorf("渲染出来的该是译文（这里是回退的英文）: %q", got)
+		t.Errorf("what renders must be the translation (here the English fallback): %q", got)
 	}
 	if !errors.Is(err, base) {
-		t.Error("%w 语义该保留：errors.Is 要能穿透")
+		t.Error("the %w semantics must be kept: errors.Is must see through")
 	}
 	// An error that is not *Error is passed through as is (someone else's error, do not translate
 	// it)
 	if got := ID(base); got != "permission denied" {
-		t.Errorf("别人的错误该原样返回: %q", got)
+		t.Errorf("someone else's error must be returned as is: %q", got)
 	}
 	if ID(nil) != "" {
-		t.Error("nil 错误该给空串")
+		t.Error("a nil error must give an empty string")
 	}
 	// Rendered in Chinese (translate this sentence)
 	if _, err := Install("zh-Hans", testLedger(), []Catalog{testEn(), Catalog{
@@ -328,10 +328,10 @@ func TestErrorCarriesIdentityNotProse(t *testing.T) {
 	}
 	err2 := Ef(base, "Cannot read mappings: {err}", A{"path": "/x"})
 	if got := err2.Error(); got != "读不了配置映射：permission denied" {
-		t.Errorf("错误该按当前语言渲染: %q", got)
+		t.Errorf("the error must render in the current language: %q", got)
 	}
 	if got := ID(err2); got != "Cannot read mappings: {err}" {
-		t.Errorf("身份不该随语言变: %q", got)
+		t.Errorf("the identity must not change with the language: %q", got)
 	}
 }
 
@@ -344,7 +344,7 @@ func TestErrorCarriesIdentityNotProse(t *testing.T) {
 func TestExtendAddsNewMessagesOnly(t *testing.T) {
 	install(t, "zh-Hans")
 	if got := T("Proxy", nil); got != "代理" {
-		t.Fatalf("装完就该是中文: %q", got)
+		t.Fatalf("after installing it must be Chinese: %q", got)
 	}
 
 	const own = "hello from the distribution"
@@ -359,10 +359,10 @@ func TestExtendAddsNewMessagesOnly(t *testing.T) {
 	}
 
 	if got := T(own, nil); got != "发行版自己的一句话" {
-		t.Errorf("追加的译文没生效: %q", got)
+		t.Errorf("the appended translation did not take effect: %q", got)
 	}
 	if got := T("Proxy", nil); got != "代理" {
-		t.Errorf("追加盖掉了内核已有的消息: %q", got)
+		t.Errorf("the append overrode a message the kernel already had: %q", got)
 	}
 	// Coverage must count the appended ones: otherwise half of the distribution's UI does not
 	// exist on `newgate lang`.
@@ -373,11 +373,11 @@ func TestExtendAddsNewMessagesOnly(t *testing.T) {
 		}
 	}
 	if zh.Total != len(testLedger().Messages)+1 {
-		t.Errorf("追加后账本 = %d 条，想要 %d 条", zh.Total, len(testLedger().Messages)+1)
+		t.Errorf("the ledger has %d entries after the append, want %d", zh.Total, len(testLedger().Messages)+1)
 	}
 	for _, id := range Missing("zh-Hans") {
 		if id == own {
-			t.Error("追加的这条已经翻了，不该还算缺")
+			t.Error("this appended entry is already translated and must not count as missing")
 		}
 	}
 
@@ -390,13 +390,13 @@ func TestExtendAddsNewMessagesOnly(t *testing.T) {
 		t.Fatalf("Extend: %v", err)
 	}
 	if got := T(own, nil); got != own {
-		t.Errorf("源语言路径被追加改变了: %q", got)
+		t.Errorf("the source-language path was changed by the append: %q", got)
 	}
 
 	// A catalog without meta.language is a broken catalog: silently dropping it means the
 	// distribution's UI always speaks English.
 	if err := Extend(Ledger{}, []Catalog{{Messages: map[string]Entry{own: {Text: "x"}}}}); err == nil {
-		t.Error("没写 meta.language 的目录该报错")
+		t.Error("a catalog without meta.language must error")
 	}
 }
 
@@ -419,23 +419,23 @@ func TestCatalogRoundTripKeepsEverything(t *testing.T) {
 	}
 	out, err := ParseCatalog(raw)
 	if err != nil {
-		t.Fatalf("自己生成的译文解不回来: %v\n%s", err, raw)
+		t.Fatalf("cannot decode the translations it generated itself: %v\n%s", err, raw)
 	}
 	if out.Language != in.Language || out.Source != in.Source || out.Widths["label"] != 8 {
-		t.Errorf("meta 丢了: %+v", out)
+		t.Errorf("meta was lost: %+v", out)
 	}
 	for id, want := range in.Messages {
 		if got := out.Messages[id]; got != want {
-			t.Errorf("%s 往返后变了: %+v vs %+v", id, got, want)
+			t.Errorf("%s changed after the round trip: %+v vs %+v", id, got, want)
 		}
 	}
 	// A message with only a body must be written as a bare string for the file to be readable
 	if !strings.Contains(string(raw), `"plain": "纯正文"`) {
-		t.Errorf("纯正文消息该写成裸字符串:\n%s", raw)
+		t.Errorf("a plain-body message must be written as a bare string:\n%s", raw)
 	}
 	// Keys sorted: random map iteration order makes every generated diff wobble
 	if strings.Index(string(raw), `"machine"`) > strings.Index(string(raw), `"noted"`) {
-		t.Errorf("键没排序:\n%s", raw)
+		t.Errorf("keys are not sorted:\n%s", raw)
 	}
 }
 
@@ -447,29 +447,29 @@ func TestLedgerRoundTrip(t *testing.T) {
 	}
 	out, err := ParseLedger(raw)
 	if err != nil {
-		t.Fatalf("自己生成的账本解不回来: %v\n%s", err, raw)
+		t.Fatalf("cannot decode the ledger it generated itself: %v\n%s", err, raw)
 	}
 	if len(out.Messages) != len(in.Messages) {
-		t.Fatalf("条数不对: %d vs %d", len(out.Messages), len(in.Messages))
+		t.Fatalf("wrong entry count: %d vs %d", len(out.Messages), len(in.Messages))
 	}
 	for id, want := range in.Messages {
 		got, ok := out.Messages[id]
 		if !ok {
-			t.Errorf("账本丢了 %q", id)
+			t.Errorf("the ledger lost %q", id)
 			continue
 		}
 		if got.Other != want.Other ||
 			strings.Join(got.Args, ",") != strings.Join(want.Args, ",") {
-			t.Errorf("%s 往返后变了: %+v vs %+v", id, got, want)
+			t.Errorf("%s changed after the round trip: %+v vs %+v", id, got, want)
 		}
 	}
 	// The fact "plural" must be readable from the ledger (coverage and translation tools both need
 	// it)
 	if !out.Messages["Saved {n} file"].Plural() {
-		t.Error("账本该记住哪条消息带复数")
+		t.Error("the ledger must remember which message has a plural")
 	}
 	if out.Messages["Proxy"].Plural() {
-		t.Error("不带复数的消息不该被标成复数")
+		t.Error("a message without a plural must not be marked as plural")
 	}
 }
 
@@ -478,43 +478,43 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 	// it as machine translated, why isn't it marked"
 	_, err := ParseCatalog([]byte(`{"meta":{"language":"zh-Hans"},"messages":{"x":{"text":"y","machien":true}}}`))
 	if err == nil {
-		t.Fatal("拼错的字段名该报错")
+		t.Fatal("a misspelled field name must error")
 	}
 	if _, err := ParseCatalog([]byte(`{"meta":{"language":"zh-Hans"},"messages":{}}`)); err != nil {
-		t.Fatalf("空表是合法的: %v", err)
+		t.Fatalf("an empty table is valid: %v", err)
 	}
 	if _, err := ParseCatalog([]byte(`{"meta":{},"messages":{}}`)); err == nil {
-		t.Fatal("没有 meta.language 该报错")
+		t.Fatal("a catalog without meta.language must error")
 	}
 	if _, err := ParseLedger([]byte(`{"messages":{"x":{"args":["dir"]}}}`)); err != nil {
-		t.Fatalf("账本该解得出来: %v", err)
+		t.Fatalf("the ledger must decode: %v", err)
 	}
 	// The `where` cell was deleted on 2026-09-21 (reasoning in the Ledger comment). If it still
 	// appears in an old ledger, DisallowUnknownFields errors on the spot -- and that is exactly
 	// what we want: an old ledger must be explicitly regenerated, not have a whole field silently
 	// ignored.
 	if _, err := ParseLedger([]byte(`{"messages":{"x":{"where":"a.go:1"}}}`)); err == nil {
-		t.Fatal("账本里还留着 where 该报错（那一格已经删了）")
+		t.Fatal("a ledger that still has where must error (that cell was deleted)")
 	}
 	if _, err := ParseLedger([]byte(`{"massages":{}}`)); err == nil {
-		t.Fatal("拼错的账本字段名该报错")
+		t.Fatal("a misspelled ledger field name must error")
 	}
 }
 
 func TestBuiltinCatalogsAreWellFormed(t *testing.T) {
 	led, cats, err := Builtin()
 	if err != nil {
-		t.Fatalf("内置目录读不出来: %v", err)
+		t.Fatalf("cannot read the builtin catalogs: %v", err)
 	}
 	if len(cats) < 1 {
-		t.Fatalf("内置至少要有源语言以外的一份译文，实际 %d 份", len(cats))
+		t.Fatalf("there must be at least one builtin translation besides the source language, got %d", len(cats))
 	}
 	for _, c := range cats {
 		if c.Language == SourceLang {
-			t.Errorf("%s 不该有内置译文文件——源语言的文本就在源码里", SourceLang)
+			t.Errorf("%s must not have a builtin translation file -- the source-language text lives in the source code", SourceLang)
 		}
 		if len(c.Widths) == 0 {
-			t.Errorf("%s 没标版式尺寸（meta.widths）——换语言时列宽会歪", c.Language)
+			t.Errorf("%s does not declare layout widths (meta.widths) -- column widths will skew when the language changes", c.Language)
 		}
 	}
 	// The ledger may be empty for now (no copy migrated yet), but it must still parse
@@ -524,14 +524,14 @@ func TestBuiltinCatalogsAreWellFormed(t *testing.T) {
 func TestPlaceholderExtraction(t *testing.T) {
 	got := Placeholders("a {b} and {c} and {b}")
 	if strings.Join(got, ",") != "b,c" {
-		t.Errorf("占位符提取错了: %v", got)
+		t.Errorf("placeholder extraction is wrong: %v", got)
 	}
 	if got := Placeholders("没有占位符 { 半个"); strings.Join(got, ",") != "" {
-		t.Errorf("半个花括号不该被当成占位符: %v", got)
+		t.Errorf("half a brace must not be treated as a placeholder: %v", got)
 	}
 	union := EntryPlaceholders(Entry{One: "{n} thing", Other: "{n} things in {dir}"})
 	if strings.Join(union, ",") != "dir,n" {
-		t.Errorf("单复数并集错了: %v", union)
+		t.Errorf("the singular/plural union is wrong: %v", union)
 	}
 	// Copy contains **machine markers**, and JSON carries braces itself. Those braces are bytes,
 	// not slots: treated as slots, `tools/i18n check` would point at a perfectly correct sentence
@@ -539,10 +539,10 @@ func TestPlaceholderExtraction(t *testing.T) {
 	// substitute it. Identifier shape separates the two.
 	const withJSON = `injected thinking:{"type":"disabled"} ({why})`
 	if got := Placeholders(withJSON); strings.Join(got, ",") != "why" {
-		t.Errorf("内嵌的 JSON 不该被当成占位符: %v", got)
+		t.Errorf("embedded JSON must not be treated as a placeholder: %v", got)
 	}
 	if got := format(withJSON, A{"why": "关掉思考"}); got != `injected thinking:{"type":"disabled"} (关掉思考)` {
-		t.Errorf("内嵌的 JSON 被改动了: %q", got)
+		t.Errorf("the embedded JSON was modified: %q", got)
 	}
 }
 
@@ -553,7 +553,7 @@ func TestCatalogsFromFSRejectsMismatchedFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := CatalogsFromFS(os.DirFS(dir), "."); err == nil {
-		t.Fatal("文件名与 meta.language 不一致时该报错")
+		t.Fatal("a filename that disagrees with meta.language must error")
 	}
 }
 
@@ -579,7 +579,7 @@ func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 		t.Fatalf("Extend: %v", err)
 	}
 	if got := T(own, nil); got != "发行版自己的一句话" {
-		t.Fatalf("追加的译文该生效: %q", got)
+		t.Fatalf("the appended translation must take effect: %q", got)
 	}
 
 	// Switch to the source language: the sentence comes out as is (identity path).
@@ -587,7 +587,7 @@ func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 		t.Fatalf("Use(%q) = %q", SourceLang, got)
 	}
 	if got := T("Proxy", nil); got != "Proxy" {
-		t.Errorf("换成源语言后该原样输出: %q", got)
+		t.Errorf("after switching to the source language it must come out as is: %q", got)
 	}
 
 	// Switch back: **the appended entry must still be there**. That is this test's real assertion.
@@ -595,13 +595,13 @@ func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 		t.Fatalf("Use(zh-Hans) = %q", got)
 	}
 	if got := T(own, nil); got != "发行版自己的一句话" {
-		t.Errorf("换回来之后发行版的译文没了——说明这次换语言重装了目录表: %q", got)
+		t.Errorf("after switching back the distribution's translation is gone -- this switch reinstalled the catalog tables: %q", got)
 	}
 	if got := T("Proxy", nil); got != "代理" {
-		t.Errorf("内核那句也该回来: %q", got)
+		t.Errorf("the kernel's sentence must come back too: %q", got)
 	}
 	if got := Current(); got != "zh-Hans" {
-		t.Errorf("Current() 该跟着变: %q", got)
+		t.Errorf("Current() must follow along: %q", got)
 	}
 }
 
@@ -614,9 +614,9 @@ func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 func TestUseFallsBackToTheSourceLanguage(t *testing.T) {
 	install(t, "zh-Hans")
 	if got := Use("fr-FR"); got != SourceLang {
-		t.Errorf("没翻的语言该回退到源语言，实际 %q", got)
+		t.Errorf("an untranslated language must fall back to the source language, got %q", got)
 	}
 	if got := T("Proxy", nil); got != "Proxy" {
-		t.Errorf("回退之后该走恒等路径: %q", got)
+		t.Errorf("after the fallback it must take the identity path: %q", got)
 	}
 }

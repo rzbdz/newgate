@@ -39,8 +39,8 @@ func TestKernelCarriesNoDistributionMachinery(t *testing.T) {
 	//    decision.
 	pin := filepath.Join(repoRoot, "modules-ext.json")
 	if _, err := os.Stat(pin); err == nil {
-		t.Errorf("%s 又出现了。内核不该声明「用哪个发行版」——装哪些模块是发行版自己的事，"+
-			"它拿 app.Selection 把表交给组合根；Pin 属于发行版仓库", pin)
+		t.Errorf("%s has appeared again. The kernel must not declare \"which distribution to use\" -- which modules to install is the distribution's own business, "+
+			"it hands the table to the composition root via app.Selection; Pin belongs to the distribution repository", pin)
 	}
 
 	// 2. The mechanism in code: import path, package name, two environment variables.
@@ -49,10 +49,10 @@ func TestKernelCarriesNoDistributionMachinery(t *testing.T) {
 	// directory name of a module checkout appears in the comments telling this history, and that
 	// is an asset, not a liability.
 	forbidden := []struct{ needle, why string }{
-		{`"github.com/rzbdz/newgate/modules-ext`, "发行版模块的 import 路径——核心里出现它，说明又在构建期把发行版编进来了"},
-		{"extmanifest.", "按 Pin 拉发行版仓库的那套工具"},
-		{"NEWGATE_MODULES_PIN", "覆盖 Pin 的环境变量"},
-		{"NEWGATE_EXT_DRYRUN", "关掉 clone 的环境变量"},
+		{`"github.com/rzbdz/newgate/modules-ext`, "the import path of distribution modules -- seeing it in the kernel means the distribution was compiled in at build time again"},
+		{"extmanifest.", "that set of tools that pulled the distribution repository by Pin"},
+		{"NEWGATE_MODULES_PIN", "the environment variable that overrode the Pin"},
+		{"NEWGATE_EXT_DRYRUN", "the environment variable that turned cloning off"},
 	}
 	err := filepath.WalkDir(goDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -76,12 +76,12 @@ func TestKernelCarriesNoDistributionMachinery(t *testing.T) {
 		rel, _ := filepath.Rel(repoRoot, p)
 		for _, f := range forbidden {
 			if strings.Contains(string(body), f.needle) {
-				t.Errorf("%s 里出现了 %q：%s", rel, f.needle, f.why)
+				t.Errorf("%s contains %q: %s", rel, f.needle, f.why)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("遍历 %s：%v", goDir, err)
+		t.Fatalf("walking %s: %v", goDir, err)
 	}
 }

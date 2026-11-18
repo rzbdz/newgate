@@ -71,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: opencode 侧端到端
+      - name: opencode e2e
 
       - name: Claude Code 侧端到端
         run: bash mock/e2e_claude.sh
@@ -80,12 +80,12 @@ jobs:
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	assertOne(t, got, "既没有 run 也没有 uses")
-	if !strings.Contains(got[0].String(), "opencode 侧端到端") {
-		t.Errorf("报的应该是那一步，实际：%s", got[0])
+	assertOne(t, got, "has neither run nor uses")
+	if !strings.Contains(got[0].String(), "opencode e2e") {
+		t.Errorf("should name that step，实际：%s", got[0])
 	}
 	if got[0].Line != 10 {
-		t.Errorf("行号 = %d，想要 10：%s", got[0].Line, got[0])
+		t.Errorf("line = %d, want 10：%s", got[0].Line, got[0])
 	}
 }
 
@@ -101,7 +101,7 @@ jobs:
     defaults:
       run:
     steps:
-      - name: 构建
+      - name: build
         run:
 `
 	got, err := Check(write(t, "ci.yml", broken))
@@ -111,11 +111,11 @@ jobs:
 	// Both must be reported: the one under `defaults:` (as in the incident) and the one in the
 	// step. Missing one of them means the check only recognized position, not shape.
 	if len(got) != 2 {
-		t.Fatalf("两处空值都该报，实际 %d 条: %v", len(got), got)
+		t.Fatalf("both empty values must be reported，实际 %d 条: %v", len(got), got)
 	}
 	for _, f := range got {
-		if !strings.Contains(f.String(), "空值") {
-			t.Errorf("报的不是空值: %s", f)
+		if !strings.Contains(f.String(), "empty value") {
+			t.Errorf("not reported as an empty value: %s", f)
 		}
 	}
 }
@@ -126,7 +126,7 @@ on: push
 
 jobs:
   static:
-    name: 没有 runs-on
+    name: has no runs-on
   e2e:
     runs-on: ubuntu-latest
 `
@@ -134,8 +134,8 @@ jobs:
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	assertOne(t, got, "没有 runs-on", "static")
-	assertOne(t, got, "没有 steps", "e2e")
+	assertOne(t, got, "has no runs-on", "static")
+	assertOne(t, got, "has no steps", "e2e")
 }
 
 func TestCatchesNoJobsAndTabs(t *testing.T) {
@@ -143,7 +143,7 @@ func TestCatchesNoJobsAndTabs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	assertOne(t, got, "没有 jobs")
+	assertOne(t, got, "no top-level jobs")
 
 	tabbed := "name: CI\non: push\n\njobs:\n\tstatic:\n    runs-on: ubuntu-latest\n"
 	got, err = Check(write(t, "ci.yml", tabbed))

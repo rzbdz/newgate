@@ -38,7 +38,7 @@ func TestTheCompositionRootNamesNoModule(t *testing.T) {
 	root := repoDir(t)
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		t.Fatalf("读不了 %s: %v", root, err)
+		t.Fatalf("cannot read %s: %v", root, err)
 	}
 
 	for _, entry := range entries {
@@ -54,7 +54,7 @@ func TestTheCompositionRootNamesNoModule(t *testing.T) {
 		}
 		body, err := os.ReadFile(filepath.Join(root, name))
 		if err != nil {
-			t.Fatalf("读不了 %s: %v", name, err)
+			t.Fatalf("cannot read %s: %v", name, err)
 		}
 		for i, line := range strings.Split(string(body), "\n") {
 			if !strings.Contains(line, `"github.com/rzbdz/newgate/modules/`) {
@@ -66,10 +66,10 @@ func TestTheCompositionRootNamesNoModule(t *testing.T) {
 			if strings.Contains(line, "modules/config/paths") {
 				continue
 			}
-			t.Errorf("app/%s:%d 组合根 import 了具体模块——"+
-				"摘掉那个模块，组合根就编译不过了：\n    %s\n"+
-				"    组合根该做的：装图、把这次调用交给入口。模块自己的知识走\n"+
-				"    component/entry（谁是入口）与 component.CatalogAware（图里有谁）。",
+			t.Errorf("app/%s:%d the composition root imports a concrete module --"+
+				"remove that module and the composition root no longer compiles:\n    %s\n"+
+				"    what the composition root should do: build the graph, hand this call to an entry. Module-specific knowledge belongs in\n"+
+				"    component/entry (who is the entry) and component.CatalogAware (who is in the graph).",
 				name, i+1, strings.TrimSpace(line))
 		}
 	}
@@ -82,7 +82,7 @@ func repoDir(t *testing.T) string {
 	t.Helper()
 	_, this, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("runtime.Caller 拿不到本文件路径")
+		t.Fatal("runtime.Caller cannot get this file's path")
 	}
 	return filepath.Dir(this)
 }

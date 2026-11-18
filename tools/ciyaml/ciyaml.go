@@ -53,7 +53,7 @@ func Check(root string) ([]Finding, error) {
 	dir := filepath.Join(root, ".github", "workflows")
 	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("读不了 %s: %w", dir, err)
+		return nil, fmt.Errorf("cannot read %s: %w", dir, err)
 	}
 	var files []string
 	for _, e := range ents {
@@ -65,7 +65,7 @@ func Check(root string) ([]Finding, error) {
 		}
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("%s 里一个 workflow 都没有——判据退化了", dir)
+		return nil, fmt.Errorf("%s has not a single workflow -- the check has degenerated", dir)
 	}
 	sort.Strings(files)
 
@@ -93,7 +93,7 @@ func (l yline) isItem() bool { return l.text == "-" || strings.HasPrefix(l.text,
 func checkFile(root, path string) ([]Finding, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("读不了 %s: %w", path, err)
+		return nil, fmt.Errorf("cannot read %s: %w", path, err)
 	}
 	rel, rerr := filepath.Rel(root, path)
 	if rerr != nil {
@@ -113,7 +113,7 @@ func checkFile(root, path string) ([]Finding, error) {
 		// YAML indentation must not use tabs. If such a line slips in, the error message points at a
 		// completely unrelated column and is painful to track down -- so this names it directly.
 		if indent < len(s) && s[indent] == '\t' {
-			out = append(out, Finding{rel, no, "缩进里出现了 tab——YAML 不认 tab 缩进"})
+			out = append(out, Finding{rel, no, "a tab appeared in the indentation -- YAML does not accept tab indentation"})
 		}
 		text := strings.TrimSpace(s)
 		if text == "" || strings.HasPrefix(text, "#") {
@@ -134,7 +134,7 @@ func checkFile(root, path string) ([]Finding, error) {
 			continue // 有子键，不是空值
 		}
 		out = append(out, Finding{rel, l.no,
-			fmt.Sprintf("「%s:」是空值——要么补上值，要么整段删掉", key)})
+			fmt.Sprintf("\"%s:\" is an empty value -- give it a value or delete the whole block", key)})
 	}
 
 	// Under jobs:, look at each job one by one. No jobs: found means the whole file was written
@@ -147,11 +147,11 @@ func checkFile(root, path string) ([]Finding, error) {
 		}
 	}
 	if jobsAt < 0 {
-		return append(out, Finding{rel, 1, "顶层没有 jobs:——这个 workflow 不会做任何事"}), nil
+		return append(out, Finding{rel, 1, "no top-level jobs: -- this workflow will not do anything"}), nil
 	}
 	rest := lines[jobsAt+1:]
 	if len(rest) == 0 {
-		return append(out, Finding{rel, lines[jobsAt].no, "jobs: 下面是空的"}), nil
+		return append(out, Finding{rel, lines[jobsAt].no, "jobs: is empty"}), nil
 	}
 
 	// Job names = the `name:` lines right after jobs:, at the same indent as the first key.
@@ -188,17 +188,17 @@ func checkJob(rel string, body []yline, name string) []Finding {
 	}
 	if !hasRunsOn {
 		out = append(out, Finding{rel, body[0].no,
-			fmt.Sprintf("job「%s」没有 runs-on——GitHub 会拒掉整个 workflow", name)})
+			fmt.Sprintf("job \"%s\" has no runs-on -- GitHub will reject the whole workflow", name)})
 	}
 	if stepsAt < 0 {
 		return append(out, Finding{rel, body[0].no,
-			fmt.Sprintf("job「%s」没有 steps", name)})
+			fmt.Sprintf("job \"%s\" has no steps", name)})
 	}
 
 	items := body[stepsAt+1:]
 	if len(items) == 0 {
 		return append(out, Finding{rel, body[stepsAt].no,
-			fmt.Sprintf("job「%s」的 steps: 下面是空的", name)})
+			fmt.Sprintf("the steps: of job \"%s\" is empty", name)})
 	}
 	itemIndent := items[0].indent
 	for i := 0; i < len(items); {
@@ -251,12 +251,12 @@ func checkStep(rel string, item []yline, itemIndent int) (Finding, bool) {
 	if hasBody {
 		return Finding{}, false
 	}
-	what := "这一步"
+	what := "This step"
 	if stepName != "" {
-		what = fmt.Sprintf("步骤「%s」", stepName)
+		what = fmt.Sprintf("step \"%s\"", stepName)
 	}
 	return Finding{rel, item[0].no,
-		what + "既没有 run 也没有 uses——GitHub 会拒掉整个 workflow，一个 job 都不会起"}, true
+		what + " has neither run nor uses -- GitHub will reject the whole workflow and not a single job will start"}, true
 }
 
 // emptyableKey returns the key names that "must carry a value". An empty value (the next line

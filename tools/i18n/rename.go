@@ -41,14 +41,14 @@ import (
 func cmdRename(args []string) error {
 	fs := flag.NewFlagSet("rename", flag.ExitOnError)
 	c := commonFlags(fs)
-	lang := fs.String("lang", "zh-Hans", "哪门语言的译文")
-	force := fs.Bool("force", false, "新措辞已有译文时也覆盖它")
+	lang := fs.String("lang", "zh-Hans", "which language's translation")
+	force := fs.Bool("force", false, "also overwrite when the new wording already has a translation")
 	fs.Parse(args)
 	if err := c.resolve(); err != nil {
 		return err
 	}
 	if fs.NArg() != 2 {
-		return fmt.Errorf("用法：i18n rename [-lang zh-Hans] <旧英文原文> <新英文原文>")
+		return fmt.Errorf("usage: i18n rename [-lang zh-Hans] <old English text> <new English text>")
 	}
 	old, fresh := fs.Arg(0), fs.Arg(1)
 
@@ -57,11 +57,11 @@ func cmdRename(args []string) error {
 		return err
 	}
 	if _, ok := led.Messages[old]; ok {
-		return fmt.Errorf("旧措辞 %q 还在源码里用着——搬走它等于删掉一条活着的译文。"+
-			"要么先把调用点改成新措辞，要么你其实想跑的是 sync", old)
+		return fmt.Errorf("the old wording %q is still used in the source -- moving it away deletes a live translation. "+
+			"either change the call sites to the new wording first, or what you actually want is sync", old)
 	}
 	if _, ok := led.Messages[fresh]; !ok {
-		return fmt.Errorf("新措辞 %q 不在账本里——源码里没有这句话（拼错了？先跑 extract？）", fresh)
+		return fmt.Errorf("the new wording %q is not in the ledger -- the source does not contain that sentence (typo? run extract first?)", fresh)
 	}
 
 	cat, err := loadOne(c.root, c.catalogDir, *lang)
@@ -70,10 +70,10 @@ func cmdRename(args []string) error {
 	}
 	entry, ok := cat.Messages[old]
 	if !ok || entry.Empty() {
-		return fmt.Errorf("%s 里没有 %q 的译文——没得搬（要新翻就用 sync）", *lang, old)
+		return fmt.Errorf("%s has no translation for %q -- nothing to move (use sync for a new translation)", *lang, old)
 	}
 	if prev, exists := cat.Messages[fresh]; exists && !prev.Empty() && !*force {
-		return fmt.Errorf("新措辞 %q 已经有译文了（%q）——要覆盖加 -force",
+		return fmt.Errorf("the new wording %q already has a translation (%q) -- add -force to overwrite",
 			fresh, firstText(prev))
 	}
 
@@ -84,12 +84,12 @@ func cmdRename(args []string) error {
 	}
 	mark := ""
 	if entry.Machine && !entry.Reviewed {
-		mark = "（这条本身还是机翻未复核——搬过来也还是）"
+		mark = "(this one is itself an unreviewed machine translation -- it stays that way after the move)"
 	}
 	if entry.Machine && entry.Reviewed {
-		mark = "（人工复核过的，搬过来仍然算复核过）"
+		mark = "(reviewed by a human; it still counts as reviewed after the move)"
 	}
-	fmt.Printf("i18n: %s: 译文搬到新措辞上%s\n  旧 %s\n  新 %s\n  译文 %s\n",
+	fmt.Printf("i18n: %s: translation moved to the new wording%s\n  old %s\n  new %s\n  translation %s\n",
 		*lang, mark, old, fresh, firstText(entry))
 	return nil
 }

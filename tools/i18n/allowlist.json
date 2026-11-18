@@ -1,14 +1,6 @@
 {
   "why": "豁免清单：「非测试 Go 源码里不许有用户可见的中文字面量」这条判据的例外。判据护的是**用户可见文本**，所以豁免只有三类，每一类都要写下自己的理由：(1) 翻译层自己——它要在目录装好之前、装坏之后说话；(2) 开发工具——读者是开发者，不是 CLI 用户；(3) 测试夹具——读者是跑测试的人，而且 CI 日志要稳定。产品源码不该出现在这里：**清单只减不增**，新条目一律先问「为什么它不是 i18n.T」。迁移期剩下的「还没迁」条目会被 `audit --seed` 收缩掉。",
   "files": {
-    "tools/ciyaml/ciyaml.go": "开发工具：同上——而且它是棘轮自己的声音（报的是「这份 workflow 结构不对」），用被它检查的目录来说话是循环",
-    "tools/genmodules/main.go": "开发工具：读者是开发者，输出只出现在生成/校验流水线上",
-    "tools/i18n/audit.go": "开发工具：同上",
-    "tools/i18n/bundle.go": "开发工具：同上——生成/校验流水线上的输出，读者是开发者",
-    "tools/i18n/check/check.go": "开发工具：同上——而且它是棘轮自己的声音，用被它检查的目录来说话是循环",
-    "tools/i18n/main.go": "开发工具：同上",
-    "tools/i18n/rename.go": "开发工具：同上",
-    "tools/i18n/scan/scan.go": "开发工具：同上",
-    "tools/i18n/translate.go": "开发工具：同上"
+    "tools/i18n/translate.go": "development tool: this is the system prompt handed to an LLM, and it contains Chinese *examples* of the target style - it is prompt content, not UI copy"
   }
 }

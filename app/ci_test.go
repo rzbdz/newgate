@@ -21,7 +21,7 @@ func TestWorkflowsAreStructurallyValid(t *testing.T) {
 	root := filepath.Join(repoDir(t), "..")
 	findings, err := ciyaml.Check(root)
 	if err != nil {
-		t.Fatalf("CI 配置检查跑不起来——判据退化了（workflow 目录挪了？）: %v", err)
+		t.Fatalf("the CI config check cannot run -- the check has degenerated (did the workflow directory move?): %v", err)
 	}
 	for _, f := range findings {
 		t.Errorf("%s", f)

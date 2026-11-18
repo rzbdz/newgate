@@ -19,7 +19,7 @@ import (
 func cmdAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	c := commonFlags(fs)
-	seed := fs.Bool("seed", false, "按现状重写未迁移清单（迁移起点用）")
+	seed := fs.Bool("seed", false, "rewrite the unmigrated list from the current state (for the start of a migration)")
 	fs.Parse(args)
 	if err := c.resolve(); err != nil {
 		return err
@@ -35,12 +35,12 @@ func cmdAudit(args []string) error {
 	sort.Strings(files)
 	if !*seed {
 		if len(files) == 0 {
-			fmt.Println("i18n: 非测试源码里已经没有中文字面量了")
+			fmt.Println("i18n: there are no Chinese string literals left in non-test source")
 			return nil
 		}
-		fmt.Printf("i18n: %d 个文件里还有中文字面量\n", len(files))
+		fmt.Printf("i18n: %d files still have Chinese string literals\n", len(files))
 		for _, f := range files {
-			fmt.Printf("  %-60s %d 处\n", f, seen[f])
+			fmt.Printf("  %-60s %d places\n", f, seen[f])
 		}
 		return nil
 	}
@@ -60,18 +60,18 @@ func cmdAudit(args []string) error {
 		Why   string            `json:"why"`
 		Files map[string]string `json:"files"`
 	}{
-		Why: "豁免清单：「非测试 Go 源码里不许有用户可见的中文字面量」这条判据的例外。" +
-			"判据护的是**用户可见文本**，所以豁免只有三类，每一类都要写下自己的理由：" +
-			"(1) 翻译层自己——它要在目录装好之前、装坏之后说话；(2) 开发工具——读者是开发者，" +
-			"不是 CLI 用户；(3) 测试夹具——读者是跑测试的人，而且 CI 日志要稳定。" +
-			"产品源码不该出现在这里：**清单只减不增**，新条目一律先问「为什么它不是 i18n.T」。" +
-			"迁移期剩下的「还没迁」条目会被 `audit --seed` 收缩掉。",
+		Why: "Exceptions to the criterion \"no user-visible Chinese string literals in non-test Go source\"." +
+			"The criterion guards **user-visible text**, so there are only three kinds of exception, and each must state its own reason: " +
+			"(1) the translation layer itself -- it must speak before the catalog is installed and after it breaks; (2) developer tools -- the reader is a developer, " +
+			"not a CLI user; (3) test fixtures -- the reader is the person running the tests, and CI logs must stay stable. " +
+			"Product source must not appear here: **the list only shrinks**, and every new entry must first answer \"why is this not i18n.T\". " +
+			"The \"not migrated yet\" entries left over from the migration will be shrunk away by `audit --seed`.",
 		Files: map[string]string{},
 	}
 	for _, f := range files {
 		reason := existing[f]
 		if reason == "" {
-			reason = "还没迁（迁移期豁免）"
+			reason = "not migrated yet (migration-period exception)"
 		}
 		out.Files[f] = reason
 	}
@@ -86,6 +86,6 @@ func cmdAudit(args []string) error {
 	if err := os.WriteFile(filepath.Join(c.root, c.allowlist), raw, 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("i18n: 未迁移清单写了 %d 个文件 → %s\n", len(files), c.allowlist)
+	fmt.Printf("i18n: unmigrated list written with %d files -> %s\n", len(files), c.allowlist)
 	return nil
 }

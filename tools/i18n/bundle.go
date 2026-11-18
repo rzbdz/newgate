@@ -23,7 +23,7 @@ import (
 func cmdBundle(args []string) error {
 	fs := flag.NewFlagSet("bundle", flag.ExitOnError)
 	c := commonFlags(fs)
-	onlyCheck := fs.Bool("check", false, "只校验 bundle 是否过期，不写文件")
+	onlyCheck := fs.Bool("check", false, "only check whether bundles are stale, do not write")
 	fs.Parse(args)
 	if err := c.resolve(); err != nil {
 		return err
@@ -34,7 +34,7 @@ func cmdBundle(args []string) error {
 		return err
 	}
 	if len(names) == 0 {
-		return fmt.Errorf("%s 里一个 .json 都没有", dir)
+		return fmt.Errorf("%s has no .json at all", dir)
 	}
 
 	stale := []string{}
@@ -60,7 +60,7 @@ func cmdBundle(args []string) error {
 			// reasoning is there (editing file A while file B is in effect turns into an unsolvable
 			// investigation).
 			if want := strings.TrimSuffix(name, ".json"); want != cat.Language {
-				return fmt.Errorf("%s: meta.language 是 %q，与文件名对不上", src, cat.Language)
+				return fmt.Errorf("%s: meta.language is %q, which does not match the file name", src, cat.Language)
 			}
 			out = i18n.EncodeCatalog(cat)
 		}
@@ -75,14 +75,14 @@ func cmdBundle(args []string) error {
 		if err := os.WriteFile(dst, out, 0o644); err != nil {
 			return err
 		}
-		fmt.Printf("i18n: %s → %s（%d 字节）\n", name, filepath.Base(dst), len(out))
+		fmt.Printf("i18n: %s -> %s (%d bytes)\n", name, filepath.Base(dst), len(out))
 	}
 	if *onlyCheck {
 		if len(stale) > 0 {
-			return fmt.Errorf("%s 已过期：运行 `go run ./tools/i18n bundle` 后重新提交",
+			return fmt.Errorf("%s is stale: run `go run ./tools/i18n bundle` and commit the result",
 				strings.Join(stale, ", "))
 		}
-		fmt.Printf("i18n: %d 份 bundle 都是新的\n", len(names))
+		fmt.Printf("i18n: all %d bundles are current\n", len(names))
 	}
 	return nil
 }
