@@ -263,3 +263,62 @@ func TestStartReportsRollbackFailure(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// TestPanickingStartStillRollsBack：panic 与「返回错误」必须走同一条回滚。
+//
+// 没有 recover 时，已启动的模块留着监听、文件和注册，调用方只看到一段栈；
+// 在测试里那是一个监听端口漏进同进程的下一个测试。MustGet 对装配错误是**故意
+// panic** 的，所以这条路不需要任何模块自己写错就能走到。
+func TestPanickingStartStillRollsBack(t *testing.T) {
+	var stopped bool
+	_, err := New(fakeLoader{components: []Component{
+		{
+			Type: "test", Name: "provider",
+			Start: func(context.Context, Context) error { return nil },
+			Stop:  func(context.Context) error { stopped = true; return nil },
+		},
+		{
+			Type: "test", Name: "boom",
+			Start: func(context.Context, Context) error { panic("wiring mistake") },
+			Stop:  func(context.Context) error { return nil },
+		},
+	}})
+	if err == nil {
+		t.Fatal("panicking Start should reject the manager")
+	}
+	if !strings.Contains(err.Error(), "panicked in Start") {
+		t.Fatalf("error should say it was a panic, got: %v", err)
+	}
+	if !stopped {
+		t.Fatal("the already-started component was left running after a panic")
+	}
+}
+
+// TestRollbackRunsEvenWhenStartContextIsCanceled：回滚不能用「可能正是让 Start
+// 失败的那个」context。进程收尾时 ctx 已取消，清理会全部立刻失败并被当成
+// 「stop failed」吞掉——资源留着，日志只说了一堆 stop failed。
+func TestRollbackRunsEvenWhenStartContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var stopSawErr error
+	_, err := NewContext(ctx, fakeLoader{components: []Component{
+		{
+			Type: "test", Name: "provider",
+			Start: func(context.Context, Context) error { return nil },
+			Stop:  func(ctx context.Context) error { stopSawErr = ctx.Err(); return nil },
+		},
+		{
+			Type: "test", Name: "partial",
+			Start: func(context.Context, Context) error {
+				cancel() // shutdown raced Start
+				return context.Canceled
+			},
+			Stop: func(context.Context) error { return nil },
+		},
+	}})
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if stopSawErr != nil {
+		t.Fatalf("rollback ran on a canceled context (%v) — cleanup would fail silently", stopSawErr)
+	}
+}

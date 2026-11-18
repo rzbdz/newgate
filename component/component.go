@@ -272,7 +272,7 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 	for i, component := range manager.components {
 		began := time.Now()
 		if component.Start != nil {
-			if err := component.Start(ctx, manager.context); err != nil {
+			if err := startComponent(ctx, component, manager.context); err != nil {
 				// Start 可能在报错前已经注册扩展或占用资源，因此失败节点也进入
 				// 回滚范围；组件的 Stop 必须能处理部分初始化。
 				manager.started = i + 1
@@ -280,7 +280,7 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 					i18n.A{"index": i + 1, "total": len(manager.components),
 						"name": component.Name,
 						"took": time.Since(began).Round(time.Microsecond), "err": err}))
-				rollbackErr := manager.Stop(ctx)
+				rollbackErr := manager.rollback(ctx)
 				if rollbackErr != nil {
 					return nil, fmt.Errorf("start component %s: %w; rollback: %v",
 						component.Name, err, rollbackErr)
@@ -303,7 +303,39 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 	return manager, nil
 }
 
-// Must 是组合根的 fail-fast 入口；库代码应优先使用 New 返回可处理的错误。
+// startComponent runs one Start and turns a panic into an error.
+//
+// A module panicking in Start is a programming error, but it must still unwind the
+// same way a returned error does: without this, every already-started module keeps
+// its listener, files and registrations, and the caller only sees a stack trace
+// (in tests that leaks a listening port into the next test in the process).
+// MustGet panics by design for wiring mistakes, so this path is reachable without
+// any module being wrong on its own.
+func startComponent(ctx context.Context, component Component, services Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panicked in Start: %v", r)
+		}
+	}()
+	return component.Start(ctx, services)
+}
+
+// rollback is Stop, but never on a context that may already be the reason Start
+// failed: if the caller's ctx is canceled (process shutdown), every cleanup would
+// fail immediately and be swallowed as "stop failed". Cleanup gets its own context
+// with a bounded budget instead.
+func (m *Manager) rollback(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+	defer cancel()
+	return m.Stop(ctx)
+}
+
+// rollbackTimeout bounds a rollback sweep. A Stop that ignores its context would
+// otherwise hang process shutdown with no diagnostic naming the culprit.
+const rollbackTimeout = 30 * time.Second
+
+// Must is the fail-fast entry for a composition root; library code should prefer
+// New and handle the error.
 func Must(loaders ...Loader) *Manager {
 	manager, err := New(loaders...)
 	if err != nil {
