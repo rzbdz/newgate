@@ -209,3 +209,53 @@ func TestPrecomputedPlanAllowsAnAbsentOptional(t *testing.T) {
 		t.Fatalf("没人提供的 Optional 是合法装配: %v", err)
 	}
 }
+
+// TestProvidersAgreesWithGetOnMultipleProviders：两个提供者时，诊断（Providers）
+// 与运行期（Get）必须指同一人。
+//
+// 以前 Providers 是 last-wins、Get 是 first-wins：多装一个同端口模块后，架构图
+// 与 `newgate st` 会指着一个根本没在处理请求的模块——两个说法各说各的，谁也不会红。
+func TestProvidersAgreesWithGetOnMultipleProviders(t *testing.T) {
+	port := NewCapability[string]("port")
+	comps := []Component{
+		{Name: "first", Type: "test", Provides: []Provision{Provide(port, "from-first")}},
+		{Name: "second", Type: "test", Provides: []Provision{Provide(port, "from-second")}},
+	}
+	plan, err := Resolve(fixedLoader(comps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Providers()["port"]; got != "first" {
+		t.Fatalf("Providers 说 %q 提供 port，但 Get 拿到的是 first", got)
+	}
+	if all := plan.AllProviders()["port"]; len(all) != 2 || all[0] != "first" || all[1] != "second" {
+		t.Fatalf("AllProviders 要按启动顺序列出全部: %v", all)
+	}
+	got, ok := Get(Context{values: collectValues(plan.Components())}, port)
+	if !ok || got != "from-first" {
+		t.Fatalf("Get 应该是 first-wins，实际 %q/%v", got, ok)
+	}
+}
+
+// TestPrecomputedAndResolvedAgreeOnValues：两条出图路径对「谁先」必须给同一个
+// 答案——否则同一份二进制走不走快路径会改变行为。
+func TestPrecomputedAndResolvedAgreeOnValues(t *testing.T) {
+	port := NewCapability[string]("port")
+	comps := []Component{
+		{Name: "a", Type: "test", Provides: []Provision{Provide(port, "a")}},
+		{Name: "b", Type: "test", Provides: []Provision{Provide(port, "b")}},
+	}
+	resolved, err := Resolve(fixedLoader(comps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := Resolve(stalePlan{components: comps, order: resolved.Names()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1, _ := Get(Context{values: resolved.values}, port)
+	r2, _ := Get(Context{values: replayed.values}, port)
+	if r1 != r2 {
+		t.Fatalf("resolved 给 %q、precomputed 给 %q——快路径改变了行为", r1, r2)
+	}
+}

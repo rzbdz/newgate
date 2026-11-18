@@ -413,7 +413,7 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 	byName := make(map[string]int, len(components))
 	specs := make(map[string]capabilitySpec)
 	providers := make(map[string][]int)
-	values := make(map[string][]any)
+	values := make(map[string][]any) // port -> values, declaration order; re-sorted at the end
 	tracef("%s", i18n.T("graph: {count} component declarations received, in declaration order below",
 		i18n.A{"count": len(components)}))
 	for i, component := range components {
@@ -539,7 +539,32 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 		order = append(order, component.Name)
 	}
 	tracef("%s", i18n.T("graph: topological order {order}", i18n.A{"order": strings.Join(order, " → ")}))
-	return ordered, values, nil
+	providedBy := make(map[string][]string, len(providers))
+	for port, indexes := range providers {
+		for _, i := range indexes {
+			providedBy[port] = append(providedBy[port], components[i].Name)
+		}
+	}
+	reportMultipleProviders(providedBy)
+	return ordered, collectValues(ordered), nil
+}
+
+// collectValues gathers each port's providers **in start order**.
+//
+// Why it matters (2026-11-18): Get returns the first provider, but the two plan
+// paths used to collect values in different orders — the resolved path walked
+// declaration order, planFromOrder walked start order — so with two providers of
+// one port, "which one a consumer got" depended on whether the manifest happened
+// to be precomputed. Collecting in start order makes first-wins a fact about the
+// graph: it always agrees with the ordering edge, and both paths agree.
+func collectValues(ordered []Component) map[string][]any {
+	values := make(map[string][]any)
+	for _, component := range ordered {
+		for _, provision := range component.Provides {
+			values[provision.spec.name] = append(values[provision.spec.name], provision.value)
+		}
+	}
+	return values
 }
 
 func isNil(value any) bool {

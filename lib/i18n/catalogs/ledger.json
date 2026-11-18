@@ -1517,6 +1517,13 @@
         "names"
       ]
     },
+    "graph: port {port} has {count} providers in start order: {providers} — Get returns the first; use GetAll for the rest": {
+      "args": [
+        "count",
+        "port",
+        "providers"
+      ]
+    },
     "graph: topological order {order}": {
       "args": [
         "order"

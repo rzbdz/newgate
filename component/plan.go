@@ -3,6 +3,7 @@ package component
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/rzbdz/newgate/lib/i18n"
 )
@@ -183,9 +184,28 @@ func planFromOrder(components []Component, order []string) (*Plan, error) {
 			}
 		}
 	}
+	reportMultipleProviders(providedBy)
 	tracef("%s", i18n.T("assembly: precomputed plan used — {count} components, no resolution",
 		i18n.A{"count": len(out)}))
 	return &Plan{components: out, values: values}, nil
+}
+
+// reportMultipleProviders names every port with more than one provider.
+//
+// Multiple providers are legal (a port declares no cardinality), but the consequence
+// is not obvious: Get takes the first in start order, so the others are unreachable
+// through it and only visible via GetAll. A distribution that accidentally ships a
+// second implementation would otherwise change what some commands hit with nobody
+// saying so — one trace line is the cheapest place to make that visible.
+func reportMultipleProviders(providedBy map[string][]string) {
+	for port, providers := range providedBy {
+		if len(providers) < 2 {
+			continue
+		}
+		tracef("%s", i18n.T("graph: port {port} has {count} providers in start order: {providers} "+
+			"— Get returns the first; use GetAll for the rest",
+			i18n.A{"port": port, "count": len(providers), "providers": strings.Join(providers, ", ")}))
+	}
 }
 
 // MustResolve 是 Resolve 的 fail-fast 版本（组合根/测试里图必须是好的）。
@@ -215,13 +235,35 @@ func (p *Plan) Names() []string {
 
 // Providers 是每个端口由谁提供：capability → 组件名。
 //
-// 一个端口一个提供者（resolve 校验过）。做成 map 而不是「问某个组件提供了
-// 什么」，是因为拿到图的人问的通常是反过来的那句话——「这个能力谁给的」。
+// 端口**不声明基数**（见 Capability 的注释），所以一个端口可能有多个提供者。
+// 这里报的是 **Get 会拿到的那一个**——启动顺序里的第一个，与 agent 实际收到的
+// 一致。以前这里是 last-wins（后写的覆盖先写的），而 Get 是 first-wins：装了
+// 第二个同端口提供者时，架构图与 `st` 诊断会指着一个**根本没在处理请求**的模块。
+// 两个说法说同一件事时不许各说各的。
+//
+// 需要全部提供者请用 AllProviders（诊断里「这个端口有几个人在抢」）。
 func (p *Plan) Providers() map[string]string {
 	out := map[string]string{}
 	for _, c := range p.components {
 		for _, prov := range c.Provides {
-			out[prov.Name()] = c.Name
+			if _, seen := out[prov.Name()]; !seen {
+				out[prov.Name()] = c.Name
+			}
+		}
+	}
+	return out
+}
+
+// AllProviders 是每个端口的**全部**提供者，按启动顺序（Get 取第一个）。
+//
+// 存在的理由：多个提供者不是错误（端口不声明基数），但「有几个、分别是谁」
+// 必须是可观测的——否则一个发行版多装了一个同端口模块，症状是「某些命令忽然
+// 走了另一个实现」，而任何地方都不说这件事。
+func (p *Plan) AllProviders() map[string][]string {
+	out := map[string][]string{}
+	for _, c := range p.components {
+		for _, prov := range c.Provides {
+			out[prov.Name()] = append(out[prov.Name()], c.Name)
 		}
 	}
 	return out
