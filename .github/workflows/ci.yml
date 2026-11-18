@@ -102,7 +102,7 @@ jobs:
       # in CI, not a promise (true since 2026-09-20: the manifest scans only this repo's
       # modules/, and the distribution is another Go module, no build-time clone). If a
       # build-time external dependency creeps back in, it surfaces here as "no required module provides package".
-      - name: Unit tests (offline: the kernel build should not go to the network)
+      - name: Unit tests offline (the kernel build should not go to the network)
         run: GOPROXY=off go test ./...
 
   race:

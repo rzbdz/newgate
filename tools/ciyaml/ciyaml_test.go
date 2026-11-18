@@ -188,3 +188,53 @@ func assertOne(t *testing.T, got []Finding, fragments ...string) {
 		t.Fatalf("want exactly one finding containing %q, got %d: %v", fragments, hits, got)
 	}
 }
+
+// TestCatchesAColonInAPlainValue is the 2026-11-18 incident: translating a step name to English
+// produced `- name: Self-check: the artifact runs`, YAML read the second colon as another mapping,
+// and GitHub rejected the whole run in 0 seconds. The existing criteria all say yes to that line
+// (it is key: value shaped, and the step has a run), so this needs a criterion of its own.
+func TestCatchesAColonInAPlainValue(t *testing.T) {
+	const broken = `name: release
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Self-check: the artifact runs
+        run: ./newgate version
+`
+	got, err := Check(write(t, "release.yml", broken))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	assertOne(t, got, "without quotes", "Self-check")
+	if got[0].Line != 8 {
+		t.Errorf("line = %d, want 8: %s", got[0].Line, got[0])
+	}
+}
+
+// TestAcceptsQuotedAndBlockValues: the fix must not become a false alarm. A quoted value may hold
+// any colon it likes, and a `run: |` script is full of them (every `echo "a: b"` would otherwise
+// be reported).
+func TestAcceptsQuotedAndBlockValues(t *testing.T) {
+	const good = `name: release
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Self-check: the artifact runs"
+        run: |
+          echo "a: b"
+          printf 'x: y\n'
+`
+	got, err := Check(write(t, "release.yml", good))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	for _, f := range got {
+		t.Errorf("valid file was reported: %s", f)
+	}
+}

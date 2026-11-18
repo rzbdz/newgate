@@ -122,6 +122,20 @@ func checkFile(root, path string) ([]Finding, error) {
 		lines = append(lines, yline{no: no, indent: indent, text: text})
 	}
 
+	// A plain (unquoted) value cannot contain ": " -- YAML reads the second colon as the start of
+	// another mapping value and rejects the whole file ("mapping values are not allowed here").
+	// This is the 2026-11-18 incident: translating a step name to English produced
+	//
+	//	- name: Self-check: the artifact runs
+	//
+	// and GitHub rejected the run in 0 seconds. It is the same failure mode as 2026-09-20 and
+	// equally invisible locally, so it gets a criterion of its own.
+	for _, l := range lines {
+		if bad, why := plainValueWithColon(l.text); bad {
+			out = append(out, Finding{rel, l.no, why})
+		}
+	}
+
 	// Empty value: nothing after `run:` (the next line has no deeper-indented subkey). This is the
 	// other half of that original bug -- three jobs' `defaults: run:` were deleted down to an
 	// empty shell.
@@ -268,6 +282,30 @@ func emptyableKey(text string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// plainValueWithColon reports a `key: value` whose unquoted value contains ": ". GitHub rejects
+// such a file outright, and nothing else in this package would notice: the line still splits into
+// a key and a value, so "is this `key: value` shaped" says yes.
+//
+// Block scalars (`|`, `>`) and quoted values are exempt, and so are lines that are not keys at
+// all (a `- item` with no key, or the body of a `run: |` script -- those are filtered by the
+// caller only for whole-line comments, so the exemption is explicit here).
+func plainValueWithColon(text string) (bool, string) {
+	body := strings.TrimSpace(strings.TrimPrefix(text, "-"))
+	key, val, ok := splitKey(body)
+	if !ok || val == "" {
+		return false, ""
+	}
+	switch val[0] {
+	case '"', '\'', '|', '>', '[', '{', '&', '*', '!':
+		return false, ""
+	}
+	if strings.Contains(val, ": ") || strings.HasSuffix(val, ":") {
+		return true, fmt.Sprintf("the value of \"%s:\" (%s) contains \": \" without quotes -- YAML reads that "+
+			"as a second mapping and GitHub rejects the whole workflow (quote the value)", key, val)
+	}
+	return false, ""
 }
 
 // splitKey splits `name: value` into key and value; returns ok=false when it is not "key:
