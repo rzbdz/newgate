@@ -82,4 +82,4 @@ to distributions · [CLAUDE.md](CLAUDE.md) — the house rules a contributor
 
 ## License
 
-Pre-1.0 and still moving. Ask before you build something you intend to depend on.
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
