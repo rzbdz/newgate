@@ -31,10 +31,10 @@ import (
 
 // Options is the input to one check. The two repositories each pass their own paths.
 type Options struct {
-	Root       string // 仓库根
-	CatalogDir string // 目录文件相对 Root 的位置，如 "lib/i18n/catalogs"
-	Allowlist  string // 未迁移文件清单（相对 Root）；空 = 跳过这项检查
-	Strict     bool   // 覆盖率不足、机翻未复核是否算失败（发版时用）
+	Root       string // repository root
+	CatalogDir string // catalog directory relative to Root, e.g. "lib/i18n/catalogs"
+	Allowlist  string // the not-yet-migrated file list (relative to Root); empty = skip it
+	Strict     bool   // count low coverage and unreviewed machine text as failures (releases)
 }
 
 // Finding is one check result. When Level is "error" the caller should exit non-zero.
@@ -101,10 +101,10 @@ func Run(opts Options) ([]Finding, error) {
 			have[a] = true
 		}
 		if call.Plural != "" {
-			have["n"] = true // N() 注入
+			have["n"] = true // injected by N()
 		}
 		if call.Method == "Ef" {
-			have["err"] = true // Ef() 注入
+			have["err"] = true // injected by Ef()
 		}
 		var missing []string
 		for _, p := range want {
@@ -296,7 +296,7 @@ func loadCatalogs(dir string) ([]i18n.Catalog, error) {
 // source", so this hole has a definite expiry date.
 type allowlistFile struct {
 	Why   string            `json:"why"`
-	Files map[string]string `json:"files"` // 路径 → 为什么还没迁（一句话）
+	Files map[string]string `json:"files"` // path -> why it is not migrated yet (one sentence)
 }
 
 // CJKFiles scans for "which non-test source files still have Chinese string literals",
@@ -396,11 +396,11 @@ func auditCJK(root, path string) ([]Finding, error) {
 func hasCJK(s string) bool {
 	for _, r := range s {
 		switch {
-		case r >= 0x4E00 && r <= 0x9FFF: // CJK 统一表意文字
+		case r >= 0x4E00 && r <= 0x9FFF: // CJK unified ideographs
 			return true
-		case r >= 0x3000 && r <= 0x303F: // 中文标点（。、：（））
+		case r >= 0x3000 && r <= 0x303F: // Chinese punctuation
 			return true
-		case r >= 0xFF00 && r <= 0xFFEF: // 全角标点
+		case r >= 0xFF00 && r <= 0xFFEF: // full-width punctuation
 			return true
 		}
 	}

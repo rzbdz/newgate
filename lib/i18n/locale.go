@@ -63,13 +63,13 @@ type A map[string]any
 // talk about a language that really needs a third level when one shows up -- at that point the
 // question is whether to pull in CLDR, not how to pile up special cases here.
 type Entry struct {
-	Text  string // 无复数变化的译文
-	One   string // 复数：1
-	Other string // 复数：其余
+	Text  string // translation with no plural variation
+	One   string // plural form: 1
+	Other string // plural form: the rest
 
-	Note     string // 给译者看的上下文（不进二进制输出）
-	Machine  bool   // 机翻产物，还没人工复核
-	Reviewed bool   // 人工复核过
+	Note     string // context for translators (never enters binary output)
+	Machine  bool   // machine-translated, not reviewed yet
+	Reviewed bool   // reviewed by a human
 }
 
 // plural says whether this translation varies by count.
@@ -83,10 +83,10 @@ func (e Entry) Empty() bool { return e.Text == "" && !e.plural() }
 // text**.
 type Catalog struct {
 	Language string
-	Source   string         // 翻译自哪一门（源语言那份留空）
-	Widths   map[string]int // 版式尺寸（见 Width）：label / term 之类
+	Source   string         // translated from which language (empty for the source table)
+	Widths   map[string]int // layout widths (see Width): label / term and the like
 	Messages map[string]Entry
-	Builtin  bool // 编译进二进制的，还是磁盘上捡来的
+	Builtin  bool // compiled into the binary, or picked up from disk
 }
 
 // Ledger is **the ledger**: which messages exist in the source language, what arguments and
@@ -122,10 +122,10 @@ type Ledger struct {
 
 // LedgerEntry is one entry in the ledger.
 type LedgerEntry struct {
-	Args  []string // 调用点给的实参名（生成物）
-	One   string   // 复数消息的单数形式（源码里的那一份）
-	Other string   // 复数消息的复数形式
-	Note  string   // 人写的上下文（extract 绝不覆盖它）
+	Args  []string // argument names given at the call site (generated)
+	One   string   // singular form of a plural message (the one in the source)
+	Other string   // plural form of a plural message
+	Note  string   // human-written context (extract never overwrites it)
 }
 
 // Plural says whether this message varies by count.
@@ -139,10 +139,10 @@ func (e LedgerEntry) Plural() bool { return e.One != "" || e.Other != "" }
 type Info struct {
 	Language   string
 	Builtin    bool
-	Total      int // 账本里有多少条
-	Translated int // 这门语言翻了多少条
-	Machine    int // 其中机翻未复核
-	Reviewed   int // 其中人工复核过
+	Total      int // how many entries the ledger has
+	Translated int // how many are translated into this language
+	Machine    int // of those, machine-translated and unreviewed
+	Reviewed   int // of those, reviewed by a human
 }
 
 // ---------- installed state ----------
@@ -155,11 +155,11 @@ type Info struct {
 var (
 	mu       sync.RWMutex
 	current  = SourceLang
-	table    = map[string]Entry{} // 当前语言的译文（源语言时为空，走恒等路径）
+	table    = map[string]Entry{} // translations for the current language (empty for the source: identity)
 	ledger   = map[string]LedgerEntry{}
 	widths   = map[string]int{}
 	builtins = map[string]Catalog{}
-	overlaid int // 有几个键来自**磁盘覆盖**
+	overlaid int // how many keys came from a **disk overlay**
 	// overlayDir is the disk override directory recorded during Install. It is kept for Use:
 	// switching languages must re-read the override (`$NEWGATE_HOME/locale/<tag>.json` is **per
 	// language**), and whoever calls Use (the language card on the web UI) neither should nor does
@@ -206,7 +206,7 @@ func apply(tag string) string {
 		avail = append(avail, lang)
 	}
 	if _, ok := builtins[SourceLang]; !ok {
-		avail = append(avail, SourceLang) // 源语言永远可选（它不需要目录文件）
+		avail = append(avail, SourceLang) // the source language is always offered (no catalog needed)
 	}
 	sort.Strings(avail)
 
@@ -226,7 +226,7 @@ func apply(tag string) string {
 		if raw, ok := readOverlay(overlayDir, eff); ok {
 			for id, e := range raw.Messages {
 				if _, known := ledger[id]; !known {
-					continue // 覆盖只能改已有的消息，凭空多出来的（拼错了）不生效
+					continue // an overlay may only change existing messages; invented (misspelled) ones do not apply
 				}
 				if e.Empty() {
 					continue
@@ -315,7 +315,7 @@ func Extend(led Ledger, catalogs []Catalog) error {
 				continue
 			}
 			if _, exists := b.Messages[id]; exists {
-				continue // 内核已经说过的话，追加不改
+				continue // anything the kernel already said is appended, not changed
 			}
 			b.Messages[id] = e
 			// The source-language path is **identity** (no lookup, what the code says is the final
@@ -416,9 +416,9 @@ func withN(args A, n int) A {
 // `if locale.ID(err) == "cannot read mappings: {err}"` -- it asserts the identity, not the
 // translation.
 type Error struct {
-	Msg  string // 源语言原文（= 消息身份）
+	Msg  string // source-language text (= the message identity)
 	Args A
-	Err  error // 可选的底层错误（%w 语义）
+	Err  error // optional underlying error (%w semantics)
 }
 
 func (e *Error) Error() string {

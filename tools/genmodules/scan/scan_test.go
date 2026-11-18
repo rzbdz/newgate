@@ -21,7 +21,7 @@ func TestIdentManglesDirectoryNames(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got := Ident(c.prefix, c.dir); got != c.want {
-			t.Errorf("Ident(%q, %q) = %q，想要 %q", c.prefix, c.dir, got, c.want)
+			t.Errorf("Ident(%q, %q) = %q, want %q", c.prefix, c.dir, got, c.want)
 		}
 	}
 }

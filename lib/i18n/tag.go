@@ -30,7 +30,7 @@ func Normalize(raw string) string {
 	}
 	s = strings.ReplaceAll(s, "_", "-")
 	switch strings.ToLower(s) {
-	case "c", "posix": // 「没意见」的两种传统写法
+	case "c", "posix": // the two traditional spellings of "no opinion"
 		return ""
 	}
 	// Case follows BCP-47 convention: language lowercase, two-letter region uppercase (CN/TW),
@@ -46,9 +46,9 @@ func Normalize(raw string) string {
 		case i == 0:
 			parts[i] = strings.ToLower(p)
 		case len(p) == 2, len(p) == 3 && isDigits(p):
-			parts[i] = strings.ToUpper(p) // 地区
+			parts[i] = strings.ToUpper(p) // region
 		default:
-			parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:]) // 脚本
+			parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:]) // script
 		}
 	}
 	return strings.Join(parts, "-")

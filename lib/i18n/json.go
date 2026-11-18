@@ -66,8 +66,8 @@ type ledgerJSON struct {
 
 type ledgerEntryJSON struct {
 	Args  []string `json:"args,omitempty"`
-	Other string   `json:"other,omitempty"` // 复数消息的复数形式
-	Note  string   `json:"note,omitempty"`  // 人写的，extract 不许覆盖
+	Other string   `json:"other,omitempty"` // plural form of a plural message
+	Note  string   `json:"note,omitempty"`  // human-written; extract must not overwrite it
 }
 
 // ParseCatalog parses one **catalog**. A misspelled field name is an error
@@ -183,7 +183,7 @@ func MarshalLedger(l Ledger) ([]byte, error) {
 func encode(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false) // 文案里会有 < > &，转义成 &lt; 就没法读了
+	enc.SetEscapeHTML(false) // messages contain < > &; escaping them to &lt; makes them unreadable
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
 		return nil, err

@@ -35,8 +35,8 @@ import (
 // error that makes GitHub reject the whole workflow -- either everything is red or nothing is,
 // and two levels would only make people think "warn can be ignored for now".
 type Finding struct {
-	File string // 相对 root 的路径
-	Line int    // 1 起
+	File string // path relative to root
+	Line int    // 1-based
 	Msg  string
 }
 
@@ -85,7 +85,7 @@ func Check(root string) ([]Finding, error) {
 type yline struct {
 	no     int
 	indent int
-	text   string // 已 TrimSpace
+	text   string // already TrimSpace'd
 }
 
 func (l yline) isItem() bool { return l.text == "-" || strings.HasPrefix(l.text, "- ") }
@@ -131,7 +131,7 @@ func checkFile(root, path string) ([]Finding, error) {
 			continue
 		}
 		if i+1 < len(lines) && lines[i+1].indent > l.indent {
-			continue // 有子键，不是空值
+			continue // it has child keys, so it is not an empty value
 		}
 		out = append(out, Finding{rel, l.no,
 			fmt.Sprintf("\"%s:\" is an empty value -- give it a value or delete the whole block", key)})

@@ -129,9 +129,9 @@ func TestAHostileCountDoesNotAllocate(t *testing.T) {
 		raw := append([]byte(nil), bundleMagic...)
 		raw = append(raw, kind)
 		if kind == bundleKindCatalog {
-			raw = append(raw, 0, 0, 0, 0) // language 空串
-			raw = append(raw, 0, 0, 0, 0) // source 空串
-			raw = append(raw, 0, 0, 0, 0) // widths: 0 个
+			raw = append(raw, 0, 0, 0, 0) // language: empty string
+			raw = append(raw, 0, 0, 0, 0) // source: empty string
+			raw = append(raw, 0, 0, 0, 0) // widths: zero entries
 		}
 		var tmp [4]byte
 		binary.LittleEndian.PutUint32(tmp[:], count)

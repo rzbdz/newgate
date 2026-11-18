@@ -26,11 +26,11 @@ import (
 
 // Call is one translatable call.
 type Call struct {
-	Msg    string   // 消息原文（= 键）
-	Method string   // T / N / E / Ef —— 检查实参时要区别对待（N 注入 n、Ef 注入 err）
-	Plural string   // N() 的复数形式；空 = 这条不分单复数
-	Args   []string // 调用点给的实参名（`i18n.A{"dir": …}` 的键）
-	Where  string   // 相对仓库根的 `文件:行`
+	Msg    string   // the message text (= the key)
+	Method string   // T / N / E / Ef -- argument checks differ (N injects n, Ef injects err)
+	Plural string   // the plural form of N(); empty = this message has no plural
+	Args   []string // argument names at the call site (the keys of `i18n.A{"dir": ...}`)
+	Where  string   // `file:line` relative to the repository root
 }
 
 // SkipDir decides which directories in a source tree **should not be entered**.
@@ -92,7 +92,7 @@ func Dir(root string) ([]Call, error) {
 		}
 		pkg := i18nAlias(file)
 		if pkg == "" {
-			return nil // 这个文件没引 lib/i18n
+			return nil // this file does not import lib/i18n
 		}
 		rel, rerr := filepath.Rel(root, p)
 		if rerr != nil {
@@ -105,7 +105,7 @@ func Dir(root string) ([]Call, error) {
 			}
 			found, cerr := parseCall(fset, call, pkg, rel)
 			if cerr != nil {
-				out = append(out, Call{Msg: "", Where: cerr.Error()}) // 见下面的约定
+				out = append(out, Call{Msg: "", Where: cerr.Error()}) // see the convention below
 				return true
 			}
 			if found != nil {
@@ -255,7 +255,7 @@ func compositeKeys(e ast.Expr) []string {
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
-			return nil // 位置写法：拿不到名字，交给上层按「没有实参」处理
+			return nil // positional form: no names available; the caller treats it as "no arguments"
 		}
 		key, ok := kv.Key.(*ast.BasicLit)
 		if !ok || key.Kind != token.STRING {
@@ -278,7 +278,7 @@ func Messages(calls []Call) map[string]Call {
 	out := make(map[string]Call, len(calls))
 	for _, c := range calls {
 		if c.Msg == "" {
-			continue // 扫描时记下的错误，交给调用方单独报
+			continue // an error recorded during the scan is reported separately by the caller
 		}
 		if _, seen := out[c.Msg]; !seen {
 			out[c.Msg] = c

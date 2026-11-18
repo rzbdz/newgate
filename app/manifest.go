@@ -128,7 +128,7 @@ func (s Selection) Load() ([]modules.Component, error) {
 		}
 		for _, e := range core {
 			if _, serves := servesCompositionRoot(e.Component); serves {
-				continue // 关不掉的那个不在「可关的」里面
+				continue // the one that cannot be turned off is not among the "turnable off"
 			}
 			off[e.Dir] = true
 		}

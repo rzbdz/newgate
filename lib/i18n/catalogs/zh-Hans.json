@@ -143,6 +143,18 @@
     "{name} did not claim": {
       "reviewed": true,
       "text": "{name} 未认领"
+    },
+    "catalog: delivered {count} components to {name} (port {port})": {
+      "reviewed": true,
+      "text": "catalog：已向 {name}（端口 {port}）交付 {count} 个组件"
+    },
+    "catalog: {name} (port {port}) panicked in SetCatalog: {err} — delivery skipped; the graph is still up": {
+      "reviewed": true,
+      "text": "catalog：{name}（端口 {port}）在 SetCatalog 里 panic 了：{err} —— 跳过这次交付，图照常运行"
+    },
+    "graph: port {port} has {count} providers in start order: {providers} — Get returns the first; use GetAll for the rest": {
+      "reviewed": true,
+      "text": "graph：端口 {port} 在启动顺序上有 {count} 个提供者：{providers} —— Get 取第一个，其余用 GetAll"
     }
   },
   "meta": {

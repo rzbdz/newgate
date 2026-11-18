@@ -302,7 +302,7 @@ func (p *Plan) AllProviders() map[string][]string {
 // edge, see component.Optional).
 type Dependency struct {
 	Capability string
-	ProvidedBy string // 空 = 这次装配里没人提供（Optional 的常见下场）
+	ProvidedBy string // empty = nobody provides it in this assembly (the usual fate of an Optional)
 	Optional   bool
 }
 

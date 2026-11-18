@@ -60,9 +60,9 @@ const (
 
 // module is one component directory to be assembled.
 type module struct {
-	dir   string // modules/ 下的目录名，用于日志与查重
-	path  string // 相对 go/ 的 import 路径后缀（`modules/foo`）
-	alias string // 生成的 import 别名，统一前缀避免与局部变量撞名
+	dir   string // the directory name under modules/, for logs and duplicate checks
+	path  string // import path suffix relative to the module root (`modules/foo`)
+	alias string // the generated import alias; one prefix keeps it off local names
 }
 
 func main() {

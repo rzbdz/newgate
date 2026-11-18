@@ -168,6 +168,6 @@ func jsonNames(fsys fs.FS, dir string) ([]string, error) {
 			names = append(names, e.Name())
 		}
 	}
-	sort.Strings(names) // 目录序与文件系统有关，排序保证结果稳定
+	sort.Strings(names) // directory order depends on the file system; sorting keeps results stable
 	return names, nil
 }

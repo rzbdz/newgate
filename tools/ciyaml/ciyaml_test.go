@@ -13,10 +13,10 @@ func write(t *testing.T, name, body string) string {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".github", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("建目录: %v", err)
+		t.Fatalf("mkdir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-		t.Fatalf("写文件: %v", err)
+		t.Fatalf("write file: %v", err)
 	}
 	return root
 }
@@ -30,7 +30,7 @@ on:
 
 jobs:
   static:
-    name: 静态检查
+    name: static checks
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -42,7 +42,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: 单测
+      - name: unit tests
         run: GOPROXY=off go test ./...
 `
 
@@ -53,7 +53,7 @@ func TestAcceptsAValidWorkflow(t *testing.T) {
 	}
 	if len(got) != 0 {
 		for _, f := range got {
-			t.Errorf("合法文件被误报: %s", f)
+			t.Errorf("a valid file was reported as broken: %s", f)
 		}
 	}
 }
@@ -73,7 +73,7 @@ jobs:
 
       - name: opencode e2e
 
-      - name: Claude Code 侧端到端
+      - name: Claude Code end to end
         run: bash mock/e2e_claude.sh
 `
 	got, err := Check(write(t, "ci.yml", broken))
@@ -82,7 +82,7 @@ jobs:
 	}
 	assertOne(t, got, "has neither run nor uses")
 	if !strings.Contains(got[0].String(), "opencode e2e") {
-		t.Errorf("should name that step，实际：%s", got[0])
+		t.Errorf("should name that step, got: %s", got[0])
 	}
 	if got[0].Line != 10 {
 		t.Errorf("line = %d, want 10：%s", got[0].Line, got[0])
@@ -111,7 +111,7 @@ jobs:
 	// Both must be reported: the one under `defaults:` (as in the incident) and the one in the
 	// step. Missing one of them means the check only recognized position, not shape.
 	if len(got) != 2 {
-		t.Fatalf("both empty values must be reported，实际 %d 条: %v", len(got), got)
+		t.Fatalf("both empty values must be reported, got %d: %v", len(got), got)
 	}
 	for _, f := range got {
 		if !strings.Contains(f.String(), "empty value") {
@@ -157,14 +157,14 @@ func TestCatchesNoJobsAndTabs(t *testing.T) {
 // **error**, not return "zero problems" -- that looks exactly like "checked, all clean".
 func TestDegeneratesLoudly(t *testing.T) {
 	if _, err := Check(t.TempDir()); err == nil {
-		t.Fatal("没有 .github/workflows 时应该报错，而不是安静地返回零条")
+		t.Fatal("with no .github/workflows it must error instead of quietly returning zero findings")
 	}
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Check(root); err == nil {
-		t.Fatal("目录是空的时应该报错，而不是安静地返回零条")
+		t.Fatal("an empty directory must error instead of quietly returning zero findings")
 	}
 }
 
@@ -185,6 +185,6 @@ func assertOne(t *testing.T, got []Finding, fragments ...string) {
 		}
 	}
 	if hits != 1 {
-		t.Fatalf("想要恰好一条含 %q 的 finding，实际 %d 条：%v", fragments, hits, got)
+		t.Fatalf("want exactly one finding containing %q, got %d: %v", fragments, hits, got)
 	}
 }

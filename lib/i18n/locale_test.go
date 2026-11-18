@@ -30,7 +30,7 @@ func testZh() Catalog {
 		Messages: map[string]Entry{
 			"Proxy": {Text: "代理"},
 			"An external file {names} is still in {dir}": {Text: "同名外部文件仍在 {dir}：{names}"},
-			"Saved {n} file": {Other: "已保存 {n} 个文件"}, // 中文不分单复数
+			"Saved {n} file": {Other: "已保存 {n} 个文件"}, // Chinese does not inflect for number
 			// "Only in the source language" is deliberately not translated: verifies the fallback
 		},
 	}
@@ -76,11 +76,11 @@ func TestMatch(t *testing.T) {
 		"zh-TW":       "zh-Hant",
 		"zh-HK":       "zh-Hant",
 		"zh-Hans":     "zh-Hans",
-		"zh":          "zh-Hans", // 裸 zh 按简体
+		"zh":          "zh-Hans", // a bare zh means simplified
 		"zh-Hant-HK":  "zh-Hant",
 		"en-US":       "en",
 		"en":          "en",
-		"fr-FR":       "", // 没翻法语 → 交给上层回退到源语言
+		"fr-FR":       "", // no French -> the layer above falls back to the source
 		"C":           "",
 		"":            "",
 	}
@@ -126,7 +126,7 @@ func TestTranslationAndFallback(t *testing.T) {
 func TestPlaceholders(t *testing.T) {
 	install(t, "zh-Hans")
 	got := T("An external file {names} is still in {dir}", A{"dir": "/usr/local/bin", "names": "claude"})
-	want := "同名外部文件仍在 /usr/local/bin：claude" // 语序与英文不同，具名占位符才做得到
+	want := "同名外部文件仍在 /usr/local/bin：claude" // word order differs from English; only named placeholders allow it
 	if got != want {
 		t.Errorf("named placeholder substituted wrong:\n got %q\nwant %q", got, want)
 	}

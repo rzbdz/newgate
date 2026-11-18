@@ -71,7 +71,7 @@ func runTranslate(args []string, name string) error {
 	var orphans []string
 	for _, msg := range i18n.SortedKeys(fresh.Messages) {
 		if e, ok := cat.Messages[msg]; ok && !e.Empty() {
-			continue // 已有译文（人写的或机翻过的）一律不动
+			continue // an existing translation (human or machine) is never touched
 		}
 		if *onlyKey != "" && msg != *onlyKey {
 			continue

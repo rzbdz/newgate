@@ -47,24 +47,24 @@ var _ = i18n.T("a message of theirs", nil)
 	}
 	msgs := Messages(calls)
 	if _, ok := msgs["a message of ours"]; !ok {
-		t.Error("自己家的消息没扫到")
+		t.Error("our own message was not scanned")
 	}
 	if _, ok := msgs["a message of theirs"]; ok {
-		t.Error("扫进了嵌套的 Go module（别人家的消息进了我们的账本）")
+		t.Error("it scanned into a nested Go module (someone else's messages entered our ledger)")
 	}
 
 	// The same rule must govern the Chinese count too -- the two criteria must measure the same
 	// tree.
 	if !SkipDir(root, filepath.Join(root, "core")) {
-		t.Error("嵌套 module 该被跳过")
+		t.Error("a nested module must be skipped")
 	}
 	if SkipDir(root, root) {
-		t.Error("根目录自己没有 go.mod 判据之外的豁免——跳过它会让扫描扫出空结果")
+		t.Error("the root has no exemption outside the go.mod criterion -- skipping it would leave the scan empty")
 	}
 	if !SkipDir(root, filepath.Join(root, "vendor")) {
-		t.Error("vendor 该被跳过")
+		t.Error("vendor must be skipped")
 	}
 	if got := strings.Join(Problems(calls), "\n"); got != "" {
-		t.Errorf("这份夹具里没有坏调用，却报了出来:\n%s", got)
+		t.Errorf("this fixture has no broken call, yet it was reported:\n%s", got)
 	}
 }

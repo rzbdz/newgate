@@ -64,10 +64,10 @@ const (
 // os.Environ and link-time variables. Modules must not read os.Args themselves -- doing so
 // would copy "how the process was invoked" once more, which is exactly why this package exists.
 type Process struct {
-	Argv0      string   // os.Args[0] 的 basename（去 .exe）：`newgate` / `claude` / `newgate-ds`
+	Argv0      string   // basename of os.Args[0] (no .exe): `newgate` / `claude` / `newgate-ds`
 	Args       []string // os.Args[1:]
-	Env        []string // os.Environ() 的原样副本
-	Version    string   // 链接期注入；`dev` 表示未注入
+	Env        []string // a verbatim copy of os.Environ()
+	Version    string   // injected at link time; `dev` means nothing was injected
 	BuildTime  string
 	CommitTime string
 }
