@@ -16,9 +16,11 @@
 package scan
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,6 +34,12 @@ import (
 func Dirs(componentsDir string) ([]string, error) {
 	entries, err := os.ReadDir(componentsDir)
 	if err != nil {
+		// A missing directory means "no modules", not "the scan broke": the kernel ships
+		// none (2026-11-18), so modules/ may legitimately be absent. Anything else (permission,
+		// I/O) is still an error.
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var out []string

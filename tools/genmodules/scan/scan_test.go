@@ -1,6 +1,9 @@
 package scan
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // Ident is the only implementation of the "directory name -> import alias" criterion, used by
 // the generators of both repositories. The first two rows are the kernel's own directory names
@@ -20,5 +23,18 @@ func TestIdentManglesDirectoryNames(t *testing.T) {
 		if got := Ident(c.prefix, c.dir); got != c.want {
 			t.Errorf("Ident(%q, %q) = %q，想要 %q", c.prefix, c.dir, got, c.want)
 		}
+	}
+}
+
+// TestDirsToleratesAMissingDirectory: the kernel ships no modules, so modules/ may simply not
+// exist. That is "no components", not a broken scan — but a permission or I/O error must still
+// surface, which is why the function does not swallow every error.
+func TestDirsToleratesAMissingDirectory(t *testing.T) {
+	dirs, err := Dirs(filepath.Join(t.TempDir(), "does-not-exist"))
+	if err != nil {
+		t.Fatalf("a missing modules/ should mean no modules, got: %v", err)
+	}
+	if len(dirs) != 0 {
+		t.Fatalf("expected no directories, got %v", dirs)
 	}
 }
