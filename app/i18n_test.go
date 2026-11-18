@@ -13,7 +13,7 @@ import (
 // step, and that step blocks "forgot to run it"; this one blocks "ran it but nobody looked at
 // the output" -- it makes local `go test ./...` raise problems like "the ledger is stale /
 // placeholders do not line up / orphan translations / a Chinese string literal has appeared in
-// the source again". The same approach as app/modules_gen_test.go takes for genmodules.
+// the source again" -- it is one of the generated artifacts `make generate` rebuilds.
 //
 // The rule set when i18n was added on 2026-09-20: **user-visible text in non-test Go source
 // always goes through i18n.T("English", ...)**, and Chinese lives only in the translation

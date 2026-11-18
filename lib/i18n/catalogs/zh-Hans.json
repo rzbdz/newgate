@@ -20,34 +20,6 @@
       "reviewed": true,
       "text": "装配完成：{count} 个组件，用时 {took}"
     },
-    "assembly selection: AllCore and Disable were both given ({list}) — the former already contains the latter. Keep only AllCore to have both; leave AllCore out to disable just a few": {
-      "reviewed": true,
-      "text": "装配选择：AllCore 与 Disable 同时给了（{list}）——前者已经包含后者。两个都要就只留 AllCore；只想关掉其中几个就别写 AllCore"
-    },
-    "assembly selection: an Extra component has no directory name (component name \"{name}\") — the directory name is what disables it and what names it in errors": {
-      "reviewed": true,
-      "text": "装配选择：Extra 里有一个没写目录名的组件（组件名 \"{name}\"）——目录名是关掉它、以及报错时说清是谁的凭据"
-    },
-    "assembly selection: component \"{name}\" is installed twice (from {first} and {second}) — two components with the same name only fail at graph build time": {
-      "reviewed": true,
-      "text": "装配选择：组件 \"{name}\" 装了两次（{first} 与 {second}）——同名的两个组件会让这次装配在构图期才失败"
-    },
-    "assembly selection: disable names \"{dir}\" (component {name}), but it provides the port {port} that the composition root itself needs — turn it off and nothing in the process can answer \"who claims this call\". What makes it unremovable is not a list, it is the composition root's own dependency (see compositionRootPorts)": {
-      "reviewed": true,
-      "text": "装配选择：disable 点名了 \"{dir}\"（组件 {name}），但它提供了组合根自己要用的端口 {port}——关掉它，进程就没有任何东西能回答「这次调用归谁」了。它摘不掉这件事不是一张名单说了算，而是组合根自己的依赖说了算（见 compositionRootPorts）"
-    },
-    "assembly selection: disable names \"{dir}\", but neither the kernel nor your own table has this module (did you write the directory name? e.g. my_module, not my-module; use AllCore to turn everything off)": {
-      "reviewed": true,
-      "text": "装配选择：disable 点名了 \"{dir}\"，但内核与自己都没有这个模块（写的是**目录名**吗？比如 my_module 而不是 my-module；要关掉全部请用 AllCore）"
-    },
-    "assembly selection: disable names \"{dir}\", but that is a module from Extra — Extra is the table you supplied yourself, so leave it out if you do not want it (disable only turns off kernel modules; listing it here has no effect, and you probably think it did)": {
-      "reviewed": true,
-      "text": "装配选择：disable 点名了 \"{dir}\"，但那是 Extra 里的模块——Extra 是你自己交上来的表，不想装就别把它列进去（disable 只用来关掉内核自带的模块；列在这里是**没有效果**的，而你多半以为它关掉了）"
-    },
-    "assembly selection: not a single component (did disable turn off every kernel module?) — an empty graph only looks like a broken command": {
-      "reviewed": true,
-      "text": "装配选择：一个组件都没有（disable 把内核模块全关掉了？）——空图跑起来只会让人以为命令坏了"
-    },
     "assembly: loader {index} failed: {err}": {
       "reviewed": true,
       "text": "装配：第 {index} 个 loader 报错：{err}"
@@ -99,6 +71,10 @@
     "no entry claimed this call (asked: {chain})": {
       "reviewed": true,
       "text": "没有任何入口认领这次调用（问过：{chain}）"
+    },
+    "nobody provides the entry ledger ({port}) — this assembly has no module that can claim a call": {
+      "reviewed": true,
+      "text": "没有人提供入口账本（{port}）—— 这个装配里没有一个模块能认领调用"
     },
     "start {index}/{total} {name} done (took {took})": {
       "reviewed": true,

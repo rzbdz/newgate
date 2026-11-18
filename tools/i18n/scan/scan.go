@@ -1,7 +1,7 @@
 // Package scan is the **only implementation** of the "which messages in the source are
 // translatable" criterion.
 //
-// Why it is its own package (same reasoning as tools/genmodules/scan): the kernel and the
+// Why it is its own package (the same reasoning the module scanner had): the kernel and the
 // distribution each have a `tools/i18n` (the distribution gets this package through replace),
 // and the two must use the same ruler -- otherwise the same call site would count as two
 // messages in the two repositories, or be counted in one and not in the other.

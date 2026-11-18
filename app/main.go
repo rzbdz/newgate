@@ -76,7 +76,19 @@ func Main(ctx context.Context, opts Options) int {
 	// The first log line: **who this invocation routes to**. It is the only record
 	// of "I typed newgate, why did another shell start" — the criterion is declared
 	// by modules, not guessed here.
-	registry := modules.MustGet(built.Context(), entry.Capability)
+	//
+	// The entry ledger is the composition root's **own dependency**, so "nobody provides it" is
+	// this package's problem, said in this package's words: an assembly without it cannot answer
+	// the one question a process exists to answer. It is not a list of unremovable modules
+	// (deleted 2026-11-18, when the kernel stopped shipping a module table) — it is the only Get
+	// the root performs, and it says "I cannot start" instead of panicking.
+	registry, ok := modules.Get(built.Context(), entry.Capability)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "newgate:", i18n.T(
+			"nobody provides the entry ledger ({port}) — this assembly has no module that can claim a call",
+			i18n.A{"port": modules.Name(entry.Capability)}))
+		return 70
+	}
 	handler, why, ok := registry.Resolve(p)
 	if !ok {
 		fmt.Fprintln(os.Stderr, "newgate: "+why)

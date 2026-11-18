@@ -3,7 +3,7 @@
 //
 // Its only reason to exist is that the kernel can be built and tested on its own.
 // **It is not a product**: a real binary installs a graph chosen by a distribution
-// (another Go module that depends on this one and passes app.Selection). Running
+// (another Go module that depends on this one and passes its own loader). Running
 // this build serves nothing — literally: there is no gateway, no CLI, no data
 // plane, because the kernel ships none (2026-11-18).
 //

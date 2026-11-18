@@ -18,7 +18,7 @@ import (
 // is 31µs (0.5%).
 //
 // So: `tools/i18n bundle` compiles catalogs/*.json into this format at generation time (checked
-// into version control, `-check` blocks staleness, the same path as manifest/modules_gen.go),
+// into version control, `-check` blocks staleness),
 // and at runtime `Builtin()` reads it directly. **JSON is still the only truth** -- people edit
 // JSON, tools read and write JSON, and this format is a pure derivative that can be deleted and
 // regenerated at any time.

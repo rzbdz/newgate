@@ -21,7 +21,7 @@ import (
 // The check is mechanical, and lives in app/direction_test.go:
 //
 //	command grep -rn '"github.com/rzbdz/newgate/modules' app/*.go
-//	→ only the modules_gen.go line is allowed (the build-time generated assembly list)
+//	→ no line allowed (the one exception, the shared leaf config/paths, is not a dependency)
 //
 // # How it hands over this invocation
 //
@@ -39,8 +39,8 @@ type App struct{ manager *modules.Manager }
 // commonly write "if opts.Loader is nil use the default", and catching it here is better than
 // every caller catching it itself.
 //
-// Passing your own loader is the front door for **a consumer group's own graph** (see
-// Selection): the composition root knows no modules, only "who handed me which components".
+// Passing your own loader is the front door for **a consumer group's own graph**: the
+// composition root knows no modules, only "who handed me which components, in what order".
 func New(ctx context.Context, loaders ...modules.Loader) (*App, error) {
 	live := make([]modules.Loader, 0, len(loaders))
 	for _, l := range loaders {

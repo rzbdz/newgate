@@ -127,7 +127,7 @@ func parseEntry(raw json.RawMessage) (Entry, error) {
 }
 
 // MarshalCatalog renders a catalog file (keys sorted: random map iteration order would make
-// every generated diff wobble, same reasoning as tools/genmodules).
+// every generated diff wobble, same reasoning as the catalogs).
 func MarshalCatalog(c Catalog) ([]byte, error) {
 	f := fileJSON{
 		Meta:     metaJSON{Language: c.Language, Source: c.Source, Widths: c.Widths},

@@ -24,41 +24,6 @@
         "took"
       ]
     },
-    "assembly selection: AllCore and Disable were both given ({list}) — the former already contains the latter. Keep only AllCore to have both; leave AllCore out to disable just a few": {
-      "args": [
-        "list"
-      ]
-    },
-    "assembly selection: an Extra component has no directory name (component name \"{name}\") — the directory name is what disables it and what names it in errors": {
-      "args": [
-        "name"
-      ]
-    },
-    "assembly selection: component \"{name}\" is installed twice (from {first} and {second}) — two components with the same name only fail at graph build time": {
-      "args": [
-        "first",
-        "name",
-        "second"
-      ]
-    },
-    "assembly selection: disable names \"{dir}\" (component {name}), but it provides the port {port} that the composition root itself needs — turn it off and nothing in the process can answer \"who claims this call\". What makes it unremovable is not a list, it is the composition root's own dependency (see compositionRootPorts)": {
-      "args": [
-        "dir",
-        "name",
-        "port"
-      ]
-    },
-    "assembly selection: disable names \"{dir}\", but neither the kernel nor your own table has this module (did you write the directory name? e.g. my_module, not my-module; use AllCore to turn everything off)": {
-      "args": [
-        "dir"
-      ]
-    },
-    "assembly selection: disable names \"{dir}\", but that is a module from Extra — Extra is the table you supplied yourself, so leave it out if you do not want it (disable only turns off kernel modules; listing it here has no effect, and you probably think it did)": {
-      "args": [
-        "dir"
-      ]
-    },
-    "assembly selection: not a single component (did disable turn off every kernel module?) — an empty graph only looks like a broken command": {},
     "assembly: loader {index} failed: {err}": {
       "args": [
         "err",
@@ -124,6 +89,11 @@
     "no entry claimed this call (asked: {chain})": {
       "args": [
         "chain"
+      ]
+    },
+    "nobody provides the entry ledger ({port}) — this assembly has no module that can claim a call": {
+      "args": [
+        "port"
       ]
     },
     "start {index}/{total} {name} done (took {took})": {

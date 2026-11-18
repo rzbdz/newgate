@@ -24,8 +24,8 @@ import (
 //     the distribution appeared in the kernel**, and "the kernel does not depend on the
 //     distribution" is the very definition of this layering.
 //
-// Now the distribution is a separate Go module that hands its own table to app.Selection (see
-// manifest.go). This test pins down "that thing must not come back" -- it governs the
+// Now the distribution is a separate Go module that hands its own table to
+// app.Options.Loader. This test pins down "that thing must not come back" -- it governs the
 // mechanism, not the words: comments that explain this history may stay (those comments are
 // exactly what keeps the next person from re-inventing it).
 func TestKernelCarriesNoDistributionMachinery(t *testing.T) {
@@ -40,7 +40,7 @@ func TestKernelCarriesNoDistributionMachinery(t *testing.T) {
 	pin := filepath.Join(repoRoot, "modules-ext.json")
 	if _, err := os.Stat(pin); err == nil {
 		t.Errorf("%s has appeared again. The kernel must not declare \"which distribution to use\" -- which modules to install is the distribution's own business, "+
-			"it hands the table to the composition root via app.Selection; Pin belongs to the distribution repository", pin)
+			"it hands the table to the composition root via app.Options.Loader; Pin belongs to the distribution repository", pin)
 	}
 
 	// 2. The mechanism in code: import path, package name, two environment variables.

@@ -11,11 +11,8 @@ import (
 // The composition root **knows no module** -- this law is a test today, not a comment.
 //
 // The check is mechanical: the non-test sources of `app/*.go` must not contain any import of
-// `github.com/rzbdz/newgate/modules/...`, except two places that are **not dependencies**:
+// `github.com/rzbdz/newgate/modules/...`, except one place that is **not a dependency**:
 //
-//   - `modules_gen.go`: the assembly list generated at build time by tools/genmodules. The list
-//     has to live somewhere, and the composition root is the only place it belongs (every
-//     module it references is named once, and no method is called on any of them).
 //   - `modules/config/paths`: a **shared leaf**, which anyone may import directly (spelled out
 //     in the layering table of docs/03); it describes "what the configuration looks like on
 //     disk", not "how some module works". It is used here to decide which file the assembly log
@@ -44,12 +41,6 @@ func TestTheCompositionRootNamesNoModule(t *testing.T) {
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		// The whole generated file is skipped: what it lists is every module name, which is **the
-		// result of a build-time scan**, a different thing from "the composition root knows a module"
-		// (it calls no method).
-		if name == "modules_gen.go" {
 			continue
 		}
 		body, err := os.ReadFile(filepath.Join(root, name))

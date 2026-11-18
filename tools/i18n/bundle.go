@@ -19,7 +19,7 @@ import (
 // It is a **derivation** step: JSON is the only truth, people edit JSON, tools read and write
 // JSON, and this copy can be deleted and regenerated at any time. It is still committed to
 // version control so that `-check` can block "edited the JSON, forgot to regenerate" -- the
-// same path as manifest/modules_gen.go (generated artifacts in the repo + CI validation).
+// same path as any other generated artifact in the repo (committed + CI validation).
 func cmdBundle(args []string) error {
 	fs := flag.NewFlagSet("bundle", flag.ExitOnError)
 	c := commonFlags(fs)
