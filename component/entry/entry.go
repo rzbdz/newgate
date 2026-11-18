@@ -96,12 +96,18 @@ type Registry interface {
 type Table struct {
 	mu       sync.Mutex
 	handlers []registration
+	// next is a monotonic token, never a slice index: releasing an entry and then
+	// registering another used to hand the new one a recycled seq, so the new
+	// entry's Release deleted the wrong handler (register A, register B, release A,
+	// register C → C's seq collides with B's). component.Registry[T] was built with
+	// a counter for exactly this reason; this ledger predates it.
+	next uint64
 }
 
 type registration struct {
 	handler Handler
 	rank    int
-	seq     int
+	seq     uint64
 }
 
 var _ Registry = (*Table)(nil)
@@ -122,7 +128,8 @@ func (t *Table) Register(h Handler, rank int) (component.Release, error) {
 			return nil, errDuplicate(h.Name())
 		}
 	}
-	reg := registration{handler: h, rank: rank, seq: len(t.handlers)}
+	t.next++
+	reg := registration{handler: h, rank: rank, seq: t.next}
 	t.handlers = append(t.handlers, reg)
 	t.sortLocked()
 	return func() error {
