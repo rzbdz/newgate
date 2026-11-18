@@ -6,27 +6,33 @@ import (
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
-// Entry 是一个组件在**装配清单里的身份**：目录名 + 组件定义。
+// Entry is a component's **identity in the assembly list**: directory name + component
+// definition.
 //
-// 为什么身份是目录名而不是组件名：目录名是「装哪个 / 关哪个」的键。发行版规格书
-// 里 disable 写的就是目录名（发行版有 `claudecode_deepseek`），而组件名不必与它相同
-// （`claudecode-deepseek`）。按组件名去关会**静默关不掉**（名字没对上，谁也不会
-// 报错），所以键从扫描来（tools/genmodules 扫的就是目录名），这里原样带着。
-// 内核这一侧今天恰好个个同名——巧合，不是规矩。
+// Why the identity is the directory name and not the component name: the directory name is the
+// key for "install which / disable which". The distribution spec writes directory names in
+// disable (the distribution has `claudecode_deepseek`), and the component name need not match
+// it (`claudecode-deepseek`). Disabling by component name **silently fails** (the names do not
+// match and nobody reports an error), so the key comes from the scan (tools/genmodules scans
+// directory names) and is carried here as-is. On the kernel side everything happens to share
+// the same name today -- a coincidence, not a rule.
 type Entry struct {
 	Dir       string
 	Component modules.Component
 }
 
-// CoreModules 返回**内核自带的全部组件**，按目录名排序；实现落在构建期生成的
-// modules_gen.go 里。
+// CoreModules returns **all components shipped with the kernel**, sorted by directory name; the
+// implementation lives in the build-time generated modules_gen.go.
 //
-// 为什么要有这个出口：组合根的装配逻辑留在内核，但「装哪些」从 2026-09-20 起是
-// **消费者的事**（发行版装它自己的模块，并按需关掉内核的几个）。消费者需要一张
-// 带身份的表——只给一串裸组件就没法按目录名关，也没法在装配前校验名字拼错了。
+// Why this exit exists: the assembly logic of the composition root stays in the kernel, but
+// "which ones to install" has been **the consumer's business** since 2026-09-20 (a distribution
+// installs its own modules and turns off a few kernel ones as needed). The consumer needs a
+// table with identity -- a bare list of components cannot be disabled by directory name, and a
+// typo cannot be validated before assembly.
 //
-// 实现必须是生成物：app 的非测试源码不许 import 任何业务模块（见 direction_test.go），
-// 而这份清单列的就是全部模块名——modules_gen.go 是它唯一合法的住处。
+// The implementation must be generated: non-test sources in app must not import any business
+// module (see direction_test.go), and this list names every module -- modules_gen.go is its
+// only legal home.
 func CoreModules() []Entry { return coreTable() }
 
 // coreTable is the swappable view over the generated table.
@@ -44,45 +50,56 @@ func swapCoreEntries(replace func() []Entry) func() {
 	return func() { coreTable = prev }
 }
 
-// Selection 是**由消费者决定**的一组组件：内核自带的减去关掉的、加上 Extra。
+// Selection is a set of components **decided by the consumer**: the kernel's own minus the
+// disabled, plus Extra.
 //
-// 发行版就是拿它把自己的模块交给内核的组合根：
+// The distribution uses it to hand its own modules to the kernel's composition root:
 //
 //	app.Main(ctx, app.Options{Loader: app.Selection{
-//	    Disable: []string{"cli"},                       // 关掉内核的界面
+//	    Disable: []string{"cli"},                       // disable the kernel's UI
 //	    Extra:   []app.Entry{{Dir: "simple-cli", Component: simplecli.New()}},
 //	}})
 //
-// 内核侧零改动：组合根仍然不认识任何模块，它只认识这张表。
+// Zero change on the kernel side: the composition root still knows no module, only this table.
 type Selection struct {
-	// AllCore 关掉**内核自带的全部可关模块**——「这个发行版只要框架 + 我自己的模块」。
+	// AllCore disables **every disableable module shipped with the kernel** -- "this distribution
+	// wants only the framework + my own modules".
 	//
-	// 为什么是一个字段，而不是让 Disable 把目录名列满：列满的写法有两份代价，而且
-	// 都是静默的。其一是**名单会腐坏**——它与 CoreModules() 是两个副本，内核加一个
-	// 模块时那份名单不会跟着长，于是「我以为全关掉了」的发行版悄悄多装了一个模块。
-	// 其二是它把一句话能说清的产品决定写成了十几行数据（骨架发行版就是这样）。
-	// AllCore 表达的是「内核自带的都不要」，它跟着 CoreModules() 一起长。
+	// Why a field rather than making Disable list every directory: the exhaustive spelling costs
+	// two things, and both are silent. First, **the list rots** -- it is a second copy of
+	// CoreModules(), so when the kernel adds a module the list does not grow with it, and a
+	// distribution that "thought it turned everything off" quietly installs one more. Second, it
+	// turns a product decision that fits in one sentence into a dozen lines of data (the skeleton
+	// distribution is that). AllCore says "none of the kernel's own", and it grows together with
+	// CoreModules().
 	//
-	// 「可关的」是关键词：组合根自己要用的那个端口（入口账本）**谁提供谁就关不掉**，
-	// AllCore 也关不掉它——否则一个发行版能把自己变成一个没人能回答「这次调用归谁」
-	// 的二进制。这不是例外，那就是「可关」的定义边界（见 compositionRootPorts）。
+	// "Disableable" is the key word: the port the composition root itself needs (the entry ledger)
+	// **cannot be disabled by whoever provides it**, and AllCore cannot disable it either --
+	// otherwise a distribution could turn itself into a binary where nobody can answer "who owns
+	// this invocation". That is not an exception; it is the boundary of the definition of
+	// "disableable" (see compositionRootPorts).
 	//
-	// 与 Disable 同时给会报错：那两个说法是同一件事（那些名字本来就在 AllCore 里）。
+	// Giving it together with Disable is an error: the two say the same thing (those names are
+	// already inside AllCore).
 	AllCore bool
-	// Disable 是要关掉的内核模块，写**目录名**。名字必须点得中——点不中就报错。
+	// Disable is the kernel module to turn off, written as the **directory name**. The name must
+	// match -- a miss is an error.
 	//
-	// 要关掉全部请用 AllCore（规格书里写 `"disable": ["*"]`，见 tools/distgen）。
+	// To turn everything off use AllCore (write `"disable": ["*"]` in the spec, see
+	// tools/distgen).
 	Disable []string
-	// Extra 是消费者自己的模块，形态与内核模块完全一致（目录名 + New()）。
+	// Extra is the consumer's own modules, identical in shape to kernel modules (directory name +
+	// New()).
 	Extra []Entry
 }
 
-// Load 实现 modules.Loader。
+// Load implements modules.Loader.
 //
-// 这里每一条拒绝都是响亮的，理由是同一条：**这一层的错全会伪装成别的问题**。
-// 一个拼错的 disable 名字看起来和「关掉了」一模一样（实际是「我以为关了，它还在
-// 跑」）；一次重复装配要到构图期才以一句 `duplicate component` 出现，那时离
-// 「我在清单里多写了一份」已经很远了。
+// Every rejection here is loud, for the same reason: **mistakes at this layer all disguise
+// themselves as other problems**. A misspelled disable name looks exactly like "turned off" (in
+// fact it is "I thought it was off, it is still running"); a duplicate assembly only shows up
+// at graph-construction time as `duplicate component`, by which point it is far from "I wrote
+// one extra entry in the list".
 func (s Selection) Load() ([]modules.Component, error) {
 	core := CoreModules()
 	known := make(map[string]Entry, len(core))
@@ -101,8 +118,9 @@ func (s Selection) Load() ([]modules.Component, error) {
 
 	off := make(map[string]bool, len(core))
 	if s.AllCore {
-		// 两个说法说同一件事时必须报错，不能取并集：那样 `AllCore` 与一长串
-		// Disable 会同时存在，而后者是前者的过时副本——正是这个字段要消掉的东西。
+		// When two spellings say the same thing it must be an error, not a union: otherwise `AllCore`
+		// and a long list of Disable would both exist, and the latter is a stale copy of the former
+		// -- exactly what this field exists to remove.
 		if len(s.Disable) > 0 {
 			return nil, i18n.E("assembly selection: AllCore and Disable were both given "+
 				"({list}) — the former already contains the latter. Keep only AllCore to "+
@@ -141,7 +159,8 @@ func (s Selection) Load() ([]modules.Component, error) {
 		off[dir] = true
 	}
 
-	// 顺序不是依赖声明：真实启动顺序由 capability 依赖图在构图期算（见 package 注释）。
+	// The order is not a dependency declaration: the real start order is computed from the
+	// capability graph at graph-construction time (see the package comment).
 	out := make([]modules.Component, 0, len(core)+len(s.Extra))
 	owner := make(map[string]string, len(core)+len(s.Extra))
 	add := func(dir string, c modules.Component) error {
@@ -175,24 +194,31 @@ func (s Selection) Load() ([]modules.Component, error) {
 	return out, nil
 }
 
-// compositionRootPorts 是**组合根自己要用的端口**：它起完图之后必须拿到的那些。
+// compositionRootPorts are **the ports the composition root itself needs**: the ones it must
+// get once the graph is up.
 //
-// 今天只有一个——入口申报账本（app.Main 起完图第一件事就是问它「这次调用归谁」）。
-// 这不是一张「不可摘模块的名单」，而是本包自己的依赖清单：谁提供这些端口，谁就
-// 摘不掉（见 Load），因为摘掉它等于组合根拿不到自己活着需要的东西。
+// There is only one today -- the entry declaration ledger (the first thing app.Main does after
+// the graph is up is ask it "who owns this invocation"). This is not a "list of modules that
+// cannot be removed" but this package's own dependency list: whoever provides these ports
+// cannot be removed (see Load), because removing it means the composition root cannot get what
+// it needs to stay alive.
 //
-// 边界必须在**这个**方向：机制不认模块名。2026-09-20 之前这里写的是
-// `case dir == "root"`——「哪个模块不可摘」于是被硬编码进内核一次、又被模块自己
-// 用 `Type = builtin` 声明了一次，两处说的是同一件事却各说各的，改一处不会让
-// 另一处红。现在只有一个说法（组合根的依赖），Type 那个标记只剩摘除矩阵在用。
+// The boundary must be in **this** direction: the mechanism does not know module names. Before
+// 2026-09-20 this said `case dir == "root"` -- "which module cannot be removed" was thus
+// hardcoded into the kernel once, and declared once more by the module itself with
+// `Type = builtin`; the two places said the same thing in their own ways, and changing one
+// would not make the other go red. Now there is only one statement (the composition root's
+// dependency), and the Type marker is only used by the removal matrix.
 //
-// 它也必须**短**：这个列表每长一条，模块的可替换性就少一分。能不加就不加。
+// It must also stay **short**: every entry added here costs a bit of module replaceability. Do
+// not add unless you must.
 func compositionRootPorts() []string {
 	return []string{modules.Name(entry.Capability)}
 }
 
-// servesCompositionRoot 报告组件是否提供了组合根自己要用的端口；是的话连同
-// 端口名一起返回（报错要用它点名「缺的是哪东西」，而不是「哪个模块」）。
+// servesCompositionRoot reports whether a component provides a port the composition root itself
+// needs; if so it returns the port name along with it (errors use it to name "what is missing",
+// not "which module").
 func servesCompositionRoot(c modules.Component) (string, bool) {
 	for _, provision := range c.Provides {
 		for _, port := range compositionRootPorts() {

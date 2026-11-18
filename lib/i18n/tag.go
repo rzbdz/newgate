@@ -2,18 +2,21 @@ package i18n
 
 import "strings"
 
-// 语言标签的归一化与匹配。
+// Normalization and matching of language tags.
 //
-// 为什么要自己写这二十行：环境变量里的语言有太多写法——`zh_CN.UTF-8`、
-// `zh-CN`、`zh`、`C`、`POSIX`、空值、`en_US.utf8`。拿它们直接当 map 键去查，
-// 中文用户会因为一个 `.UTF-8` 后缀而拿到英文。这里只做够用的一小步：
-// 去编码、下划线转连字符、语言子标签小写、其余首字母大写，然后按
-// 「精确 → 同语言 → 中文脚本特判」三级匹配。
+// Why write these twenty lines yourself: language values in environment variables come in too
+// many spellings -- `zh_CN.UTF-8`, `zh-CN`, `zh`, `C`, `POSIX`, empty, `en_US.utf8`. Use them
+// directly as map keys and Chinese users get English because of a `.UTF-8` suffix. This only
+// does the small step that is enough: drop the encoding, turn underscores into hyphens,
+// lowercase the language subtag, capitalize the rest, then match in three levels: "exact ->
+// same language -> Chinese script special case".
 
-// Normalize 归一化一个语言标签；判不出（C/POSIX/空）时返回空串。
+// Normalize normalizes a language tag; returns an empty string when it cannot tell
+// (C/POSIX/empty).
 //
-// 空串的含义是「没有意见」，不是「英语」——调用方拿到空串应当继续往下一条
-// 线索走（还有别的环境变量、还有配置、最后才是源语言）。
+// An empty string means "no opinion", not "English" -- on receiving an empty string the caller
+// should keep following the next clue (there are more environment variables, there is
+// configuration, and the source language comes last).
 func Normalize(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -30,9 +33,10 @@ func Normalize(raw string) string {
 	case "c", "posix": // 「没意见」的两种传统写法
 		return ""
 	}
-	// 大小写按 BCP-47 的惯例摆：语言小写、两字母地区大写（CN/TW）、四位脚本
-	// 首字母大写（Hans/Hant/Latn）。不这么做的话 `zh-CN` 会变成 `zh-Cn`，
-	// 而它会被拿去当覆盖文件名、也要跟目录里的 tag 比——一次大小写之差就是一小时排查。
+	// Case follows BCP-47 convention: language lowercase, two-letter region uppercase (CN/TW),
+	// four-letter script capitalized (Hans/Hant/Latn). Without that `zh-CN` would become `zh-Cn`,
+	// and it gets used as an overlay file name and has to be compared with the tag in a catalog --
+	// one case difference is an hour of investigation.
 	parts := strings.Split(s, "-")
 	for i, p := range parts {
 		if p == "" {
@@ -59,12 +63,14 @@ func isDigits(s string) bool {
 	return true
 }
 
-// Match 在可选语言里挑一个最合适的；挑不出返回空串。
+// Match picks the best fit among the available languages; returns an empty string when there is
+// none.
 //
-// 三级：**精确**（zh-Hant 就是 zh-Hant）→ **同语言 + 脚本特判**（zh-CN 落到
-// zh-Hans，zh-TW/zh-HK 落到 zh-Hant）→ **裸语言**（en-US 落到 en）。
-// 中文必须特判：简体/繁体不是一个「地区变体」那么简单，同一句话在两边读起来
-// 不一样，而 `zh` 这个 tag 本身不说明用哪一套。
+// Three levels: **exact** (zh-Hant is zh-Hant) -> **same language + script special case**
+// (zh-CN lands on zh-Hans, zh-TW/zh-HK land on zh-Hant) -> **bare language** (en-US lands on
+// en). Chinese needs the special case: simplified/traditional is not just a "regional variant",
+// the same sentence reads differently on the two sides, and the tag `zh` itself does not say
+// which one to use.
 func Match(want string, avail []string) string {
 	w := Normalize(want)
 	if w == "" {
@@ -114,7 +120,7 @@ func Match(want string, avail []string) string {
 	return ""
 }
 
-// primary 取语言子标签（`zh-Hans-CN` → `zh`）。
+// primary takes the language subtag (`zh-Hans-CN` → `zh`).
 func primary(tag string) string {
 	if i := strings.IndexByte(tag, '-'); i >= 0 {
 		return strings.ToLower(tag[:i])
@@ -122,8 +128,9 @@ func primary(tag string) string {
 	return strings.ToLower(tag)
 }
 
-// scriptOf 判断中文用哪套字：地区优先，其次显式脚本，都没有时按简体
-// （使用者里简体占多数，猜错的那一半人至少还能读）。
+// scriptOf decides which Chinese script to use: region first, then an explicit script, and
+// simplified when there is neither (simplified is the majority among users, and the half that
+// is guessed wrong can at least still read it).
 func scriptOf(tag string) string {
 	parts := strings.Split(tag, "-")
 	for _, p := range parts[1:] {

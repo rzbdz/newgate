@@ -1,15 +1,18 @@
-// Package app 是 newgate 可执行程序的组合根。
+// Package app is the composition root of the newgate executable.
 //
-// 各模块只声明自己的 capability、依赖和生命周期，不应知道"产品默认启用哪些
-// 模块"。装配清单由 tools/genmodules 在构建期扫描 modules/ 生成（见
-// modules_gen.go），component.Manager 再根据 Need/Provide 计算真实启动顺序；
-// 清单顺序不是隐藏依赖。
+// Modules only declare their own capabilities, dependencies and lifecycle; they should not know
+// "which modules are enabled by default in the product". The assembly list is generated at
+// build time by tools/genmodules scanning modules/ (see modules_gen.go), and component.Manager
+// then computes the real start order from Need/Provide; the list order is not a hidden
+// dependency.
 //
-// **装一个模块 = 把目录复制进 modules/、重新编译**，不需要改任何清单。
-// 判据见 tools/genmodules：目录含根 module.go 且导出 `func New() modules.Component`。
+// **Installing a module = copying the directory into modules/ and recompiling**; no list needs
+// editing. The check is in tools/genmodules: the directory has a root module.go and exports
+// `func New() modules.Component`.
 //
-// App 持有 Manager，并只向 main 暴露启动后真正需要的入口。替代产品或测试可
-// 使用不同 Loader，而不修改任何业务模块。
+// App holds the Manager and exposes to main only the entry points really needed after startup.
+// Alternative products or tests can use a different Loader without modifying any business
+// module.
 package app
 
 import (

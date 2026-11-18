@@ -2,9 +2,10 @@ package scan
 
 import "testing"
 
-// Ident 是「目录名 → import 别名」这条判据的唯一实现，两个仓库的生成器都用它。
-// 表里前两行是内核自己的目录名（下划线，本来就是合法标识符），后两行是发行版
-// 仓库的连字符目录名——不拧的话生成的是 `ext_simple-cli`，一个语法错误。
+// Ident is the only implementation of the "directory name -> import alias" criterion, used by
+// the generators of both repositories. The first two rows are the kernel's own directory names
+// (underscores, already legal identifiers), the last two are hyphenated directory names from
+// the distribution repository -- unmangled, they generate `ext_simple-cli` , a syntax error.
 func TestIdentManglesDirectoryNames(t *testing.T) {
 	cases := []struct {
 		prefix, dir string

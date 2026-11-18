@@ -13,11 +13,13 @@ import (
 
 // ---------- bundle ----------
 //
-// 把 catalogs/*.json 编成运行期直接读的二进制（见 lib/i18n/bundle.go 的格式注释）。
+// Compiles catalogs/*.json into a binary the runtime reads directly (see the format comment in
+// lib/i18n/bundle.go).
 //
-// 它是**派生**步骤：JSON 是唯一的真相，人改 JSON、工具读写 JSON，这一份随时可以
-// 删掉重生成。之所以还把它提交进版本控制，是为了让 `-check` 能拦住「改了 JSON 忘
-// 了重生成」——同 manifest/modules_gen.go 那条路（生成物进库 + CI 校验）。
+// It is a **derivation** step: JSON is the only truth, people edit JSON, tools read and write
+// JSON, and this copy can be deleted and regenerated at any time. It is still committed to
+// version control so that `-check` can block "edited the JSON, forgot to regenerate" -- the
+// same path as manifest/modules_gen.go (generated artifacts in the repo + CI validation).
 func cmdBundle(args []string) error {
 	fs := flag.NewFlagSet("bundle", flag.ExitOnError)
 	c := commonFlags(fs)
@@ -54,8 +56,9 @@ func cmdBundle(args []string) error {
 			if err != nil {
 				return fmt.Errorf("%s: %w", src, err)
 			}
-			// 文件名与 meta.language 必须一致——CatalogsFromFS 里也有一条同样的
-			// 检查，理由在那（改的是文件 A、生效的是文件 B 会变成一次无解的排查）。
+			// The file name and meta.language must agree -- CatalogsFromFS has the same check, and the
+			// reasoning is there (editing file A while file B is in effect turns into an unsolvable
+			// investigation).
 			if want := strings.TrimSuffix(name, ".json"); want != cat.Language {
 				return fmt.Errorf("%s: meta.language 是 %q，与文件名对不上", src, cat.Language)
 			}
@@ -84,7 +87,8 @@ func cmdBundle(args []string) error {
 	return nil
 }
 
-// jsonFileNames 列出目录里的 .json（排序：目录序与文件系统有关，排序保证结果稳定）。
+// jsonFileNames lists the .json files in a directory (sorted: directory order depends on the
+// filesystem, sorting keeps the result stable).
 func jsonFileNames(dir string) ([]string, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {

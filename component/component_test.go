@@ -113,31 +113,38 @@ func TestManyCapabilityInjectsAllProviders(t *testing.T) {
 	_ = manager.Stop(context.Background())
 }
 
-// TestOptionalIsAWeakDependency 锁住 Optional 的**两条**语义。
+// TestOptionalIsAWeakDependency locks down **both** semantics of Optional.
 //
-// 它取代了 2026-09-18 删掉的 Attach 阶段测试（TestAttachFailureRollsBackTheWholeGraph）。
-// 那条测试守的是「Attach 失败要回滚整张图」——Attach 连同 Inject 一起删了（理由见
-// component.Optional 的注释：它当初要解的环，随 cli 不再有任何出边而消失）。删掉
-// 一个机制的同时得把**它承担的那条不变量**接过来，否则就是静默降级。
+// It replaces the Attach-phase test deleted on 2026-09-18
+// (TestAttachFailureRollsBackTheWholeGraph). That test guarded "an Attach failure must roll
+// back the whole graph" -- Attach was deleted together with Inject (reasoning in the
+// component.Optional comment: the ring it was meant to solve disappeared once cli had no
+// outbound edges). When you delete a mechanism you must take over **the invariant it carried**,
+// otherwise it is a silent downgrade.
 //
-// 两条语义各自都要有现场：
+// Both semantics need a scene of their own:
 //
-//  1. 提供者在场 → Optional 是一条**排序边**：注册者排在提供者后面，于是它在
-//     Start 里一定能拿到端口。这一条正是「注入别人的人要等被注入的人」——它以前
-//     由 Attach 阶段保证（全图 Start 完之后再跑一遍），现在由排序保证，更强也更简单。
-//  2. 提供者缺席 → **不建边、不报错**：注册者照常启动，只是拿不到端口。
+//  1. Provider present -> Optional is an **ordering edge**: the registrant is ordered after the
+//     provider, so in its Start it is guaranteed to get the port. This is exactly "whoever
+//     injects into others waits for the injected" -- it used to be guaranteed by the Attach
+//     phase (run once more after every Start in the graph), now by ordering, which is stronger
+//     and simpler.
+//  2. Provider absent -> **no edge, no error**: the registrant starts as usual, it just does
+//     not get the port.
 func TestOptionalIsAWeakDependency(t *testing.T) {
 	t.Run("provider present", func(t *testing.T) {
 		ui := NewCapability[string]("weak.ui")
 		var events []string
 		manager, err := New(fakeLoader{components: []Component{
 			{
-				// 声明在前、却排在后面：证明顺序来自那条弱依赖边，而不是声明位置。
+				// Declared first but ordered last: proof that the order comes from that weak dependency
+				// edge, not from the declaration position.
 				Type: "test", Name: "registrant", Requires: []Requirement{Optional(ui)},
 				Start: func(_ context.Context, ctx Context) error {
 					value, ok := Get(ctx, ui)
 					if !ok {
-						// 端口在 Start 时应当已经可用——「等被注入的人」就是这一条。
+						// The port should already be usable at Start -- "wait for the injected" is exactly this
+						// point.
 						t.Fatal("Optional 命中时端口应当已提供（排序边没生效？）")
 					}
 					events = append(events, "start registrant sees "+value)
@@ -168,7 +175,7 @@ func TestOptionalIsAWeakDependency(t *testing.T) {
 			{
 				Type: "test", Name: "registrant", Requires: []Requirement{Optional(ui)},
 				Start: func(_ context.Context, ctx Context) error {
-					// 缺席不是错误，只是拿不到端口：注册者必须照常起得来。
+					// Absence is not an error, it just means no port: the registrant must still start fine.
 					if _, ok := Get(ctx, ui); ok {
 						t.Fatal("没有提供者时不该拿到端口")
 					}
@@ -264,11 +271,13 @@ func TestStartReportsRollbackFailure(t *testing.T) {
 	}
 }
 
-// TestPanickingStartStillRollsBack：panic 与「返回错误」必须走同一条回滚。
+// TestPanickingStartStillRollsBack: a panic and "returning an error" must go through the same
+// rollback.
 //
-// 没有 recover 时，已启动的模块留着监听、文件和注册，调用方只看到一段栈；
-// 在测试里那是一个监听端口漏进同进程的下一个测试。MustGet 对装配错误是**故意
-// panic** 的，所以这条路不需要任何模块自己写错就能走到。
+// Without recover, a module that has already started keeps its listeners, files and
+// registrations, and the caller only sees a stack trace; in tests that is a listening port
+// leaking into the next test in the same process. MustGet deliberately **panics** on assembly
+// errors, so this path is reachable without any module writing a bug of its own.
 func TestPanickingStartStillRollsBack(t *testing.T) {
 	var stopped bool
 	_, err := New(fakeLoader{components: []Component{
@@ -294,9 +303,10 @@ func TestPanickingStartStillRollsBack(t *testing.T) {
 	}
 }
 
-// TestRollbackRunsEvenWhenStartContextIsCanceled：回滚不能用「可能正是让 Start
-// 失败的那个」context。进程收尾时 ctx 已取消，清理会全部立刻失败并被当成
-// 「stop failed」吞掉——资源留着，日志只说了一堆 stop failed。
+// TestRollbackRunsEvenWhenStartContextIsCanceled: rollback must not use the context that may be
+// exactly what made Start fail. At process shutdown ctx is already canceled, so cleanup would
+// all fail immediately and be swallowed as "stop failed" -- resources stay around, and the log
+// only says a pile of stop failed.
 func TestRollbackRunsEvenWhenStartContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var stopSawErr error
@@ -336,9 +346,10 @@ func (c *catalogSpy) SetCatalog(components []Component) {
 	c.got = len(components)
 }
 
-// TestCatalogDeliveryIsVisibleAndContained：deliverCatalog 是唯一一条「Start 之后
-// 还写一次模块」的通道，所以它必须可观测，并且它的 panic 不能拖着整个进程下来
-// （那时所有监听已经起来了，panic 会让它们全漏掉）。
+// TestCatalogDeliveryIsVisibleAndContained: deliverCatalog is the only channel that "writes to
+// modules once more after Start", so it must be observable, and its panic must not drag the
+// whole process down with it (by then all the listeners are up, and a panic would leak every
+// one of them).
 func TestCatalogDeliveryIsVisibleAndContained(t *testing.T) {
 	capability := NewCapability[*catalogSpy]("spy")
 	spy := &catalogSpy{}

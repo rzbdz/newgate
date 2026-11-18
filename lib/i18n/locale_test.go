@@ -8,8 +8,9 @@ import (
 	"testing"
 )
 
-// 测试自己造一份账本与译文，不依赖 catalogs/ 里那两份——它们会随着迁移不断长大，
-// 拿它们当夹具的话每迁一个模块都要改测试。
+// The tests build their own ledger and catalogs and do not depend on the two in catalogs/ --
+// those grow continuously as migration proceeds, and using them as fixtures would mean touching
+// the tests for every module migrated.
 func testLedger() Ledger {
 	return Ledger{Messages: map[string]LedgerEntry{
 		"Proxy": {},
@@ -30,7 +31,7 @@ func testZh() Catalog {
 			"Proxy": {Text: "代理"},
 			"An external file {names} is still in {dir}": {Text: "同名外部文件仍在 {dir}：{names}"},
 			"Saved {n} file": {Other: "已保存 {n} 个文件"}, // 中文不分单复数
-			// "Only in the source language" 故意不翻：验证回退
+			// "Only in the source language" is deliberately not translated: verifies the fallback
 		},
 	}
 }
@@ -92,7 +93,8 @@ func TestMatch(t *testing.T) {
 
 func TestSourceLanguageIsIdentity(t *testing.T) {
 	install(t, "en")
-	// 源语言路径：代码里那句就是最终文本，一个字的目录数据都没用到
+	// Source language path: the sentence in the code is the final text, not a character of catalog
+	// data is used
 	if got := T("Proxy", nil); got != "Proxy" {
 		t.Errorf("源语言该恒等: %q", got)
 	}
@@ -102,7 +104,8 @@ func TestSourceLanguageIsIdentity(t *testing.T) {
 	if got := N("Saved {n} file", "Saved {n} files", 1, nil); got != "Saved 1 file" {
 		t.Errorf("源语言单数: %q", got)
 	}
-	// 一句目录里根本没有的话，照样原样输出——没有「键」这东西，也就没有拼错的键
+	// A sentence that is not in the catalog at all still comes out as is -- there is no such thing
+	// as a "key", so there is no misspelled key
 	if got := T("Never listed anywhere", nil); got != "Never listed anywhere" {
 		t.Errorf("未登记的消息该原样输出: %q", got)
 	}
@@ -113,7 +116,8 @@ func TestTranslationAndFallback(t *testing.T) {
 	if got := T("Proxy", nil); got != "代理" {
 		t.Errorf("中文表没生效: %q", got)
 	}
-	// 缺译文 → 回退到源码里那句英文（不是显示键名，因为键就是那句话）
+	// Missing translation -> falls back to the English sentence in the source (not the key name,
+	// because the key is that sentence)
 	if got := T("Only in the source language", nil); got != "Only in the source language" {
 		t.Errorf("缺译文时该回退源语言: %q", got)
 	}
@@ -126,7 +130,8 @@ func TestPlaceholders(t *testing.T) {
 	if got != want {
 		t.Errorf("具名占位符替换错了:\n got %q\nwant %q", got, want)
 	}
-	// 少给一个实参：那个占位符**原样留着**（精确指出这里缺东西），不是悄悄变空串
+	// One argument too few: that placeholder is **left as is** (pinpointing what is missing here),
+	// not silently emptied
 	got = T("An external file {names} is still in {dir}", A{"dir": "/x"})
 	if !strings.Contains(got, "{names}") {
 		t.Errorf("缺实参时该留下占位符，实际 %q", got)
@@ -141,14 +146,16 @@ func TestPlural(t *testing.T) {
 	if got := N("Saved {n} file", "Saved {n} files", 5, nil); got != "已保存 5 个文件" {
 		t.Errorf("中文不分单复数: %q", got)
 	}
-	// 调用点自己给的 n 与译文里的 {n} 是同一个（withN 补进去）
+	// The n given at the call site and the {n} in the translation are the same one (withN fills it
+	// in)
 	if got := N("Saved {n} file", "Saved {n} files", 1, A{"n": 7}); got != "已保存 7 个文件" {
 		t.Errorf("显式给的 n 该优先: %q", got)
 	}
 }
 
 func TestEnglishPluralForms(t *testing.T) {
-	// 英文作为译文出现时（比如一个英文用户把语言切到 en-GB，或有人给英文做了份修订表）
+	// When English appears as a translation (say an English user switches the language to en-GB,
+	// or someone makes a revised table for English)
 	install(t, "en-GB", Catalog{
 		Language: "en-GB",
 		Messages: map[string]Entry{
@@ -167,7 +174,8 @@ func TestEnglishPluralForms(t *testing.T) {
 }
 
 func TestRequestedLanguageFallsBackToSource(t *testing.T) {
-	// 请求一门没翻的语言：不报错、不拒绝启动，静默用源语言（Info/Missing 里看得见）
+	// Requesting an untranslated language: no error, no refusal to start, the source language is
+	// used silently (visible in Info/Missing)
 	eff, err := Install("fr-FR", testLedger(), []Catalog{testEn(), testZh()}, "")
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +209,7 @@ func TestAvailableAndMissing(t *testing.T) {
 	if len(Missing(SourceLang)) != 0 {
 		t.Error("源语言不该缺任何消息")
 	}
-	// 源语言永远在可选列表里（它不需要目录文件）
+	// The source language is always in the available list (it needs no catalog file)
 	var sawSource bool
 	for _, i := range Available() {
 		if i.Language == SourceLang {
@@ -270,7 +278,8 @@ func TestDiskOverlayOverridesBuiltin(t *testing.T) {
 	if got := Overlaid(); got != 1 {
 		t.Errorf("覆盖计数该是 1（账本里没有的消息不算），实际 %d", got)
 	}
-	// 覆盖改不了一条账本里没有的消息——它不生效，也不该让别的东西坏掉
+	// The overlay cannot change a message that is not in the ledger -- it does not take effect,
+	// and it must not break anything else either
 	if got := T("Saved {n} file", A{"n": 2}); got != "已保存 2 个文件" {
 		t.Errorf("别的消息被覆盖搞坏了: %q", got)
 	}
@@ -302,14 +311,15 @@ func TestErrorCarriesIdentityNotProse(t *testing.T) {
 	if !errors.Is(err, base) {
 		t.Error("%w 语义该保留：errors.Is 要能穿透")
 	}
-	// 非 *Error 的错误原样透传（别人家的错，别去翻译它）
+	// An error that is not *Error is passed through as is (someone else's error, do not translate
+	// it)
 	if got := ID(base); got != "permission denied" {
 		t.Errorf("别人的错误该原样返回: %q", got)
 	}
 	if ID(nil) != "" {
 		t.Error("nil 错误该给空串")
 	}
-	// 渲染成中文（把这句话翻出来）
+	// Rendered in Chinese (translate this sentence)
 	if _, err := Install("zh-Hans", testLedger(), []Catalog{testEn(), Catalog{
 		Language: "zh-Hans",
 		Messages: map[string]Entry{"Cannot read mappings: {err}": {Text: "读不了配置映射：{err}"}},
@@ -325,11 +335,12 @@ func TestErrorCarriesIdentityNotProse(t *testing.T) {
 	}
 }
 
-// TestExtendAddsNewMessagesOnly 锁住「发行版带自己的文案」那条路。
+// TestExtendAddsNewMessagesOnly locks down the path where "a distribution brings its own copy".
 //
-// 两件事一起锁：(a) 追加的**新** id 立刻生效；(b) 内核已经说过的 id 追加改不动——
-// 措辞的归属权在说话的那一层，改内核的措辞要走内核或磁盘覆盖，不是靠后到的模块
-// 悄悄盖掉。
+// It locks two things at once: (a) an appended **new** id takes effect immediately; (b) an id
+// the kernel has already stated cannot be changed by an append -- the wording belongs to the
+// layer that speaks it, and changing the kernel's wording goes through the kernel or the disk
+// overlay, not by a late-arriving module quietly overriding it.
 func TestExtendAddsNewMessagesOnly(t *testing.T) {
 	install(t, "zh-Hans")
 	if got := T("Proxy", nil); got != "代理" {
@@ -353,7 +364,8 @@ func TestExtendAddsNewMessagesOnly(t *testing.T) {
 	if got := T("Proxy", nil); got != "代理" {
 		t.Errorf("追加盖掉了内核已有的消息: %q", got)
 	}
-	// 覆盖率要把追加的算进去：否则发行版那一半界面在 `newgate lang` 上不存在。
+	// Coverage must count the appended ones: otherwise half of the distribution's UI does not
+	// exist on `newgate lang`.
 	var zh Info
 	for _, in := range Available() {
 		if in.Language == "zh-Hans" {
@@ -369,7 +381,8 @@ func TestExtendAddsNewMessagesOnly(t *testing.T) {
 		}
 	}
 
-	// 源语言下追加不改变恒等路径：那句英文原样出来，一个字节都不动。
+	// Under the source language an append does not change the identity path: that English sentence
+	// comes out as is, not one byte moved.
 	install(t, SourceLang)
 	if err := Extend(Ledger{}, []Catalog{{Language: SourceLang, Messages: map[string]Entry{
 		own: {Text: "不该在这条路径上出现"},
@@ -380,7 +393,8 @@ func TestExtendAddsNewMessagesOnly(t *testing.T) {
 		t.Errorf("源语言路径被追加改变了: %q", got)
 	}
 
-	// 没写 meta.language 的目录是坏目录：静默丢掉它等于发行版的界面永远说英文。
+	// A catalog without meta.language is a broken catalog: silently dropping it means the
+	// distribution's UI always speaks English.
 	if err := Extend(Ledger{}, []Catalog{{Messages: map[string]Entry{own: {Text: "x"}}}}); err == nil {
 		t.Error("没写 meta.language 的目录该报错")
 	}
@@ -415,11 +429,11 @@ func TestCatalogRoundTripKeepsEverything(t *testing.T) {
 			t.Errorf("%s 往返后变了: %+v vs %+v", id, got, want)
 		}
 	}
-	// 只有正文的消息要写成裸字符串，文件才读得下去
+	// A message with only a body must be written as a bare string for the file to be readable
 	if !strings.Contains(string(raw), `"plain": "纯正文"`) {
 		t.Errorf("纯正文消息该写成裸字符串:\n%s", raw)
 	}
-	// 键排序：map 遍历序随机会让每次生成的 diff 都飘
+	// Keys sorted: random map iteration order makes every generated diff wobble
 	if strings.Index(string(raw), `"machine"`) > strings.Index(string(raw), `"noted"`) {
 		t.Errorf("键没排序:\n%s", raw)
 	}
@@ -449,7 +463,8 @@ func TestLedgerRoundTrip(t *testing.T) {
 			t.Errorf("%s 往返后变了: %+v vs %+v", id, got, want)
 		}
 	}
-	// 「复数」这个事实必须能从账本里读出来（覆盖率与翻译工具都要用它）
+	// The fact "plural" must be readable from the ledger (coverage and translation tools both need
+	// it)
 	if !out.Messages["Saved {n} file"].Plural() {
 		t.Error("账本该记住哪条消息带复数")
 	}
@@ -459,7 +474,8 @@ func TestLedgerRoundTrip(t *testing.T) {
 }
 
 func TestParseRejectsUnknownFields(t *testing.T) {
-	// 拼错的字段名必须响亮报错：静默忽略的症状是「我明明标了机翻，怎么没标上」
+	// A misspelled field name must error loudly: the symptom of silently ignoring it is "I marked
+	// it as machine translated, why isn't it marked"
 	_, err := ParseCatalog([]byte(`{"meta":{"language":"zh-Hans"},"messages":{"x":{"text":"y","machien":true}}}`))
 	if err == nil {
 		t.Fatal("拼错的字段名该报错")
@@ -473,9 +489,10 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 	if _, err := ParseLedger([]byte(`{"messages":{"x":{"args":["dir"]}}}`)); err != nil {
 		t.Fatalf("账本该解得出来: %v", err)
 	}
-	// `where` 那一格 2026-09-21 删了（理由见 Ledger 的注释）。它还出现在老账本里的话，
-	// DisallowUnknownFields 会当场报错——这正是我们要的：旧的账本必须显式重生成，
-	// 而不是被静默忽略掉一整个字段。
+	// The `where` cell was deleted on 2026-09-21 (reasoning in the Ledger comment). If it still
+	// appears in an old ledger, DisallowUnknownFields errors on the spot -- and that is exactly
+	// what we want: an old ledger must be explicitly regenerated, not have a whole field silently
+	// ignored.
 	if _, err := ParseLedger([]byte(`{"messages":{"x":{"where":"a.go:1"}}}`)); err == nil {
 		t.Fatal("账本里还留着 where 该报错（那一格已经删了）")
 	}
@@ -500,7 +517,7 @@ func TestBuiltinCatalogsAreWellFormed(t *testing.T) {
 			t.Errorf("%s 没标版式尺寸（meta.widths）——换语言时列宽会歪", c.Language)
 		}
 	}
-	// 账本可以暂时是空的（还没迁任何文案），但它必须解得出来
+	// The ledger may be empty for now (no copy migrated yet), but it must still parse
 	_ = led
 }
 
@@ -516,9 +533,10 @@ func TestPlaceholderExtraction(t *testing.T) {
 	if strings.Join(union, ",") != "dir,n" {
 		t.Errorf("单复数并集错了: %v", union)
 	}
-	// 文案里会嵌**机器标记**，而 JSON 自己带花括号。那对花括号是字节，不是槽：
-	// 当成槽的话，`tools/i18n check` 会指着一句正确的文案说「少给了 type":"disabled
-	// 这个实参」，而运行时的 format 会试图去替换它。标识符形状把两者分开。
+	// Copy contains **machine markers**, and JSON carries braces itself. Those braces are bytes,
+	// not slots: treated as slots, `tools/i18n check` would point at a perfectly correct sentence
+	// and report `type":` `"disabled` as a missing argument, while the runtime format would try to
+	// substitute it. Identifier shape separates the two.
 	const withJSON = `injected thinking:{"type":"disabled"} ({why})`
 	if got := Placeholders(withJSON); strings.Join(got, ",") != "why" {
 		t.Errorf("内嵌的 JSON 不该被当成占位符: %v", got)
@@ -539,15 +557,19 @@ func TestCatalogsFromFSRejectsMismatchedFilename(t *testing.T) {
 	}
 }
 
-// TestUseSwitchesLanguageWithoutReinstalling 锁住「运行期换语言」那条路。
+// TestUseSwitchesLanguageWithoutReinstalling locks down the "switch language at runtime" path.
 //
-// 这是 web 上那张语言卡能成立的全部理由：daemon 是长命的，用户挑完语言必须**当场**
-// 换，不能等重启。而换的时候有一件很容易做错的事——图省事再调一次 Install 会把
-// builtins 整个重建，于是发行版在装配期 Extend 进来的译文全部消失。症状是「在网页
-// 上切成中文之后，发行版那一半界面变回英文」，看起来只像「有几条没翻」。
+// This is the entire reason the language card on the web UI can exist: the daemon is
+// long-lived, and the user must be able to switch **on the spot** after picking a language,
+// without waiting for a restart. And there is one thing very easy to get wrong while switching
+// -- taking the easy route and calling Install again rebuilds builtins entirely, so every
+// translation the distribution Extend-ed in at assembly time disappears. The symptom is "after
+// switching to Chinese on the web UI, half of the distribution's UI went back to English",
+// which looks like "a few are untranslated".
 //
-// 所以断言打在**切走再切回来之后追加的那条还在不在**上——只切一次的话，被冲掉的
-// catalog 在这一刻还看不出差别（当前语言用的是内核那份）。
+// So the assertion is on **whether the appended entry is still there after switching away and
+// back** -- with only one switch, the wiped catalog shows no difference at that moment (the
+// current language is still using the kernel's copy).
 func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 	install(t, "zh-Hans")
 
@@ -560,7 +582,7 @@ func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 		t.Fatalf("追加的译文该生效: %q", got)
 	}
 
-	// 换到源语言：那句话原样出来（恒等路径）。
+	// Switch to the source language: the sentence comes out as is (identity path).
 	if got := Use(SourceLang); got != SourceLang {
 		t.Fatalf("Use(%q) = %q", SourceLang, got)
 	}
@@ -568,7 +590,7 @@ func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 		t.Errorf("换成源语言后该原样输出: %q", got)
 	}
 
-	// 换回来：**追加的那条必须还在**。这是本测试真正的断言。
+	// Switch back: **the appended entry must still be there**. That is this test's real assertion.
 	if got := Use("zh-Hans"); got != "zh-Hans" {
 		t.Fatalf("Use(zh-Hans) = %q", got)
 	}
@@ -583,11 +605,12 @@ func TestUseSwitchesLanguageWithoutReinstalling(t *testing.T) {
 	}
 }
 
-// TestUseFallsBackToTheSourceLanguage：换一门没有的语言不是错误，是回退。
+// TestUseFallsBackToTheSourceLanguage: switching to a language that does not exist is not an
+// error, it is a fallback.
 //
-// 与 Install 那条同规矩：界面上的取值来自 Available()，正常不会走到这里，但
-// 一道门不能因为「调用方不该这么调」就把整个进程卡住——语言是偏好，不是配置
-// 正确性的一部分。
+// Same rule as the Install one: the values on the UI come from Available(), so this is not
+// normally reached, but a gate must not hang the whole process because "the caller should not
+// call it that way" -- language is a preference, not part of configuration correctness.
 func TestUseFallsBackToTheSourceLanguage(t *testing.T) {
 	install(t, "zh-Hans")
 	if got := Use("fr-FR"); got != SourceLang {

@@ -6,38 +6,46 @@ import (
 	"sort"
 )
 
-// 目录表的**编译期形态**：解析这件事在生成期做完，运行期只按格式读。
+// The **compile-time form** of the catalog tables: parsing is done at generation time, and at
+// runtime they are only read by format.
 //
-// # 为什么值得一个格式
+// # Why it deserves a format
 //
-// 2026-09-21 实测：每条 `newgate …` 命令的装配约 6ms，其中 **88% 是每次进程都
-// 重新解析那 250KB 目录 JSON**（`Builtin()` 单独量是 2.78ms，而 `Install` 建查找表
-// 只要 90µs）。真要挪到编译期的是**这个**，不是 resolve——`component.Resolve` 的
-// 校验加拓扑排序一共 31µs（0.5%）。
+// Measured on 2026-09-21: assembling each `newgate …` command takes about 6ms, of which **88%
+// is re-parsing the 250KB catalog JSON on every process** (`Builtin()` alone measures 2.78ms,
+// while `Install` building the lookup table takes only 90µs). What really should move to
+// compile time is **this**, not resolve -- component.Resolve's validation plus topological sort
+// is 31µs (0.5%).
 //
-// 所以：`tools/i18n bundle` 在生成期把 catalogs/*.json 编成这个格式（进版本控制，
-// `-check` 拦过期，同 manifest/modules_gen.go 那条路），运行期 `Builtin()` 直接读
-// 它。**JSON 仍然是唯一的真相**——人改的是 JSON，工具读写的是 JSON，这个格式是
-// 纯派生物，随时可以删了重生成。
+// So: `tools/i18n bundle` compiles catalogs/*.json into this format at generation time (checked
+// into version control, `-check` blocks staleness, the same path as manifest/modules_gen.go),
+// and at runtime `Builtin()` reads it directly. **JSON is still the only truth** -- people edit
+// JSON, tools read and write JSON, and this format is a pure derivative that can be deleted and
+// regenerated at any time.
 //
-// # 为什么不是「读到 map 里就完了」
+// # Why not "just decode into a map and be done"
 //
-// 格式解码出来仍然是 `Catalog`/`Ledger`（map 在里面），**公开 API 一个字没动**：
-// 网关日志热路径上的 `T()` 还是哈希查找。换掉的只是「从字节到 map」这一步——
-// 从「JSON 词法分析 + 2800 次反射反序列化」变成「读长度前缀 + 插 map」。
+// After decoding, the format is still `Catalog`/ `Ledger` (with maps inside), and **not a word
+// of the public API changed**: `T()` on the gateway log hot path is still a hash lookup. Only
+// the "bytes to map" step was swapped -- from "JSON lexing + 2800 reflection deserializations"
+// to "read a length prefix + insert into a map".
 //
-// # 格式
+// # Format
 //
-//	魔数 "NGCAT2\n"（8 字节）
-//	（NGCAT1 是有 Where 那一格时的格式。改格式必须换魔数：拿一份旧 .bin 去按
-//	新布局解，会一路读歪而不报错——那是「解释器对不上语法」的经典坏法。）
-//	类型 1 字节           'c' 译文 / 'l' 账本
-//	u32 段数 → 每段      u32 长度 + 字节（字符串一律这样放；u32 是为了不用想上限）
-//	条目按**键排序**写：同一份 JSON 生成的字节必须逐字节相同，否则 -check 会
-//	因为 map 遍历序不同而永远报「过期」，而那种假警报会让人把这条检查关掉。
+//	magic "NGCAT2\n" (8 bytes)
+//	(NGCAT1 is the format from when there was a Where cell. Changing the format requires changing the
+//	magic: decoding an old .bin with the new layout reads garbage all the way without an error --
+//	that is the classic bad way for "the interpreter does not match the grammar".)
+//	type         1 byte   'c' catalog / 'l' ledger
+//	u32 segments → each: u32 length + bytes (every string is stored this way; u32 so limits
+//	need no thought)
+//	entries are written in **key order**: bytes generated from the same JSON must be byte-identical,
+//	otherwise -check would always report "stale" because of a different map iteration order, and a
+//	false alarm like that would make people turn the check off.
 //
-// 读的每一个长度都做边界检查：这个格式是**生成物**，但它可能来自一次失败的构建
-// （半截文件）或者一个被别人换过的仓库。越界读是崩溃，比报一句错严重得多。
+// Every length read is bounds-checked: this format is a **generated artifact**, but it may come
+// from a failed build (a truncated file) or from a repository someone else swapped. An
+// out-of-bounds read is a crash, far worse than reporting an error.
 const bundleMagic = "NGCAT2\n"
 
 const (
@@ -45,7 +53,7 @@ const (
 	bundleKindLedger  = 'l'
 )
 
-// ---------- 写 ----------
+// ---------- write ----------
 
 type bundleWriter struct{ b []byte }
 
@@ -62,7 +70,7 @@ func (w *bundleWriter) str(s string) {
 	w.b = append(w.b, s...)
 }
 
-// EncodeCatalog 把一份译文编成 bundle 字节。
+// EncodeCatalog encodes one catalog into bundle bytes.
 func EncodeCatalog(c Catalog) []byte {
 	w := &bundleWriter{b: append([]byte(nil), bundleMagic...)}
 	w.u8(bundleKindCatalog)
@@ -105,7 +113,7 @@ func EncodeCatalog(c Catalog) []byte {
 	return w.b
 }
 
-// EncodeLedger 把账本编成 bundle 字节。
+// EncodeLedger encodes the ledger into bundle bytes.
 func EncodeLedger(l Ledger) []byte {
 	w := &bundleWriter{b: append([]byte(nil), bundleMagic...)}
 	w.u8(bundleKindLedger)
@@ -132,7 +140,7 @@ func EncodeLedger(l Ledger) []byte {
 	return w.b
 }
 
-// ---------- 读 ----------
+// ---------- read ----------
 
 type bundleReader struct {
 	b   []byte
@@ -140,13 +148,15 @@ type bundleReader struct {
 	err error
 }
 
-// hint 把一个**来自文件**的条数变成可以安全交给 make 的容量提示。
+// hint turns an entry count **from a file** into a capacity hint that is safe to hand to make.
 //
-// 为什么需要：`make(map[K]V, n)` 会按 n 预分配，而 n 是文件里写着的数。一个坏掉的
-// 或者被人换过的 bundle 可以写着 40 亿条——那会在**第一处边界检查生效之前**先要一次
-// 巨额分配，症状是启动时 OOM（或者干脆 panic），而不是一句「这个 bundle 是坏的」。
-// 这里按「剩下多少字节」夹一次：每条至少 perEntry 个字节，超出这个数的条数一定是
-// 假的。夹的是**容量提示**，不是判据——真正的越界仍然由每一步的检查拦。
+// Why it is needed: `make(map[K]V, n)` preallocates by n, and n is a number written in the
+// file. A broken or swapped bundle can claim 4 billion entries -- that would demand a huge
+// allocation **before the first bounds check takes effect**, and the symptom is an OOM (or a
+// plain panic) at startup rather than "this bundle is broken". Here it is clamped by "how many
+// bytes are left": each entry is at least perEntry bytes, so a count beyond that is certainly
+// fake. What is clamped is the **capacity hint**, not the check -- real out-of-bounds reads are
+// still stopped by the check at every step.
 func (r *bundleReader) hint(n uint32, perEntry int) int {
 	if r.err != nil {
 		return 0
@@ -158,7 +168,8 @@ func (r *bundleReader) hint(n uint32, perEntry int) int {
 	return int(n)
 }
 
-// fail 记下第一处越界就停：后面每一步都拿 err 短路，不必每处都写 if。
+// fail records the first out-of-bounds and stops: every later step short-circuits on err, so no
+// if is needed at each site.
 func (r *bundleReader) fail(what string) {
 	if r.err == nil {
 		r.err = fmt.Errorf("the message bundle is truncated or corrupt (%s at byte %d)", what, r.at)
@@ -199,8 +210,9 @@ func (r *bundleReader) str() string {
 	if r.err != nil {
 		return ""
 	}
-	// 长度是**文件里写着的数**：它可能是垃圾。按剩余字节夹一次再切，否则一次
-	// 越界读就是 panic，而这里一个 panic 会让整个进程起不来（目录表在 Start 里读）。
+	// The length is **a number written in the file**: it may be garbage. Clamp it to the remaining
+	// bytes before slicing, otherwise one out-of-bounds read is a panic, and a panic here keeps
+	// the whole process from starting (the catalog tables are read in Start).
 	if int(n) > len(r.b)-r.at {
 		r.fail("string length")
 		return ""
@@ -210,7 +222,7 @@ func (r *bundleReader) str() string {
 	return s
 }
 
-// DecodeCatalog 读一份 bundle 译文。
+// DecodeCatalog reads one bundle catalog.
 func DecodeCatalog(raw []byte) (Catalog, error) {
 	kind, r, err := openBundle(raw)
 	if err != nil {
@@ -246,7 +258,7 @@ func DecodeCatalog(raw []byte) (Catalog, error) {
 	return out, nil
 }
 
-// DecodeLedger 读一份 bundle 账本。
+// DecodeLedger reads one bundle ledger.
 func DecodeLedger(raw []byte) (Ledger, error) {
 	kind, r, err := openBundle(raw)
 	if err != nil {

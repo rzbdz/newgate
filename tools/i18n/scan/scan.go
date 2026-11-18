@@ -1,12 +1,14 @@
-// Package scan 是「源码里有哪些可翻译消息」这条判据的**唯一实现**。
+// Package scan is the **only implementation** of the "which messages in the source are
+// translatable" criterion.
 //
-// 为什么要单独成包（同 tools/genmodules/scan 那条理由）：内核与发行版各有一个
-// `tools/i18n`（发行版通过 replace 拿到这个包），两边必须用同一把尺子——否则
-// 同一个调用点会在两个仓库里被数成两条消息、或者一边数得到一边数不到。
+// Why it is its own package (same reasoning as tools/genmodules/scan): the kernel and the
+// distribution each have a `tools/i18n` (the distribution gets this package through replace),
+// and the two must use the same ruler -- otherwise the same call site would count as two
+// messages in the two repositories, or be counted in one and not in the other.
 //
-// 判据是**键 = 源语言原文**（见 lib/i18n 的包注释）：扫的就是 `i18n.T("...")`
-// 这类调用里的字符串字面量。所以这里没有「消息 ID 表」，也不可能有——没有键，
-// 就没有键写错这回事。
+// The criterion is **key = source-language text** (see the lib/i18n package comment): what is
+// scanned is the string literal in calls like `i18n.T("...")` . So there is no "message ID
+// table" here, and there cannot be one -- no keys means no such thing as a misspelled key.
 package scan
 
 import (
@@ -22,7 +24,7 @@ import (
 	"strings"
 )
 
-// Call 是一次可翻译调用。
+// Call is one translatable call.
 type Call struct {
 	Msg    string   // 消息原文（= 键）
 	Method string   // T / N / E / Ef —— 检查实参时要区别对待（N 注入 n、Ef 注入 err）
@@ -31,18 +33,20 @@ type Call struct {
 	Where  string   // 相对仓库根的 `文件:行`
 }
 
-// SkipDir 判一棵源码树里哪些目录**不该走进去**。
+// SkipDir decides which directories in a source tree **should not be entered**.
 //
-// 两条判据共用它：本包的 AST 扫描（哪些消息）与 check.CJKFiles 的中文清点
-// （哪些文件还没迁）。两把尺子量的必须是**同一棵树**——不然会出现「账本里没有
-// 这个文件、豁免清单里却有它」这种自相矛盾，而那是排查起来最费劲的一类。
+// Two criteria share it: this package's AST scan (which messages) and check.CJKFiles' Chinese
+// count (which files are not migrated yet). The two rulers must measure **the same tree** --
+// otherwise you get contradictions like "this file is not in the ledger but it is in the
+// allowlist", which is the most laborious kind to investigate.
 //
-// 两类目录被跳过：
-//   - 产物与外部代码（`.git`/`bin`/`dist`/`vendor`/`node_modules`）；
-//   - **嵌套的 Go module**——发行版的 `core/` 就是内核那份 submodule，它自带
-//     go.mod，是另一个产品。扫进别人家去，会把内核的消息算进发行版的账本。
-//     判据用 go.mod 而不是目录名：`core` 只是今天的惯例，「这里是不是另一个
-//     module」才是这件事本身。
+// Two kinds of directory are skipped:
+//   - artifacts and external code (`.git`/ `bin`/ `dist`/ `vendor`/ `node_modules`);
+//   - **nested Go modules** -- the distribution's `core/` is the kernel submodule, which
+//     carries its own go.mod and is another product. Scanning into someone else's house would
+//     count the kernel's messages in the distribution's ledger. The criterion uses go.mod
+//     rather than the directory name: `core` is only today's convention, and "is this place
+//     another module" is the thing itself.
 func SkipDir(root, path string) bool {
 	switch filepath.Base(path) {
 	case ".git", "bin", "dist", "node_modules", "vendor":
@@ -56,9 +60,10 @@ func SkipDir(root, path string) bool {
 	return false
 }
 
-// Dir 扫一棵源码树，返回全部可翻译调用（按位置排序）。
+// Dir scans one source tree and returns every translatable call (sorted by position).
 //
-// 只扫**非测试**源码：测试里的字面量是断言用的夹具，不是给用户看的文案。
+// Only **non-test** source is scanned: literals in tests are fixtures used for assertions, not
+// copy shown to users.
 func Dir(root string) ([]Call, error) {
 	var out []Call
 	fset := token.NewFileSet()
@@ -76,8 +81,9 @@ func Dir(root string) ([]Call, error) {
 			return nil
 		}
 		if strings.HasSuffix(p, "_gen.go") {
-			// 生成物（装配清单之类）里不会有给用户看的文案；即便有，它也该在
-			// 生成器那边改。整份跳过，理由与 app/direction_test.go 跳过它一致。
+			// A generated artifact (an assembly list or the like) holds no user-visible copy; even if it
+			// had some, it should be changed on the generator side. Skipped whole, for the same reason
+			// app/direction_test.go skips it.
 			return nil
 		}
 		file, perr := parser.ParseFile(fset, p, nil, parser.SkipObjectResolution)
@@ -121,7 +127,8 @@ func Dir(root string) ([]Call, error) {
 	return out, nil
 }
 
-// i18nAlias 找这个文件里 lib/i18n 的本地名字（`i18n` 是惯例，但别假设）。
+// i18nAlias finds the local name of lib/i18n in this file (`i18n` is the convention, but do not
+// assume it).
 func i18nAlias(file *ast.File) string {
 	for _, imp := range file.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
@@ -136,7 +143,8 @@ func i18nAlias(file *ast.File) string {
 	return ""
 }
 
-// parseCall 认一条可翻译调用。返回 nil 表示这次调用与 i18n 无关。
+// parseCall recognizes one translatable call. A nil return means this call has nothing to do
+// with i18n.
 func parseCall(fset *token.FileSet, call *ast.CallExpr, pkg, rel string) (*Call, error) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
@@ -180,8 +188,8 @@ func parseCall(fset *token.FileSet, call *ast.CallExpr, pkg, rel string) (*Call,
 		}
 		out.Plural = plural
 	}
-	// 实参：`i18n.A{"dir": …}` 的键。取**最后一个**参数里的具名键——
-	// 契约就是「args 是最后一个参数」（见 lib/i18n 的 A 类型）。
+	// Args: the keys of `i18n.A{"dir": …}` . Take the named keys from the **last** argument -- the
+	// contract is "args is the last parameter" (see the A type in lib/i18n).
 	for i := len(call.Args) - 1; i >= 0; i-- {
 		if keys := compositeKeys(call.Args[i]); keys != nil {
 			out.Args = keys
@@ -191,19 +199,23 @@ func parseCall(fset *token.FileSet, call *ast.CallExpr, pkg, rel string) (*Call,
 	return out, nil
 }
 
-// literal 取一个**编译期常量字符串**：字面量，或字面量的 `+` 拼接。
+// literal takes a **compile-time constant string**: a literal, or a `+` concatenation of
+// literals.
 //
-// 为什么要认拼接：长句子在源码里必然要折行，写成
+// Why concatenation is recognized: a long sentence has to be wrapped in the source, and writing
 //
 //	i18n.T("the proxy is not running (newgate start) — "+
 //		"run `newgate start` first")
 //
-// 是 Go 里唯一的折行办法。它的**值**就是一个字面量，翻译起来与写成一行没有区别——
-// 而按行扫描会把这种人眼最正常不过的写法误报成「消息不是字面量」。折叠在前，判据在后。
+// is the only way to wrap in Go. Its **value** is one literal, and translating it is no
+// different from writing it on one line -- but scanning line by line would misreport this
+// completely normal human way of writing as "the message is not a literal". Fold first, judge
+// second.
 //
-// 只折叠字面量（含嵌套拼接）。引用**常量标识符**不折叠：那要跨文件求值，
-// 而「消息就在调用点上、看得见」正是 msgid-as-key 的立身之本——真需要复用，
-// 复用的该是译文，不是英文原文。
+// Only literals (including nested concatenations) are folded. Referencing **constant
+// identifiers** is not folded: that would need cross-file evaluation, and "the message is at
+// the call site, visible" is precisely what msgid-as-key stands on -- if reuse is really
+// needed, what should be reused is the translation, not the English source.
 func literal(e ast.Expr) (string, bool) {
 	switch v := e.(type) {
 	case *ast.BasicLit:
@@ -232,8 +244,8 @@ func literal(e ast.Expr) (string, bool) {
 	return "", false
 }
 
-// compositeKeys 取一个复合字面量的具名键（`A{"dir": x, "n": y}` → dir, n）。
-// 不是复合字面量（或用了位置写法）时返回 nil。
+// compositeKeys takes the named keys of a composite literal (`A{"dir": x, "n": y}` → dir, n).
+// Returns nil when it is not a composite literal (or uses positional form).
 func compositeKeys(e ast.Expr) []string {
 	lit, ok := e.(*ast.CompositeLit)
 	if !ok {
@@ -259,8 +271,9 @@ func compositeKeys(e ast.Expr) []string {
 	return out
 }
 
-// Messages 把扫描结果收成「消息 → 那次调用」的表。同一条消息在多处出现是正常的
-// （同一句话在几个地方用），取**第一次**出现的位置作为账本里的 where。
+// Messages folds the scan result into a "message → that call" table. The same message appearing
+// in several places is normal (the same sentence used in a few spots); the **first** occurrence
+// is taken as the ledger's where.
 func Messages(calls []Call) map[string]Call {
 	out := make(map[string]Call, len(calls))
 	for _, c := range calls {
@@ -274,7 +287,8 @@ func Messages(calls []Call) map[string]Call {
 	return out
 }
 
-// Problems 取出扫描时记下的错误（Msg 为空、Where 里写着原因）。
+// Problems extracts the problems recorded during the scan (Msg is empty, the reason is written
+// in Where).
 func Problems(calls []Call) []string {
 	var out []string
 	for _, c := range calls {

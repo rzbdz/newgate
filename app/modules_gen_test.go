@@ -11,10 +11,11 @@ import (
 	modscan "github.com/rzbdz/newgate/tools/genmodules/scan"
 )
 
-// TestGeneratedModuleListIsCurrent 拦住「往 modules/ 加了目录但忘了重新生成」
-// 这类漂移：清单过期时 `make build` 会自动重生成，但直接 `go build`/`go test`
-// 的人不会经过 Makefile，而那时的症状是模块在仓库里却根本没被装配——静默的
-// 功能缺失，比编译错误难查得多，所以在这里显式失败一次。
+// TestGeneratedModuleListIsCurrent blocks drift like "added a directory under modules/ but
+// forgot to regenerate": when the list is stale `make build` regenerates it automatically, but
+// people running `go build`/ `go test` directly do not go through the Makefile, and the symptom
+// then is a module sitting in the repo that is simply never assembled -- a silent missing
+// feature, much harder to find than a compile error, so it fails explicitly here once.
 func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("需要跑子进程重新生成，-short 下跳过")
@@ -32,15 +33,17 @@ func TestGeneratedModuleListIsCurrent(t *testing.T) {
 		t.Fatalf("装配清单已过期，请运行 `make generate`：\n%s", output)
 	}
 
-	// 双保险：-check 是拿生成器和自己的输出比，若生成器逻辑本身退化成空，
-	// 它会自我一致。所以这里再断言清单非空且覆盖 modules/ 下的每个目录。
+	// Second line of defense: -check compares the generator against its own output, so if the
+	// generator logic itself degenerates to empty it would be self-consistent. So also assert here
+	// that the list is non-empty and covers every directory under modules/.
 	generated := generatedComponents()
 	if len(generated) != 0 {
 		t.Fatalf("the kernel generated %d components — the framework must ship none", len(generated))
 	}
-	// 清单**就是** modules/ 下的目录快照——内核的装配只有一个来源（2026-09-20
-	// 删掉了第二个：发行版的模块不再由内核在构建期 clone 进来）。逐个对账，
-	// 让「模块在仓库里但没被装配」这种静默漏装配在这里就红。
+	// The list **is** a snapshot of the directories under modules/ -- the kernel's assembly has
+	// only one source (2026-09-20 deleted the second one: the distribution's modules are no longer
+	// cloned in by the kernel at build time). Reconcile one by one, so "the module is in the repo
+	// but not assembled" goes red right here.
 	dirs := moduleDirs(t, filepath.Join(root, "modules"))
 	if len(generated) != len(dirs) {
 		t.Fatalf("装配了 %d 个组件，modules/ 下有 %d 个目录——数量对不上", len(generated), len(dirs))
@@ -52,7 +55,7 @@ func TestGeneratedModuleListIsCurrent(t *testing.T) {
 	}
 }
 
-// mustReadGenerated 读生成的清单源码（给上面那条 import 对账用）。
+// mustReadGenerated reads the generated list source (used for the import reconciliation above).
 func mustReadGenerated(t *testing.T) []byte {
 	t.Helper()
 	_, current, _, ok := runtime.Caller(0)
@@ -66,12 +69,13 @@ func mustReadGenerated(t *testing.T) []byte {
 	return raw
 }
 
-// moduleDirs 返回 modules/ 下所有「是组件」的目录名。
+// moduleDirs returns every directory name under modules/ that "is a component".
 //
-// 用的就是**生成器那把尺子**（tools/genmodules/scan）：判据曾经有两份、口径还
-// 不同（这里用 bytes.Contains 找字面量，生成器用 AST 看返回值），于是照文档写
-// `func New() component.Component` 的模块会被生成器装进清单、却数不进这里，
-// 报出一个完全指不到真因的失败（2026-09-18 实测，见 scan 的包注释）。
+// It uses **the generator's own ruler** (tools/genmodules/scan): there used to be two checks
+// with different criteria (this one used bytes.Contains to find a literal, the generator used
+// the AST to look at the return value), so a module that wrote `func New() component.Component`
+// as the docs say was installed by the generator but not counted here, producing a failure that
+// pointed nowhere near the real cause (observed 2026-09-18, see the scan package comment).
 func moduleDirs(t *testing.T, modulesDir string) []string {
 	t.Helper()
 	dirs, err := modscan.Dirs(modulesDir)

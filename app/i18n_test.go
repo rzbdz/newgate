@@ -7,15 +7,17 @@ import (
 	"github.com/rzbdz/newgate/tools/i18n/check"
 )
 
-// TestLocalizationStaysConsistent 是 `tools/i18n check` 的**双保险**。
+// TestLocalizationStaysConsistent is the **second line of defense** for `tools/i18n check`.
 //
-// 判据只有一份实现（tools/i18n/check）：CI 里另有一个 step 跑同一条命令，
-// 那条挡的是「忘了跑」；这条挡的是「跑过了但没人看输出」——它让本地
-// `go test ./...` 就把「账本过期 / 占位符对不上 / 孤儿译文 / 源码里又冒出一个
-// 中文字面量」这些问题提出来。同 app/modules_gen_test.go 对 genmodules 的做法。
+// The check has only one implementation (tools/i18n/check): CI runs the same command in another
+// step, and that step blocks "forgot to run it"; this one blocks "ran it but nobody looked at
+// the output" -- it makes local `go test ./...` raise problems like "the ledger is stale /
+// placeholders do not line up / orphan translations / a Chinese string literal has appeared in
+// the source again". The same approach as app/modules_gen_test.go takes for genmodules.
 //
-// 2026-09-20 加进 i18n 时定的规矩：**非测试 Go 源码里的用户可见文本一律走
-// i18n.T("English", …)**，中文只活在译文表里。这条棘轮就是那句话的执行者。
+// The rule set when i18n was added on 2026-09-20: **user-visible text in non-test Go source
+// always goes through i18n.T("English", ...)**, and Chinese lives only in the translation
+// tables. This ratchet is the enforcer of that sentence.
 func TestLocalizationStaysConsistent(t *testing.T) {
 	root := filepath.Join(repoDir(t), "..")
 	findings, err := check.Run(check.Options{
@@ -32,8 +34,9 @@ func TestLocalizationStaysConsistent(t *testing.T) {
 		}
 	}
 
-	// 退化守卫：判据自己坏掉时必须红，而不是「一条都不报」看起来像通过。
-	// 这条棘轮的价值全在「它会说话」，一个哑掉的检查比没有检查更坏。
+	// Degenerate guard: when the check itself breaks it must go red, instead of "reports nothing"
+	// looking like a pass. The whole value of this ratchet is that "it speaks"; a muted check is
+	// worse than no check.
 	cats, cerr := check.LoadCatalogs(filepath.Join(root, "lib/i18n/catalogs"))
 	if cerr != nil {
 		t.Fatalf("读不了译文目录——判据退化了: %v", cerr)

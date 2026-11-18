@@ -2,26 +2,32 @@ package component
 
 import "sync"
 
-// Registry 是「注册 → 撤销」这类贡献的通用账本：单调 token + 按 token 精确
-// 撤销 + 可选的准入检查。
+// Registry is a general ledger for "register → undo" contributions: a monotonic token, exact
+// undo by token, and an optional admission check.
 //
-// 为什么要有它
+// # Why it exists
 //
-// 跨模块注入在 2026-09-17 收敛成一条路：**要往别人的扩展点插东西，就消费它
-// 的 service 并调 RegisterX**，不再用 `Provides: Provide(别人的能力, 值)`
-// （那条路没有 Release、没有查重、没有生命周期——两个模块认领同一个命令名会
-// 静默先到先得）。收敛之后，「注册一张带撤销的表」这件事在每个 owner 里都要
-// 写一遍，所以把它抽到这里。
+// Cross-module injection converged onto one path on 2026-09-17: **to insert something into
+// someone else's extension point, consume its service and call RegisterX**, no longer
+// `Provides: Provide(someone else's capability, value)` (that path has no Release, no duplicate
+// check, no lifecycle -- two modules claiming the same command name silently win first-come,
+// first-served). After that convergence, "register a table with undo" had to be written once in
+// every owner, so it was pulled out here.
 //
-// 与产品层里那几份手写账本的关系：它们**暂时保留原样**。那几份各有真实的差异
-// （插件拓扑排序与 copy-on-write、带 Refresh 的读侧、多个异质注册表共享一张
-// token 表），强行归并会造出更差的抽象。这里先在一处验证，验证过再逐个迁。
+// Relation to those hand-written ledgers in the product layer: they **stay as they are for
+// now**. Each of them has a real difference (plugin topological sort with copy-on-write, a read
+// side with Refresh, several heterogeneous registries sharing one token table), and forcing
+// them together would produce a worse abstraction. This one is validated in one place first,
+// and then they migrate one by one.
 //
-// 相比那三份实现，这里少一张 `tokens map[string]uint64`：那张表是为了容忍
-// 「同名重复注册」——新值覆盖旧值，旧值的 Release 变成 no-op。而我们**禁止**
-// 重复注册（交给调用方的 check），重复的当场报错，于是只需要单调计数器。
+// Compared with those three implementations, this one is missing a `tokens map[string]uint64`:
+// that table was there to tolerate "duplicate registration of the same name" -- the new value
+// overwrites the old and the old value's Release becomes a no-op. We **forbid** duplicate
+// registration (delegated to the caller's check), duplicates error on the spot, so all that is
+// needed is a monotonic counter.
 //
-// 零值可用：新建的 module service 直接内嵌一个 Registry[T] 字段即可，不必构造。
+// Usable as a zero value: a new module service can just embed a Registry[T] field, no
+// construction needed.
 type Registry[T any] struct {
 	mu    sync.Mutex
 	items []registryEntry[T]
@@ -33,15 +39,17 @@ type registryEntry[T any] struct {
 	value T
 }
 
-// Register 先把 value 交给 check 审一遍，通过了才加入账本，返回只属于本次
-// 注册的撤销句柄。
+// Register first hands value to check for review, and only adds it to the ledger if it passes,
+// returning an undo handle that belongs only to this registration.
 //
-// check 在**写锁内**被调用，所以「查重」和「插入」对并发注册是原子的：
-// 两个 goroutine 同时注册同一个名字，第二个一定看得见第一个。check 拿到的是
-// 当前全部贡献的**快照**（改它不影响账本），返回非 nil 表示拒绝，此时账本
-// 不变、Release 为 nil。
+// check is called **under the write lock**, so "duplicate check" and "insert" are atomic with
+// respect to concurrent registration: if two goroutines register the same name at the same
+// time, the second is guaranteed to see the first. check receives a **snapshot** of all current
+// contributions (modifying it does not affect the ledger) and a non-nil return means rejection,
+// in which case the ledger is unchanged and Release is nil.
 //
-// check 传 nil 表示不检查（诊断这类可叠加、没有键命名空间的贡献就是这种）。
+// Passing nil for check means no check (diagnostics, contributions that can stack and have no
+// key namespace, are like this).
 func (r *Registry[T]) Register(value T, check func([]T) error) (Release, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -66,17 +74,18 @@ func (r *Registry[T]) Register(value T, check func([]T) error) (Release, error) 
 			r.items = append(r.items[:i], r.items[i+1:]...)
 			return nil
 		}
-		// 陈旧 Release：这一条已经被撤过了（或者根本没插进来）。返回 nil 而
-		// 不是报错，是为了让 Stop 幂等——组件的 Stop 可能被调用不止一次，
-		// 释放路径上多一次「已经没了」不该被当成故障。
+		// Stale Release: this entry was already undone (or never inserted). Returning nil instead of
+		// an error is to make Stop idempotent -- a component's Stop may be called more than once, and
+		// an extra "it is already gone" on the release path should not be treated as a fault.
 		return nil
 	}, nil
 }
 
-// All 返回全部贡献的快照，顺序与注册顺序一致。
+// All returns a snapshot of every contribution, in registration order.
 //
-// 返回的是副本：调用方拿着它遍历时可能有别的模块在注册，不能把内部切片交出去。
-// 空账本返回 nil（不是空切片），调用方按 len()==0 判断即可。
+// What is returned is a copy: other modules may be registering while the caller iterates over
+// it, so the internal slice must not be handed out. An empty ledger returns nil (not an empty
+// slice), and callers can just test len()==0.
 func (r *Registry[T]) All() []T {
 	r.mu.Lock()
 	defer r.mu.Unlock()

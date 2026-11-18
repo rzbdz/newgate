@@ -6,11 +6,12 @@ import (
 	"testing"
 )
 
-// 图纸（Resolve）的全部价值是一句话：**不启动任何东西**。
+// The whole value of the blueprint (Resolve) is one sentence: **start nothing**.
 //
-// 为什么值得单独钉住：破了它不会红任何别的东西——图照样对、顺序照样对，症状
-// 只是「求一张图，结果整个世界被初始化了一遍」（端口起来了、全局注册表被改了、
-// 第二份规格书当场撞 already registered）。2026-09-20 架构图工具撞的就是这个。
+// Why it deserves its own pin: breaking it turns no other test red -- the graph is still right,
+// the order is still right, the only symptom is "asked for a graph and the whole world got
+// initialized" (ports came up, the global registry was modified, the second spec hits already
+// registered on the spot). That is what the architecture diagram tool hit on 2026-09-20.
 
 type seed struct {
 	capabilityName string
@@ -34,7 +35,7 @@ type fixedLoader []Component
 
 func (f fixedLoader) Load() ([]Component, error) { return f, nil }
 
-// TestResolveDoesNotStartAnything 是这一层存在的理由。
+// TestResolveDoesNotStartAnything is the reason this layer exists.
 func TestResolveDoesNotStartAnything(t *testing.T) {
 	starts := 0
 	s := seed{capabilityName: "leaf", provided: true, starts: &starts}
@@ -53,10 +54,12 @@ func TestResolveDoesNotStartAnything(t *testing.T) {
 	}
 }
 
-// TestPlanOrderMatchesStartOrder：图纸与真启动**必须**是同一个顺序，否则拿图纸
-// 做的推论（谁在谁之后、谁会先拿到端口）全是假的。这条把两份实现钉在一起。
+// TestPlanOrderMatchesStartOrder: the blueprint and the real start **must** be in the same
+// order, otherwise every inference drawn from the blueprint (who is after whom, who gets the
+// port first) is false. This pins the two implementations together.
 func TestPlanOrderMatchesStartOrder(t *testing.T) {
-	// 声明顺序故意是反的（依赖者在前），这样「顺序对不对」才是个真问题。
+	// The declaration order is deliberately reversed (dependents first), so that "is the order
+	// right" is a real question.
 	comps := []Component{
 		{Name: "mid", Type: "test", Requires: []Requirement{Need(NewCapability[struct{}]("leaf"))}},
 		{Name: "leaf", Type: "test", Provides: []Provision{Provide(NewCapability[struct{}]("leaf"), struct{}{})}},
@@ -77,8 +80,9 @@ func TestPlanOrderMatchesStartOrder(t *testing.T) {
 	}
 }
 
-// TestResolveStillValidates：图纸不启动，但**校验一步不少**——缺 provider 的 Need
-// 在这里就该报错（这正是「解析真的能过」这句话的含义）。
+// TestResolveStillValidates: the blueprint starts nothing, but **skips no validation** -- a
+// Need with a missing provider should error here (that is exactly what "resolve really passes"
+// means).
 func TestResolveStillValidates(t *testing.T) {
 	_, err := Resolve(fixedLoader{
 		{Name: "user", Type: "test", Requires: []Requirement{Need(NewCapability[struct{}]("nothing-provides-this"))}},
@@ -88,9 +92,10 @@ func TestResolveStillValidates(t *testing.T) {
 	}
 }
 
-// TestDependenciesReportsBothKindsOfEdge：review 时最该看见的一条区别——Need 是
-// 硬边（断了起不来），Optional 是弱边（断了只是没入口），而**没人提供的 Optional**
-// 正是「这个发行版少装了什么」的答案。
+// TestDependenciesReportsBothKindsOfEdge: the one distinction most worth seeing in review --
+// Need is a hard edge (broken means it will not start), Optional is a weak edge (broken just
+// means no entry), and **an Optional nobody provides** is exactly the answer to "what did this
+// distribution not install".
 func TestDependenciesReportsBothKindsOfEdge(t *testing.T) {
 	plan, err := Resolve(fixedLoader{
 		{Name: "leaf", Type: "test", Provides: []Provision{Provide(NewCapability[struct{}]("leaf"), struct{}{})}},
@@ -118,7 +123,8 @@ func TestDependenciesReportsBothKindsOfEdge(t *testing.T) {
 	}
 }
 
-// TestPlanComponentsIsACopy：拿到图纸的人不该能改到框架手里的那份。
+// TestPlanComponentsIsACopy: whoever gets the blueprint must not be able to modify the copy the
+// framework holds.
 func TestPlanComponentsIsACopy(t *testing.T) {
 	plan, err := Resolve(fixedLoader{{Name: "leaf", Type: "test"}})
 	if err != nil {
@@ -131,8 +137,8 @@ func TestPlanComponentsIsACopy(t *testing.T) {
 	}
 }
 
-// stalePlan 是「组件集合没变、边变了」的 Loader：它交出的组件与真装配一致，但
-// 图纸是旧的。
+// stalePlan is a Loader where "the component set is unchanged but an edge changed": the
+// components it hands over match the real assembly, but the blueprint is old.
 type stalePlan struct {
 	components []Component
 	order      []string
@@ -142,21 +148,24 @@ func (s stalePlan) Load() ([]Component, error) { return s.components, nil }
 
 func (s stalePlan) PrecomputedOrder() []string { return s.order }
 
-// TestPrecomputedPlanRejectsAStaleOrder 锁住 2026-11-18 那条修补。
+// TestPrecomputedPlanRejectsAStaleOrder locks down the 2026-11-18 fix.
 //
-// 现场：一个已装配的依赖从 Optional 翻成 Need（或者新增一条 Need），而生成的
-// 清单没重生成——组件**集合一个都没变**，旧校验只比集合，于是放行，按旧顺序
-// 启动一个排在提供者前面的消费者。那条路是每一条 CLI 的默认路径，所以
-// 「提供者先启动」这条唯一的硬保证当时没有任何东西在守。
+// The scene: an already-assembled dependency flips from Optional to Need (or a new Need is
+// added) while the generated list is not regenerated -- **not one component in the set
+// changes**, the old validation compared only sets, so it let it through and started a consumer
+// that comes before its provider, in the old order. That path is the default path of every CLI,
+// so "the provider starts first", the one hard guarantee, had nothing guarding it at the time.
 //
-// 一个只会静默给出错顺序的校验比没有校验更坏：图看起来是好的。
+// A validation that only silently gives the wrong order is worse than no validation: the graph
+// looks good.
 func TestPrecomputedPlanRejectsAStaleOrder(t *testing.T) {
 	leaf := NewCapability[struct{}]("leaf")
 	comps := []Component{
 		{Name: "user", Type: "test", Requires: []Requirement{Need(leaf)}},
 		{Name: "leaf", Type: "test", Provides: []Provision{Provide(leaf, struct{}{})}},
 	}
-	// 名字集合与组件表逐个对得上，只有顺序是反的——正是「清单过期」的形状。
+	// The name set matches the component table one by one, only the order is reversed -- exactly
+	// the shape of a stale list.
 	_, err := Resolve(stalePlan{components: comps, order: []string{"user", "leaf"}})
 	if err == nil {
 		t.Fatal("图纸里消费者排在提供者前面时必须报错（否则它会拿到零值或 panic）")
@@ -166,8 +175,8 @@ func TestPrecomputedPlanRejectsAStaleOrder(t *testing.T) {
 	}
 }
 
-// TestPrecomputedPlanAcceptsTheRightOrder：同一条图，顺序对了就必须照样走快路径
-// ——修复不能把正常的那条路变成「每次都报错」。
+// TestPrecomputedPlanAcceptsTheRightOrder: for the same graph, when the order is right it must
+// still take the fast path -- the fix must not turn the normal path into "errors every time".
 func TestPrecomputedPlanAcceptsTheRightOrder(t *testing.T) {
 	leaf := NewCapability[struct{}]("leaf")
 	comps := []Component{
@@ -183,8 +192,9 @@ func TestPrecomputedPlanAcceptsTheRightOrder(t *testing.T) {
 	}
 }
 
-// TestPrecomputedPlanRejectsAMissingNeedProvider：集合对得上、但某个 Need 的端口
-// 整张图里没人提供（另一个模块被摘掉却没重生成）——同样是过期，同样要说出来。
+// TestPrecomputedPlanRejectsAMissingNeedProvider: the set matches, but some Need port has no
+// provider anywhere in the graph (another module was removed and not regenerated) -- also
+// stale, and it must also be said out loud.
 func TestPrecomputedPlanRejectsAMissingNeedProvider(t *testing.T) {
 	_, err := Resolve(stalePlan{
 		components: []Component{
@@ -197,8 +207,9 @@ func TestPrecomputedPlanRejectsAMissingNeedProvider(t *testing.T) {
 	}
 }
 
-// TestPrecomputedPlanAllowsAnAbsentOptional：Optional 的提供者不在**不是**过期
-// ——那正是「这个发行版没装它」。修复不能把它误判成故障。
+// TestPrecomputedPlanAllowsAnAbsentOptional: an Optional whose provider is absent is **not**
+// stale -- that is exactly "this distribution did not install it". The fix must not misjudge it
+// as a fault.
 func TestPrecomputedPlanAllowsAnAbsentOptional(t *testing.T) {
 	if _, err := Resolve(stalePlan{
 		components: []Component{
@@ -210,11 +221,13 @@ func TestPrecomputedPlanAllowsAnAbsentOptional(t *testing.T) {
 	}
 }
 
-// TestProvidersAgreesWithGetOnMultipleProviders：两个提供者时，诊断（Providers）
-// 与运行期（Get）必须指同一人。
+// TestProvidersAgreesWithGetOnMultipleProviders: with two providers, diagnostics (Providers)
+// and runtime (Get) must point at the same one.
 //
-// 以前 Providers 是 last-wins、Get 是 first-wins：多装一个同端口模块后，架构图
-// 与 `newgate st` 会指着一个根本没在处理请求的模块——两个说法各说各的，谁也不会红。
+// Providers used to be last-wins while Get was first-wins: after installing an extra module for
+// the same port, the architecture diagram and `newgate st` pointed at a module that was not
+// handling any request at all -- two statements each saying their own thing, and nothing went
+// red.
 func TestProvidersAgreesWithGetOnMultipleProviders(t *testing.T) {
 	port := NewCapability[string]("port")
 	comps := []Component{
@@ -237,8 +250,9 @@ func TestProvidersAgreesWithGetOnMultipleProviders(t *testing.T) {
 	}
 }
 
-// TestPrecomputedAndResolvedAgreeOnValues：两条出图路径对「谁先」必须给同一个
-// 答案——否则同一份二进制走不走快路径会改变行为。
+// TestPrecomputedAndResolvedAgreeOnValues: the two ways of producing the graph must give the
+// same answer to "who comes first" -- otherwise the same binary behaves differently depending
+// on whether it takes the fast path.
 func TestPrecomputedAndResolvedAgreeOnValues(t *testing.T) {
 	port := NewCapability[string]("port")
 	comps := []Component{

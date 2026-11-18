@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// Registry 的三条不变量：Release 精确撤销自己那一条、陈旧 Release 无害、
-// check 拒绝时账本不变。
+// The three invariants of Registry: Release undoes exactly its own entry, a stale Release is
+// harmless, and the ledger is unchanged when check rejects.
 
 func TestRegistryReleaseRemovesOnlyItsOwnEntry(t *testing.T) {
 	var r Registry[string]
@@ -28,9 +28,9 @@ func TestRegistryReleaseRemovesOnlyItsOwnEntry(t *testing.T) {
 	}
 }
 
-// 陈旧 Release 返回 nil 而不是报错，是为了让组件的 Stop 幂等。
-// 组件的 Stop 可能被调用不止一次（装配失败回滚 + 正常停止），释放路径上
-// 多一次「已经没了」不该被当成故障。
+// A stale Release returns nil instead of an error, to make a component's Stop idempotent. A
+// component's Stop may be called more than once (assembly-failure rollback + normal stop), and
+// an extra "it is already gone" on the release path should not be treated as a fault.
 func TestRegistryStaleReleaseIsNoop(t *testing.T) {
 	var r Registry[string]
 
@@ -53,7 +53,8 @@ func TestRegistryStaleReleaseIsNoop(t *testing.T) {
 	}
 }
 
-// check 在写锁内跑，所以「查重 + 插入」是原子的；被拒绝时账本一个字节都不动。
+// check runs under the write lock, so "duplicate check + insert" is atomic; when rejected the
+// ledger does not change by a byte.
 func TestRegistryCheckRejectionLeavesLedgerUntouched(t *testing.T) {
 	var r Registry[string]
 	reject := func(existing []string) error {
@@ -83,7 +84,7 @@ func TestRegistryCheckRejectionLeavesLedgerUntouched(t *testing.T) {
 	}
 }
 
-// check 拿到的是快照：它改动传进来的切片不能影响账本。
+// check receives a snapshot: modifying the slice passed in must not affect the ledger.
 func TestRegistryCheckSeesASnapshot(t *testing.T) {
 	var r Registry[string]
 	if _, err := r.Register("a", nil); err != nil {

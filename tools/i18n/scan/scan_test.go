@@ -7,12 +7,13 @@ import (
 	"testing"
 )
 
-// TestDirStopsAtNestedModule 锁住「扫描器不进别人家的树」。
+// TestDirStopsAtNestedModule locks down "the scanner does not enter someone else's tree".
 //
-// 为什么这条要紧：发行版是独立 module，它的 `core/` 是内核那份 submodule（自带
-// go.mod）。扫描器若走进去，发行版的账本里会冒出一堆内核的消息——症状是覆盖率
-// 分母莫名变大、豁免清单里列出 `core/...` 的文件（实测过一次），而账本本身看起来
-// 完全正常。同一棵树，两把尺子。
+// Why this matters: the distribution is a separate module, and its `core/` is the kernel
+// submodule (carrying its own go.mod). If the scanner walked in, the distribution's ledger
+// would suddenly sprout a pile of the kernel's messages -- the symptom is the coverage
+// denominator growing for no reason and the allowlist listing `core/...` files (observed once),
+// while the ledger itself looks perfectly normal. One tree, two rulers.
 func TestDirStopsAtNestedModule(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel, body string) {
@@ -52,7 +53,8 @@ var _ = i18n.T("a message of theirs", nil)
 		t.Error("扫进了嵌套的 Go module（别人家的消息进了我们的账本）")
 	}
 
-	// 同一条规则必须也管住中文清点——两条判据量的得是同一棵树。
+	// The same rule must govern the Chinese count too -- the two criteria must measure the same
+	// tree.
 	if !SkipDir(root, filepath.Join(root, "core")) {
 		t.Error("嵌套 module 该被跳过")
 	}

@@ -8,16 +8,18 @@ import (
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
-// Trace 是**构图期事件**的出口：内核把「扫到几个组件、每个声明了什么、谁排在
-// 谁前面、每个起了多久」这些事实报出去，怎么排版、写到哪里由产品层决定。
+// Trace is the exit for **graph-construction events**: the kernel reports facts like "how many
+// components were scanned, what each declared, who is ordered before whom, how long each took
+// to start", and how to lay it out and where to write it is the product layer's decision.
 //
-// 为什么放在内核里而不是产品层自己数：这些事实只有 resolve 与生命周期循环
-// 知道——声明顺序、被跳过的弱依赖、拓扑序、每个组件的起停耗时。产品层拿不到
-// （Manager 只交出结果，不交出过程），于是「为什么这个模块没起」「为什么顺序
-// 是这样」就只能靠猜。
+// Why it is in the kernel instead of the product layer counting for itself: only resolve and
+// the lifecycle loop know these facts -- declaration order, skipped weak dependencies,
+// topological order, each component's start/stop duration. The product layer cannot get them
+// (the Manager only hands out the result, not the process), so "why did this module not start"
+// and "why is the order like this" could only be guessed.
 //
-// 内核不认识日志、不认识文件、不认识环境变量：产品层装一个函数进来即可
-// （见 app.TraceTo）。默认 nil = 什么都不报。
+// The kernel knows nothing of logging, files or environment variables: the product layer
+// installs a function (see app.TraceTo). Default nil = report nothing.
 type Trace func(format string, args ...any)
 
 var (
@@ -25,18 +27,20 @@ var (
 	traceFn Trace
 )
 
-// SetTrace 安装构图期事件出口；传 nil 关掉。
+// SetTrace installs the graph-construction event exit; pass nil to turn it off.
 //
-// 进程级设置，与 thinkcache.SetErrorHandler / buildinfo.Set 同类：它是「这台
-// 进程往哪报诊断」这一件事，不是某个组件的能力。装配**之前**调用才完整
-// （装配一开始就会开始报）。
+// A process-level setting, the same kind as thinkcache.SetErrorHandler / buildinfo.Set: it is
+// the one thing "where this process reports diagnostics", not some component's capability. It
+// must be called **before** assembly to be complete (reporting starts as soon as assembly
+// begins).
 func SetTrace(fn Trace) {
 	traceMu.Lock()
 	traceFn = fn
 	traceMu.Unlock()
 }
 
-// tracef 报一行。没装出口时是空操作，所以调用点不需要判空。
+// tracef reports one line. It is a no-op when no exit is installed, so call sites need no nil
+// check.
 func tracef(format string, args ...any) {
 	traceMu.RLock()
 	fn := traceFn
@@ -46,13 +50,14 @@ func tracef(format string, args ...any) {
 	}
 }
 
-// describeComponent 把一条声明渲染成一行事实：
+// describeComponent renders one declaration as a line of facts:
 //
-//	breaker            type=infra   提供=[breaker]        需要=[~cli]
+//	breaker            type=infra   provides=[breaker]    needs=[~cli]
 //
-// `~` 前缀是**弱依赖**（Optional，见 Requirement）：装着就依赖，不装就没有这
-// 条边。这一行是排查「模块为什么没起」的第一现场——它是静态声明，与运行时
-// 结果无关，所以能直接和下面的排序结果对照。
+// The `~` prefix marks a **weak dependency** (Optional, see Requirement): installed means it is
+// depended on, not installed means there is no such edge. This line is the first scene when
+// investigating "why did the module not start" -- it is a static declaration, independent of
+// the runtime result, so it can be compared directly with the sorted result below.
 func describeComponent(c Component) string {
 	provided := make([]string, 0, len(c.Provides))
 	for _, p := range c.Provides {
@@ -74,14 +79,16 @@ func describeComponent(c Component) string {
 	}
 	sort.Strings(provided)
 	sort.Strings(needed)
-	// `type=` / `~` 是机器标记（构图期的判据与字段名），留在消息外面。
+	// `type=` / `~` are machine markers (graph-construction criteria and field names), kept
+	// outside the message.
 	return pad(c.Name, 20) + " type=" + pad(string(c.Type), 9) +
 		i18n.T(" provides=[{list}]", i18n.A{"list": strings.Join(provided, " ")}) +
 		i18n.T(" needs=[{list}]", i18n.A{"list": strings.Join(needed, " ")})
 }
 
-// pad 按显示宽度右侧补空格。组件名是 ASCII（目录名），所以这里不必处理
-// CJK 双宽——版式那件事归 lib/style，内核不引入它。
+// pad right-pads with spaces by display width. Component names are ASCII (directory names), so
+// there is no need to handle CJK double width here -- layout is lib/style's business, and the
+// kernel does not pull it in.
 func pad(s string, width int) string {
 	if len(s) >= width {
 		return s
@@ -89,9 +96,12 @@ func pad(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-// Tracef 让**组合根**也能往装配日志里写一行（内核自己的 tracef 是包内的）。
+// Tracef lets the **composition root** write a line into the assembly log too (the kernel's own
+// tracef is package-private).
 //
-// 组合根要用它的场合只有一个、但很关键：**入口解析**——「这次进程调用 route 给
-// 谁」必须和装配过程落在同一份日志里，否则排查「我敲的明明是 newgate，为什么起的
-// 是别的壳」要同时翻两个地方。它不引入新目的地：出口还是 SetTrace 那一个。
+// There is exactly one situation where the composition root needs it, but it matters: **entry
+// resolution** -- "who is this process invocation routed to" must land in the same log as the
+// assembly process, otherwise investigating "I typed newgate, why did some other shell start"
+// means digging in two places at once. It introduces no new destination: the exit is still the
+// one from SetTrace.
 func Tracef(format string, args ...any) { tracef(format, args...) }

@@ -8,29 +8,32 @@ import (
 	"testing"
 )
 
-// 组合根**不认识任何模块**——这条法则今天是一条测试，不是一句注释。
+// The composition root **knows no module** -- this law is a test today, not a comment.
 //
-// 判据是机械的：`app/*.go` 的非测试源码里不许出现任何
-// `github.com/rzbdz/newgate/modules/...` 的 import，除了两处**不是依赖**的：
+// The check is mechanical: the non-test sources of `app/*.go` must not contain any import of
+// `github.com/rzbdz/newgate/modules/...`, except two places that are **not dependencies**:
 //
-//   - `modules_gen.go`：构建期由 tools/genmodules 生成的装配清单。清单必须住在
-//     某个地方，而组合根是它唯一该在的地方（它引用的每个模块都只被列一次名，
-//     不调用任何方法）。
-//   - `modules/config/paths`：**共享叶子**，谁都能直接 import（docs/03 的分层表
-//     写明），它描述的是「配置在磁盘上长什么样」，不是「某个模块怎么工作」。
-//     这里用它决定装配日志写到哪个文件。
+//   - `modules_gen.go`: the assembly list generated at build time by tools/genmodules. The list
+//     has to live somewhere, and the composition root is the only place it belongs (every
+//     module it references is named once, and no method is called on any of them).
+//   - `modules/config/paths`: a **shared leaf**, which anyone may import directly (spelled out
+//     in the layering table of docs/03); it describes "what the configuration looks like on
+//     disk", not "how some module works". It is used here to decide which file the assembly log
+//     is written to.
 //
-// # 为什么值得钉住
+// # Why it is worth pinning down
 //
-// 破了它，症状是**编译期才出现，而且是别人踩的**：用户从清单里摘掉一个模块
-// （那正是「装一个模块 = 复制目录」的另一半），组合根却因为它 import 了某个具体
-// 模块而编译不过。这一条与「模块可摘」是同一条不变式的两面——见 matrix_test.go
-// 的摘除矩阵。
+// Break it and the symptom **appears at compile time, and someone else steps on it**: the user
+// removes a module from the list (that is the other half of "installing a module = copying a
+// directory"), and the composition root fails to compile because it imports some concrete
+// module. This is two sides of the same invariant as "modules are removable" -- see the removal
+// matrix in matrix_test.go.
 //
-// 2026-09-20 之前这里违反过三处，全是「组合根替模块做决定」：
-// `MustGet(pluginmanager).SetCatalog(...)`（名单现在由内核递，见 component.CatalogAware）、
-// `App.CLI()/Wrapper()`（入口现在由模块自己申报，见 component/entry）、
-// `Agent/Slot` 类型别名（零调用方，纯冗余）。
+// Before 2026-09-20 this was violated in three places, all of them "the composition root
+// deciding for modules": `MustGet(pluginmanager).SetCatalog(...)` (the list is now delivered by
+// the kernel, see component.CatalogAware), `App.CLI()/Wrapper()` (the entry is now declared by
+// modules themselves, see component/entry), `Agent/Slot` type aliases (zero callers, pure
+// redundancy).
 func TestTheCompositionRootNamesNoModule(t *testing.T) {
 	root := repoDir(t)
 	entries, err := os.ReadDir(root)
@@ -43,8 +46,9 @@ func TestTheCompositionRootNamesNoModule(t *testing.T) {
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		// 生成物整份跳过：它列的就是全部模块名，那是**构建期扫描的结果**，
-		// 与「组合根认识某个模块」是两回事（它一个方法都不调）。
+		// The whole generated file is skipped: what it lists is every module name, which is **the
+		// result of a build-time scan**, a different thing from "the composition root knows a module"
+		// (it calls no method).
 		if name == "modules_gen.go" {
 			continue
 		}
@@ -56,8 +60,9 @@ func TestTheCompositionRootNamesNoModule(t *testing.T) {
 			if !strings.Contains(line, `"github.com/rzbdz/newgate/modules/`) {
 				continue
 			}
-			// 唯一的例外是共享叶子 config/paths（docs/03 的分层表写明谁都能
-			// 直接 import）：它描述「配置在磁盘上长什么样」，不是某个模块的内部。
+			// The only exception is the shared leaf config/paths (the layering table of docs/03 says
+			// anyone may import it directly): it describes "what the configuration looks like on disk",
+			// not a module's internals.
 			if strings.Contains(line, "modules/config/paths") {
 				continue
 			}
@@ -70,8 +75,9 @@ func TestTheCompositionRootNamesNoModule(t *testing.T) {
 	}
 }
 
-// repoDir 是本测试文件所在的目录（app/）。要仓库根再加一级 ".."——2026-09-20
-// 摊平 go/ 之前这里是「包的上两级」，那句话跟着那层目录一起没了。
+// repoDir is the directory this test file lives in (app/). To get the repo root add one more
+// ".." -- before go/ was flattened on 2026-09-20 this was "two levels above the package", and
+// that sentence went away with the directory.
 func repoDir(t *testing.T) string {
 	t.Helper()
 	_, this, _, ok := runtime.Caller(0)

@@ -1,12 +1,14 @@
-// Package check 是本地化这件事的**静态检查**：账本是否过期、译文与原文的占位符
-// 是否对得上、有没有孤儿键、有没有把机器标记当成文案、源码里还剩下多少中文。
+// Package check is the **static check** for localization: is the ledger stale, do the
+// placeholders of the translation and the source match, are there orphan keys, has a machine
+// marker been treated as copy, how much Chinese is left in the source.
 //
-// 它与 tools/i18n/scan 一样，是内核与发行版**共用**的一份实现（发行版通过
-// replace 拿到它）：两个仓库的规矩必须是同一把尺子，否则「发行版里能过、内核里
-// 报错」这种事会变成日常。
+// Like tools/i18n/scan, it is an implementation **shared** by the kernel and the distribution
+// (the distribution gets it through replace): the two repositories must use the same ruler,
+// otherwise "passes in the distribution, errors in the kernel" becomes routine.
 //
-// 全部检查都是**离线、不花钱**的——CI 里跑的就是它。要调 LLM 的那一步（翻译）
-// 不在这里，见 tools/i18n/main.go 的 sync 子命令：那是开发者本地跑的事。
+// Every check is **offline and free** -- this is what CI runs. The step that calls an LLM
+// (translation) is not here, see the sync subcommand in tools/i18n/main.go: that is a
+// developer-local task.
 package check
 
 import (
@@ -27,7 +29,7 @@ import (
 	"github.com/rzbdz/newgate/tools/i18n/scan"
 )
 
-// Options 是一次检查的输入。两个仓库各给各的路径。
+// Options is the input to one check. The two repositories each pass their own paths.
 type Options struct {
 	Root       string // 仓库根
 	CatalogDir string // 目录文件相对 Root 的位置，如 "lib/i18n/catalogs"
@@ -35,7 +37,7 @@ type Options struct {
 	Strict     bool   // 覆盖率不足、机翻未复核是否算失败（发版时用）
 }
 
-// Finding 是一条检查结论。Level 为 "error" 时调用方应当以非零退出。
+// Finding is one check result. When Level is "error" the caller should exit non-zero.
 type Finding struct {
 	Level string // error | warn
 	Where string
@@ -50,7 +52,7 @@ func (f Finding) String() string {
 	return fmt.Sprintf("%-5s %s: %s", f.Level, where, f.Msg)
 }
 
-// Run 跑完全部检查。
+// Run runs every check.
 func Run(opts Options) ([]Finding, error) {
 	var out []Finding
 	add := func(level, where, msg string) { out = append(out, Finding{level, where, msg}) }
@@ -78,14 +80,16 @@ func Run(opts Options) ([]Finding, error) {
 			"运行 `go run ./tools/i18n extract` 后重新提交")
 	}
 
-	// 调用点给的实参必须盖住消息里的占位符。
+	// The arguments given at the call site must cover the placeholders in the message.
 	//
-	// 为什么值得单独一条：漏一个实参**不报错**，界面上就永远显示一个光秃秃的
-	// `{dir}`——只有用户会看见，而用户不会为此开 issue（他以为那是我们想显示的
-	// 东西）。这是 i18n 里唯一「静默到没人会来修」的失效，所以放在构建期拦。
+	// Why this deserves its own check: a missing argument **does not error**, and the UI just
+	// shows a bare `{dir}` forever -- only the user sees it, and the user will not file an issue
+	// over it (they assume it is what we meant to show). This is the one i18n failure mode that is
+	// "silent enough that nobody comes to fix it", so it is caught at build time.
 	//
-	// 两个**注入**例外（写在 lib/i18n 里）：N() 自己把数量放进实参、Ef() 自己把
-	// 底层错误放进 {err}——这两处调用点可以不写。除此之外一个都不能少。
+	// Two **injection** exceptions (written in lib/i18n): N() puts the count into the arguments
+	// itself, and Ef() puts the underlying error into {err} -- those two call sites may omit them.
+	// Everything else must be given.
 	for _, msg := range i18n.SortedKeys(msgs) {
 		call := msgs[msg]
 		want := i18n.Placeholders(msg)
@@ -116,7 +120,7 @@ func Run(opts Options) ([]Finding, error) {
 		}
 	}
 
-	// 译文：占位符一致、没有孤儿键、覆盖率。
+	// Catalogs: placeholder consistency, no orphan keys, coverage.
 	catalogs, err := loadCatalogs(filepath.Join(opts.Root, opts.CatalogDir))
 	if err != nil {
 		return nil, err
@@ -164,7 +168,8 @@ func Run(opts Options) ([]Finding, error) {
 		}
 	}
 
-	// 机器标记不许被当成文案：它们是控制流的判据、协议里的名字。
+	// Machine markers must not be treated as copy: they are control-flow criteria and protocol
+	// names.
 	for _, cat := range catalogs {
 		for _, msg := range i18n.SortedKeys(cat.Messages) {
 			if forbidden[msg] {
@@ -185,22 +190,26 @@ func Run(opts Options) ([]Finding, error) {
 	return out, nil
 }
 
-// forbidden 是**绝不许**进目录的字符串——它们看着像文案，其实是机器读的。
+// forbidden lists strings that must **never** enter a catalog -- they look like copy but are
+// read by machines.
 //
-// 结构上它们根本不经过 i18n.T（`Diagnostic.State` 是 switch 的判据、metrics 名是
-// 协议字段），所以这条检查防的是**译者手滑**：有人把 `ok` 做成一条消息改成
-// 「正常」，那一天 `newgate doctor` 的判据就断了。
+// Structurally they never go through i18n.T at all (`Diagnostic.State` is a switch criterion,
+// metric names are protocol fields), so this check guards against **a translator's slip of the
+// hand**: someone turns `ok` into a message and changes it to "normal", and that day
+// `newgate doctor` 's criterion is broken.
 var forbidden = map[string]bool{
 	"ok": true, "warn": true, "bad": true, "skip": true,
 	"providers.json": true, "state.json": true, "health.json": true,
 	"/__newgate/status": true, "/__newgate/metrics": true,
 }
 
-// buildLedger 把扫描结果变成账本。人写的 note 保留（extract 绝不覆盖人写的东西）。
+// buildLedger turns scan results into a ledger. Human-written notes are kept (extract never
+// overwrites something a human wrote).
 //
-// **不记位置**（2026-09-21）：`scan.Call` 有 Where（`文件:行`，报错时点名用），但账本
-// 不留它——位置一变账本就"过期"，而那是每次挪一行代码都会发生的事。理由与代价写在
-// lib/i18n 的 Ledger 注释里。
+// **No locations** (2026-09-21): `scan.Call` has Where (`file:line`, used to name the spot in
+// errors), but the ledger does not keep it -- move a line and the ledger is "stale", and that
+// happens every time anyone moves a line of code. The reasoning and the cost are in the Ledger
+// comment in lib/i18n.
 func buildLedger(msgs map[string]scan.Call) i18n.Ledger {
 	led := i18n.Ledger{Messages: make(map[string]i18n.LedgerEntry, len(msgs))}
 	for msg, call := range msgs {
@@ -212,7 +221,8 @@ func buildLedger(msgs map[string]scan.Call) i18n.Ledger {
 	return led
 }
 
-// MergeLedger 把新扫出来的账本与旧账本合并：消息的 args 用新的，**note 用旧的**。
+// MergeLedger merges the freshly scanned ledger with the old one: args come from the new,
+// **notes from the old**.
 func MergeLedger(old, fresh i18n.Ledger) i18n.Ledger {
 	out := i18n.Ledger{Messages: make(map[string]i18n.LedgerEntry, len(fresh.Messages))}
 	for msg, e := range fresh.Messages {
@@ -224,7 +234,8 @@ func MergeLedger(old, fresh i18n.Ledger) i18n.Ledger {
 	return out
 }
 
-// FreshLedger 扫源码算出当前应有的账本（extract 与 check 共用这一份）。
+// FreshLedger scans the source to compute the ledger that should exist now (shared by extract
+// and check).
 func FreshLedger(root, catalogDir string) (i18n.Ledger, error) {
 	calls, err := scan.Dir(root)
 	if err != nil {
@@ -237,7 +248,8 @@ func FreshLedger(root, catalogDir string) (i18n.Ledger, error) {
 	return MergeLedger(old, buildLedger(scan.Messages(calls))), nil
 }
 
-// LoadLedger 读一份账本；读不到给空账本（第一次跑 extract 时就是这个状态）。
+// LoadLedger reads a ledger; when it cannot be read, an empty ledger is returned (the state on
+// the first extract run).
 func LoadLedger(path string) (i18n.Ledger, error) {
 	raw, err := os.ReadFile(filepath.Join(path, i18n.LedgerName))
 	if err != nil {
@@ -246,7 +258,7 @@ func LoadLedger(path string) (i18n.Ledger, error) {
 	return i18n.ParseLedger(raw)
 }
 
-// LoadCatalogs 读目录下全部译文（不含账本）。
+// LoadCatalogs reads every catalog under the directory (not the ledger).
 func LoadCatalogs(dir string) ([]i18n.Catalog, error) { return loadCatalogs(dir) }
 
 func loadCatalogs(dir string) ([]i18n.Catalog, error) {
@@ -273,24 +285,27 @@ func loadCatalogs(dir string) ([]i18n.Catalog, error) {
 	return out, nil
 }
 
-// ---------- 中文残留的棘轮 ----------
+// ---------- the ratchet on leftover Chinese ----------
 
-// allowlistFile 是「还没迁移的文件」清单。
+// allowlistFile is the "not yet migrated files" list.
 //
-// 它是**迁移期**的脚手架，终点是空文件。为什么按文件而不是按字面量列：迁移是
-// 一个文件一个文件做的（一个模块一批），按文件列才跟得上手速；代价是未迁移的
-// 文件里可以偷偷加新的中文——但那份清单只减不增，终点是「非测试源码里一个字都
-// 没有中文」，所以这个漏洞有明确的到期日。
+// It is **migration-period** scaffolding, and its end state is an empty file. Why list files
+// rather than literals: migration is done file by file (one module per batch), so listing files
+// keeps up with the pace; the cost is that unmigrated files can quietly gain new Chinese -- but
+// the list only shrinks, and the end state is "not one character of Chinese in non-test
+// source", so this hole has a definite expiry date.
 type allowlistFile struct {
 	Why   string            `json:"why"`
 	Files map[string]string `json:"files"` // 路径 → 为什么还没迁（一句话）
 }
 
-// CJKFiles 扫出「哪些非测试源码文件里还有中文字符串字面量」，返回 文件 → 条数。
+// CJKFiles scans for "which non-test source files still have Chinese string literals",
+// returning file -> count.
 //
-// 只看**字符串字面量**：注释是设计记录，本来就该是中文；测试文件里的中文是夹具。
-// 两者都不该被这条检查管。导出是因为 tools/i18n 的 `audit --seed` 要用它生成
-// 未迁移清单，而发行版复用同一份判据。
+// Only **string literals** are looked at: comments are design records and should be Chinese;
+// Chinese in test files is fixtures. Neither should be governed by this check. It is exported
+// because `audit --seed` in tools/i18n uses it to generate the unmigrated list, and the
+// distribution reuses the same criterion.
 func CJKFiles(root string) (map[string]int, error) {
 	seen := map[string]int{}
 	fset := token.NewFileSet()
@@ -299,10 +314,10 @@ func CJKFiles(root string) (map[string]int, error) {
 			return err
 		}
 		if d.IsDir() {
-			// 走哪些目录、不走哪些，与 scan.Dir 用**同一条规则**（scan.SkipDir）：
-			// 两条判据量的必须是同一棵树，否则会出现「账本里没有它、豁免清单里却
-			// 列着它」这种自相矛盾——而发行版里 `core/` 那棵 submodule 正好是这
-			// 种错位最容易发生的地方。
+			// Which directories to walk, using the **same rule** as scan.Dir (scan.SkipDir): the two
+			// criteria must measure the same tree, otherwise you get contradictions like "it is not in
+			// the ledger but it is listed in the allowlist" -- and in the distribution the `core/`
+			// submodule tree is exactly where that kind of misalignment is most likely.
 			if scan.SkipDir(root, p) {
 				return fs.SkipDir
 			}
@@ -339,11 +354,12 @@ func CJKFiles(root string) (map[string]int, error) {
 	return seen, nil
 }
 
-// auditCJK 是那条棘轮：清单与现状必须**精确相等**。
+// auditCJK is that ratchet: the list and the current state must be **exactly equal**.
 //
-// 两个方向都要红。「多出来」拦的是新增的中文（该走 i18n.T）；「少下去」拦的是
-// 迁完了忘了删清单——只查一个方向的话，清单会慢慢腐坏，腐坏之后它就只是一份
-// 谁也不敢删的历史文件。
+// Both directions must go red. "More than listed" catches newly added Chinese (which should go
+// through i18n.T); "fewer than listed" catches "migrated but forgot to remove from the list" --
+// checking only one direction would let the list rot, and once rotted it is just a history file
+// nobody dares delete.
 func auditCJK(root, path string) ([]Finding, error) {
 	var out []Finding
 	raw, err := os.ReadFile(path)

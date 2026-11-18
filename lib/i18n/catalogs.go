@@ -8,22 +8,25 @@ import (
 	"strings"
 )
 
-// 嵌的是 **bundle（.bin）**，不是 JSON：JSON 是给人改的，编译期那份是给运行期
-// 读的。每个进程都要读一遍这些表，而解析 250KB JSON 实测 2.78ms——占一次
-// `newgate …` 装配（约 6ms）的将近一半。两种形态由 `tools/i18n bundle` 对齐，
-// `-check` 与 lib/i18n 的测试拦「改了 JSON 忘了重生成」。
+// What is embedded is the **bundle (.bin)**, not the JSON: JSON is for people to edit, the
+// compile-time copy is for the runtime to read. Every process reads these tables once, and
+// parsing 250KB of JSON measured 2.78ms -- nearly half of one `newgate …` assembly (about 6ms).
+// The two forms are kept aligned by `tools/i18n bundle`, and `-check` plus the lib/i18n tests
+// block "edited the JSON, forgot to regenerate".
 //
 //go:embed catalogs/*.bin
 var catalogsFS embed.FS
 
-// LedgerName 是账本的文件名。它**不是**一门语言，是源语言的清单，
-// 所以不能按 `<tag>.json` 的规矩来（否则会被当成一门叫 ledger 的语言）。
+// LedgerName is the ledger's file name. It is **not** a language, it is the source-language
+// inventory, so it must not follow the `<tag>.json` rule (otherwise it would be treated as a
+// language called ledger).
 const LedgerName = "ledger.json"
 
-// Builtin 读内核自带的账本与译文（编译进二进制的那一份）。
+// Builtin reads the kernel's own ledger and catalogs (the copy compiled into the binary).
 //
-// 为什么内置：`newgate` 是**单文件静态二进制**，要能拷到别的机器上直接跑，不能
-// 依赖旁边躺着一个 locale/ 目录。磁盘那一层（OverlayDir）是**覆盖**，不是唯一来源。
+// Why built in: `newgate` is a **single-file static binary** that must be copyable to another
+// machine and run directly, without depending on a locale/ directory lying next to it. The disk
+// layer (OverlayDir) is an **override**, not the only source.
 func Builtin() (Ledger, []Catalog, error) {
 	led, err := ledgerFromBundle(catalogsFS, "catalogs")
 	if err != nil {
@@ -36,12 +39,15 @@ func Builtin() (Ledger, []Catalog, error) {
 	return led, cats, nil
 }
 
-// BundlesFromFS 从一个目录里读全部 `<tag>.bin`（编译期生成的那一份，见 bundle.go）。
+// BundlesFromFS reads every `<tag>.bin` from a directory (the compile-time generated copy, see
+// bundle.go).
 //
-// 与 CatalogsFromFS 是同一件事的两种输入：那边读 JSON（人写的、工具写的、磁盘覆盖
-// 用的），这边读 bundle（运行期用的）。**必须是两份实现而不是「自动挑一种」**：
-// 自动挑的那条会在「目录里两种都有」时给出一个看运气的结果，而那种不确定正是
-// 「改了 JSON 忘了重生成」最难查的形态。
+// Together with CatalogsFromFS these are two inputs for the same thing: that one reads JSON
+// (written by people, written by tools, used for disk overrides), this one reads bundles (used
+// at runtime). **They must be two implementations rather than "pick one automatically"**:
+// automatic picking would give a luck-dependent result when "both are present in the
+// directory", and that indeterminacy is exactly the hardest form of "edited the JSON, forgot to
+// regenerate" to investigate.
 func BundlesFromFS(fsys fs.FS, dir string) ([]Catalog, error) {
 	names, err := bundleNames(fsys, dir)
 	if err != nil {
@@ -60,7 +66,7 @@ func BundlesFromFS(fsys fs.FS, dir string) ([]Catalog, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s/%s: %w", dir, name, err)
 		}
-		// 文件名与 meta.language 必须一致（理由同 CatalogsFromFS 里那一条）。
+		// The file name and meta.language must agree (same reasoning as the one in CatalogsFromFS).
 		if want := strings.TrimSuffix(name, ".bin"); want != c.Language {
 			return nil, fmt.Errorf("%s/%s: language is %q, which disagrees with the file name",
 				dir, name, c.Language)
@@ -70,7 +76,7 @@ func BundlesFromFS(fsys fs.FS, dir string) ([]Catalog, error) {
 	return out, nil
 }
 
-// LedgerBundleName 是账本的 bundle 文件名（LedgerName 的编译期形态）。
+// LedgerBundleName is the bundle file name of the ledger (the compile-time form of LedgerName).
 const LedgerBundleName = "ledger.bin"
 
 const bundleLedgerName = LedgerBundleName
@@ -102,10 +108,12 @@ func bundleNames(fsys fs.FS, dir string) ([]string, error) {
 	return names, nil
 }
 
-// CatalogsFromFS 从一个目录里读全部 `<tag>.json` 译文（`ledger.json` 不算）。
+// CatalogsFromFS reads every `<tag>.json` catalog from a directory (`ledger.json` does not
+// count).
 //
-// 发行版模块带自己的文案时也用它：发行版是独立 module，内核不认识它的目录名，
-// 所以「把自己的表嵌进来并注册」这件事必须由它自己做。
+// A distribution module bringing its own copy also uses it: the distribution is a separate Go
+// module, the kernel does not know its directory names, so "embed your own tables and register
+// them" has to be done by the distribution itself.
 func CatalogsFromFS(fsys fs.FS, dir string) ([]Catalog, error) {
 	names, err := jsonNames(fsys, dir)
 	if err != nil {
@@ -124,8 +132,9 @@ func CatalogsFromFS(fsys fs.FS, dir string) ([]Catalog, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s/%s: %w", dir, name, err)
 		}
-		// 文件名与 meta.language 必须一致：不一致时「我改了 zh-Hans.json 怎么没
-		// 生效」会变成一次无解的排查（改的是文件 A，生效的是文件 B）。
+		// The file name and meta.language must agree: when they disagree, "why did my edit to
+		// zh-Hans.json not take effect" turns into an unsolvable investigation (you edited file A,
+		// file B is the one in effect).
 		if want := strings.TrimSuffix(name, ".json"); want != c.Language {
 			return nil, fmt.Errorf("%s/%s: meta.language is %q, which disagrees with the file name",
 				dir, name, c.Language)
@@ -135,7 +144,7 @@ func CatalogsFromFS(fsys fs.FS, dir string) ([]Catalog, error) {
 	return out, nil
 }
 
-// ledgerFromFS 读账本。
+// ledgerFromFS reads the ledger.
 func ledgerFromFS(fsys fs.FS, dir string) (Ledger, error) {
 	raw, err := fs.ReadFile(fsys, dir+"/"+LedgerName)
 	if err != nil {

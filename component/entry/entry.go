@@ -1,28 +1,34 @@
-// Package entry 是**进程入口**这条边的契约：一个进程醒来之后，这次调用该交给谁。
+// Package entry is the contract for the **process entry** edge: once a process wakes up, who
+// should this invocation go to.
 //
-// # 为什么它住在内核旁边，而不是某个模块里
+// # Why it lives beside the kernel instead of inside some module
 //
-// 要一个**认不出任何模块**的组合根，就必须有一个双方都看得见的边界类型：组合
-// 根在一侧、模块在另一侧，它们不能互相 import，能共同看见的只有内核。这个类型
-// 描述的是**进程**（我是怎么被调起来的），不是**业务**（我是谁、我干什么），所以
-// 它和 Start/Stop 同级——内核提供形状，产品填内容（见 component.Type 的同款规矩）。
+// To have a composition root that **cannot recognize any module**, there must be a boundary
+// type both sides can see: the composition root on one side, modules on the other, they cannot
+// import each other, and the only thing they can both see is the kernel. This type describes
+// **the process** (how was I invoked), not **the business** (who am I, what do I do), so it is
+// at the same level as Start/Stop -- the kernel provides the shape, the product fills in the
+// content (the same rule as component.Type).
 //
-// # 为什么不是「app 先问 wrapper、再问 cli」
+// # Why not "app asks wrapper first, then cli"
 //
-// 那是把分发的判据写死在组合根里：谁是入口、什么条件下归谁，全是模块的知识。
-// 2026-09-20 之前 cmd/newgate/main.go 就是这么写的，后果是组合根 import 了
-// cli 与 wrapper 两个模块，删掉其中任何一个都无法编译——「用户的模块可以摘掉」
-// 这句话在组合根上不成立。
+// That hardcodes the dispatch criterion into the composition root: who the entry is, and under
+// what conditions it belongs to whom, is all module knowledge. Before 2026-09-20
+// cmd/newgate/main.go was written that way, and the consequence was that the composition root
+// imported the cli and wrapper modules, so deleting either one made it uncompilable -- "the
+// user's modules can be removed" did not hold at the composition root.
 //
-// 现在反过来：**入口是贡献者申报的**。每个模块在自己的 Start 里 Register 一个
-// Handler 并给出一个 rank（小的先被问），组合根只做一次 Resolve，然后调用它。
+// Now it is the other way around: **the entry is declared by contributors**. Each module
+// Registers a Handler in its own Start and gives a rank (smaller is asked first), and the
+// composition root does a single Resolve and then calls it.
 //
-//	rank 0    wrapper    argv0 是某个被接管的 client（PATH shim 转过来的）
-//	rank 1000 cli        默认入口：谁都没认领就是它
-//	（将来）  web-daemon 配置里写着 entry=web
+//	rank 0    wrapper    argv0 is some taken-over client (forwarded by a PATH shim)
+//	rank 1000 cli        the default entry: it is this one if nobody claimed the invocation
+//	(future)  web-daemon with entry=web in the configuration
 //
-// 于是「换一个更好的 cli」「让 newgate 直接起一个 web」在组合根上是**零改动**的：
-// 换掉 modules/cli 那个目录、或者加一个新模块申报更高的 rank。
+// So "swap in a better cli" and "have newgate start a web server directly" are **zero change**
+// at the composition root: replace the modules/cli directory, or add a new module that declares
+// a higher rank.
 package entry
 
 import (
@@ -35,24 +41,28 @@ import (
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
-// 申报用的三个 rank。小的先被问，**不是魔法数字**，读作优先级区间：
+// The three ranks used for declaration. Smaller is asked first, and these are **not magic
+// numbers**, they read as priority bands:
 //
-//	RankShim      有条件的入口：先问，条件不成立就放过去，让后面的人接手
-//	RankPreferred 显式优先：产品/测试主动选定的壳（配置里点名、测试构建里只装它）
-//	DefaultRank   兜底：永远返回 true，所以必须排在最后被问
+//	RankShim      conditional entry: asked first; if the condition fails, later ones take over
+//	RankPreferred explicitly preferred: the shell the product/tests chose (named in config, or
+//	              the only one in a test build)
+//	DefaultRank   fallback: always returns true, so it must be asked last
 //
-// 区间之间的空隙是留给将来的：按环境分流、按配置分流都往中间插，不需要改已有模块。
+// The gaps between the bands are left for the future: splitting by environment and splitting by
+// configuration both go in the middle, with no change to existing modules.
 const (
 	RankShim      = 0
 	RankPreferred = 500
 	DefaultRank   = 1000
 )
 
-// Process 是「这次进程调用」的全部事实，也是边界两侧唯一的公共词汇。
+// Process is every fact about "this process invocation", and the only shared vocabulary on both
+// sides of the boundary.
 //
-// 它只有一个来源：组合根在 main 里从 os.Args / os.Environ 与链接期变量装出来。
-// 模块不许自己去读 os.Args——那样它就把「进程是怎么被调起来的」这件事又抄了
-// 一遍，而这正是本包存在的理由。
+// It has exactly one source: the composition root assembles it in main from os.Args /
+// os.Environ and link-time variables. Modules must not read os.Args themselves -- doing so
+// would copy "how the process was invoked" once more, which is exactly why this package exists.
 type Process struct {
 	Argv0      string   // os.Args[0] 的 basename（去 .exe）：`newgate` / `claude` / `newgate-ds`
 	Args       []string // os.Args[1:]
@@ -62,36 +72,40 @@ type Process struct {
 	CommitTime string
 }
 
-// Handler 是一次入口申报。
+// Handler is one entry declaration.
 type Handler interface {
-	// Name 进日志：组合根那句 `[entry] resolve: … → <Name>`。
+	// Name goes into the log: the composition root's `[entry] resolve: … → <Name>` line.
 	Name() string
 
-	// Claims 这次调用归我吗。**必须只读 Process，不许有副作用**——它会被问
-	// 在真正分派之前，而且别的申报者也可能被问到。
+	// Claims says whether this invocation belongs to me. It **must only read Process and have no
+	// side effects** -- it is asked before the actual dispatch, and other declarants may be asked
+	// too.
 	Claims(Process) bool
 
-	// Handle 执行这次调用并返回退出码。
+	// Handle executes this invocation and returns an exit code.
 	Handle(Process) int
 }
 
-// Registry 是入口申报账本。它由 **modules/entry 那个模块**提供（见 modules/entry），
-// 那是内核唯一认识、也是唯一摘不掉的模块：用户摘不掉它，所以「入口一定有人管」
-// 这条不变式由它保证。
+// Registry is the entry declaration ledger. It is provided by **the modules/entry module** (see
+// modules/entry), the only module the kernel knows and the only one that cannot be removed: the
+// user cannot remove it, so the invariant "someone is always in charge of the entry" is
+// guaranteed by it.
 type Registry interface {
-	// Register 申报一个入口。rank 小的先被问（见 DefaultRank）。
+	// Register declares one entry. Smaller rank is asked first (see DefaultRank).
 	Register(h Handler, rank int) (component.Release, error)
 
-	// Resolve 问一遍所有申报者，返回第一个认领的。为什么没认领时 ok=false
-	// 而不是 panic：一个只装了业务模块、没装任何界面的图是**合法**的，那时
-	// 组合根该报一句人话并退出，不是崩。
+	// Resolve asks every declarant and returns the first one that claims it. Why ok=false instead
+	// of a panic when nobody claims it: a graph that installs only business modules and no UI at
+	// all is **legal**, and in that case the composition root should print a human sentence and
+	// exit, not crash.
 	Resolve(p Process) (Handler, string, bool)
 
-	// Handlers 按 rank 顺序列出全部申报者，供 `newgate plugin` 这类诊断枚举。
+	// Handlers lists every declarant in rank order, for diagnostics like `newgate plugin` to
+	// enumerate.
 	Handlers() []Handler
 }
 
-// Table 是 Registry 的默认实现。
+// Table is the default implementation of Registry.
 type Table struct {
 	mu       sync.Mutex
 	handlers []registration
@@ -144,10 +158,11 @@ func (t *Table) Register(h Handler, rank int) (component.Release, error) {
 	}, nil
 }
 
-// sortLocked 按 rank 排序，同 rank 保持申报顺序（稳定）。
+// sortLocked sorts by rank, keeping declaration order among equal ranks (stable).
 //
-// 稳定性不是细节：`newgate` 这个名字将来可能被两个模块同时认领，此时谁先
-// 申报谁赢，而不是由 map 迭代顺序决定——那样的 bug 只在某些机器上出现。
+// Stability is not a detail: the name `newgate` may be claimed by two modules at once in the
+// future, and then whoever declared first wins, rather than it being decided by map iteration
+// order -- a bug like that only shows up on some machines.
 func (t *Table) sortLocked() {
 	sort.SliceStable(t.handlers, func(i, j int) bool {
 		return t.handlers[i].rank < t.handlers[j].rank
@@ -200,19 +215,23 @@ func joinAsked(asked []string, winner string) string {
 	return out
 }
 
-// Capability 是入口申报账本的端口身份。它由 modules/entry 提供（见 modules/entry）。
+// Capability is the port identity of the entry declaration ledger. It is provided by
+// modules/entry (see modules/entry).
 //
-// 组合根（app）也 import 本包——它是唯一能这么做的模块侧契约（见本包开头那段）。
+// The composition root (app) also imports this package -- it is the only module-side contract
+// that may do so (see the opening section of this package).
 var Capability = component.NewCapability[Registry]("entry")
 
-// ---- 申报期能犯的两种错 ----
+// ---- The two kinds of mistake that can be made at declaration time ----
 //
-// 它们在这里而不是调用点：申报是**模块自己的编程错误**（重名、空名、nil），
-// 必须当场返回错误让那个模块的 Start 失败并回滚，而不是等到分派时才炸。
+// They live here rather than at the call site: declaring is **a module's own programming
+// error** (duplicate name, empty name, nil), and it must return an error right there so that
+// module's Start fails and rolls back, instead of blowing up at dispatch time.
 //
-// 三条都写成**函数**而不是包级变量：包级变量在 init 期求值，而 i18n 的译文是
-// 装配期才装上的（modules/locale 在 Start 里 Install），init 期取到的永远是
-// 源语言那一句——一个只在非英文环境下才显形的 bug。
+// All three are written as **functions** rather than package-level variables: package-level
+// variables are evaluated during init, while the i18n translations are installed only at
+// assembly time (modules/locale Installs them in Start), so at init time you always get the
+// source-language sentence -- a bug that only shows up in non-English environments.
 func errDuplicate(name string) error {
 	return i18n.E("entry: a handler with this name is already registered: {name}",
 		i18n.A{"name": name})
@@ -226,14 +245,16 @@ func errEmptyName() error {
 	return i18n.E("entry: handler must have a Name()", nil)
 }
 
-// MakeProcess 把「进程是怎么被调起来的」装成一个 Process。
+// MakeProcess assembles "how the process was invoked" into a Process.
 //
-// 版本号落在进程自己身上（Process.Version 等），**不再写进某个全局叶子**：那个
-// 叶子（buildinfo）属于发行版的模块，内核不该认识它。谁需要版本号就向 Process 要。
+// The version lands on the process itself (Process.Version etc.), **no longer written into some
+// global leaf**: that leaf (buildinfo) belongs to the distribution's modules, and the kernel
+// should not know it. Whoever needs the version asks Process for it.
 //
-// **只有组合根该调它**，而且只在 main 里调一次。它做两件必须成对发生的事：
-// 归一 argv0（basename、剥 .exe、剥路径）、注入版本——两者都是「这个二进制
-// 这一趟的事实」，模块自己各读各的就会漂移。
+// **Only the composition root should call it**, and only once, in main. It does two things that
+// must happen as a pair: normalize argv0 (basename, strip .exe, strip the path) and inject the
+// version -- both are "facts about this binary on this run", and modules reading their own
+// copies would drift.
 func MakeProcess(argv []string, env []string, version, buildTime, commitTime string) Process {
 	name := ""
 	var args []string

@@ -8,20 +8,24 @@ import (
 	"testing"
 )
 
-// catalogsJSONForTest 让测试能读**磁盘上**那份 JSON：它已经不在 embed 里了（嵌的
-// 是 bundle），而这几条要验的正是「bundle 与 JSON 一致」。
+// catalogsJSONForTest lets the tests read the JSON **on disk**: it is no longer in the embed
+// (what is embedded is the bundle), and these tests are exactly verifying "the bundle agrees
+// with the JSON".
 //
-// 住在测试文件里而不是 catalogs.go：运行期不该有走 JSON 的路，那正是这一趟要消掉的
-// 开销——发布代码里放一个「只有测试用」的入口，下一个人就会以为它是个正经 API。
+// It lives in the test file rather than catalogs.go: at runtime there must be no path that goes
+// through JSON, that is exactly the cost this pass removes -- put a "tests only" entrance in
+// shipped code and the next person will think it is a real API.
 func catalogsJSONForTest() fs.FS { return os.DirFS(".") }
 
-// 目录表的编译期形态（见 bundle.go）。这三条锁的是同一条链的三段：编出来的字节
-// 读得回来、**读回来的必须与 JSON 那份逐字段相同**、以及嵌在二进制里那一份确实
-// 是新的（不是「改了 JSON 忘了重生成」）。
+// The compile-time form of the catalog tables (see bundle.go). These three tests lock the three
+// links of one chain: the encoded bytes read back, **what reads back must be field-for-field
+// identical to the JSON**, and the copy embedded in the binary really is the new one (not
+// "edited the JSON, forgot to regenerate").
 //
-// 为什么值得：这个是**派生物**，而派生物的失效方式是静默的——`.bin` 落后于 `.json`
-// 时，界面照样跑，只是少了最近加的那几句译文，谁也不会报错。所以「读得回来」不算
-// 数，得与 JSON 那份对上才算。
+// Why it is worth it: this is a **derived artifact**, and derived artifacts fail silently --
+// when the `.bin` lags behind the `.json`, the UI still runs, it is just missing the few
+// translations added recently, and nobody reports an error. So "reads back" does not count; it
+// has to match the JSON.
 
 func sampleCatalog() Catalog {
 	return Catalog{
@@ -36,7 +40,7 @@ func sampleCatalog() Catalog {
 	}
 }
 
-// TestABundleRoundTrips：编出来读回去，必须逐字段相同。
+// TestABundleRoundTrips: encode then read back, must be field-for-field identical.
 func TestABundleRoundTrips(t *testing.T) {
 	want := sampleCatalog()
 	got, err := DecodeCatalog(EncodeCatalog(want))
@@ -62,7 +66,8 @@ func TestABundleRoundTrips(t *testing.T) {
 			t.Errorf("%q 对不上:\n  想要 %+v\n  实际 %+v", id, w, g)
 		}
 	}
-	// 复数与标记是**容易在二进制里丢**的两样（它们不是文本，是形状）。
+	// Plurals and flags are the two things **easily lost in a binary** (they are not text, they
+	// are shape).
 	if e := got.Messages["plural {n}"]; !e.plural() || !e.Reviewed {
 		t.Errorf("复数/复核标记丢了: %+v", e)
 	}
@@ -71,10 +76,11 @@ func TestABundleRoundTrips(t *testing.T) {
 	}
 }
 
-// TestABundleIsDeterministic：同一份输入编两次必须逐字节相同。
+// TestABundleIsDeterministic: the same input encoded twice must be byte-for-byte identical.
 //
-// 这条是 `-check` 能成立的前提：不确定的话，它每次都会报「过期」，而那种假警报
-// 会让人把这条检查关掉——那时它拦不住的那个真错误就再也拦不住了。
+// This is the premise that makes `-check` work: if it were not deterministic, it would report
+// "stale" every time, and a false alarm like that makes people turn the check off -- and then
+// the real error it was meant to catch is never caught again.
 func TestABundleIsDeterministic(t *testing.T) {
 	a := EncodeCatalog(sampleCatalog())
 	b := EncodeCatalog(sampleCatalog())
@@ -83,10 +89,11 @@ func TestABundleIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestABundleRefusesGarbage：坏输入必须报错，**不能崩**。
+// TestABundleRefusesGarbage: bad input must error, **not crash**.
 //
-// 目录表是在 Start 里读的，一次 panic 会让整个进程起不来（连 `newgate status` 都
-// 跑不了，而那条命令正是用来查「为什么起不来」的）。所以越界一律转成错误。
+// The catalog tables are read in Start, and one panic keeps the whole process from starting
+// (not even `newgate status` runs, and that command is exactly what you use to investigate "why
+// it does not start"). So every out-of-bounds case becomes an error.
 func TestABundleRefusesGarbage(t *testing.T) {
 	good := EncodeCatalog(sampleCatalog())
 	cases := map[string][]byte{
@@ -100,22 +107,23 @@ func TestABundleRefusesGarbage(t *testing.T) {
 			t.Errorf("%s：该报错，却读成功了", name)
 		}
 	}
-	// 类型对不上也要报（拿账本去当译文读）。
+	// A type mismatch must error too (reading a ledger as a catalog).
 	if _, err := DecodeCatalog(EncodeLedger(Ledger{Messages: map[string]LedgerEntry{"x": {Args: []string{"y"}}}})); err == nil {
 		t.Error("账本被当成译文读成功了，该报错")
 	}
 }
 
-// TestAHostileCountDoesNotAllocate：条数字段是**文件里写着的数**，不能直接拿去
-// `make(map, n)`。
+// TestAHostileCountDoesNotAllocate: the count field is **a number written in the file** and
+// must not be handed straight to `make(map, n)`.
 //
-// 这一条防的不是「读出错数据」而是「读的时候先崩」：`make(map[K]V, 40 亿)` 会在
-// 第一处边界检查生效**之前**先要一次巨额分配——症状是启动时 OOM，而不是一句
-// 「这个 bundle 是坏的」。而目录表是在 Start 里读的，起不来就等于 `newgate status`
-// 也跑不了，而那条命令正是用来查「为什么起不来」的。
+// What this guards against is not "reading wrong data" but "crashing while reading":
+// `make(map[K]V, 4 billion)` demands a huge allocation **before the first bounds check takes
+// effect** -- the symptom is an OOM at startup rather than "this bundle is broken". And the
+// catalog tables are read in Start, so failing to start means `newgate status` does not run
+// either, and that command is exactly what you use to investigate "why it does not start".
 //
-// 断言写成「不 panic 且报错」：分配那个大小在测试机上会直接崩，所以它红了就是这条
-// 检查真的有用。
+// The assertion is "does not panic and reports an error": allocating that size would crash the
+// test machine outright, so it going red means the check really works.
 func TestAHostileCountDoesNotAllocate(t *testing.T) {
 	mk := func(kind byte, count uint32) []byte {
 		raw := append([]byte(nil), bundleMagic...)
@@ -133,16 +141,18 @@ func TestAHostileCountDoesNotAllocate(t *testing.T) {
 	if _, err := DecodeCatalog(mk(bundleKindCatalog, huge)); err == nil {
 		t.Error("条数是天文数字时该报错")
 	}
-	// 账本同理：它的条数字段在更前面，走的是另一条 make。
+	// Same for the ledger: its count field is earlier, and goes through a different make.
 	if _, err := DecodeLedger(mk(bundleKindLedger, huge)); err == nil {
 		t.Error("账本条数是天文数字时该报错")
 	}
 }
 
-// TestTheEmbeddedBundlesMatchTheJSON：嵌在二进制里的那一份必须与仓库里的 JSON 相同。
+// TestTheEmbeddedBundlesMatchTheJSON: the copy embedded in the binary must be the same as the
+// JSON in the repository.
 //
-// 这就是「改了 JSON 忘了跑 bundle」的棘轮。判据落在**内容**上：把内嵌的 bundle 解
-// 开、把磁盘上的 JSON 解出来，两份比字段。
+// This is the ratchet for "edited the JSON but forgot to run bundle". The check is on
+// **content**: decode the embedded bundle, decode the JSON on disk, and compare the two field
+// by field.
 func TestTheEmbeddedBundlesMatchTheJSON(t *testing.T) {
 	led, cats, err := Builtin()
 	if err != nil {

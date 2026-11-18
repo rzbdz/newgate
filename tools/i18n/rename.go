@@ -8,28 +8,36 @@ import (
 	"github.com/rzbdz/newgate/tools/i18n/check"
 )
 
-// cmdRename 把一条译文从**旧措辞**搬到**新措辞**上。
+// cmdRename moves a translation from the **old wording** to the **new wording**.
 //
-// # 为什么需要它
+// # Why it is needed
 //
-// 键 = 英文原文（msgid）这条规矩买到了「错了会出声」：改了措辞，旧译文立刻变成
-// 孤儿，`check` 报 error、界面回落英文——**不会有「看起来正常其实已经错了」的译文**。
-// 代价是改一句话要重新翻一句。这条命令就是补那个代价的：措辞改了但意思没变时，
-// 译文**搬过去**，不花一次 LLM 调用、也不产生一条「机翻未复核」。
+// The rule "key = English source (msgid)" buys "it speaks up when wrong": change the wording
+// and the old translation instantly becomes an orphan, `check` reports an error, the UI falls
+// back to English -- **there is no translation that "looks fine but is already wrong"**. The
+// cost is that changing one sentence means retranslating one sentence. This command pays that
+// cost back: when the wording changed but the meaning did not, the translation is **moved
+// over**, without spending an LLM call and without producing a "machine translated, unreviewed"
+// entry.
 //
-// 这与 gettext 的 msgmerge / msgcat 是同一件事：源文变了、译文没变，工具负责把
-// 译文接过去，而不是让人重翻。区别只在于这里**由人指名道姓**——自动模糊匹配
-// （相似度最高的孤儿）会把「改了个词」和「换了句话」混为一谈，而接错一条译文
-// 是静默的错，比多敲一次命令贵得多。
+// This is the same thing as gettext's msgmerge / msgcat: the source changed and the translation
+// did not, and the tool carries the translation across instead of making a person retranslate.
+// The only difference is that here it is **named explicitly by a human** -- automatic fuzzy
+// matching (the most similar orphan) would confuse "one word changed" with "a different
+// sentence", and attaching the wrong translation is a silent error, far more expensive than
+// typing one more command.
 //
-// 撤销就是反过来再跑一次：`rename <新> <旧>`（旧那条此刻正不在账本里，条件成立）。
+// Undo is running it the other way: `rename <new> <old>` (the old one is currently absent from
+// the ledger, so the condition holds).
 //
-// # 判据
+// # Criteria
 //
-//   - 旧措辞必须**已经是孤儿**（源码里没人再写它了）：否则说明它还在用，搬走等于
-//     删掉一条活着的译文。
-//   - 新措辞必须在账本里（源码里确实有这句话）；否则是拼错了。
-//   - 新措辞若已有译文：默认拒绝（那多半说明你该翻的是别的），`-force` 才覆盖。
+//   - The old wording must **already be an orphan** (nobody writes it in the source any more);
+//     otherwise it is still in use, and moving it away is deleting a live translation.
+//   - The new wording must be in the ledger (the sentence really exists in the source);
+//     otherwise it is a typo.
+//   - If the new wording already has a translation: reject by default (that usually means you
+//     should be translating something else); only `-force` overwrites.
 func cmdRename(args []string) error {
 	fs := flag.NewFlagSet("rename", flag.ExitOnError)
 	c := commonFlags(fs)
@@ -86,7 +94,8 @@ func cmdRename(args []string) error {
 	return nil
 }
 
-// firstText 取一条译文用来显示的那一句（复数条目取 other——中文不分单复数）。
+// firstText takes the sentence shown for a translation (for plural entries it takes other --
+// Chinese does not distinguish singular and plural).
 func firstText(e i18n.Entry) string {
 	switch {
 	case e.Text != "":

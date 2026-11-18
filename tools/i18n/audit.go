@@ -11,10 +11,11 @@ import (
 	"github.com/rzbdz/newgate/tools/i18n/check"
 )
 
-// cmdAudit 看/写「还没迁移的文件」清单。
+// cmdAudit reads/writes the "not yet migrated files" list.
 //
-// 迁移开始时先 `-seed` 播一次种（把今天所有含中文字面量的文件登记进去），
-// 此后每迁完一个文件就从清单里删一行——清单只减不增，终点是空文件。
+// At the start of a migration run `-seed` once to seed it (register every file that has Chinese
+// string literals today), and thereafter delete one line from the list each time a file is
+// migrated -- the list only shrinks, and the end state is an empty file.
 func cmdAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	c := commonFlags(fs)
@@ -44,7 +45,8 @@ func cmdAudit(args []string) error {
 		return nil
 	}
 
-	// 播种时保留已有的理由（人写的那句话不能被一次重播抹掉）。
+	// Keep the existing note when seeding (a sentence a human wrote must not be erased by a
+	// reseed).
 	existing := map[string]string{}
 	if raw, rerr := os.ReadFile(filepath.Join(c.root, c.allowlist)); rerr == nil {
 		var prev struct {

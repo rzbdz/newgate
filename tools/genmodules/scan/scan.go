@@ -1,14 +1,18 @@
-// Package scan 是「哪些目录算组件」这条判据的**唯一实现**。
+// Package scan is the **only implementation** of the "which directories are components"
+// criterion.
 //
-// 为什么单独成包（2026-09-18）：判据原来有两份，而且口径不同——生成器
-// （tools/genmodules）用 AST 看返回值是不是 `X.Component`，而 app 的装配测试
-// （app/modules_gen_test.go 的 moduleDirs）用 `bytes.Contains` 找字面量
-// `func New() modules.Component`。后果是：照文档写 `func New() component.Component`
-// 的模块会被生成器装进清单（AST 认），却数不进测试的目录集合，于是测试报
-// 「装配了 N 个组件，modules/ 下有 M 个目录」——一个完全指不到真因的失败。
+// Why it is its own package (2026-09-18): there used to be two criteria with different wording
+// -- the generator (tools/genmodules) used the AST to see whether the return type was
+// `X.Component` , while the app assembly test (moduleDirs in app/modules_gen_test.go) used
+// `bytes.Contains` to look for the literal `func New() modules.Component` . The consequence: a
+// module written as the docs say, `func New() component.Component` , was installed into the
+// list by the generator (the AST recognized it) but not counted in the test's directory set, so
+// the test reported "assembled N components, modules/ has M directories" -- a failure that
+// points nowhere near the real cause.
 //
-// 现在两份都调这里。生成器是**构建期**工具（只解析不编译），测试是装配期断言，
-// 两者必须用同一把尺子，否则它们的分歧会伪装成别的问题冒出来。
+// Now both call this package. The generator is a **build-time** tool (parse only, no compile),
+// the test is an assembly-time assertion, and the two must use the same ruler, otherwise their
+// disagreement shows up disguised as some other problem.
 package scan
 
 import (
@@ -21,10 +25,10 @@ import (
 	"strings"
 )
 
-// Dirs 列出 componentsDir 下所有「是组件」的目录名，按字母序返回。
+// Dirs lists every "is a component" directory name under componentsDir, in alphabetical order.
 //
-// 字母序而非目录遍历序：生成结果必须与文件系统返回顺序无关，否则不同机器上
-// diff 会飘。
+// Alphabetical rather than directory-walk order: the generated result must not depend on the
+// order the filesystem returns, otherwise diffs wobble across machines.
 func Dirs(componentsDir string) ([]string, error) {
 	entries, err := os.ReadDir(componentsDir)
 	if err != nil {
@@ -44,17 +48,20 @@ func Dirs(componentsDir string) ([]string, error) {
 	return out, nil
 }
 
-// Ident 把目录名拧成一个合法的 Go 标识符（前缀保证首字符合法），
-// 例如 `simple-cli` → `mod_simple_cli`。
+// Ident turns a directory name into a legal Go identifier (the prefix guarantees the first
+// character is legal), e.g. `simple-cli` → `mod_simple_cli` .
 //
-// 为什么由生成器拧、而不是要求目录改名：目录名**不必是** Go 标识符。内核自己的
-// modules/ 用下划线（claudecode_deepseek），而发行版仓库是另一拨人的目录，
-// `simple-cli` 这种连字符名字完全正常。别名是生成物，就该由生成器拧好。
-// 2026-09-20 实测：不拧的话生成的是 `ext_simple-cli`——一个语法错误，而它要到
-// `make generate` 之后的第一次编译才暴露。
+// Why the generator does the mangling instead of requiring the directory to be renamed: a
+// directory name **need not be** a Go identifier. The kernel's own modules/ uses underscores
+// (claudecode_deepseek), while a distribution repository is another team's directories, where
+// hyphenated names like `simple-cli` are perfectly normal. The alias is a generated artifact,
+// so the generator should mangle it. Measured 2026-09-20: without mangling it generated
+// `ext_simple-cli` -- a syntax error, and one that only shows up at the first compile after
+// `make generate` .
 //
-// 与「哪些目录算组件」同址（判据只有一份）：内核与发行版各有一个生成器，
-// 两边必须用同一把尺子，否则同一个目录名会在两个仓库里拧出两个不同的标识符。
+// Co-located with "which directories are components" (one criterion only): the kernel and the
+// distribution each have a generator, and both must use the same ruler, otherwise the same
+// directory name would mangle into two different identifiers in the two repositories.
 func Ident(prefix, dir string) string {
 	var b strings.Builder
 	b.WriteString(prefix)
@@ -69,8 +76,9 @@ func Ident(prefix, dir string) string {
 	return b.String()
 }
 
-// isComponent 判断一个 module.go 是否导出 `func New() modules.Component`。
-// 只解析不编译：这一步在构建之前跑，不能依赖源码当时能通过类型检查。
+// isComponent reports whether a module.go exports `func New() modules.Component` . Parse only,
+// no compile: this step runs before the build and must not depend on the source type-checking
+// at that moment.
 func IsComponent(path string) bool {
 	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 	if err != nil {

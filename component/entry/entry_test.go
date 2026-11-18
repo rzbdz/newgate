@@ -2,11 +2,12 @@ package entry
 
 import "testing"
 
-// TestReleasingOneHandlerDoesNotRemoveAnother 锁住「撤销按 token、不按位置」。
+// TestReleasingOneHandlerDoesNotRemoveAnother locks down "undo by token, not by position".
 //
-// 现场：seq 原来是切片长度。注册 A、注册 B、撤销 A、再注册 C —— C 拿到与 B
-// 相同的 seq，C 的 Release 于是删掉了 B。症状是「某个跑着的入口突然没人认领」，
-// 而它只在「先撤销再注册」的顺序里出现（模块重启、测试夹具、插件换绑）。
+// The scene: seq used to be the slice length. Register A, register B, release A, then register
+// C -- C gets the same seq as B, so C's Release deletes B. The symptom is "some running entry
+// suddenly has no claimant", and it only appears in the "release then register" order (module
+// restart, test fixtures, plugin rebinding).
 func TestReleasingOneHandlerDoesNotRemoveAnother(t *testing.T) {
 	table := NewTable()
 	releaseA, err := table.Register(fakeHandler{name: "a"}, DefaultRank)

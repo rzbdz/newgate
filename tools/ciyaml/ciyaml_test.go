@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// write 造一个最小仓库：只有 .github/workflows/<name>。
+// write builds a minimal repository: only .github/workflows/<name>.
 func write(t *testing.T, name, body string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -21,8 +21,8 @@ func write(t *testing.T, name, body string) string {
 	return root
 }
 
-// good 是一份**结构上合法**的 workflow，两种步骤写法都覆盖：
-// 破折号那一行直接 `uses:`，以及 `- name:` + 缩进一级的 `run:`。
+// good is a **structurally valid** workflow covering both ways of writing a step: `uses:`
+// directly on the dash line, and `- name:` + a `run:` indented one level.
 const good = `name: CI
 on:
   push:
@@ -58,8 +58,9 @@ func TestAcceptsAValidWorkflow(t *testing.T) {
 	}
 }
 
-// TestCatchesTheStepThatTookDownCI 就是 2026-09-20 那次事故的复现：摊平 go/ 时
-// 一个步骤的 `run:` 行被连带删掉，GitHub 从此 0 秒拒掉整个 run。判据必须抓住它。
+// TestCatchesTheStepThatTookDownCI is a reproduction of the 2026-09-20 incident: while
+// flattening go/, a step's `run:` line was deleted along with it, and GitHub rejected the whole
+// run in 0 seconds ever since. The check must catch it.
 func TestCatchesTheStepThatTookDownCI(t *testing.T) {
 	const broken = `name: CI
 on: push
@@ -88,7 +89,8 @@ jobs:
 	}
 }
 
-// TestCatchesEmptyValues 覆盖事故的另一半——被删空的 `defaults: run:`。
+// TestCatchesEmptyValues covers the other half of the incident -- the `defaults: run:` deleted
+// down to nothing.
 func TestCatchesEmptyValues(t *testing.T) {
 	const broken = `name: CI
 on: push
@@ -106,8 +108,8 @@ jobs:
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	// 两处都要报：`defaults:` 下的那个（事故原样）和步骤里那个。少报一处就说明
-	// 判据只认了位置、没认形态。
+	// Both must be reported: the one under `defaults:` (as in the incident) and the one in the
+	// step. Missing one of them means the check only recognized position, not shape.
 	if len(got) != 2 {
 		t.Fatalf("两处空值都该报，实际 %d 条: %v", len(got), got)
 	}
@@ -151,8 +153,8 @@ func TestCatchesNoJobsAndTabs(t *testing.T) {
 	assertOne(t, got, "tab")
 }
 
-// TestDegeneratesLoudly 判据自己坏掉时（目录挪了、没有 workflow）必须**报错**，
-// 不能返回「零条问题」——那和「查过了，很干净」长得一模一样。
+// TestDegeneratesLoudly: when the check itself breaks (directory moved, no workflows), it must
+// **error**, not return "zero problems" -- that looks exactly like "checked, all clean".
 func TestDegeneratesLoudly(t *testing.T) {
 	if _, err := Check(t.TempDir()); err == nil {
 		t.Fatal("没有 .github/workflows 时应该报错，而不是安静地返回零条")
@@ -166,7 +168,8 @@ func TestDegeneratesLoudly(t *testing.T) {
 	}
 }
 
-// assertOne 断言恰好有一条 finding 同时包含全部片段——顺带保证不会一条报成八条。
+// assertOne asserts there is exactly one finding containing all the fragments -- which also
+// guarantees one issue is not reported as eight.
 func assertOne(t *testing.T, got []Finding, fragments ...string) {
 	t.Helper()
 	hits := 0

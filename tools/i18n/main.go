@@ -1,17 +1,21 @@
-// Command i18n 是本地化这件事的工具：扫源码生成账本、静态检查、看覆盖率、
-// 以及**在本地**把缺的译文补上（调自己的网关跑 LLM）。
+// Command i18n is the localization tool: scan the source to generate the ledger, run static
+// checks, look at coverage, and **locally** fill in missing translations (by calling your own
+// gateway to run an LLM).
 //
-// 子命令分两类，别混：
+// The subcommands fall into two groups, do not mix them up:
 //
-//	不出网、不花钱（CI 里跑）      extract / check / status / missing
-//	改了措辞不想重翻           rename
-//	要调 LLM（**只在开发者本地跑**）  sync
+//	offline, free (run in CI)   extract / check / status / missing
+//	changed wording, do not want to retranslate  rename
+//	calls an LLM (**developer-local only**)  sync
 //
-// 用户定的规矩：翻译不进任何自动化流程。CI 只跑前一类——账本是否过期、占位符是否
-// 对得上、有没有孤儿键、源码里还剩多少中文。要花钱的那一步永远是人主动敲的。
+// The rule the user set: translation never enters any automated flow. CI only runs the first
+// group -- is the ledger stale, do the placeholders match, are there orphan keys, how much
+// Chinese is left in the source. The step that costs money is always typed by a human on
+// purpose.
 //
-// 发行版仓库里有一个同名的壳（tools/i18n/main.go），它复用本目录下的 scan/check
-// 两个包（通过 replace 拿到内核）——两个仓库的判断必须是同一把尺子。
+// The distribution repository has a shell of the same name (tools/i18n/main.go) that reuses the
+// scan/check packages here (getting the kernel through replace) -- the two repositories must
+// judge by the same ruler.
 package main
 
 import (
@@ -68,17 +72,17 @@ func usage() {
 
   extract [-check]      扫源码重建账本（-check 只校验是否过期，不写文件）
   check [-strict]       静态检查：账本 / 占位符 / 孤儿键 / 覆盖率 / 中文残留
-  bundle [-check]       把 catalogs/*.json 编成运行期直接读的 .bin（-check 只校验是否过期）
-  status                每种语言的覆盖率与机翻计数
-  audit [-seed]         看/写「还没迁移的文件」清单（-seed 按现状播种）
-  missing [-lang zh-Hans]  列出缺哪些译文
-  rename <旧> <新>      把译文从旧措辞搬到新措辞上（改了措辞但意思没变时用，不花 LLM）
-  sync [-lang zh-Hans]  把缺的译文补齐（调本机网关跑 LLM，**开发者本地跑**）
-  translate             同 sync，别名
+  bundle [-check]       compile catalogs/*.json into a .bin read at runtime (-check: staleness only)
+  status                coverage and machine-translation counts per language
+  audit [-seed]         read/write the "not yet migrated files" list (-seed seeds it)
+  missing [-lang zh-Hans]  list the missing translations
+  rename <old> <new>    move a translation from old wording to new (same meaning; no LLM)
+  sync [-lang zh-Hans]  fill in missing translations (LLM via the local gateway, **local**)
+  translate             same as sync, an alias
 `)
 }
 
-// ---------- 公共选项 ----------
+// ---------- common options ----------
 
 type common struct {
 	root       string
@@ -88,9 +92,9 @@ type common struct {
 
 func commonFlags(fs *flag.FlagSet) *common {
 	c := &common{}
-	fs.StringVar(&c.root, "root", "", "仓库根（默认向上找 go.mod）")
-	fs.StringVar(&c.catalogDir, "catalogs", "lib/i18n/catalogs", "目录文件所在的目录（相对仓库根）")
-	fs.StringVar(&c.allowlist, "allowlist", "tools/i18n/allowlist.json", "未迁移清单（相对仓库根，空串=不查）")
+	fs.StringVar(&c.root, "root", "", "repository root (defaults to walking up to go.mod)")
+	fs.StringVar(&c.catalogDir, "catalogs", "lib/i18n/catalogs", "directory holding the catalog files (relative to the repository root)")
+	fs.StringVar(&c.allowlist, "allowlist", "tools/i18n/allowlist.json", "unmigrated list (relative to the repository root, empty = no check)")
 	return c
 }
 
@@ -117,7 +121,7 @@ func moduleRoot() (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("向上找不到 go.mod（从 %s 开始）", dir)
+			return "", fmt.Errorf("no go.mod found walking up (starting from %s)", dir)
 		}
 		dir = parent
 	}
@@ -128,7 +132,7 @@ func moduleRoot() (string, error) {
 func cmdExtract(args []string) error {
 	fs := flag.NewFlagSet("extract", flag.ExitOnError)
 	c := commonFlags(fs)
-	onlyCheck := fs.Bool("check", false, "只校验账本是否过期，不写文件")
+	onlyCheck := fs.Bool("check", false, "only verify the ledger is not stale, write no file")
 	fs.Parse(args)
 	if err := c.resolve(); err != nil {
 		return err
@@ -146,7 +150,7 @@ func cmdExtract(args []string) error {
 	if *onlyCheck {
 		got, rerr := os.ReadFile(path)
 		if rerr != nil || string(got) != string(raw) {
-			return fmt.Errorf("%s 已过期：运行 `go run ./tools/i18n extract` 后重新提交", path)
+			return fmt.Errorf("%s is stale: run `go run ./tools/i18n extract` and commit the result", path)
 		}
 		return nil
 	}
@@ -156,7 +160,7 @@ func cmdExtract(args []string) error {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("i18n: 账本 %d 条 → %s\n", len(fresh.Messages), path)
+	fmt.Printf("i18n: ledger %d entries -> %s\n", len(fresh.Messages), path)
 	return nil
 }
 
@@ -165,7 +169,7 @@ func cmdExtract(args []string) error {
 func cmdCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	c := commonFlags(fs)
-	strict := fs.Bool("strict", false, "覆盖率不足与机翻未复核也算失败（发版前用）")
+	strict := fs.Bool("strict", false, "low coverage and unreviewed machine translations also fail (use before a release)")
 	fs.Parse(args)
 	if err := c.resolve(); err != nil {
 		return err
@@ -187,13 +191,13 @@ func cmdCheck(args []string) error {
 		}
 	}
 	if errs > 0 {
-		return fmt.Errorf("%d 条错误、%d 条警告", errs, warns)
+		return fmt.Errorf("%d errors, %d warnings", errs, warns)
 	}
 	if warns > 0 {
-		fmt.Printf("i18n: 0 条错误、%d 条警告\n", warns)
+		fmt.Printf("i18n: 0 errors, %d warnings\n", warns)
 		return nil
 	}
-	fmt.Println("i18n: 全部检查通过")
+	fmt.Println("i18n: all checks passed")
 	return nil
 }
 
@@ -252,7 +256,7 @@ func cmdStatus(args []string) error {
 func cmdMissing(args []string) error {
 	fs := flag.NewFlagSet("missing", flag.ExitOnError)
 	c := commonFlags(fs)
-	lang := fs.String("lang", "zh-Hans", "看哪门语言")
+	lang := fs.String("lang", "zh-Hans", "which language to look at")
 	fs.Parse(args)
 	if err := c.resolve(); err != nil {
 		return err
@@ -279,16 +283,16 @@ func cmdMissing(args []string) error {
 		fmt.Println(msg)
 		n++
 	}
-	fmt.Fprintf(os.Stderr, "i18n: %s 缺 %d 条\n", *lang, n)
+	fmt.Fprintf(os.Stderr, "i18n: %s is missing %d\n", *lang, n)
 	return nil
 }
 
-// catalogPath 是某门语言的译文文件。
+// catalogPath is the catalog file for one language.
 func catalogPath(root, catalogDir, lang string) string {
 	return filepath.Join(root, catalogDir, lang+".json")
 }
 
-// loadOne 读一门语言的译文（不存在时给一份带 meta 的空表）。
+// loadOne reads one language's catalog (when absent, returns an empty table carrying meta).
 func loadOne(root, catalogDir, lang string) (i18n.Catalog, error) {
 	raw, err := os.ReadFile(catalogPath(root, catalogDir, lang))
 	if err != nil {
@@ -314,8 +318,9 @@ func writeCatalog(root, catalogDir string, cat i18n.Catalog) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	// 先写临时文件再改名：半个文件写下去，下一次 parse 就失败，而失败现场
-	// 是一份几千行的 JSON——比一次 rename 贵得多。
+	// Write a temp file and then rename: writing half a file makes the next parse fail, and the
+	// scene of that failure is a JSON file thousands of lines long -- far more expensive than one
+	// rename.
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
 		return err

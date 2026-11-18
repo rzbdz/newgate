@@ -12,29 +12,34 @@ import (
 	i18n "github.com/rzbdz/newgate/lib/i18n"
 )
 
-// capabilitySpec 是 Capability 的运行时身份。泛型保证调用点类型安全，
-// 这份反射信息则让构图阶段能在启动任何组件前发现同名异型等配置错误。
+// capabilitySpec is the runtime identity of a Capability. Generics guarantee type safety at the
+// call site, while this reflection information lets the graph-construction phase catch config
+// errors such as same name with a different type before any component starts.
 type capabilitySpec struct {
 	name      string
 	valueType reflect.Type
 }
 
-// Capability 是提供者与消费者共同引用的有类型端口身份。
-// 模块依赖这个端口而不是依赖具体实现，因此实现可以被替换、组合和独立测试。
+// Capability is the typed port identity that providers and consumers both reference. Modules
+// depend on this port rather than on a concrete implementation, so implementations can be
+// replaced, composed and tested independently.
 //
-// **端口不声明基数**。曾经有过 One/Many 之分（"只能有一个提供者" / "允许多个"），
-// 2026-09-17 取消：框架没法预知一个端口将来会有几个实现（cli 今天一个，
-// 明天就可能有第二个），"只能有一个"是使用者的约束，不是框架的约束，
-// 更不该在构图期把合法的装配判死。多提供者时 Get 取声明顺序里的第一个，
-// GetAll 取全部。
+// **Ports do not declare cardinality**. There used to be a One/Many distinction ("only one
+// provider" / "multiple allowed"), dropped on 2026-09-17: the framework cannot foresee how many
+// implementations a port will have (cli has one today, and there may be a second tomorrow),
+// "only one" is the user's constraint, not the framework's, and it certainly should not condemn
+// a legal assembly at graph-construction time. With multiple providers Get takes the first in
+// declaration order, and GetAll takes all of them.
 //
-// 多样性更常见的表达方式不是"一个端口多个提供者"，而是 owner 在自己的
-// service 上开注册方法（见 Registry）：注册是运行期动作，有撤销、有查重、
-// 有生命周期；Provide 只是"这个端口由谁绑定"的静态声明。
+// Diversity is more commonly expressed not as "one port with multiple providers" but by the
+// owner opening registration methods on its own service (see Registry): registration is a
+// runtime action with undo, duplicate detection and a lifecycle; Provide is only the static
+// declaration of "who binds this port".
 type Capability[T any] struct{ spec capabilitySpec }
 
-// NewCapability 声明一个端口身份。名字是全局逻辑键：同名端口必须同型，
-// 否则构图阶段直接报错（见 validateSpec）。
+// NewCapability declares a port identity. The name is a global logical key: ports with the same
+// name must have the same type, otherwise the graph-construction phase errors out (see
+// validateSpec).
 func NewCapability[T any](name string) Capability[T] {
 	return Capability[T]{spec: capabilitySpec{
 		name:      name,
@@ -42,131 +47,158 @@ func NewCapability[T any](name string) Capability[T] {
 	}}
 }
 
-// Name 返回端口的逻辑名。诊断输出和测试断言用；业务代码不该拿它做分支——
-// 那等于把类型安全换成字符串比较，正是 Capability 想避免的事。
+// Name returns the port's logical name. Used by diagnostics and test assertions; business code
+// should not branch on it -- that would trade type safety for string comparison, exactly what
+// Capability exists to avoid.
 func Name[T any](capability Capability[T]) string { return capability.spec.name }
 
-// Requirement 描述组件启动前必须解析的端口，而不是保存服务实例。
-// optional 只放宽"没有提供者"这一种情况，端口类型仍然严格校验。
+// Requirement describes a port that must be resolved before a component starts, rather than
+// holding a service instance. optional only relaxes the "no provider" case; the port type is
+// still checked strictly.
 //
-// 只有两种需求：**硬依赖**（Need）与**弱依赖**（Optional）。2026-09-18 之前还有
-// 第三种（Inject：不建边的注入边），它已经删掉——理由见 Optional 的注释。
+// There are only two kinds of requirement: **hard dependency** (Need) and **weak dependency**
+// (Optional). Before 2026-09-18 there was a third (Inject: an injection edge that creates no
+// ordering edge), and it has been deleted -- see the Optional comment for the reasoning.
 type Requirement struct {
 	spec     capabilitySpec
 	optional bool
 }
 
-// Name 返回这个需求指向的端口名，供装配期枚举与校验用（内核不解释它，就像它
-// 不解释 Type 的取值：core 提供表，产品填内容）。
+// Name returns the port name this requirement points at, for assembly-time enumeration and
+// validation (the kernel does not interpret it, just as it does not interpret the values of
+// Type: core provides the table, the product fills in the content).
 //
-// 加它的原因很具体：产品层要断言「没有任何组件依赖 cli」这类层级不变量，而
-// Requirement 的字段是私有的、外面看不到。断言写在产品层、观测手段由内核提供，
-// 比把不变量塞进内核合适。
+// The reason for adding it is concrete: the product layer wants to assert layering invariants
+// like "no component depends on cli", and the fields of Requirement are private and invisible
+// from outside. Assertions in the product layer, observation provided by the kernel, is a
+// better fit than stuffing invariants into the kernel.
 func (r Requirement) Name() string { return r.spec.name }
 
-// Optional 报告这个需求是不是可选的（由 Optional 而非 Need 建立）。
+// Optional reports whether this requirement is optional (established by Optional rather than
+// Need).
 //
-// 与 Name 同属装配期枚举：产品层要断言「业务模块对 ui 只做可选依赖」这类
-// 层级不变量，内核只提供观测手段，不解释「ui」是什么。
+// Together with Name it belongs to assembly-time enumeration: the product layer wants to assert
+// layering invariants like "business modules only depend on ui optionally", and the kernel only
+// provides the observation, not an interpretation of what "ui" is.
 func (r Requirement) Optional() bool { return r.optional }
 
-// Need 建立**硬依赖**：缺少提供者时整张图拒绝启动，而且「我排在提供者后面」
-// 是明确的排序边。
+// Need establishes a **hard dependency**: if the provider is missing the whole graph refuses to
+// start, and "I come after the provider" is an explicit ordering edge.
 func Need[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec}
 }
 
-// Optional 建立**弱依赖**：你存在，我就依赖你；你不在，我就不依赖你。
+// Optional establishes a **weak dependency**: you exist, so I depend on you; you do not, so I
+// do not.
 //
-// 语义是两条，一起成立：
+// The semantics are two rules that hold together:
 //
-//   - **排序**：有提供者时照常建边——我排在它后面，它的 Start 一定先跑完。
-//     这是我「等它准备好」的地方，也是「注入别人的人要等被注入的人」这句话
-//     在框架里的落点（2026-09-18 之前这条要靠 Component.Attach 兜，见下）。
-//   - **缺席即无依赖**：没有提供者时**不建边、不报错**，只是拿不到端口。
-//     所以「装不装这个模块」不会让别的模块起不来。
+//   - **Ordering**: when a provider exists an edge is created as usual -- I come after it and
+//     its Start is guaranteed to finish first. This is where I "wait for it to be ready", and
+//     where the sentence "whoever injects into others waits for the injected" lands in the
+//     framework (before 2026-09-18 this was covered by Component.Attach, see below).
+//   - **Absence means no dependency**: with no provider, **no edge and no error** -- you just
+//     do not get the port. So "whether this module is installed" never keeps another module
+//     from starting.
 //
-// 典型用户是 ui：业务模块 Optional(cli) —— 装了 cli，就在它的 Start 里把命令
-// 挂上去；没装，跳过，模块自身功能一样不缺。反方向仍然禁止：**ui 不依赖任何
-// 模块**（cli 的 Requires 是空的，见 app/default_test.go 的棘轮）。
+// The typical user is ui: business modules do Optional(cli) -- with cli installed, hook the
+// command up in its Start; without it, skip, and the module itself is missing nothing. The
+// reverse direction is still forbidden: **ui depends on no module** (cli's Requires is empty,
+// see the ratchet in app/default_test.go).
 //
-// # 2026-09-18：这里曾经是 Inject + 第二阶段 Attach，已删除
+// # 2026-09-18: this used to be Inject + a second Attach phase, deleted
 //
-// 早先版本为了躲一个**已不存在的环**，引入了第三种需求 `Inject`（optional 且
-// 不参与排序）和配套的 `Component.Attach`（全图 Start 跑完之后再跑一遍的注入
-// 阶段）。那个环是这么来的：当时注入是一条排序边，而 ui **自己也要依赖那些
-// 模块**才能渲染——两条箭头互指，config / runtime / config-hook 的命令因此
-// 永远注入不进来，只能被迫留在界面里。
+// An earlier version, to dodge a **ring that no longer exists**, introduced a third requirement
+// `Inject` (optional and not part of ordering) plus the matching `Component.Attach` (an
+// injection phase that ran once more after every Start in the graph had run). The ring came
+// about like this: injection was an ordering edge back then, and ui **itself also had to depend
+// on those modules** to render -- two arrows pointing at each other, so the commands of config
+// / runtime / config-hook could never be injected in and were forced to stay inside the UI.
 //
-// 环的真正解法是**把 ui 的出边砍干净**（cli.Requires 现在为空，界面只循环
-// 调用注入进来的回调）。出边没了之后，Optional(cli) 这条入边不可能成环，
-// Inject 存在的唯一理由随之消失；Attach 的唯一理由是「Start 时 ui 可能还没
-// 起」——排序边一恢复，它也就没有存在必要了。
+// The real fix for the ring was to **cut ui's outbound edges clean** (cli.Requires is now empty
+// and the UI only loops over injected callbacks). With the outbound edge gone, the inbound
+// Optional(cli) edge cannot form a ring, and the only reason for Inject to exist disappeared
+// with it; Attach's only reason was "at Start time ui may not have started yet" -- once the
+// ordering edge was restored, it had no reason to exist either.
 //
-// 留着它们不是零成本，实测代价有三条：
+// Keeping them was not free; measured, there were three costs:
 //
-//   - inject 不参与排序 ⇒ **谁先谁后没有任何保证**。今天 9 个注入者恰好都排在
-//     cli 之后，靠的是稳定拓扑排序 + 目录名字母序——碰巧，不是机制。
-//   - 停止顺序跟着一起没了保证：实测 breaker 在 cli **之后**停，也就是它的
-//     Stop 会往一个已经停掉的界面账本里回写 Release。今天无害（cli.Stop 是空
-//     的），靠约定撑着。
-//   - 每个新模块作者都得先读懂 30 行注释才知道「往界面注册要写 Attach 而不是
-//     Start」——modules/pluginmanager/command.go 上那条警告就是这个症状。
+//   - inject does not take part in ordering => **no guarantee at all about who comes first**.
+//     Today the 9 injectors all happen to be ordered after cli, thanks to stable topological
+//     sort + alphabetical directory names -- a coincidence, not a mechanism.
+//   - The stop order lost its guarantee along with it: breaker was observed stopping **after**
+//     cli, i.e. its Stop writes a Release back into a UI ledger that has already stopped.
+//     Harmless today (cli.Stop is empty) because convention holds it up.
+//   - Every new module author has to read 30 lines of comments before learning "to register
+//     with the UI, write Attach, not Start" -- the warning on modules/pluginmanager/command.go
+//     is that symptom.
 //
-// 现在只有两种需求，语义各自单一：Need 是硬依赖，Optional 是弱依赖。
+// Now there are only two kinds of requirement, each with a single meaning: Need is a hard
+// dependency, Optional is a weak one.
 func Optional[T any](capability Capability[T]) Requirement {
 	return Requirement{spec: capability.spec, optional: true}
 }
 
-// Provision 把一个具体值绑定到端口。绑定会先于 Start 完成，
-// 因此依赖解析不依赖组件启动时的全局副作用。
+// Provision binds a concrete value to a port. Binding completes before Start, so dependency
+// resolution does not rely on global side effects from component startup.
 type Provision struct {
 	spec  capabilitySpec
 	value any
 }
 
-// Name 返回这个提供者绑定的端口名。
+// Name returns the port name this provider binds.
 //
-// 与 Requirement.Name 对称，存在的理由也同一条：产品层要断言「摘掉一个模块会发生
-// 什么」这类层级不变量（见 app/matrix_test.go 的摘除矩阵），而 Provision 的字段
-// 是私有的。断言写在产品层、观测手段由内核提供，比把不变量塞进内核合适。
+// Symmetric with Requirement.Name, and it exists for the same reason: the product layer wants
+// to assert layering invariants like "what happens when a module is removed" (see the removal
+// matrix in app/matrix_test.go), and the fields of Provision are private. Assertions in the
+// product layer, observation provided by the kernel, is a better fit than stuffing invariants
+// into the kernel.
 func (p Provision) Name() string { return p.spec.name }
 
-// Provide 创建端口绑定；值的动态类型会在构图阶段再次校验。
+// Provide creates a port binding; the dynamic type of the value is checked again at
+// graph-construction time.
 func Provide[T any](capability Capability[T], value T) Provision {
 	return Provision{spec: capability.spec, value: value}
 }
 
-// Type 是组件的分类标签。
+// Type is the classification label of a component.
 //
-// 内核**不定义任何具体取值**，也不解释它——它只是一个必须存在的、稳定的分类键，
-// 供装配期枚举与上层按类展示、统计、治理使用。**有哪些分类是产品概念，不是内核
-// 概念**，所以词汇表归产品层；内核只提供这个字段。这与「模块的键不 hard-code 进
-// core」是同一条规矩：core 提供表，产品填内容。
+// The kernel **defines no concrete value** and does not interpret it -- it is only a
+// classification key that must exist and be stable, for assembly-time enumeration and for upper
+// layers to display, count and govern by class. **Which classes exist is a product concept, not
+// a kernel concept**, so the vocabulary belongs to the product layer; the kernel only provides
+// the field. This is the same rule as "module keys are not hard-coded into core": core provides
+// the table, the product fills in the content.
 //
-// 它是空字符串以外的任意值；内核对取值一无所知，因此校验不了——取值是否落在
-// 产品层认识的集合里，由产品层自己兜（通常是一条装配测试）。
+// It is any value other than the empty string; the kernel knows nothing about the values and
+// therefore cannot validate them -- whether a value falls inside the set the product layer
+// knows is up to the product layer (usually an assembly test).
 type Type string
 
-// Component 是运行时依赖图中的一个生命周期节点。
-// Requires/Provides 描述静态拓扑，Start/Stop 只处理获得依赖后的副作用；
-// 这样依赖关系可在执行前验证，停止顺序也能由同一张图可靠推导。
+// Component is a lifecycle node in the runtime dependency graph. Requires/Provides describe the
+// static topology; Start/Stop only handle side effects after dependencies are obtained; this
+// way dependencies can be validated before execution, and the stop order can be derived
+// reliably from the same graph.
 type Component struct {
 	Name string
-	// Type 是分类标签，必填。它跟着组件定义走，所以图一装配就能枚举出全部
-	// 组件及其分类——不需要组件配合、不需要启动。需要运行期才知道的东西
-	// 不能放这里：那是模块在 Start 时向某个 owner 注册的事，不是静态元数据。
+	// Type is the classification label, required. It travels with the component definition, so the
+	// graph can enumerate every component and its class as soon as it is assembled -- no
+	// cooperation from the component, no startup. Things that are only known at runtime cannot go
+	// here: that is what a module registers with some owner in Start, not static metadata.
 	Type Type
-	// Desc 是这个模块**干什么**的一句话；nil = 没写（列表里显示为空，不编）。
+	// Desc is one sentence about **what this module does**; nil = not written (shown as empty in a
+	// list, not invented).
 	//
-	// 为什么是**闭包**而不是字符串：它要能翻译，而组件字面量是在 Load 期构造的
-	// ——那时候语言层装好没有是没有保证的（同 view.Title / Concept.Title 那条：
-	// 登记发生在 Start 里，而求值要等到界面来问）。写成字符串就等于把「构造那一刻
-	// 的语言」焊死进去。
+	// Why a **closure** and not a string: it has to be translatable, and component literals are
+	// built during Load -- there is no guarantee at that point that the language layer is
+	// installed (same as view.Title / Concept.Title: registration happens in Start, while
+	// evaluation waits until the UI asks). Writing a string would weld the language of "the moment
+	// of construction" into it.
 	//
-	// 为什么放在描述符上而不是让模块自己注册一遍：它与 Type 同类——**静态元数据**，
-	// 装配一结束就能枚举，不需要模块配合、不需要启动。需要运行期才知道的东西不能
-	// 放这里（那是模块在 Start 时向某个 owner 注册的事）。
+	// Why put it on the descriptor instead of having the module register it itself: it is the same
+	// kind as Type -- **static metadata**, enumerable as soon as assembly ends, with no
+	// cooperation from the module and no startup. Things only known at runtime cannot go here
+	// (that is what a module registers with some owner in Start).
 	Desc     func() string
 	Requires []Requirement
 	Provides []Provision
@@ -174,11 +206,13 @@ type Component struct {
 	Stop     func(context.Context) error
 }
 
-// Release 撤销一次注册所有权。返回句柄而不是暴露全局 Remove，
-// 可以确保组件只释放自己创建的贡献，并让 Stop 自然成为 Start 的逆操作。
+// Release undoes one registration's ownership. Returning a handle instead of exposing a global
+// Remove ensures a component only releases the contributions it created, and makes Stop
+// naturally the inverse of Start.
 type Release func() error
 
-// ReleaseAll 按注册的相反顺序撤销一组贡献，与组件逆序停止保持相同所有权语义。
+// ReleaseAll undoes a set of contributions in the reverse order of registration, keeping the
+// same ownership semantics as reverse-order stop.
 func ReleaseAll(releases []Release) error {
 	var first error
 	for i := len(releases) - 1; i >= 0; i-- {
@@ -192,18 +226,20 @@ func ReleaseAll(releases []Release) error {
 	return first
 }
 
-// Loader 在构图前贡献一组组件。它只负责声明组合，不负责自行启动组件，
-// 因而所有组件仍由同一个 Manager 统一验证和回滚。
+// Loader contributes a set of components before graph construction. It only declares the
+// composition and does not start components itself, so all components are still validated and
+// rolled back uniformly by the same Manager.
 type Loader interface {
 	Load() ([]Component, error)
 }
 
-// Context 是构图后只读的端口表，只在 Start 阶段交给组件。
-// 它刻意不提供动态写入，防止运行期退化为 service locator。
+// Context is the read-only port table after graph construction, handed to components only
+// during Start. It deliberately offers no dynamic writes, to keep the runtime from degenerating
+// into a service locator.
 type Context struct{ values map[string][]any }
 
-// Get 读取一个端口；布尔值让调用方显式处理"没有提供者"的情况。
-// 多个提供者时返回声明顺序里的第一个——要全部请用 GetAll。
+// Get reads a port; the boolean lets the caller handle "no provider" explicitly. With multiple
+// providers it returns the first in declaration order -- for all of them use GetAll.
 func Get[T any](ctx Context, capability Capability[T]) (T, bool) {
 	var zero T
 	for _, value := range ctx.values[capability.spec.name] {
@@ -214,8 +250,8 @@ func Get[T any](ctx Context, capability Capability[T]) (T, bool) {
 	return zero, false
 }
 
-// MustGet 读取已经由 Need 保证存在的端口。
-// 若声明与使用不一致则立即 panic，暴露组件自身的编程错误。
+// MustGet reads a port that Need has already guaranteed to exist. If the declaration and the
+// use disagree it panics immediately, exposing the component's own programming error.
 func MustGet[T any](ctx Context, capability Capability[T]) T {
 	value, ok := Get(ctx, capability)
 	if !ok {
@@ -224,8 +260,9 @@ func MustGet[T any](ctx Context, capability Capability[T]) T {
 	return value
 }
 
-// GetAll 读取端口的全部贡献，顺序与组件声明顺序一致，用于插件、命令这类
-// 开放扩展点。没有提供者时返回空切片而非 nil，调用方无需判空。
+// GetAll reads every contribution of a port, in the same order as the components were declared,
+// for open extension points like plugins and commands. With no provider it returns an empty
+// slice rather than nil, so callers need no nil check.
 func GetAll[T any](ctx Context, capability Capability[T]) []T {
 	values := ctx.values[capability.spec.name]
 	out := make([]T, 0, len(values))
@@ -237,8 +274,9 @@ func GetAll[T any](ctx Context, capability Capability[T]) []T {
 	return out
 }
 
-// Manager 拥有一张已经验证并排序的组件图，以及它的完整启停状态。
-// 进程只需持有 Manager，就能保证启动失败回滚和正常退出使用同一套逆序语义。
+// Manager owns an already validated and sorted component graph, plus its complete start/stop
+// state. Holding only the Manager is enough for a process to get startup-failure rollback and
+// normal exit through the same reverse-order semantics.
 type Manager struct {
 	components []Component
 	context    Context
@@ -246,20 +284,24 @@ type Manager struct {
 	stopOnce   sync.Once
 }
 
-// New 使用后台 context 构建并启动组件图，适合没有启动取消需求的组合根。
+// New builds and starts the component graph with a background context, for composition roots
+// that need no startup cancellation.
 func New(loaders ...Loader) (*Manager, error) {
 	return NewContext(context.Background(), loaders...)
 }
 
-// NewContext 收集组件、验证端口、拓扑排序并依次启动。
-// 任一 Start 失败都会立即逆序停止已经进入生命周期的节点。
+// NewContext collects components, validates ports, topologically sorts and starts them in
+// order. If any Start fails, every node that already entered its lifecycle is stopped
+// immediately in reverse order.
 //
-// 全过程经 tracef 报出去（见 trace.go）：扫到几个组件、每个声明了什么、排出来
-// 什么顺序、每个起了多久。这是「模块为什么这么加载」的唯一一手材料——它只在
-// 装配期存在，事后从 Manager 里问不出来。
+// The whole process is reported via tracef (see trace.go): how many components were scanned,
+// what each declared, what order came out, how long each took to start. This is the only
+// first-hand material for "why modules load this way" -- it exists only during assembly and
+// cannot be asked out of the Manager afterwards.
 func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
-	// 收集、校验、排序只有一份实现（见 plan.go 的说明）：启动是**图纸 + 生命周期**，
-	// 不是另一条路径。分开写过一次，两边就会开始漂移。
+	// Collecting, validating and sorting have only one implementation (see the notes in plan.go):
+	// starting is **blueprint + lifecycle**, not another path. Written separately once, the two
+	// start to drift.
 	plan, err := Resolve(loaders...)
 	if err != nil {
 		return nil, err
@@ -273,8 +315,9 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 		began := time.Now()
 		if component.Start != nil {
 			if err := startComponent(ctx, component, manager.context); err != nil {
-				// Start 可能在报错前已经注册扩展或占用资源，因此失败节点也进入
-				// 回滚范围；组件的 Stop 必须能处理部分初始化。
+				// Start may already have registered extensions or taken resources before returning the
+				// error, so the failed node is also in the rollback set; a component's Stop must be able to
+				// handle partial initialization.
 				manager.started = i + 1
 				tracef("%s", i18n.T("start {index}/{total} {name} failed (took {took}): {err}",
 					i18n.A{"index": i + 1, "total": len(manager.components),
@@ -297,8 +340,9 @@ func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
 	tracef("%s", i18n.T("assembly complete: {count} components, took {took}",
 		i18n.A{"count": len(manager.components),
 			"took": time.Since(assembledAt).Round(time.Millisecond)}))
-	// 名单的交付在**所有 Start 返回之后**：谁想知道图里有谁，此刻才拿得到完整答案。
-	// 这一步只读、不启动——见 CatalogAware 与 docs/02 的三段法则。
+	// The list is delivered **after all Starts have returned**: anyone who wants to know who is in
+	// the graph only gets the complete answer at this moment. This step is read-only and starts
+	// nothing -- see CatalogAware and the three-phase rule in docs/02.
 	manager.deliverCatalog()
 	return manager, nil
 }
@@ -344,10 +388,12 @@ func Must(loaders ...Loader) *Manager {
 	return manager
 }
 
-// Context 返回已解析端口的只读视图，供组合根访问最终入口服务。
+// Context returns a read-only view of the resolved ports, so the composition root can reach the
+// final entry service.
 func (m *Manager) Context() Context { return m.context }
 
-// ComponentNames 按实际启动顺序返回组件名，主要用于诊断依赖图。
+// ComponentNames returns component names in actual start order, mainly for diagnosing the
+// dependency graph.
 func (m *Manager) ComponentNames() []string {
 	names := make([]string, 0, len(m.components))
 	for _, component := range m.components {
@@ -356,22 +402,27 @@ func (m *Manager) ComponentNames() []string {
 	return names
 }
 
-// Components 按启动顺序返回组件定义副本（含 Type），供上层枚举。
+// Components returns copies of the component definitions in start order (including Type), for
+// upper layers to enumerate.
 //
-// 只读快照：返回的是浅拷贝，调用方改不到图里的那一份。它跟 ComponentNames 的区别
-// 就是多了分类与依赖声明。枚举的权威来源是这里而不是「谁自报过」——自报会漏掉
-// 没参与那些机制的组件，而「没参与」和「忘了注册」在结果上必须长得不一样。
+// A read-only snapshot: what is returned is a shallow copy, so callers cannot modify the one in
+// the graph. Its difference from ComponentNames is the classes and dependency declarations. The
+// authoritative source for enumeration is here, not "whoever reported itself" -- self-reporting
+// misses components that took part in none of those mechanisms, and "took no part" and "forgot
+// to register" must look different in the result.
 func (m *Manager) Components() []Component {
 	out := make([]Component, len(m.components))
 	copy(out, m.components)
 	return out
 }
 
-// Stop 只执行一次，并按启动的反方向释放组件。
-// 即使某个 Stop 失败，其余组件仍继续清理，最终返回第一个错误。
+// Stop runs exactly once and releases components in the reverse of the start direction. Even if
+// one Stop fails, the remaining components still clean up, and the first error is returned in
+// the end.
 //
-// 与 Start 对称地报事件：停止顺序是启动顺序的逆序，而「谁在谁之后停」正是
-// 「晚到的 Release 会不会回写一个已经停掉的对象」这类问题的唯一现场。
+// Events are reported symmetrically with Start: the stop order is the reverse of the start
+// order, and "who stops after whom" is exactly the only place where questions like "will a late
+// Release write back into an object that has already stopped" show up.
 func (m *Manager) Stop(ctx context.Context) error {
 	var first error
 	m.stopOnce.Do(func() {
@@ -403,12 +454,14 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return first
 }
 
-// resolve 在任何副作用发生前验证端口并生成稳定拓扑顺序。
-// 同序候选按原始声明位置排序，使扩展点和诊断输出可复现。
+// resolve validates ports and produces a stable topological order before any side effect
+// happens. Ties are ordered by original declaration position, so extension points and
+// diagnostic output are reproducible.
 //
-// 每一步都经 tracef 报出去。排查「某个模块为什么没起」「顺序为什么是这样」时
-// 需要的是**过程**（谁声明了什么、哪条弱依赖因为没人提供而跳过、拓扑排序在
-// 第几轮把谁放出来），而 return 值只有结果。
+// Every step is reported via tracef. When investigating "why a module did not start" or "why
+// the order is this way" you need the **process** (who declared what, which weak dependency was
+// skipped because nobody provided it, at which round of the topological sort someone was
+// released), while the return value only has the result.
 func resolve(components []Component) ([]Component, map[string][]any, error) {
 	byName := make(map[string]int, len(components))
 	specs := make(map[string]capabilitySpec)
@@ -420,8 +473,9 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 		if component.Name == "" {
 			return nil, nil, fmt.Errorf("component name is required")
 		}
-		// 分类键必填，但**不校验取值**：内核不认识有哪些分类（见 Type 的注释）。
-		// 取值正确性由 app 层的装配测试兜。
+		// The class key is required, but **the value is not validated**: the kernel does not know
+		// which classes there are (see the Type comment). The correctness of values is covered by the
+		// assembly tests in the app layer.
 		if component.Type == "" {
 			return nil, nil, fmt.Errorf("component %s: type is required", component.Name)
 		}
@@ -462,9 +516,9 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 					return nil, nil, fmt.Errorf("component %s requires missing capability %s",
 						component.Name, requirement.spec.name)
 				}
-				// 弱依赖缺席：**不建边，也不报错**。这条是「你存在就有依赖，你不
-				// 存在就没依赖」的落点，所以要明说，否则和下一条（真的建了边）
-				// 在日志里长得一样。
+				// Weak dependency absent: **no edge, and no error**. This is the point where "you exist, so
+				// there is a dependency; you do not, so there is none" is applied, so say it out loud,
+				// otherwise it looks the same in the log as the next case (an edge really was created).
 				tracef("%s", i18n.T("  optional dependency absent: {consumer} needs {provider} "+
 					"— no provider, skipped (no edge, no effect on startup)",
 					i18n.A{"consumer": component.Name, "provider": requirement.spec.name}))
@@ -521,7 +575,8 @@ func resolve(components []Component) ([]Component, map[string][]any, error) {
 		}
 	}
 	if len(ordered) != len(components) {
-		// 环的现场：把还卡着的组件点名——只说「有环」的话，下一步得靠人工二分。
+		// The scene of the ring: name the components still stuck -- saying only "there is a ring"
+		// leaves the next step to manual bisection.
 		var stuck []string
 		for i, component := range components {
 			if indegree[i] > 0 {
@@ -580,9 +635,10 @@ func isNil(value any) bool {
 	}
 }
 
-// validateSpec 保证同名端口处处同型。名字是全局逻辑键，若两个模块用同一个
-// 名字指代不同的东西，这里必须在启动任何组件之前失败，而不是等到某次 Get
-// 拿到一个类型断言失败的零值。
+// validateSpec guarantees that a port with the same name has the same type everywhere. The name
+// is a global logical key; if two modules use the same name for different things, this must
+// fail before any component starts, rather than waiting for some Get to return a zero value
+// that fails a type assertion.
 func validateSpec(known map[string]capabilitySpec, spec capabilitySpec) error {
 	if spec.name == "" {
 		return fmt.Errorf("capability name is required")

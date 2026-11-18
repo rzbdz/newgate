@@ -16,14 +16,16 @@ import (
 	"github.com/rzbdz/newgate/tools/i18n/check"
 )
 
-// 翻译这一步**只在开发者本地跑**（用户 2026-09-20 定的规矩）：它要调 LLM，
-// 放进 CI 就等于每次 push 都可能烧 token、还依赖一台在跑的网关。
-// CI 只跑 check（不出网、不花钱）。
+// The translation step **runs only on the developer's machine** (a rule the user set on
+// 2026-09-20): it calls an LLM, and putting it in CI would mean every push might burn tokens
+// and depends on a gateway that is running. CI only runs check (offline, free).
 //
-// 它调的是**用户自己的 newgate 网关**——这个工具本身就是 newgate 的一个用户：
-// 档位链、fallback、上游怪癖修补全都照常生效。默认走 `smt-deepseek/deepseek-flash`
-// 并**显式关掉思考**：翻译是机械任务，让它思考既费 token 又慢，而且推理内容会
-// 混进译文（内核 modules/thinking 那套「关不掉就翻成 low」是这里的安全网）。
+// It calls **the user's own newgate gateway** -- this tool is itself a newgate user: the tier
+// chain, fallback and upstream quirk patches all apply as usual. By default it goes through
+// `smt-deepseek/deepseek-flash` and **explicitly turns thinking off**: translation is a
+// mechanical task, and making it think costs tokens and time, and the reasoning content would
+// leak into the translation (the kernel modules/thinking behavior of "turn it down to low if it
+// cannot be turned off" is the safety net here).
 
 const (
 	defaultEndpoint = "http://127.0.0.1:8899"
@@ -63,7 +65,8 @@ func runTranslate(args []string, name string) error {
 		return err
 	}
 
-	// 挑出要翻的：缺译文的；孤儿（源码里已经没有这条了）单独报，不翻。
+	// Pick what to translate: those with no translation; orphans (no longer in the source) are
+	// reported separately, not translated.
 	var todo []string
 	var orphans []string
 	for _, msg := range i18n.SortedKeys(fresh.Messages) {
@@ -109,8 +112,9 @@ func runTranslate(args []string, name string) error {
 		chunk := todo[start:end]
 		got, err := translateChunk(client, *endpoint, *model, chunk, fresh)
 		if err != nil {
-			// 单批失败不放弃整趟：把这一批记下来，继续下一批，最后一起报。
-			// 一次网络抖动不该让前面几十条白翻。
+			// One failed batch does not abandon the whole run: record this batch, continue to the next,
+			// and report them all at the end. One network hiccup should not throw away dozens already
+			// translated.
 			fmt.Fprintf(os.Stderr, "i18n: 这一批失败（%d 条）：%v\n", len(chunk), err)
 			failed += len(chunk)
 			continue
@@ -129,14 +133,16 @@ func runTranslate(args []string, name string) error {
 			}
 			e := cat.Messages[msg]
 			if fresh.Messages[msg].Plural() {
-				// 中文不分单复数：只写 other 就够（lib/i18n 的 pick 会用它）。
+				// Chinese does not distinguish singular and plural: writing only other is enough (pick in
+				// lib/i18n will use it).
 				e.Other = text
 			} else {
 				e.Text = text
 			}
 			e.Machine = true
-			// reviewed 保持 false：机翻就是机翻，复核过才算数。这是给下一个人看的
-			// 事实，也是 release 前 `check -strict` 拦的那一条。
+			// reviewed stays false: machine translation is machine translation, and only review makes it
+			// count. This is a fact for the next person, and it is the thing `check -strict` blocks
+			// before a release.
 			e.Reviewed = false
 			cat.Messages[msg] = e
 			done++
@@ -155,7 +161,8 @@ func runTranslate(args []string, name string) error {
 	return nil
 }
 
-// validate 机翻结果的两条硬要求：占位符一个不少、别把整句话原样还回来。
+// validate has two hard requirements for a machine translation: no placeholder may be missing,
+// and do not hand the sentence back unchanged.
 func validate(msg, text string, fresh i18n.Ledger) error {
 	want := i18n.Placeholders(msg)
 	if le := fresh.Messages[msg]; le.Plural() {
@@ -173,7 +180,7 @@ func validate(msg, text string, fresh i18n.Ledger) error {
 	return nil
 }
 
-// translateChunk 请模型翻一批。
+// translateChunk asks the model to translate one batch.
 func translateChunk(client *http.Client, endpoint, model string, chunk []string, fresh i18n.Ledger) (map[string]string, error) {
 	type entry struct {
 		Text   string `json:"text"`
@@ -203,8 +210,9 @@ func translateChunk(client *http.Client, endpoint, model string, chunk []string,
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": string(payload)},
 		},
-		// 显式关掉思考：翻译是机械任务。上游若关不掉，内核 modules/thinking 会把它
-		// 翻成「最省思考」的形式（见那个模块的注释），不必在这里分情况。
+		// Explicitly turn thinking off: translation is a mechanical task. If the upstream cannot turn
+		// it off, the kernel's modules/thinking turns it into "least thinking" form (see that
+		// module's comments); no need to branch on it here.
 		"thinking": map[string]string{"type": "disabled"},
 	}
 	raw, err := json.Marshal(body)
@@ -242,10 +250,11 @@ func translateChunk(client *http.Client, endpoint, model string, chunk []string,
 	return parseTranslation(parsed.Choices[0].Message.Content)
 }
 
-// parseTranslation 从模型输出里抠出 JSON。
+// parseTranslation digs the JSON out of the model output.
 //
-// 为什么要抠：再怎么叮嘱「只输出 JSON」，模型偶尔还是会裹一层 ```json 围栏或者
-// 加一句「好的，以下是译文」。这里不跟它讲道理，直接取第一个 { 到最后一个 }。
+// Why dig: no matter how often you insist "output only JSON", the model occasionally wraps it
+// in a JSON code fence or adds a sentence like "Sure, here are the translations". We do not
+// argue with it here; just take from the first { to the last }.
 func parseTranslation(content string) (map[string]string, error) {
 	s := strings.TrimSpace(content)
 	if i := strings.Index(s, "{"); i > 0 {
@@ -265,9 +274,10 @@ func parseTranslation(content string) (map[string]string, error) {
 			out[k] = plain
 			continue
 		}
-		// 它把值回成了对象（`{"text": …}`，或复数的 `{"one": …, "other": …}`）。
-		// 照收：**译文本身是对的**，形状不对不值得丢掉一次调用——何况提示词里
-		// 那些字段名（args/plural）本来就长得像这个形状，模型顺着回并不离谱。
+		// It returned the value as an object (`{"text": …}`, or the plural `{"one": …, "other": …}`
+		// ). Accept it: **the translation itself is right**, and a wrong shape is not worth
+		// discarding a whole call -- besides, the field names in the prompt (args/plural) already
+		// look like this shape, so the model following that pattern is not unreasonable.
 		var forms struct {
 			Text  string `json:"text"`
 			One   string `json:"one"`
@@ -277,7 +287,8 @@ func parseTranslation(content string) (map[string]string, error) {
 			return nil, fmt.Errorf("键 %q 的值既不是字符串、也不是译文对象: %s",
 				k, truncate(string(v), 80))
 		}
-		// 中文不分单复数：有 other 就用 other，那是对所有 n 都成立的那一句。
+		// Chinese does not distinguish singular and plural: if there is other, use other -- that is
+		// the sentence that holds for every n.
 		switch {
 		case forms.Text != "":
 			out[k] = forms.Text

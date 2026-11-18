@@ -8,38 +8,46 @@ import (
 	"testing"
 )
 
-// 内核不带任何发行版机制——这条边界今天是一条测试，不是一句注释。
+// The kernel carries no distribution mechanism -- this boundary is a test today, not a comment.
 //
-// 2026-09-20 之前内核里有一整套「装哪个发行版」的机制：仓库根的 modules-ext.json
-// （一张 Pin）、tools/extmanifest（按 Pin 去 clone 发行版仓库）、genmodules 的
-// -ext 那一半。它换来的代价实测有三条，每条都咬过人：
+// Before 2026-09-20 the kernel had a whole mechanism for "which distribution to install":
+// modules-ext.json at the repo root (a Pin), tools/extmanifest (clone the distribution repo by
+// Pin), and the -ext half of genmodules. Measured, it bought three costs, and every one of them
+// bit someone:
 //
-//   - 编一次发行版就把**内核 checkout 改脏**（生成的装配清单被重写成发行版那份），
-//     于是 `git -C core pull` / 换分支被工作区挡住；
-//   - 内核 CI 必须去 `git clone` 另一个仓库，内核的构建不再离线；
-//   - 清单里 import 了 modules-ext 下的包 ⇒ **核心里出现了一条指向发行版的编译期
-//     依赖**，而「内核不依赖发行版」正是这套分层的定义。
+//   - Building a distribution once **made the kernel checkout dirty** (the generated assembly
+//     list was rewritten with the distribution's version), so `git -C core pull` / switching
+//     branches was blocked by the working tree;
+//   - The kernel CI had to `git clone` another repository, so the kernel build was no longer
+//     offline;
+//   - The list imported packages under modules-ext => **a compile-time dependency pointing at
+//     the distribution appeared in the kernel**, and "the kernel does not depend on the
+//     distribution" is the very definition of this layering.
 //
-// 现在发行版是另一个 Go module，把自己那张表交给 app.Selection（见 manifest.go）。
-// 这条测试钉的就是「那套东西不许回来」——它管的是机制，不是文字：解释这段历史的
-// 注释可以留着（那些注释正是在防止下一个人重新发明它）。
+// Now the distribution is a separate Go module that hands its own table to app.Selection (see
+// manifest.go). This test pins down "that thing must not come back" -- it governs the
+// mechanism, not the words: comments that explain this history may stay (those comments are
+// exactly what keeps the next person from re-inventing it).
 func TestKernelCarriesNoDistributionMachinery(t *testing.T) {
-	// 摊平之后（2026-09-20）：Go 代码就在仓库根，「模块根」与「仓库根」是同一个
-	// 目录。两个名字都留着——下面一个用来走代码，一个用来报相对路径。
+	// After the flattening (2026-09-20): the Go code is at the repo root, so "module root" and
+	// "repo root" are the same directory. Both names are kept -- the one below walks code, the
+	// other reports relative paths.
 	goDir := filepath.Join(repoDir(t), "..")
 	repoRoot := goDir
 
-	// 1. Pin 文件本身：它写的是「本构建用哪个发行版」——那是产品决定。
+	// 1. The Pin file itself: it says "which distribution this build uses" -- that is a product
+	//    decision.
 	pin := filepath.Join(repoRoot, "modules-ext.json")
 	if _, err := os.Stat(pin); err == nil {
 		t.Errorf("%s 又出现了。内核不该声明「用哪个发行版」——装哪些模块是发行版自己的事，"+
 			"它拿 app.Selection 把表交给组合根；Pin 属于发行版仓库", pin)
 	}
 
-	// 2. 代码里的机制：import 路径、包名、两个环境变量。
+	// 2. The mechanism in code: import path, package name, two environment variables.
 	//
-	// 只查这三类**代码形态**，不查光秃秃的 "modules-ext" 字样：模块 checkout 的
-	// 目录名会出现在讲这段历史的注释里，那是资产不是负债。
+	// Only these three kinds of **code shape** are checked, not the bare string "modules-ext": the
+	// directory name of a module checkout appears in the comments telling this history, and that
+	// is an asset, not a liability.
 	forbidden := []struct{ needle, why string }{
 		{`"github.com/rzbdz/newgate/modules-ext`, "发行版模块的 import 路径——核心里出现它，说明又在构建期把发行版编进来了"},
 		{"extmanifest.", "按 Pin 拉发行版仓库的那套工具"},
@@ -51,7 +59,8 @@ func TestKernelCarriesNoDistributionMachinery(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
-			// 构建产物目录（老机制留下的）里是别人的代码，不是内核的。
+			// The build artifact directory (left over from the old mechanism) holds someone else's code,
+			// not the kernel's.
 			if d.Name() == "modules-ext" {
 				return fs.SkipDir
 			}

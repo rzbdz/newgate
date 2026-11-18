@@ -1,22 +1,26 @@
-// Package ciyaml 检查 .github/workflows/*.yml 的**结构**——不做完整 YAML 解析，
-// 只认「按缩进一眼能看出来的硬伤」。
+// Package ciyaml checks the **structure** of .github/workflows/*.yml -- it does not do a full
+// YAML parse, it only recognizes "the hard errors you can see at a glance from the
+// indentation".
 //
-// 为什么值得单独一层（2026-09-20 的教训）：摊平 go/ 那次改 workflow，把一个步骤
-// 的 `run:` 行连同 `working-directory` 一起删掉了，留下这么一条：
+// Why it deserves its own layer (the lesson of 2026-09-20): editing the workflows while
+// flattening go/ deleted a step's `run:` line together with `working-directory`, leaving this:
 //
-//   - name: opencode 侧端到端
+//   - name: opencode e2e
 //
-// 既没有 `run` 也没有 `uses`。这份 workflow 从此**非法**，GitHub 在 0 秒拒掉
-// 整个 run——一个 job 都没起。于是接下来六个提交的 CI 全是红的，看着像
-// 「测试挂了」，实际是**测试根本没跑**。这种失败必须有人喊，而喊的人不能是
-// GitHub：等它开口，东西已经推上去了。
+// with neither `run` nor `uses`. That made the workflow **invalid**, and GitHub rejected the
+// whole run in 0 seconds -- not a single job started. So the CI of the next six commits was all
+// red, looking like "the tests are broken" when in fact **the tests never ran**. A failure like
+// that has to be shouted by someone, and that someone cannot be GitHub: by the time it speaks,
+// the thing is already pushed.
 //
-// 所以把同一件事挪到**本地**——内核的 `go test ./...`（app/ci_test.go）与发行版的
-// dist-test（testing/ci_test.go）都会跑它。判据刻意保守：宁可漏报也不误报，
-// 因为一条会误报的棘轮最后一定被人绕过去。
+// So the same check is moved **locally** -- the kernel's `go test ./...` (app/ci_test.go) and
+// the distribution's dist-test (testing/ci_test.go) both run it. The criteria are deliberately
+// conservative: rather miss something than raise a false alarm, because a ratchet that raises
+// false alarms always ends up being worked around.
 //
-// 完整解析要引 YAML 库，而这个仓库**不许有第三方依赖**——同一个取舍下已经有
-// lib/style 手写的 East Asian Width 与 tools/i18n 手写的扫描器。
+// A full parse would need a YAML library, and this repository **forbids third-party
+// dependencies** -- the same trade-off already produced the hand-written East Asian Width in
+// lib/style and the hand-written scanner in tools/i18n.
 package ciyaml
 
 import (
@@ -27,8 +31,9 @@ import (
 	"strings"
 )
 
-// Finding 一条结构问题。没有 Level：这里报的全是 GitHub 会拒掉整个 workflow 的
-// 硬伤——要么全红，要么全不红，分成两级只会让人以为「warn 可以先不管」。
+// Finding is one structural problem. There is no Level: everything reported here is a hard
+// error that makes GitHub reject the whole workflow -- either everything is red or nothing is,
+// and two levels would only make people think "warn can be ignored for now".
 type Finding struct {
 	File string // 相对 root 的路径
 	Line int    // 1 起
@@ -39,10 +44,11 @@ func (f Finding) String() string {
 	return fmt.Sprintf("%s:%d: %s", f.File, f.Line, f.Msg)
 }
 
-// Check 扫描 root/.github/workflows 下的全部 *.yml/*.yaml。
+// Check scans every *.yml/*.yaml under root/.github/workflows.
 //
-// 目录不存在、或者一个 workflow 都没有时返回错误而不是空结果：那是**判据自己
-// 退化了**，不是「仓库很干净」。空结果必须只意味着「查过了，没问题」。
+// When the directory does not exist, or there is not a single workflow, it returns an error
+// rather than an empty result: that means **the check itself has degenerated**, not "the
+// repository is clean". An empty result must only ever mean "checked, no problems".
 func Check(root string) ([]Finding, error) {
 	dir := filepath.Join(root, ".github", "workflows")
 	ents, err := os.ReadDir(dir)
@@ -74,7 +80,8 @@ func Check(root string) ([]Finding, error) {
 	return out, nil
 }
 
-// yline 一行有效内容（空行与整行注释已经滤掉），带原始缩进列数。
+// yline is one line of effective content (blank lines and whole-line comments already filtered
+// out), with the original indent column.
 type yline struct {
 	no     int
 	indent int
@@ -103,8 +110,8 @@ func checkFile(root, path string) ([]Finding, error) {
 		for indent < len(s) && s[indent] == ' ' {
 			indent++
 		}
-		// YAML 的缩进不许用 tab。这行要是混进去了，报错信息会指向一个
-		// 完全无关的列号，查起来很费劲——这里直接点名。
+		// YAML indentation must not use tabs. If such a line slips in, the error message points at a
+		// completely unrelated column and is painful to track down -- so this names it directly.
 		if indent < len(s) && s[indent] == '\t' {
 			out = append(out, Finding{rel, no, "缩进里出现了 tab——YAML 不认 tab 缩进"})
 		}
@@ -115,8 +122,9 @@ func checkFile(root, path string) ([]Finding, error) {
 		lines = append(lines, yline{no: no, indent: indent, text: text})
 	}
 
-	// 空值：`run:` 后面什么都没有（下一行没有缩进更深的子键）。这就是当初那个
-	// bug 的另一半——三个 job 的 `defaults: run:` 被删得只剩壳。
+	// Empty value: nothing after `run:` (the next line has no deeper-indented subkey). This is the
+	// other half of that original bug -- three jobs' `defaults: run:` were deleted down to an
+	// empty shell.
 	for i, l := range lines {
 		key, ok := emptyableKey(l.text)
 		if !ok {
@@ -129,7 +137,8 @@ func checkFile(root, path string) ([]Finding, error) {
 			fmt.Sprintf("「%s:」是空值——要么补上值，要么整段删掉", key)})
 	}
 
-	// jobs: 之下逐个 job 看。找不到 jobs: 就是整个文件白写了。
+	// Under jobs:, look at each job one by one. No jobs: found means the whole file was written
+	// for nothing.
 	jobsAt := -1
 	for i, l := range lines {
 		if l.indent == 0 && l.text == "jobs:" {
@@ -145,7 +154,7 @@ func checkFile(root, path string) ([]Finding, error) {
 		return append(out, Finding{rel, lines[jobsAt].no, "jobs: 下面是空的"}), nil
 	}
 
-	// job 名 = 紧跟 jobs: 之后、与第一个键同缩进的那些 `名字:` 行。
+	// Job names = the `name:` lines right after jobs:, at the same indent as the first key.
 	jobIndent := rest[0].indent
 	for i := 0; i < len(rest); {
 		if rest[i].indent != jobIndent || !strings.HasSuffix(rest[i].text, ":") {
@@ -163,8 +172,8 @@ func checkFile(root, path string) ([]Finding, error) {
 	return out, nil
 }
 
-// checkJob 看一个 job：必须有 runs-on（否则 GitHub 拒），steps 里每一步必须有
-// run 或 uses。
+// checkJob looks at one job: it must have runs-on (otherwise GitHub rejects it), and every step
+// under steps must have run or uses.
 func checkJob(rel string, body []yline, name string) []Finding {
 	var out []Finding
 	hasRunsOn := false
@@ -209,9 +218,10 @@ func checkJob(rel string, body []yline, name string) []Finding {
 	return out
 }
 
-// checkStep 一步必须有 run 或 uses。键两个地方都算：`- uses: x` 写在破折号那一行，
-// 或者写在下面同级的 `run:` / `uses:`。更深的键（`with:` 的子键）不算——那层是
-// 参数，不是这一步的类型。
+// checkStep: a step must have run or uses. Keys count in two places: `- uses: x` written on the
+// dash line itself, or written below it at the same level as `run:` / `uses:` . Deeper keys
+// (the children of `with:` ) do not count -- that layer is parameters, not the kind of this
+// step.
 func checkStep(rel string, item []yline, itemIndent int) (Finding, bool) {
 	hasBody, stepName := false, ""
 	dash := strings.TrimSpace(strings.TrimPrefix(item[0].text, "-"))
@@ -249,8 +259,8 @@ func checkStep(rel string, item []yline, itemIndent int) (Finding, bool) {
 		what + "既没有 run 也没有 uses——GitHub 会拒掉整个 workflow，一个 job 都不会起"}, true
 }
 
-// emptyableKey 返回「这个键必须带值」的键名。值是空的（下一行没有更深的子键）
-// 就是硬伤：`run:` 空着等于这一步什么都不做。
+// emptyableKey returns the key names that "must carry a value". An empty value (the next line
+// has no deeper subkey) is a hard error: `run:` left empty means the step does nothing.
 func emptyableKey(text string) (string, bool) {
 	for _, k := range []string{"run", "shell", "uses", "runs-on", "steps"} {
 		if text == k+":" {
@@ -260,8 +270,9 @@ func emptyableKey(text string) (string, bool) {
 	return "", false
 }
 
-// splitKey 把 `name: 值` 拆成键与值；不是「键: 值」形态就返回 ok=false。
-// 值里可能带冒号（`run: echo a:b`），所以只切第一个。
+// splitKey splits `name: value` into key and value; returns ok=false when it is not "key:
+// value" shaped. The value may contain a colon (`run: echo a:b`), so only the first one is
+// split on.
 func splitKey(s string) (key, val string, ok bool) {
 	i := strings.Index(s, ":")
 	if i <= 0 {
