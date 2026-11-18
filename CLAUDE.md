@@ -1,9 +1,18 @@
 # CLAUDE.md — 在这个仓库里怎么干活
 
-newgate：把 AI CLI（claude / opencode）的模型选择收敛到**语义档位层**，网关侧
-做路由、fallback、上游怪癖修补。设计思想见 `docs/01-product.md`，架构见
-`docs/03-architecture.md`。**改代码前先读这两篇**——这个仓库的注释和文档密度
-很高，而且写的都是「为什么」，不是「是什么」。
+这是 **newgate 的内核**：组件框架（typed capability、依赖图、生命周期）、进程
+入口契约、i18n 引擎、生成器与 lint 工具。**它一个模块都不带**（2026-11-18 起）。
+
+> 网关、熔断、接管、界面、配置、客户端接入、上游怪癖修补——**全部**在发行版
+> （`newgate-ext`）里。分法就是 Linux 内核与用户态：内核只给机制，产品由发行版
+> 组装。判据一句话：**换个发行版，这东西还该在吗？**
+
+架构见 `docs/03-architecture.md`。改代码前先读它——这个仓库的注释密度很高，
+写的都是「为什么」。
+
+**产品文档不在本仓库**（2026-11-18 搬去发行版 `docs/`）：配置、网关、推理、客户端
+接管、运维、排障都在 `newgate-ext/docs/`。内核这一侧只剩框架、扩展、测试安全、
+本地化四篇。
 
 ---
 
@@ -20,10 +29,9 @@ newgate：把 AI CLI（claude / opencode）的模型选择收敛到**语义档�
    开发从 `main` 切分支 → 完事合回 `main`。曾经的主分支 `clean-tree` 已删除
    （2026-09-18，`c3bd2ed` 已整体并入 `main`）。`/root/workspace/newgate` 那个
    worktree 停在 `deprecated`（= 旧 main 血统的最后一版），只作历史留存，别在上面改。
-2. **本机 shell 的三个坑**：`grep` 是 ugrep 包装、会静默吞结果 → 一律写
-   `command grep`；`go test ./...` 必须在 `go/` 子目录里跑（module 根在那）；
-   `/bin/sh` 是 dash，没有 `exec -a`，测试里要「argv0 是特定名字」得用
-   `/bin/bash -c "exec -a …"`。
+2. **本机 shell 的两个坑**：`grep` 是 ugrep 包装、会静默吞结果 → 一律写
+   `command grep`；`/bin/sh` 是 dash，没有 `exec -a`，测试里要「argv0 是特定
+   名字」得用 `/bin/bash -c "exec -a …"`。
 3. **你自己的请求也穿行在这个 daemon 里**。root 的 claude 被 PATH shim 接管，
    `newgate stop` 和 `newgate start` **绝不能拆成两个工具调用**——中间那个请求
    会撞上死掉的代理，会话当场挂。一切重启都放**一条命令**里（见 §3）。
@@ -40,30 +48,29 @@ make test       # == go test ./...
 go vet ./... && gofmt -l .
 ```
 
-分层（依赖通过 capability 表达，`component` 不 import 业务模块）：
+分层（依赖通过 capability 表达，`component` 不 import 任何模块——它一个都不认）：
 
 | 目录 | 管什么 | 改这里当你在做… |
 | --- | --- | --- |
-| `component` | typed capability、依赖 DAG、生命周期（强依赖 `Need` / 弱依赖 `Optional`，单阶段装配），以及装配过程的 trace 出口 | 组件框架本身 |
-| `modules/config/{domain,resolve,roleprov,store}` | Config 组件、配置语义、动态角色、fallback 纯函数、持久化（后三个同时是**共享叶子**，谁都能直接 import，不算依赖边） | 档位与配置 |
-| `modules/gateway/{forward,special,rewrite,thinkcache}` | 网关组件及其内部实现 | 转发、扩展与思维链 |
-| `modules/breaker` | binding 健康表：可用性 + 延迟排序。`Need(gateway)`——它是**插进数据面四个决策点的策略**，不是被 gateway import 的库（方向 2026-09-18 翻过） | 熔断策略与恢复 |
-| `modules/confighook` | agent/config/state-field 注册端口 | 配置文件接管 |
-| `modules/runtime/{launch,injection,takeover}` | 接管与 env 注入 | 客户端怎么被拦下来 |
-| `modules/cli` | 命令行界面：分派、排版、注入点（**不含任何业务知识**，见 §4） | `newgate <动词>` 的分派与 help |
-| `modules/<客户端>` | Claude Code、opencode 的接入与组合行为（**客户端**留 core） | 新增客户端支持 |
-| **发行版的模块**（上游怪癖修补、客户端×交叉语义） | **不在本仓库**：住在发行版仓库里，那是**另一个 Go module** | 修某个上游的怪癖 |
-| `app`（在 `modules/` 之外） | 组合根：装图、把这次调用交给入口。**不认识任何模块**；对内提供 `Selection`/`Main` 这条接缝 | 换装图方式 |
-| `modules/entry`（唯一的 built-in，也是**内核唯一认识的那个模块**） | 入口账本：谁认领这次进程调用。**摘不掉**，而判据是「组合根自己要用它提供的端口」（`app/manifest.go` 的 `compositionRootPorts`），不是一张名单 | 加入口类型 |
-| `tools/genmodules` | 构建期扫描 `modules/`，生成装配清单（**只看本仓库、完全离线**） | 改模块发现规则 |
-| `tools/genmodules/scan` | 「哪些目录算组件」+「目录名怎么拧成 import 别名」的唯一实现（发行版的生成器也用这份） | 改组件判据 |
-| `testing/{testkit,upstream,system}` | 测试设施：模块层起图、进程内假上游、系统层整图。**从这里起是对外 API**（发行版拿 `system.StartWith` 测自己的模块） | 加测试设施（不是产品代码） |
+| `component` | typed capability、依赖 DAG、生命周期（强依赖 `Need` / 弱依赖 `Optional`，单阶段装配）、装配图（`Plan`）/启动（`Manager`）的分离、trace 出口 | 组件框架本身 |
+| `component/entry` | **进程入口契约**：`Process` / `Handler` / `Registry` / `MakeProcess`。组合根与模块两侧唯一共用的词 | 入口类型、argv0 归一、rank |
+| `lib/i18n` | 本地化引擎：账本、目录、`T` / `N` / `E`、`Extend` | 翻译机制 |
+| `app` | 组合根逻辑：`Main`（trace → 起图 → 问入口）、`Selection`（由消费者决定装什么）、`CoreModules()`（**空的**） | 换装图方式、退出码 |
+| `tools/genmodules` | 构建期扫描 `modules/`，生成装配清单（**只看本仓库、完全离线**）；本仓库扫出来是空的 | 改模块发现规则 |
+| `tools/genmodules/scan` | 「哪些目录算组件」+「目录名怎么拧成 import 别名」的唯一实现（发行版生成器用同一份） | 改组件判据 |
+| `tools/i18n` | 账本提取、校验、bundle、翻译（`sync` 只在本地跑） | 改本地化工具 |
+| `tools/ciyaml` | 校验 GitHub workflow 的结构（两个仓库共用一条判据） | 改 CI 棘轮 |
 
-每个 `modules/<name>`（无例外）都必须在根目录提供唯一的 `module.go`，由它用
-`New()` 直接返回 `component.Component`，并声明 `Requires`、`Provides`、`Start`
-和 `Stop`。**生命周期只有这两个阶段**：没有 `Attach`，也没有「注入阶段」（见 §4）。
+**`core/modules/` 是空的，而且必须空着。** 一个模块该不该在这里，判据是
+「换个发行版，这东西还该在吗？」——网关、熔断、界面、配置、客户端接入在答案里都是
+「不该」，所以它们住在发行版的 `modules/`。`app/core_test.go` 的
+`TestKernelShipsNoModules` 在有人把模块放回来时当场变红。
+
+**模块契约（给发行版的模块用，本仓库只是它的定义处）**：一个目录、一个
+`module.go`、导出 `func New() component.Component`，声明 `Requires`、`Provides`、
+`Start`、`Stop`；生命周期只有这两个阶段（没有 `Attach`，没有「注入阶段」，见 §4）。
 注册型 capability 必须返回 `component.Release`，consumer 在 `Stop` 中逆序释放。
-复杂实现可以拆文件或子包，但入口文件名和所在层级不能变化。
+目录规则（根 `module.go`、契约在根 `api.go`）由发行版的 `testing/kernel` 断言。
 
 **公开 capability 和接口写在模块根目录的 `api.go`**（2026-09-17 起，不再用
 `<module>/api/` 子包）；禁止建立中心化 contracts 包。契约类型若实现方需要反向
@@ -79,47 +86,64 @@ service」。端口不声明基数（没有 `One`/`Many`），需要唯一性由
 会自动重生成，`make check-generate` 只校验；`app` 里有一条测试跑它，拦住
 「加了模块忘了生成」的静默漏装配。
 
-### 发行版：另一个 Go module（2026-09-20 起）
+### 发行版：另一个 Go module（2026-09-20 起，2026-11-18 完整落地）
 
-**core 只是内核**：链的复合、结局的推进、身份的定义、故障的隔离。**哪些模块属于
-这个产品**是发行版的事——发行版是**另一个仓库、另一个 Go module**，它把 core
-当依赖（`replace` 到它自己的 `core/` submodule），并把自己那张表交给内核的组合根：
+**core 只是内核**：组件框架、入口契约、i18n 引擎、工具。**模块全在发行版**——那是
+**另一个仓库、另一个 Go module**，它把 core 当依赖（`replace` 到自己的 `core/`
+submodule），并把自己那张表交给内核的组合根：
 
 ```go
-app.Main(ctx, app.Options{Loader: app.Selection{
-    Disable: []string{"cli"},                        // 关掉内核的界面（写**目录名**）
-    Extra:   []app.Entry{{Dir: "deepseek", Component: deepseek.New()}},
-}})
+app.Main(ctx, app.Options{
+    Loader: app.Selection{Extra: []app.Entry{
+        {Dir: "entry",    Component: entry.New()},
+        {Dir: "gateway",  Component: gateway.New()},
+        {Dir: "deepseek", Component: deepseek.New()},
+    }},
+    Trace: func() func() { return assembly.TraceToLogFile(paths.LogFile()) },
+})
 ```
 
-装模块/关模块**都不改 core 的代码**，core 也不认识任何模块名。
+装哪些模块**不改 core 的代码**，core 也不认识任何模块名（连 `gateway` 这个词都不该有）。
 
-**2026-09-20 之前不是这样**：那时内核根挂着一张 `modules-ext.json`（Pin），构建期
-把发行版仓库 clone 到 `modules-ext/` 再扫一遍。那套机制整个删了，因为产品决定
-住进了内核里，代价实测三条：编一次发行版就把内核 checkout 改脏（生成的清单被重写成
-发行版那份，挡住 pull/换分支）、内核 CI 必须去 clone 另一个仓库、装配清单 import 了
-发行版的包（核心里出现一条指向发行版的编译期依赖）。现在内核**完全离线**：
+**两条接缝**（2026-11-18）：
+
+- `app.Selection{AllCore, Disable, Extra}`：消费者的模块表。`AllCore` 与 `Disable`
+  今天对内核对空（内核没有模块），但语义保留着——第三方组合根如果自己往
+  `CoreModules()` 里放东西，规则照样生效。**本仓库的规格书已经不用 `Disable`。**
+- `app.Options.Trace` / `OnAssemblyFailure`：装配记录与失败的落点。内核**不再**
+  认识发行版的日志路径——那段逻辑（指纹、去重、写文件）在发行版的 `lib/assembly`。
+
+**2026-09-20 之前**内核根挂着一份 `modules-ext.json`（Pin），构建期 clone 发行版再扫
+一遍；那套删了。**2026-11-18 之前**内核还自带十三个模块（gateway、cli、config…），
+那时「内核 vs 发行版」只是仓库边界，模块仍住在核心里。现在这条线画在**模块身上**：
+
+| 留在 `core/` | 搬去发行版 |
+| --- | --- |
+| `component`、`component/entry`、`app`、`lib/i18n`、`tools/` | **全部 `modules/`**、`lib/{httpx,style,view,logx,porthub,serving,buildinfo,durarg}` |
+| `mock/fake_upstream.py`（按路径复用） | `testing/{testkit,upstream,system}`、`mock/` 的端到端 |
+| 框架文档（`docs/02,03,09,10,13`） | 产品文档（`docs/01,04,05,06,07,08,11,12`） |
+
+内核因此**完全离线**，而且连「真起一张图」都做不到——它没有模块：
 
 ```bash
-make check          # 本仓库自己的 fmt/vet/清单/单测/两条 e2e
-GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事实不是承诺
+make check                    # fmt / vet / 清单 / 单测（无 e2e：没有东西可服务）
+GOPROXY=off go test ./...     # 离线也全过——「不需要网络」是事实不是承诺
 ```
 
-`app/independence_test.go` 守着这条边界（Pin 文件、`modules-ext` 的 import 路径、
-`extmanifest`、`NEWGATE_MODULES_PIN` / `NEWGATE_EXT_DRYRUN`，一个都不许回来）。
+`app/independence_test.go` 守着「内核不 import 发行版」；`app/core_test.go` 守着
+「内核不带模块」；`app/selection_test.go` 用一张换进来的假表守住 Selection 的规则
+（名字必须点得中、组合根自己的端口关不掉、AllCore 跟着表长）。
 
 - 官方发行版：`git@github.com:rzbdz/newgate-ext.git`，**只有 `main` 一条分支**。
-  2026-09-20 删掉了 `template`（给别人 fork 的骨架）——「从零开始」这件事规格书本来
-  就能做，`dist-hello.json` 是活的最小样例。**fork 它 + `build/build.sh` 就是一个新发行版**。
+  **fork 它 + `build/build.sh` 就是一个新发行版**；`dist-hello.json` 是活的最小样例
+  （`i18n` + `entry` + `hello`）。
 - **两个仓库在同一个工作区里改**（2026-09-20 定）：开发只开
-  `/root/workspace/newgate-ext`。改发行版模块就在仓库根下改、直接提交推送；改内核
-  进 `core/`（那是个 submodule，改之前先 `git checkout main`），推完回发行版
-  `git add core` 挪 gitlink。**不要为内核另开一个 checkout**。
-- 装不装发行版都要能编：`TestRemovalMatrix`（app/matrix_test.go）逐个模块摘一遍，
-  **只有 built-in（`modules/entry`）不可摘**；`app/direction_test.go` 与
-  `modules/gateway/direction_test.go` 守着「组合根/数据面不认识任何具体模块」。
-- 测试边界：**内核的测试只管内核的逻辑与内核的模块**；发行版模块的行为（DeepSeek
-  的尾部形状、推理回填、跨上游迁移）由发行版自己的测试与 `mock/` 端到端锁。
+  `/root/workspace/newgate-ext`。改模块就在仓库根下改、直接提交推送；改内核进
+  `core/`（submodule，改之前先 `git checkout main`），推完回发行版 `git add core`
+  挪 gitlink。**不要为内核另开一个 checkout**。
+- 测试边界（2026-11-18 之后）：**内核的测试只管框架**（component、entry、app、
+  i18n、tools）。模块行为全在发行版：`testing/kernel`（整图不变式）、
+  `testing/system`（整图 + 真转发）、`modules/*/_test.go`、`mock/*.sh`。
 
 档位阶梯（2026-09-16 四档化）：
 `heavy`(fable) > `normal`(opus，**主力**) > `mid`(sonnet) > `light`(haiku)，
@@ -179,183 +203,43 @@ GOPROXY=off go test ./...    # 离线也全过——「不需要网络」是事�
 
 ---
 
-## 3. 部署（优雅，零停机）
+## 3. 部署
 
-> **产品二进制从发行版仓库出**（2026-09-20 起）。本仓库的 `make build` / `make static`
-> 产出的是**内核自带**的二进制（十三个模块：网关、熔断、接管、界面…）——**它没有**
-> deepseek / glm 那些上游怪癖补丁。把这里的产物装到线上是一次**降级**：形状 400 的
-> 修补、推理回填、跨上游迁移全没了，症状是「某些请求突然开始 400」或者悄悄沿链
-> 换人（见 `docs/06-reasoning.md`）。
->
-> 发一版产品：`cd /root/workspace/newgate-ext && build/build.sh`
-> （或直接下 GitHub Release 的产物），再按下面这套换版。
-> 本仓库的二进制只在**内核自己的测试**（`make e2e`）里用。
+**这个仓库不产出产品二进制。** 内核没有模块，`make build` 编出来的 `bin/newgate`
+起来之后没有任何入口（它只会说「no entry claimed this call」）——它不是降级版，
+是**一个框架**。
 
-### 3.1 单机
-
-```bash
-# 产物来自发行版仓库：dist/newgate-<发行版>-<平台>-<架构>
-cp <发行版产物> /root/.local/bin/.newgate.new
-mv -f /root/.local/bin/.newgate.new /root/.local/bin/newgate   # 换名覆盖
-/root/.local/bin/newgate restart         # 优先走优雅交接（socket fd 移交）
-```
-
-**换完核一下模块数**：`newgate plugin | head -1` 应当是 **30 个模块 · 7 个可运行期
-开关点**（2026-09-29 实测）。少了就是装错了（内核自带的二进制只有 13 个模块、0 个
-开关点）。
-
-这个数跟着**发行版的规格书**走（装一个模块就加一），所以对不上时先看发行版仓库里
-有没有一条「bump the kernel」的提交——那份提交挪了 gitlink，模块表也就跟着变了。
-
-- **为什么不是 `cp` 直接覆盖**：Text file busy——运行中的进程占着 inode。
-  `mv`（rename）换目录项，老进程继续用旧 inode 排空在途请求。
-- `newgate restart` 先探 `daemon.Running()`（读 pidfile）。**pidfile 里的 pid
-  是死的**时它会误判「没在跑」，退化成 stop+start（摘接管、起新进程、撞端口，
-  2026-09-15 实际踩过）。
-- 手动优雅交接（CLI 判定「没在跑」时唯一不停机的换版手段）：
-  ```bash
-  TOK=$(python3 -c 'import json;print(json.load(open("/root/.config/newgate/state.json"))["control_token"])')
-  curl -s -X POST -H "Authorization: Bearer $TOK" http://127.0.0.1:8899/__newgate/upgrade
-  ```
-  返回 `{"ok":true,"new_pid":…}` 才算数；被拒时旧进程继续服务，服务不受影响。
-- **换完必须核验**（别信 `newgate version`，那是 CLI 的版本）：
-  ```bash
-  PID=$(python3 -c 'import json;print(json.load(open("/root/.config/newgate/.newgate.pid"))["pid"])')
-  md5sum /proc/$PID/exe /root/.local/bin/newgate     # 两个必须一样
-  ```
-- **重启会清空内存里的 thinkcache**（推理内容缓存）。磁盘冷层
-  （`thinkcache.bin`）从 2026-09-16 起可用，重启后会自动装回去；冷层坏掉时
-  重启后的第一发大请求会因为思维链补不上而被上游 400（`must be passed
-  back`）。长会话中间重启前先想一下这件事。
-- **多用户/权限坑**（daemon 以 `claude` 用户跑，配置目录 root 建的）：
-  root 的 CLI 写出的文件被 umask 削成 `0640 root:developer` → claude 写不了。
-  表现为：优雅交接 500（`AdoptRuntime` EACCES）、`thinkcache 落盘关闭（继续
-  纯内存）: permission denied`、400 证据「已存」其实没写出。修法一行：
-  `chmod 0660 <文件>` / `chmod 2770 <目录>`。
-
-### 3.2 跨机器（`panjunzhong@10.0.50.11`，snode1）
-
-```bash
-# 产物来自发行版仓库，且必须是静态的（那台 glibc 旧，动态链接起不来）。
-cd /root/workspace/newgate-ext
-NEWGATE_PLATFORMS=linux/amd64 build/build.sh dist/    # 脚本自带静态断言
-scp dist/newgate-newgate-default-linux-amd64 \
-  panjunzhong@10.0.50.11:/data/home2/panjunzhong/WorkSpace/bin/newgate.new
-ssh panjunzhong@10.0.50.11 'cd /data/home2/panjunzhong/WorkSpace/bin && \
-  mv -f newgate.new newgate && ./newgate restart'
-```
-
-同样用 `/proc/<pid>/exe` 的 md5 核验。远程 daemon 以 `panjunzhong` 跑，pidfile
-同用户，交接不会撞权限坑。`/home/panjunzhong/WorkSpace` 是
-`/data/home2/panjunzhong/WorkSpace` 的软链，同一份。
-
-### 3.3 接管配置的更新
-
-改了注入内容（档位名、base URL、槽位映射）后，**已经跑着的会话不会自动变**
-（env 是启动时注入的），要重新接管一次：
-
-```bash
-newgate on claude      # 重装 PATH shim（claude 下次启动生效）
-newgate on opencode    # 重写 opencode.json / oh-my-openagent.json
-```
-
-注意 `on` 对「已经是 `newgate/xxx` 的值」是幂等的——**不会重新分类**。要让
-omo 的 intra-agent 槽位按新规则重分类，得走一轮
-`newgate off opencode && newgate on opencode`（会先还原原始配置再改写）。
-
-**omo 槽位（2026-09-16 起）**：`newgate on opencode` 给每个 intra-agent 分配
-一个稳定键（`newgate/omo-sisyphus` / `newgate/cat-deep`），体格与建议写进
-`~/.config/newgate/omo-slots.json`（见 `docs/04-configuration.md`）。重跑 `on` 是安全的：`current`
-沿用它现在的档位（**不改行为**），原模型名从 `backups/original/` 找回。
-**顺序不能反**：先换二进制、重启 daemon，再 `on opencode`——老 daemon 不认识
-槽位键，配置先改了会让 opencode 的请求打空。看现状/调归属：`newgate omo`。
-
----
+产品和它的部署（换二进制、优雅交接、跨机器、重新接管配置）全在发行版：
+`newgate-ext` 的 `docs/08-operations.md` 与它的 `CLAUDE.md` §3。
 
 ## 4. 代码约定
 
-- **纯字节手术**：请求体不做 JSON 往返（大整数会变 `…92`，字段顺序和未知键会
-  丢）。用 `gateway/rewrite` 的原语，只动该动的那一段。
-- **不静默**：改写了请求就必须回报 `notes`，由调用方写日志。用户永远能知道
-  自己的请求被动过哪一笔。
-- **fail-open**：插件/探针出错就当它没跑过，请求按原样发出去。宁可上游报错，
-  也不能因为一个补丁把整条链弄断。
+These rules are the kernel's (they apply to the framework code in this repo).
+The product-specific conventions — byte surgery on request bodies, the data-plane
+policy port, upstream-patch plugins, UI injection ports, module key registration —
+now live with their modules in the distribution; see `newgate-ext/CLAUDE.md` §2.
+
+- **不静默**：任何失败、任何改写、任何「我跳过了」都要有一条可读的回报。这条是
+  框架级规矩（`component` 的 trace、`app` 的装配记录、`Selection` 的每一条报错
+  都是它的落地），不是某个产品的偏好。
+- **fail-open**：框架自己的辅助路径（trace、catalog 交付、面板）出错不该让整条
+  链断掉。`Start` 失败仍然要回滚（那是装配错误），但**诊断输出**永远不能成为
+  新的故障源。
 - **注释写「为什么」**：现场报错原文、实测数字、日期、以及「为什么不是另一
   种做法」。这是这个仓库最重要的资产。
-- **文档同步**：动了行为就改 `docs/`（`00-index.md` 有全表）。新机制写进
-  `docs/09-extension-guide.md`，配置字段写进 `docs/04-configuration.md` / `docs/05-gateway.md`。
-- **模块的键不 hard-code 进 core**：客户端插件自带的东西（omo 的
-  sisyphus/librarian 槽位）由模块实现 `config.RoleProvider` 注册成动态角色
-  键（`domain.ExtraRole`），命名与缺省归属留在 `modules/opencodeomo`。
-  core 只认「键 → 缺省绑定」这张表，解析路径与档位完全一样（引用展开，见
-  `resolve.BuildChain`）。接一个新插件 = 新注册一个 Provider，core 不动。
-- **ui 只是一类普通模块，cli 是其中一个**（2026-09-18 定）。将来 tui / web 都会
-  是独立模块，走同一套模式。由此推出三条硬规矩：
-
-  - **业务模块不依赖任何 ui**。它们往当前存在的 ui 注入自己的控制面，谁在就注入
-    给谁，谁不在就跳过。
-  - **没装任何 ui 时，一切功能照常**。最坏情况只是「这些模块没有入口」——
-    不影响任何模块的功能与运作；反过来，要操作某个模块的控制面，**至少得装
-    一个 ui 模块**。
-  - **ui 自己不依赖任何模块**。`modules/cli` 的 `Requires` 是**空的**，目录里不
-    含任何业务知识。判断一个东西该不该留在 ui：**把它删掉，业务模块还成立吗？**
-    成立就不该留在 ui。
-
-  **注入是一条弱依赖**（`component.Optional(cli)`）。往界面里注册命令/状态行的
-  模块声明它：**界面在，就注册进去；界面不在，就跳过**——模块功能一个都不少，
-  只是没有入口。
-
-  **为什么现在能用 `Optional` 了**：因为它是一条**排序边**，而排序边会不会成环
-  取决于界面有没有出边——界面现在**一条出边都没有**（`cli.Requires` 是空的），
-  箭头只有「模块 → 界面」一个方向。2026-09-18 之前界面依赖那些模块才能渲染，
-  两条箭头互指成环，于是被迫引入 `component.Inject`（不排序的注入边）+
-  `Component.Attach`（全图 `Start` 之后再跑一遍的第二阶段）来绕开。出边砍干净
-  那套机制就整个删掉了——它带来的代价是实测出来的：顺序**没有任何保证**（当时
-  9 个注入者恰好都在 cli 之后，靠目录名字母序碰巧成立）、停止顺序跟着失去保证
-  （`breaker` 在 `cli` 之后停）。现在顺序由依赖图给出，逆序停止时注入者的
-  `Stop` 一定先跑完，界面最后停。
-
-  `app/` 里三条棘轮测试守着这个方向：
-  `TestCLIDependenciesOnlyShrink`（界面出边集合必须为空）、
-  `TestUIStaysOutOfTheDependencyGraph`（对 ui 只许 `Optional`，不许 `Need`）、
-  `TestInjectorsStartAfterTheUI`（注入者必须排在界面之后）。
-
-  **界面全部的能力都来自注入**，端口都在 `modules/cli/extension`：
-
-  | 端口 | 交什么 | 谁交（举例） |
-  | --- | --- | --- |
-  | `RegisterCommand` | 一条命令（含 `HelpLine` 声明的槽位与位置） | 每个拥有动词的模块 |
-  | `RegisterStatus` | status 里的一行 | gateway（代理）、runtime（接管）、config（配置） |
-  | `RegisterStatusBlocks` | status 里的成块内容（表格） | config（档位绑定、fallback 链） |
-  | `RegisterDiagnostics` | doctor 里的一项 | config、gateway、runtime |
-  | `RegisterDump` | 诊断包（`alllogs`）里的原始素材 | config、gateway、runtime |
-  | `RegisterGlossary` | 帮助屏术语表里属于自己的一行 | config-hook（agent）、config（槽位键） |
-  | `RegisterVerbose` | 「我的详细模式开着」 | gateway（debug） |
-
-  于是 `--help`、`status`、`doctor`、`alllogs` 全是**纯汇总**：里面每一行、每张表、
-  每段原文都由拥有那份数据的人产出，**装一个新模块不需要改这四条命令里的任何一行**。
-
-  两条可选接口让命令自己声明例外，省得界面列名单：`Handoff`（这条命令马上要把
-  控制权交给别的进程）、`Unstyled`（这一次的输出不是版式——JSON / KV 原文 / 日志）。
-- **两条棘轮测试**守着上面那些「方向」：`app/direction_test.go`（组合根不 import
-  任何 `modules/…`）、`app/matrix_test.go`（摘除矩阵 + 零依赖模块独立加载）、
-  `modules/gateway/direction_test.go`（数据面不认识任何策略）。加模块/加依赖前先
-  想一下它们会不会红——红了就是方向被掰回去了。
+- **文档同步**：动了框架行为就改 `docs/`（`00-index.md` 有全表）。新机制写进
+  `docs/09-extension-guide.md`。
+- **模块契约不认模块名**：内核提供类型（`Capability`、`Requirement`、
+  `Provision`、`Entry`），产品填内容。`component.Type` 的注释里那条规矩在两个
+  仓库都成立：core 提供表，产品填内容。
+- **契约的观测口是对外 API**：`Requirement.Name()` / `Optional()`、
+  `Provision.Name()`、`Plan.Dependencies()` / `AllProviders()` 这些访问器存在
+  的唯一理由是**产品层能写自己的不变量测试**（「业务模块对 ui 只许 Optional」
+  这类），而内核不解释那些概念。新增不变量时优先加访问器，别把产品概念塞进内核。
 - **提交**：英文 subject（`fix(scope): …` / `feat(scope): …`），正文说明
   「现场是什么样、为什么这么改、验证了什么」。概念的设计动机写在所属
   package 或声明旁；行为变化才更新专题文档。结尾只带
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`。
-- **新的上游怪癖** → 写成 `gateway/special/st-<上游>.go` 插件，别散落在转发热
-  路径的 `if` 里；插件自己说清 `Match`（认哪个上游）、`Why`（为什么存在）、
-  `Apply`（改了什么）。用户能 `newgate st off <名字>` 单独摘掉。
-  只对某一类客户端生效的补丁，判据用 `special.claudeCode(r)`，别按
-  「Agent 非空」猜。
-- **新的数据面策略**（摘谁的牌、记哪本账、什么算失败、留什么痕）→ 实现
-  `gateway/policy` 的口，在自己的 `Start` 里 `RegisterFilter` 挂进去；**别让
-  gateway import 你**——数据面的非测试源码里连你的名字都不该出现（`modules/
-  gateway/direction_test.go` 那条棘轮测试守着方向：它拒「名字」也拒 `import`
-  策略包本身，只有 `…/breaker/status` 那种 wire 叶子除外）。一个都不装时网关是
-  最小系统，照常转发。见 `docs/09-extension-guide.md` §7。
 - **用户可见的文本一律走目录表**（2026-09-20 起）。源码里写**英文**：
   `i18n.T("unknown command {cmd}", i18n.A{"cmd": args[0]})`；中文、以及将来任何语言，
   都活在 `lib/i18n/catalogs/<tag>.json` 里。判据一句话——**非测试 Go 源码里不许出现
@@ -375,25 +259,24 @@ omo 的 intra-agent 槽位按新规则重分类，得走一轮
     还缺什么。补译文用 `make i18n-sync`——**它调本机网关跑 LLM，只在开发者本地跑，
     绝不进 CI**（CI 只跑不花钱的 `check`）。机翻条目标着 `machine`，人工复核后改成
     `reviewed`；发版前 `check -strict` 会拦住没复核的。
-  - 语言解析次序（`NEWGATE_LANG` > 配置 > `LC_ALL`/`LC_MESSAGES`/`LANG` > 源语言）见
-    `modules/locale/resolve.go`；用户机上要钉中文：`newgate lang zh-Hans`。
+  - 语言解析次序（`NEWGATE_LANG` > 配置 > `LC_ALL`/`LC_MESSAGES`/`LANG` > 源语言）
+    由产品层决定，实现在发行版的 `modules/locale/resolve.go`；内核这一侧只提供
+    `lib/i18n.Install` / `Extend` 这两个装配口。
 
 ---
 
-## 5. 排查手册
+## 5. 排查内核
+
+内核自己只有两条排查面：
 
 ```bash
-newgate status            # 端口/请求数/失败数/thinkcache 计数
-newgate logs              # 代理日志尾部（跟随后续用 tail -f ~/.config/newgate/newgate.log）
-newgate doctor            # 环境体检：provider、链、接管、端口冲突
-newgate tier <档位>       # 某个档位现在解析成哪条链、谁被跳过、为什么
-newgate probe [profile]   # 主动探活：连通性 + 方言 + 上游毛病
-newgate metrics           # 计数器：超时/转移/改写/取消，调参看这个
-newgate st                # 当前生效的 special 插件与它们为什么存在
+NEWGATE_TRACE=1 <二进制> …     # 装配过程逐行打到 stderr（不缓冲、不判重）
 ```
 
-- 报文级证据：`~/.config/newgate/dump/`（`NEWGATE_DUMP=1` 时逐条存 in/out；
-  上游 4xx 时无条件存 `err-<code>-req<id>.{client-sent,we-sent,upstream-said}`）。
-  排查「是不是代理改坏了请求」这是唯一能拿出手的东西。
-- 日志里 `X-Newgate-Chain` / `X-Newgate-Route` 响应头告诉你这一发实际走了谁。
-- 上游报错原文始终原样转给客户端并在日志里打全（`上游原文:` 那行）。
+- 装配记录（谁装了、什么顺序、哪条弱依赖没命中）由 **组合根经
+  `component.SetTrace` 的出口**产出——内核只提供事实，写去哪由产品决定。
+- 内核的每条报错都点名**端口**，不是模块名（内核不认识模块）。看到
+  `component X requires missing capability Y` 时，缺的是端口 Y——哪个模块该提供它，
+  由产品的 `Selection` 和它的依赖图回答。
+
+产品侧排查（网关日志、dump、`newgate doctor`…）见发行版 `docs/11-troubleshooting.md`。
