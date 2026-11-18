@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+// fakeLoader hands the table over as-is: **the slice is the order** (see Loader), so these
+// tests declare their components in the order they want started.
 type fakeLoader struct{ components []Component }
 
 func (loader fakeLoader) Load() ([]Component, error) { return loader.components, nil }
@@ -16,17 +18,6 @@ func TestManagerInjectsCapabilitiesAndReversesLifecycle(t *testing.T) {
 	var events []string
 	manager, err := New(fakeLoader{components: []Component{
 		{
-			Type: "test", Name: "consumer", Requires: []Requirement{Need(service)},
-			Start: func(_ context.Context, ctx Context) error {
-				events = append(events, "start consumer "+MustGet(ctx, service))
-				return nil
-			},
-			Stop: func(context.Context) error {
-				events = append(events, "stop consumer")
-				return nil
-			},
-		},
-		{
 			Type: "test", Name: "provider", Provides: []Provision{Provide(service, "ready")},
 			Start: func(context.Context, Context) error {
 				events = append(events, "start provider")
@@ -34,6 +25,17 @@ func TestManagerInjectsCapabilitiesAndReversesLifecycle(t *testing.T) {
 			},
 			Stop: func(context.Context) error {
 				events = append(events, "stop provider")
+				return nil
+			},
+		},
+		{
+			Type: "test", Name: "consumer", Requires: []Requirement{Need(service)},
+			Start: func(_ context.Context, ctx Context) error {
+				events = append(events, "start consumer "+MustGet(ctx, service))
+				return nil
+			},
+			Stop: func(context.Context) error {
+				events = append(events, "stop consumer")
 				return nil
 			},
 		},
@@ -55,6 +57,12 @@ func TestManagerInjectsCapabilitiesAndReversesLifecycle(t *testing.T) {
 	}
 }
 
+// TestManagerRejectsInvalidCapabilityGraphs: an assembly that cannot be valid.
+//
+// A dependency **cycle** is not in this table any more (2026-11-18). Since the order arrives
+// with the declaration, the framework never sorts, so a cycle can only be discovered where an
+// order is computed -- see TestOrderedRejectsACycle in plan_test.go. What assembly can still
+// reject on its own is "a Need nobody provides".
 func TestManagerRejectsInvalidCapabilityGraphs(t *testing.T) {
 	service := NewCapability[string]("service")
 	tests := []struct {
@@ -68,18 +76,6 @@ func TestManagerRejectsInvalidCapabilityGraphs(t *testing.T) {
 				Type: "test", Name: "consumer", Requires: []Requirement{Need(service)},
 			}},
 			want: "requires missing capability service",
-		},
-		{
-			name: "cycle",
-			components: func() []Component {
-				a := NewCapability[string]("a")
-				b := NewCapability[string]("b")
-				return []Component{
-					{Type: "test", Name: "a", Requires: []Requirement{Need(b)}, Provides: []Provision{Provide(a, "a")}},
-					{Type: "test", Name: "b", Requires: []Requirement{Need(a)}, Provides: []Provision{Provide(b, "b")}},
-				}
-			}(),
-			want: "dependency cycle",
 		},
 	}
 	for _, tt := range tests {
@@ -137,8 +133,15 @@ func TestOptionalIsAWeakDependency(t *testing.T) {
 		var events []string
 		manager, err := New(fakeLoader{components: []Component{
 			{
-				// Declared first but ordered last: proof that the order comes from that weak dependency
-				// edge, not from the declaration position.
+				Type: "test", Name: "ui", Provides: []Provision{Provide(ui, "surface")},
+				Start: func(context.Context, Context) error {
+					events = append(events, "start ui")
+					return nil
+				},
+			},
+			{
+				// Declared after the UI: a weak dependency that is present is still an ordering edge, so
+				// the declaration has to put this one second -- and the port is usable in Start.
 				Type: "test", Name: "registrant", Requires: []Requirement{Optional(ui)},
 				Start: func(_ context.Context, ctx Context) error {
 					value, ok := Get(ctx, ui)
@@ -148,13 +151,6 @@ func TestOptionalIsAWeakDependency(t *testing.T) {
 						t.Fatal("when the Optional is present the port should already be provided (did the ordering edge fail?)")
 					}
 					events = append(events, "start registrant sees "+value)
-					return nil
-				},
-			},
-			{
-				Type: "test", Name: "ui", Provides: []Provision{Provide(ui, "surface")},
-				Start: func(context.Context, Context) error {
-					events = append(events, "start ui")
 					return nil
 				},
 			},

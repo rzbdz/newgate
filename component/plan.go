@@ -2,14 +2,15 @@ package component
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/rzbdz/newgate/lib/i18n"
 )
 
-// Plan is the **blueprint** of one assembly: the sorted components, what each of them needs,
-// and who provides what.
+// Plan is the **blueprint** of one assembly: the components in start order, what each of them
+// needs, and who provides what.
 //
 // It holds no lifecycle -- not a single Start runs, no port is taken, no file is written, no
 // global registry is modified. So it can be evaluated repeatedly (ask the same blueprint ten
@@ -37,54 +38,67 @@ type Plan struct {
 	values     map[string][]any
 }
 
-// Precomputed is a Loader with **its own blueprint**: the components it hands over come from a
-// **module set fixed at compile time** (no runtime plugging in), and the start order has
-// already been computed at build time.
+// Loader contributes a set of components. It only declares the composition and does not start
+// anything, so all components are still validated and rolled back uniformly by the same Manager.
 //
-// # Why it exists (2026-09-21)
+// # The slice IS the start order (2026-11-18)
 //
-// The user's own words: "logically, running a cli shouldn't trigger assembly... this dependency
-// relationship is a compile-time thing, resolving it at runtime does nothing for you, generate
-// the dependency relationship at build time. Because it is statically fixed, there is no
-// runtime plug-in mechanism."
+// A provider appears before every consumer that Needs or Optionals it. This is not a hint, not a
+// preference, and not something the framework is free to rearrange: a Loader whose slice is not
+// a valid order **fails assembly**, naming the component and the port.
 //
-// He was right. The modules installed are fixed at **build time** (chosen by the spec, names
-// written into the generated list), and the order is only a function of that set -- so it is a
-// compile-time fact. Before this, every `newgate status` and every web backend startup redid
-// that work from scratch: build the port table, build the dependency edges, topologically sort,
-// check for cycles, and then write the declarations of 24 components and 55 edges into the log.
+// Why the order is part of the declaration and not something the framework computes:
 //
-// With this exit installed, all that is left on that path is "lay it out by the blueprint and
-// collect the port values from each component's Provides" -- no edges, no sorting, no cycle
-// check, none of those log lines.
+// The module set is fixed at **build time** (chosen by a spec, compiled into the binary), so the
+// start order is a function of that set alone -- a compile-time fact. The user's own words
+// (2026-09-21): "logically, running a cli shouldn't trigger assembly... generate the dependency
+// relationship at build time. Because it is statically fixed, there is no runtime plug-in
+// mechanism." Before 2026-11-18 every `newgate status` and every web backend startup rebuilt the
+// port table, rebuilt the edges, topologically sorted and checked for cycles -- work whose answer
+// could not have changed since the binary was linked.
 //
-// # So where did validation go
-//
-// To **build time**, which is exactly where it belongs: tools/distgen runs a real Resolve when
-// it generates this order, so a spec that cannot assemble now **fails the build**, instead of
-// waiting for someone to type the first command. The three kinds of error -- "duplicate
-// component name", "Need port has no provider", "the graph has a cycle" -- are far better
-// reported at build time than at runtime: the former is one build away from "who broke which
-// line".
-//
-// When the order and the set disagree (the generated list is stale), this still **errors**:
-// that is the one thing that must be caught at runtime, because its symptom (some module did
-// not start) is too far from the cause. See planFromOrder.
-type Precomputed interface {
-	Loader
-	// PrecomputedOrder returns component names in start order (dependencies first). nil = this
-	// Loader has no blueprint, resolve as usual at runtime.
-	PrecomputedOrder() []string
+// So there is **one** mechanism, not two exits: whoever writes a declaration computes the order
+// once with Ordered and hands it over (the build-time generator freezes it into a committed
+// table; testkit computes it from the components the test passed). Resolve then only **verifies**.
+type Loader interface {
+	Load() ([]Component, error)
 }
 
-// Resolve collects components, validates ports and topologically sorts them, **starting
-// nothing**.
+// Static is a Loader over a fixed slice: the declaration is already in start order.
 //
-// New() is exactly "Resolve, then Start one by one", two faces on the same implementation (see
-// NewContext): there is only one validation and sort, so they cannot drift.
+// It exists so "I have the table, hand it over" needs no per-package three-line type. A caller
+// whose components are in **arbitrary** order goes through Ordered first -- that is the only
+// place an order is computed, and it is deliberately not hidden inside Static.
+type Static []Component
+
+// Load implements Loader.
+func (s Static) Load() ([]Component, error) { return s, nil }
+
+// Resolve loads every loader's components, validates the assembly and verifies that the declared
+// order really is one, **starting nothing**.
+//
+// New() is exactly "Resolve, then Start one by one" (see NewContext): there is only one
+// validation, so the two cannot drift.
+//
+// # What it does not do
+//
+// It does not sort. There is no topological sort here and no cycle check, because there is
+// nothing to sort: the order arrived with the declaration. A dependency cycle cannot exist in a
+// linear list -- its symptom is "a provider is not earlier than its consumer", which is exactly
+// what the edge replay below reports, by name.
+//
+// # Which errors live here, and which live in Ordered
+//
+// Three kinds of error are about the **declaration** and are reported in both paths, because
+// both need them: a duplicate component name, an empty name/Type, a port declared with two types,
+// a nil provision. The rest -- "a Need has no provider", "the order contradicts an edge" -- can
+// only be judged against an order, and both paths judge them.
+//
+// The one thing Resolve cannot tell you is whether a slice is the *canonical* order (the one
+// Ordered would produce). That property is worth locking, and it is locked in the test of
+// whoever froze the order -- see manifest/order_test.go in the distribution.
 func Resolve(loaders ...Loader) (*Plan, error) {
 	var components []Component
-	var precomputed []string
 	for i, loader := range loaders {
 		loaded, err := loader.Load()
 		if err != nil {
@@ -93,121 +107,223 @@ func Resolve(loaders ...Loader) (*Plan, error) {
 			return nil, err
 		}
 		components = append(components, loaded...)
-		if p, ok := loader.(Precomputed); ok && len(precomputed) == 0 {
-			precomputed = p.PrecomputedOrder()
-		}
 	}
-	if len(precomputed) > 0 {
-		// **The build-time computed blueprint**: lay it out, collect the port values, done. See the
-		// Precomputed notes.
-		return planFromOrder(components, precomputed)
-	}
-	tracef("%s", i18n.T("assembly: {count} components, no precomputed plan — resolving at run time",
-		i18n.A{"count": len(components)}))
-	ordered, values, err := resolve(components)
+	values, err := validate(components)
 	if err != nil {
-		tracef("%s", i18n.T("assembly: graph build failed: {err}", i18n.A{"err": err}))
 		return nil, err
 	}
-	return &Plan{components: ordered, values: values}, nil
-}
-
-// planFromOrder produces the blueprint directly from the **build-time computed order**: no
-// edges, no sorting, no cycle check.
-//
-// It does only three things: lay out by name, collect each port's provided values, and check
-// that the blueprint matches the source.
-//
-// **That check is the only validation left here**, and the reason is: the generated list can go
-// stale (spec edited, module added but not regenerated), and the symptom of staleness is "some
-// module did not start" or "the start order is inexplicable" -- too far from "the list is
-// stale", so it must be said plainly at runtime. The other three kinds of error (duplicate
-// name, missing port, cycle) are all caught at build time by that real Resolve run in distgen.
-//
-// # Why check the **edges** too, not just the set (2026-11-18)
-//
-// When an already-assembled dependency is changed to `Need` (or a new `Need` is added) and the
-// list is not regenerated, **not one component in the set changes**: the old validation let it
-// through as soon as "the name sets are equal", so it started in the old order -- the consumer
-// could come before its provider and MustGet would get a zero value or panic on the spot. This
-// path is the whole process's **default path** (every CLI goes through it), so "the order is
-// only guaranteed by the generator" is another way of saying nobody guards this invariant. The
-// price is one O(edges) scan, and it buys back "the provider always starts first", the one hard
-// guarantee.
-func planFromOrder(components []Component, order []string) (*Plan, error) {
-	if len(order) != len(components) {
-		return nil, fmt.Errorf("precomputed plan lists %d components but %d were assembled "+
-			"— the generated manifest is out of date (rerun the generator)",
-			len(order), len(components))
-	}
-	byName := make(map[string]Component, len(components))
-	for _, c := range components {
-		byName[c.Name] = c
-	}
-	out := make([]Component, 0, len(components))
-	values := map[string][]any{}
 	providedBy := map[string][]string{}
-	seen := make(map[string]bool, len(components))
-	for _, name := range order {
-		c, ok := byName[name]
-		if !ok {
-			return nil, fmt.Errorf("precomputed plan names %q, which was not assembled "+
-				"— the generated manifest is out of date (rerun the generator)", name)
-		}
-		if seen[name] {
-			return nil, fmt.Errorf("precomputed plan names %q twice", name)
-		}
-		seen[name] = true
+	for _, c := range components {
 		for _, prov := range c.Provides {
-			values[prov.spec.name] = append(values[prov.spec.name], prov.value)
 			providedBy[prov.spec.name] = append(providedBy[prov.spec.name], c.Name)
 		}
-		out = append(out, c)
 	}
-	// Replay the graph's edges against the positions we just assigned. A need whose
-	// provider sits later (or is missing) is a stale plan — say so here, by name,
-	// instead of letting the consumer quietly receive nil.
-	pos := make(map[string]int, len(out))
-	for i, c := range out {
+	if err := checkOrder(components, providedBy); err != nil {
+		return nil, err
+	}
+	reportMultipleProviders(providedBy)
+	tracef("%s", i18n.T("assembly: {count} components, in declared order",
+		i18n.A{"count": len(components)}))
+	return &Plan{components: components, values: values}, nil
+}
+
+// validate checks every component and every port on its own, and returns each port's values **in
+// declaration order**.
+//
+// It is shared by Resolve and Ordered: a duplicate name or a port declared as two types is wrong
+// whether or not someone recomputed the order, and two copies of this check is how the two paths
+// would start to disagree about what a valid graph is.
+func validate(components []Component) (map[string][]any, error) {
+	byName := make(map[string]bool, len(components))
+	specs := make(map[string]capabilitySpec)
+	values := make(map[string][]any)
+	for _, component := range components {
+		if component.Name == "" {
+			return nil, fmt.Errorf("component name is required")
+		}
+		// The class key is required, but **the value is not validated**: the kernel does not know
+		// which classes there are (see the Type comment). The correctness of values is covered by
+		// the assembly tests in the product layer.
+		if component.Type == "" {
+			return nil, fmt.Errorf("component %s: type is required", component.Name)
+		}
+		if byName[component.Name] {
+			return nil, fmt.Errorf("duplicate component %s", component.Name)
+		}
+		byName[component.Name] = true
+		for _, provision := range component.Provides {
+			if err := validateSpec(specs, provision.spec); err != nil {
+				return nil, fmt.Errorf("component %s: %w", component.Name, err)
+			}
+			if isNil(provision.value) {
+				return nil, fmt.Errorf("component %s provides nil %s",
+					component.Name, provision.spec.name)
+			}
+			if !reflect.TypeOf(provision.value).AssignableTo(provision.spec.valueType) {
+				return nil, fmt.Errorf("component %s provides %s as %T, want %s",
+					component.Name, provision.spec.name, provision.value, provision.spec.valueType)
+			}
+			values[provision.spec.name] = append(values[provision.spec.name], provision.value)
+		}
+		for _, requirement := range component.Requires {
+			if err := validateSpec(specs, requirement.spec); err != nil {
+				return nil, fmt.Errorf("component %s: %w", component.Name, err)
+			}
+		}
+	}
+	return values, nil
+}
+
+// checkOrder replays every requirement against the positions it was declared at.
+//
+// A consumer whose provider sits later (or is missing) is an invalid declaration. This is the
+// one hard guarantee the framework gives -- "the provider always starts first" -- so it is
+// checked on **every** path, including the precomputed one that used to trust the generator.
+func checkOrder(components []Component, providedBy map[string][]string) error {
+	pos := make(map[string]int, len(components))
+	for i, c := range components {
 		pos[c.Name] = i
 	}
-	for i, c := range out {
+	for i, c := range components {
 		for _, req := range c.Requires {
 			providers := providedBy[req.spec.name]
 			if len(providers) == 0 {
-				// No provider at all: fatal for Need, fine for Optional. A precomputed
-				// plan is only ever generated from a successful Resolve, so a missing
-				// Need means the set drifted — same message family as below.
 				if req.optional {
+					// A weak dependency nobody provides is not an error and creates no ordering
+					// constraint -- "you exist, so I depend on you; you do not, so I do not".
+					tracef("%s", i18n.T("  optional dependency absent: {consumer} needs {provider} "+
+						"— no provider, skipped (no effect on startup)",
+						i18n.A{"consumer": c.Name, "provider": req.spec.name}))
 					continue
 				}
-				return nil, fmt.Errorf("precomputed plan: %s needs port %q but nothing "+
-					"in the assembled graph provides it — the generated manifest is out "+
-					"of date (rerun the generator)", c.Name, req.spec.name)
+				return fmt.Errorf("component %s requires missing capability %s", c.Name, req.spec.name)
 			}
 			for _, provider := range providers {
 				j, ok := pos[provider]
 				if !ok {
-					return nil, fmt.Errorf("precomputed plan: %s needs port %q, provided "+
-						"by %s, which is not in the plan — the generated manifest is out "+
-						"of date (rerun the generator)", c.Name, req.spec.name, provider)
+					return fmt.Errorf("component %s requires %s, provided by %s, which is not in the graph",
+						c.Name, req.spec.name, provider)
 				}
-				// Optional is a weak dependency but still an ordering edge when the
-				// provider is present (see Optional's comment), so backwards is stale
-				// either way — the module would Start before what it waits for.
-				if j >= i {
-					return nil, fmt.Errorf("precomputed plan: %s (position %d) needs port "+
-						"%q, but its provider %s starts at position %d — the generated "+
-						"manifest is out of date (rerun the generator)", c.Name, i,
-						req.spec.name, provider, j)
+				// A provider may also consume its own port (the framework tolerates that and
+				// creates no edge for it, so there is nothing to order).
+				if j == i {
+					continue
+				}
+				if j > i {
+					return fmt.Errorf("component %s (position %d) requires %s, but its provider %s "+
+						"is declared at position %d — a provider must come before its consumer",
+						c.Name, i, req.spec.name, provider, j)
 				}
 			}
 		}
 	}
-	reportMultipleProviders(providedBy)
-	tracef("%s", i18n.T("assembly: precomputed plan used — {count} components, no resolution",
-		i18n.A{"count": len(out)}))
-	return &Plan{components: out, values: values}, nil
+	return nil
+}
+
+// Ordered is **the only implementation of "compute a valid start order"**: it validates the
+// components, builds the dependency edges and returns a stable topological order.
+//
+// # Who calls it
+//
+// Whoever **writes** a declaration, and only them:
+//
+//   - tools/distgen, at build time, freezing each spec's order into the generated manifest;
+//   - testkit, for the ad-hoc graphs of unit tests ("me + my dependency chain");
+//   - a composition root that assembles its table at hand rather than from a generated one.
+//
+// It is deliberately **not** on the assembly path: Resolve never calls it, and a Loader that
+// hands over an unsorted slice is an error rather than a save (see Loader).
+//
+// Ties are ordered by original declaration position, so extension points and diagnostic output
+// are reproducible.
+//
+// # Why one function and not a method on Plan
+//
+// Because the order has to be computed where the declaration is written, which is usually a
+// different program (the generator) or a different package (a test). It takes components and
+// returns components -- no Manager, no Plan, no side effects -- so the thing that computes the
+// order and the thing that verifies it cannot grow apart.
+func Ordered(components []Component) ([]Component, error) {
+	if _, err := validate(components); err != nil {
+		return nil, err
+	}
+	providers := make(map[string][]int)
+	for i, component := range components {
+		for _, provision := range component.Provides {
+			providers[provision.spec.name] = append(providers[provision.spec.name], i)
+		}
+	}
+
+	edges := make([]map[int]bool, len(components))
+	indegree := make([]int, len(components))
+	edgeTotal := 0
+	for consumer, component := range components {
+		for _, requirement := range component.Requires {
+			indexes := providers[requirement.spec.name]
+			if len(indexes) == 0 {
+				// Absent Need/Optional is checked by checkOrder on the result; here absence only
+				// means "no edge". Saying it out loud belongs to the caller's trace, not to a pure
+				// function whose output is one slice.
+				continue
+			}
+			for _, provider := range indexes {
+				if provider == consumer {
+					continue
+				}
+				if edges[provider] == nil {
+					edges[provider] = make(map[int]bool)
+				}
+				if !edges[provider][consumer] {
+					edges[provider][consumer] = true
+					indegree[consumer]++
+					edgeTotal++
+				}
+			}
+		}
+	}
+
+	var ready []int
+	for i := range components {
+		if indegree[i] == 0 {
+			ready = append(ready, i)
+		}
+	}
+	sort.Ints(ready)
+	ordered := make([]Component, 0, len(components))
+	for len(ready) > 0 {
+		current := ready[0]
+		ready = ready[1:]
+		ordered = append(ordered, components[current])
+		var next []int
+		for dependent := range edges[current] {
+			next = append(next, dependent)
+		}
+		sort.Ints(next)
+		for _, dependent := range next {
+			indegree[dependent]--
+			if indegree[dependent] == 0 {
+				ready = append(ready, dependent)
+				sort.Ints(ready)
+			}
+		}
+	}
+	if len(ordered) != len(components) {
+		// The scene of the ring: name the components still stuck -- saying only "there is a ring"
+		// leaves the next step to manual bisection.
+		var stuck []string
+		for i, component := range components {
+			if indegree[i] > 0 {
+				stuck = append(stuck, component.Name)
+			}
+		}
+		sort.Strings(stuck)
+		tracef("%s", i18n.T("graph: dependency cycle, components still stuck: {names}",
+			i18n.A{"names": strings.Join(stuck, " ")}))
+		return nil, fmt.Errorf("component capability dependency cycle")
+	}
+	tracef("%s", i18n.T("graph: {count} components, {edges} ordering edges — order computed",
+		i18n.A{"count": len(components), "edges": edgeTotal}))
+	return ordered, nil
 }
 
 // reportMultipleProviders names every port with more than one provider.
@@ -226,16 +342,6 @@ func reportMultipleProviders(providedBy map[string][]string) {
 			"— Get returns the first; use GetAll for the rest",
 			i18n.A{"port": port, "count": len(providers), "providers": strings.Join(providers, ", ")}))
 	}
-}
-
-// MustResolve is the fail-fast version of Resolve (in the composition root and tests the graph
-// must be good).
-func MustResolve(loaders ...Loader) *Plan {
-	plan, err := Resolve(loaders...)
-	if err != nil {
-		panic("component: resolve failed: " + err.Error())
-	}
-	return plan
 }
 
 // Components returns the components in **start order**: dependencies first.

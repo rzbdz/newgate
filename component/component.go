@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +27,7 @@ type capabilitySpec struct {
 // implementations a port will have (cli has one today, and there may be a second tomorrow),
 // "only one" is the user's constraint, not the framework's, and it certainly should not condemn
 // a legal assembly at graph-construction time. With multiple providers Get takes the first in
-// declaration order, and GetAll takes all of them.
+// start order, and GetAll takes all of them.
 //
 // Diversity is more commonly expressed not as "one port with multiple providers" but by the
 // owner opening registration methods on its own service (see Registry): registration is a
@@ -226,20 +224,13 @@ func ReleaseAll(releases []Release) error {
 	return first
 }
 
-// Loader contributes a set of components before graph construction. It only declares the
-// composition and does not start components itself, so all components are still validated and
-// rolled back uniformly by the same Manager.
-type Loader interface {
-	Load() ([]Component, error)
-}
-
 // Context is the read-only port table after graph construction, handed to components only
 // during Start. It deliberately offers no dynamic writes, to keep the runtime from degenerating
 // into a service locator.
 type Context struct{ values map[string][]any }
 
 // Get reads a port; the boolean lets the caller handle "no provider" explicitly. With multiple
-// providers it returns the first in declaration order -- for all of them use GetAll.
+// providers it returns the first in **start order** -- for all of them use GetAll.
 func Get[T any](ctx Context, capability Capability[T]) (T, bool) {
 	var zero T
 	for _, value := range ctx.values[capability.spec.name] {
@@ -260,8 +251,8 @@ func MustGet[T any](ctx Context, capability Capability[T]) T {
 	return value
 }
 
-// GetAll reads every contribution of a port, in the same order as the components were declared,
-// for open extension points like plugins and commands. With no provider it returns an empty
+// GetAll reads every contribution of a port, in **start order**, for open extension points like
+// plugins and commands. With no provider it returns an empty
 // slice rather than nil, so callers need no nil check.
 func GetAll[T any](ctx Context, capability Capability[T]) []T {
 	values := ctx.values[capability.spec.name]
@@ -290,18 +281,18 @@ func New(loaders ...Loader) (*Manager, error) {
 	return NewContext(context.Background(), loaders...)
 }
 
-// NewContext collects components, validates ports, topologically sorts and starts them in
-// order. If any Start fails, every node that already entered its lifecycle is stopped
-// immediately in reverse order.
+// NewContext resolves the graph and starts it in **the order the loaders declared**. If any
+// Start fails, every node that already entered its lifecycle is stopped immediately in reverse
+// order.
 //
-// The whole process is reported via tracef (see trace.go): how many components were scanned,
-// what each declared, what order came out, how long each took to start. This is the only
-// first-hand material for "why modules load this way" -- it exists only during assembly and
-// cannot be asked out of the Manager afterwards.
+// The whole process is reported via tracef (see trace.go): how many components were handed over,
+// what each declared, how long each took to start. This is the only first-hand material for
+// "why modules load this way" -- it exists only during assembly and cannot be asked out of the
+// Manager afterwards.
 func NewContext(ctx context.Context, loaders ...Loader) (*Manager, error) {
-	// Collecting, validating and sorting have only one implementation (see the notes in plan.go):
-	// starting is **blueprint + lifecycle**, not another path. Written separately once, the two
-	// start to drift.
+	// Resolving has only one implementation (see the notes in plan.go): starting is
+	// **blueprint + lifecycle**, not another path. Written separately once, the two start to
+	// drift.
 	plan, err := Resolve(loaders...)
 	if err != nil {
 		return nil, err
@@ -378,16 +369,6 @@ func (m *Manager) rollback(ctx context.Context) error {
 // otherwise hang process shutdown with no diagnostic naming the culprit.
 const rollbackTimeout = 30 * time.Second
 
-// Must is the fail-fast entry for a composition root; library code should prefer
-// New and handle the error.
-func Must(loaders ...Loader) *Manager {
-	manager, err := New(loaders...)
-	if err != nil {
-		panic(fmt.Sprintf("component: load failed: %v", err))
-	}
-	return manager
-}
-
 // Context returns a read-only view of the resolved ports, so the composition root can reach the
 // final entry service.
 func (m *Manager) Context() Context { return m.context }
@@ -452,174 +433,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 		tracef("%s", i18n.T("stop: complete", nil))
 	})
 	return first
-}
-
-// resolve validates ports and produces a stable topological order before any side effect
-// happens. Ties are ordered by original declaration position, so extension points and
-// diagnostic output are reproducible.
-//
-// Every step is reported via tracef. When investigating "why a module did not start" or "why
-// the order is this way" you need the **process** (who declared what, which weak dependency was
-// skipped because nobody provided it, at which round of the topological sort someone was
-// released), while the return value only has the result.
-func resolve(components []Component) ([]Component, map[string][]any, error) {
-	byName := make(map[string]int, len(components))
-	specs := make(map[string]capabilitySpec)
-	providers := make(map[string][]int)
-	values := make(map[string][]any) // port -> values, declaration order; re-sorted at the end
-	tracef("%s", i18n.T("graph: {count} component declarations received, in declaration order below",
-		i18n.A{"count": len(components)}))
-	for i, component := range components {
-		if component.Name == "" {
-			return nil, nil, fmt.Errorf("component name is required")
-		}
-		// The class key is required, but **the value is not validated**: the kernel does not know
-		// which classes there are (see the Type comment). The correctness of values is covered by the
-		// assembly tests in the app layer.
-		if component.Type == "" {
-			return nil, nil, fmt.Errorf("component %s: type is required", component.Name)
-		}
-		if _, exists := byName[component.Name]; exists {
-			return nil, nil, fmt.Errorf("duplicate component %s", component.Name)
-		}
-		byName[component.Name] = i
-		tracef("%s", i18n.T("  declaration {index}  {desc}", i18n.A{
-			"index": fmt.Sprintf("%2d", i+1), "desc": describeComponent(component)}))
-		for _, provision := range component.Provides {
-			if err := validateSpec(specs, provision.spec); err != nil {
-				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
-			}
-			if isNil(provision.value) {
-				return nil, nil, fmt.Errorf("component %s provides nil %s",
-					component.Name, provision.spec.name)
-			}
-			if !reflect.TypeOf(provision.value).AssignableTo(provision.spec.valueType) {
-				return nil, nil, fmt.Errorf("component %s provides %s as %T, want %s",
-					component.Name, provision.spec.name, provision.value, provision.spec.valueType)
-			}
-			providers[provision.spec.name] = append(providers[provision.spec.name], i)
-			values[provision.spec.name] = append(values[provision.spec.name], provision.value)
-		}
-	}
-
-	edges := make([]map[int]bool, len(components))
-	indegree := make([]int, len(components))
-	edgeTotal := 0
-	for consumer, component := range components {
-		for _, requirement := range component.Requires {
-			if err := validateSpec(specs, requirement.spec); err != nil {
-				return nil, nil, fmt.Errorf("component %s: %w", component.Name, err)
-			}
-			indexes := providers[requirement.spec.name]
-			if len(indexes) == 0 {
-				if !requirement.optional {
-					return nil, nil, fmt.Errorf("component %s requires missing capability %s",
-						component.Name, requirement.spec.name)
-				}
-				// Weak dependency absent: **no edge, and no error**. This is the point where "you exist, so
-				// there is a dependency; you do not, so there is none" is applied, so say it out loud,
-				// otherwise it looks the same in the log as the next case (an edge really was created).
-				tracef("%s", i18n.T("  optional dependency absent: {consumer} needs {provider} "+
-					"— no provider, skipped (no edge, no effect on startup)",
-					i18n.A{"consumer": component.Name, "provider": requirement.spec.name}))
-				continue
-			}
-			if requirement.optional {
-				tracef("%s", i18n.T("  optional dependency hit: {consumer} needs {provider} "+
-					"— {count} providers, ordering edge added as usual",
-					i18n.A{"consumer": component.Name, "provider": requirement.spec.name,
-						"count": len(indexes)}))
-			}
-			for _, provider := range indexes {
-				if provider == consumer {
-					continue
-				}
-				if edges[provider] == nil {
-					edges[provider] = make(map[int]bool)
-				}
-				if !edges[provider][consumer] {
-					edges[provider][consumer] = true
-					indegree[consumer]++
-					edgeTotal++
-				}
-			}
-		}
-	}
-	tracef("%s", i18n.T("graph: {count} components, {edges} ordering edges "+
-		"(Need and Optional with a provider; an Optional nobody provides makes no edge)",
-		i18n.A{"count": len(components), "edges": edgeTotal}))
-
-	var ready []int
-	for i := range components {
-		if indegree[i] == 0 {
-			ready = append(ready, i)
-		}
-	}
-	sort.Ints(ready)
-	ordered := make([]Component, 0, len(components))
-	for len(ready) > 0 {
-		current := ready[0]
-		ready = ready[1:]
-		ordered = append(ordered, components[current])
-		var next []int
-		for dependent := range edges[current] {
-			next = append(next, dependent)
-		}
-		sort.Ints(next)
-		for _, dependent := range next {
-			indegree[dependent]--
-			if indegree[dependent] == 0 {
-				ready = append(ready, dependent)
-				sort.Ints(ready)
-			}
-		}
-	}
-	if len(ordered) != len(components) {
-		// The scene of the ring: name the components still stuck -- saying only "there is a ring"
-		// leaves the next step to manual bisection.
-		var stuck []string
-		for i, component := range components {
-			if indegree[i] > 0 {
-				stuck = append(stuck, component.Name)
-			}
-		}
-		sort.Strings(stuck)
-		tracef("%s", i18n.T("graph: dependency cycle, components still stuck: {names}",
-			i18n.A{"names": strings.Join(stuck, " ")}))
-		return nil, nil, fmt.Errorf("component capability dependency cycle")
-	}
-
-	order := make([]string, 0, len(ordered))
-	for _, component := range ordered {
-		order = append(order, component.Name)
-	}
-	tracef("%s", i18n.T("graph: topological order {order}", i18n.A{"order": strings.Join(order, " → ")}))
-	providedBy := make(map[string][]string, len(providers))
-	for port, indexes := range providers {
-		for _, i := range indexes {
-			providedBy[port] = append(providedBy[port], components[i].Name)
-		}
-	}
-	reportMultipleProviders(providedBy)
-	return ordered, collectValues(ordered), nil
-}
-
-// collectValues gathers each port's providers **in start order**.
-//
-// Why it matters (2026-11-18): Get returns the first provider, but the two plan
-// paths used to collect values in different orders — the resolved path walked
-// declaration order, planFromOrder walked start order — so with two providers of
-// one port, "which one a consumer got" depended on whether the manifest happened
-// to be precomputed. Collecting in start order makes first-wins a fact about the
-// graph: it always agrees with the ordering edge, and both paths agree.
-func collectValues(ordered []Component) map[string][]any {
-	values := make(map[string][]any)
-	for _, component := range ordered {
-		for _, provision := range component.Provides {
-			values[provision.spec.name] = append(values[provision.spec.name], provision.value)
-		}
-	}
-	return values
 }
 
 func isNil(value any) bool {

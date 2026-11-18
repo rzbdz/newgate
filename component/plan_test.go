@@ -31,15 +31,11 @@ func (s seed) component(name string, requires ...Requirement) Component {
 	return c
 }
 
-type fixedLoader []Component
-
-func (f fixedLoader) Load() ([]Component, error) { return f, nil }
-
 // TestResolveDoesNotStartAnything is the reason this layer exists.
 func TestResolveDoesNotStartAnything(t *testing.T) {
 	starts := 0
 	s := seed{capabilityName: "leaf", provided: true, starts: &starts}
-	plan, err := Resolve(fixedLoader{
+	plan, err := Resolve(Static{
 		s.component("leaf"),
 		s.component("user", Need(NewCapability[struct{}]("leaf"))),
 	})
@@ -50,25 +46,40 @@ func TestResolveDoesNotStartAnything(t *testing.T) {
 		t.Fatalf("Resolve started %d components -- the blueprint must have no lifecycle", starts)
 	}
 	if got := plan.Names(); len(got) != 2 || got[0] != "leaf" || got[1] != "user" {
-		t.Fatalf("wrong order (dependencies must come first): %v", got)
+		t.Fatalf("wrong order (the declaration's order must be kept): %v", got)
+	}
+}
+
+// TestResolveKeepsTheDeclaredOrder: the order is a **fact of the declaration**, so Resolve is
+// not allowed a preference of its own. Two independent components must come out exactly as they
+// went in, including the "wrong" alphabetical order.
+func TestResolveKeepsTheDeclaredOrder(t *testing.T) {
+	plan, err := Resolve(Static{
+		{Name: "zulu", Type: "test"},
+		{Name: "alpha", Type: "test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(plan.Names(), ","); got != "zulu,alpha" {
+		t.Fatalf("Resolve rearranged an order it had no reason to touch: %s", got)
 	}
 }
 
 // TestPlanOrderMatchesStartOrder: the blueprint and the real start **must** be in the same
 // order, otherwise every inference drawn from the blueprint (who is after whom, who gets the
-// port first) is false. This pins the two implementations together.
+// port first) is false.
 func TestPlanOrderMatchesStartOrder(t *testing.T) {
-	// The declaration order is deliberately reversed (dependents first), so that "is the order
-	// right" is a real question.
+	leaf := NewCapability[struct{}]("leaf")
 	comps := []Component{
-		{Name: "mid", Type: "test", Requires: []Requirement{Need(NewCapability[struct{}]("leaf"))}},
-		{Name: "leaf", Type: "test", Provides: []Provision{Provide(NewCapability[struct{}]("leaf"), struct{}{})}},
+		{Name: "leaf", Type: "test", Provides: []Provision{Provide(leaf, struct{}{})}},
+		{Name: "mid", Type: "test", Requires: []Requirement{Need(leaf)}},
 	}
-	plan, err := Resolve(fixedLoader(comps))
+	plan, err := Resolve(Static(comps))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mgr, err := New(fixedLoader(comps))
+	mgr, err := New(Static(comps))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +95,61 @@ func TestPlanOrderMatchesStartOrder(t *testing.T) {
 // Need with a missing provider should error here (that is exactly what "resolve really passes"
 // means).
 func TestResolveStillValidates(t *testing.T) {
-	_, err := Resolve(fixedLoader{
+	_, err := Resolve(Static{
 		{Name: "user", Type: "test", Requires: []Requirement{Need(NewCapability[struct{}]("nothing-provides-this"))}},
 	})
 	if err == nil {
 		t.Fatal("a Need whose provider is missing must error at resolve time")
+	}
+}
+
+// TestResolveRejectsAConsumerBeforeItsProvider is the 2026-11-18 fix, now the only mechanism.
+//
+// The scene it came from: a module's dependency flips from Optional to Need (or a new Need is
+// added) while the frozen table is not regenerated. **Not one name in the set changes**, so a
+// set-only validation let it through and started a consumer before its provider -- MustGet then
+// returns a zero value or panics. Because the order now *is* the declaration, this is the one
+// error the framework must never leave unsaid.
+func TestResolveRejectsAConsumerBeforeItsProvider(t *testing.T) {
+	leaf := NewCapability[struct{}]("leaf")
+	_, err := Resolve(Static{
+		{Name: "user", Type: "test", Requires: []Requirement{Need(leaf)}},
+		{Name: "leaf", Type: "test", Provides: []Provision{Provide(leaf, struct{}{})}},
+	})
+	if err == nil {
+		t.Fatal("a consumer declared before its provider must error")
+	}
+	for _, want := range []string{"user", "leaf", "before"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error must name the consumer, the provider and the rule, got: %v", err)
+		}
+	}
+}
+
+// TestResolveAllowsASelfRequirement: a component may consume a port it provides itself. The
+// framework makes no edge out of it, so there is no order to violate -- and the requirement is
+// satisfied by the component's own provision.
+func TestResolveAllowsASelfRequirement(t *testing.T) {
+	port := NewCapability[struct{}]("self")
+	if _, err := Resolve(Static{{
+		Name:     "one",
+		Type:     "test",
+		Requires: []Requirement{Need(port)},
+		Provides: []Provision{Provide(port, struct{}{})},
+	}}); err != nil {
+		t.Fatalf("a component may need its own port: %v", err)
+	}
+}
+
+// TestResolveAllowsAnAbsentOptional: an Optional whose provider is absent is **not** an error --
+// that is exactly "this distribution did not install it".
+func TestResolveAllowsAnAbsentOptional(t *testing.T) {
+	if _, err := Resolve(Static{{
+		Name:     "user",
+		Type:     "test",
+		Requires: []Requirement{Optional(NewCapability[struct{}]("ui"))},
+	}}); err != nil {
+		t.Fatalf("an Optional nobody provides is a valid assembly: %v", err)
 	}
 }
 
@@ -97,7 +158,7 @@ func TestResolveStillValidates(t *testing.T) {
 // means no entry), and **an Optional nobody provides** is exactly the answer to "what did this
 // distribution not install".
 func TestDependenciesReportsBothKindsOfEdge(t *testing.T) {
-	plan, err := Resolve(fixedLoader{
+	plan, err := Resolve(Static{
 		{Name: "leaf", Type: "test", Provides: []Provision{Provide(NewCapability[struct{}]("leaf"), struct{}{})}},
 		{Name: "user", Type: "test", Requires: []Requirement{
 			Need(NewCapability[struct{}]("leaf")),
@@ -126,7 +187,7 @@ func TestDependenciesReportsBothKindsOfEdge(t *testing.T) {
 // TestPlanComponentsIsACopy: whoever gets the blueprint must not be able to modify the copy the
 // framework holds.
 func TestPlanComponentsIsACopy(t *testing.T) {
-	plan, err := Resolve(fixedLoader{{Name: "leaf", Type: "test"}})
+	plan, err := Resolve(Static{{Name: "leaf", Type: "test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,87 +198,43 @@ func TestPlanComponentsIsACopy(t *testing.T) {
 	}
 }
 
-// stalePlan is a Loader where "the component set is unchanged but an edge changed": the
-// components it hands over match the real assembly, but the blueprint is old.
-type stalePlan struct {
-	components []Component
-	order      []string
-}
-
-func (s stalePlan) Load() ([]Component, error) { return s.components, nil }
-
-func (s stalePlan) PrecomputedOrder() []string { return s.order }
-
-// TestPrecomputedPlanRejectsAStaleOrder locks down the 2026-11-18 fix.
-//
-// The scene: an already-assembled dependency flips from Optional to Need (or a new Need is
-// added) while the generated list is not regenerated -- **not one component in the set
-// changes**, the old validation compared only sets, so it let it through and started a consumer
-// that comes before its provider, in the old order. That path is the default path of every CLI,
-// so "the provider starts first", the one hard guarantee, had nothing guarding it at the time.
-//
-// A validation that only silently gives the wrong order is worse than no validation: the graph
-// looks good.
-func TestPrecomputedPlanRejectsAStaleOrder(t *testing.T) {
+// TestOrderedComputesADependencyOrder: Ordered is the only place an order is **computed**, and
+// it is what the build-time generator freezes. Bare consumers must come out after providers,
+// and ties must keep the declaration's relative order (stable, so the generated table does not
+// churn between runs).
+func TestOrderedComputesADependencyOrder(t *testing.T) {
 	leaf := NewCapability[struct{}]("leaf")
 	comps := []Component{
+		{Name: "second", Type: "test"},
 		{Name: "user", Type: "test", Requires: []Requirement{Need(leaf)}},
+		{Name: "first", Type: "test"},
 		{Name: "leaf", Type: "test", Provides: []Provision{Provide(leaf, struct{}{})}},
 	}
-	// The name set matches the component table one by one, only the order is reversed -- exactly
-	// the shape of a stale list.
-	_, err := Resolve(stalePlan{components: comps, order: []string{"user", "leaf"}})
-	if err == nil {
-		t.Fatal("when a consumer comes before its provider in the blueprint it must error (otherwise it gets a zero value or panics)")
-	}
-	if !strings.Contains(err.Error(), "out of date") || !strings.Contains(err.Error(), "user") {
-		t.Fatalf("the error must name the stale edge and the consumer, got: %v", err)
-	}
-}
-
-// TestPrecomputedPlanAcceptsTheRightOrder: for the same graph, when the order is right it must
-// still take the fast path -- the fix must not turn the normal path into "errors every time".
-func TestPrecomputedPlanAcceptsTheRightOrder(t *testing.T) {
-	leaf := NewCapability[struct{}]("leaf")
-	comps := []Component{
-		{Name: "user", Type: "test", Requires: []Requirement{Need(leaf)}},
-		{Name: "leaf", Type: "test", Provides: []Provision{Provide(leaf, struct{}{})}},
-	}
-	plan, err := Resolve(stalePlan{components: comps, order: []string{"leaf", "user"}})
+	ordered, err := Ordered(comps)
 	if err != nil {
-		t.Fatalf("a correct order must not error: %v", err)
+		t.Fatal(err)
 	}
-	if got := plan.Names(); len(got) != 2 || got[0] != "leaf" {
-		t.Fatalf("wrong order: %v", got)
+	names := make([]string, 0, len(ordered))
+	for _, c := range ordered {
+		names = append(names, c.Name)
+	}
+	want := "second,first,leaf,user"
+	if got := strings.Join(names, ","); got != want {
+		t.Fatalf("Ordered gave %s, want %s -- ties must keep declaration order and the provider must precede its consumer", got, want)
 	}
 }
 
-// TestPrecomputedPlanRejectsAMissingNeedProvider: the set matches, but some Need port has no
-// provider anywhere in the graph (another module was removed and not regenerated) -- also
-// stale, and it must also be said out loud.
-func TestPrecomputedPlanRejectsAMissingNeedProvider(t *testing.T) {
-	_, err := Resolve(stalePlan{
-		components: []Component{
-			{Name: "user", Type: "test", Requires: []Requirement{Need(NewCapability[struct{}]("gone"))}},
-		},
-		order: []string{"user"},
+// TestOrderedRejectsACycle: a cycle cannot be expressed as an order, so the loudest place to
+// report it is where an order is being computed -- the generator (fails the build) rather than
+// somebody's first command.
+func TestOrderedRejectsACycle(t *testing.T) {
+	a, b := NewCapability[struct{}]("a"), NewCapability[struct{}]("b")
+	_, err := Ordered([]Component{
+		{Name: "a", Type: "test", Requires: []Requirement{Need(b)}, Provides: []Provision{Provide(a, struct{}{})}},
+		{Name: "b", Type: "test", Requires: []Requirement{Need(a)}, Provides: []Provision{Provide(b, struct{}{})}},
 	})
-	if err == nil {
-		t.Fatal("the blueprint says it can start but nobody in the graph provides this port; it must error")
-	}
-}
-
-// TestPrecomputedPlanAllowsAnAbsentOptional: an Optional whose provider is absent is **not**
-// stale -- that is exactly "this distribution did not install it". The fix must not misjudge it
-// as a fault.
-func TestPrecomputedPlanAllowsAnAbsentOptional(t *testing.T) {
-	if _, err := Resolve(stalePlan{
-		components: []Component{
-			{Name: "user", Type: "test", Requires: []Requirement{Optional(NewCapability[struct{}]("ui"))}},
-		},
-		order: []string{"user"},
-	}); err != nil {
-		t.Fatalf("an Optional nobody provides is a valid assembly: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("a cycle must be reported as such, got: %v", err)
 	}
 }
 
@@ -234,7 +251,7 @@ func TestProvidersAgreesWithGetOnMultipleProviders(t *testing.T) {
 		{Name: "first", Type: "test", Provides: []Provision{Provide(port, "from-first")}},
 		{Name: "second", Type: "test", Provides: []Provision{Provide(port, "from-second")}},
 	}
-	plan, err := Resolve(fixedLoader(comps))
+	plan, err := Resolve(Static(comps))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,32 +261,8 @@ func TestProvidersAgreesWithGetOnMultipleProviders(t *testing.T) {
 	if all := plan.AllProviders()["port"]; len(all) != 2 || all[0] != "first" || all[1] != "second" {
 		t.Fatalf("AllProviders must list everything in start order: %v", all)
 	}
-	got, ok := Get(Context{values: collectValues(plan.Components())}, port)
+	got, ok := Get(Context{values: plan.values}, port)
 	if !ok || got != "from-first" {
 		t.Fatalf("Get should be first-wins, got %q/%v", got, ok)
-	}
-}
-
-// TestPrecomputedAndResolvedAgreeOnValues: the two ways of producing the graph must give the
-// same answer to "who comes first" -- otherwise the same binary behaves differently depending
-// on whether it takes the fast path.
-func TestPrecomputedAndResolvedAgreeOnValues(t *testing.T) {
-	port := NewCapability[string]("port")
-	comps := []Component{
-		{Name: "a", Type: "test", Provides: []Provision{Provide(port, "a")}},
-		{Name: "b", Type: "test", Provides: []Provision{Provide(port, "b")}},
-	}
-	resolved, err := Resolve(fixedLoader(comps))
-	if err != nil {
-		t.Fatal(err)
-	}
-	replayed, err := Resolve(stalePlan{components: comps, order: resolved.Names()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r1, _ := Get(Context{values: resolved.values}, port)
-	r2, _ := Get(Context{values: replayed.values}, port)
-	if r1 != r2 {
-		t.Fatalf("resolved gives %q, precomputed gives %q -- the fast path changed behavior", r1, r2)
 	}
 }

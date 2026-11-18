@@ -1,16 +1,8 @@
 {
   "messages": {
-    "  declaration {index}  {desc}": {
+    "  optional dependency absent: {consumer} needs {provider} — no provider, skipped (no effect on startup)": {
       "reviewed": true,
-      "text": "  声明 {index}  {desc}"
-    },
-    "  optional dependency absent: {consumer} needs {provider} — no provider, skipped (no edge, no effect on startup)": {
-      "reviewed": true,
-      "text": "  弱依赖缺席 {consumer} 需要 {provider} —— 没有提供者，跳过（不建边、不影响启动）"
-    },
-    "  optional dependency hit: {consumer} needs {provider} — {count} providers, ordering edge added as usual": {
-      "reviewed": true,
-      "text": "  弱依赖命中 {consumer} 需要 {provider} —— {count} 个提供者，照常建排序边"
+      "text": "  弱依赖缺席 {consumer} 需要 {provider} —— 没有提供者，跳过（不影响启动）"
     },
     " needs=[{list}]": {
       "reviewed": true,
@@ -56,21 +48,21 @@
       "reviewed": true,
       "text": "装配选择：一个组件都没有（disable 把内核模块全关掉了？）——空图跑起来只会让人以为命令坏了"
     },
-    "assembly: graph build failed: {err}": {
-      "reviewed": true,
-      "text": "装配：构图失败：{err}"
-    },
     "assembly: loader {index} failed: {err}": {
       "reviewed": true,
       "text": "装配：第 {index} 个 loader 报错：{err}"
     },
-    "assembly: precomputed plan used — {count} components, no resolution": {
+    "assembly: {count} components, in declared order": {
       "reviewed": true,
-      "text": "装配：用的是构建期算好的图纸——{count} 个组件，没有运行期解析"
+      "text": "装配：{count} 个组件，按声明顺序"
     },
-    "assembly: {count} components, no precomputed plan — resolving at run time": {
+    "catalog: delivered {count} components to {name} (port {port})": {
       "reviewed": true,
-      "text": "装配：{count} 个组件，没有构建期图纸——运行期解析一遍"
+      "text": "catalog：已向 {name}（端口 {port}）交付 {count} 个组件"
+    },
+    "catalog: {name} (port {port}) panicked in SetCatalog: {err} — delivery skipped; the graph is still up": {
+      "reviewed": true,
+      "text": "catalog：{name}（端口 {port}）在 SetCatalog 里 panic 了：{err} —— 跳过这次交付，图照常运行"
     },
     "claimed by: {chain}": {
       "reviewed": true,
@@ -96,17 +88,13 @@
       "reviewed": true,
       "text": "构图：依赖成环，仍被卡住的组件：{names}"
     },
-    "graph: topological order {order}": {
+    "graph: port {port} has {count} providers in start order: {providers} — Get returns the first; use GetAll for the rest": {
       "reviewed": true,
-      "text": "构图：拓扑顺序 {order}"
+      "text": "graph：端口 {port} 在启动顺序上有 {count} 个提供者：{providers} —— Get 取第一个，其余用 GetAll"
     },
-    "graph: {count} component declarations received, in declaration order below": {
+    "graph: {count} components, {edges} ordering edges — order computed": {
       "reviewed": true,
-      "text": "构图：收到 {count} 个组件声明，按声明顺序如下"
-    },
-    "graph: {count} components, {edges} ordering edges (Need and Optional with a provider; an Optional nobody provides makes no edge)": {
-      "reviewed": true,
-      "text": "构图：{count} 个组件，{edges} 条排序边（Need 与命中提供者的 Optional；没人提供的 Optional 不成边）"
+      "text": "依赖图：{count} 个组件、{edges} 条排序边 —— 顺序已算出"
     },
     "no entry claimed this call (asked: {chain})": {
       "reviewed": true,
@@ -143,18 +131,6 @@
     "{name} did not claim": {
       "reviewed": true,
       "text": "{name} 未认领"
-    },
-    "catalog: delivered {count} components to {name} (port {port})": {
-      "reviewed": true,
-      "text": "catalog：已向 {name}（端口 {port}）交付 {count} 个组件"
-    },
-    "catalog: {name} (port {port}) panicked in SetCatalog: {err} — delivery skipped; the graph is still up": {
-      "reviewed": true,
-      "text": "catalog：{name}（端口 {port}）在 SetCatalog 里 panic 了：{err} —— 跳过这次交付，图照常运行"
-    },
-    "graph: port {port} has {count} providers in start order: {providers} — Get returns the first; use GetAll for the rest": {
-      "reviewed": true,
-      "text": "graph：端口 {port} 在启动顺序上有 {count} 个提供者：{providers} —— Get 取第一个，其余用 GetAll"
     }
   },
   "meta": {
