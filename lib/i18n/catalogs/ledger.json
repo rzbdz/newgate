@@ -1294,6 +1294,20 @@
         "err"
       ]
     },
+    "catalog: delivered {count} components to {name} (port {port})": {
+      "args": [
+        "count",
+        "name",
+        "port"
+      ]
+    },
+    "catalog: {name} (port {port}) panicked in SetCatalog: {err} — delivery skipped; the graph is still up": {
+      "args": [
+        "err",
+        "name",
+        "port"
+      ]
+    },
     "chain": {},
     "chain budget exhausted": {},
     "chain head {head} ({who}) · max attempts {n} · budget {budget}": {

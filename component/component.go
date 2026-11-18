@@ -598,27 +598,56 @@ func validateSpec(known map[string]capabilitySpec, spec capabilitySpec) error {
 	return nil
 }
 
-// CatalogAware 由想知道「这张图里有哪些组件」的组件实现。
+// CatalogAware is implemented by a component that wants the graph's full
+// component list delivered once, after every Start has returned.
 //
-// 为什么在内核里而不是让组合根去问某个具体模块：那份成员名单**内核本来就拥有**
-// （m.components），而组合根不该认识任何模块。装配完成后由 Manager 递一次，
-// 谁想看一眼谁就实现这个接口——没实现就是不需要，不算错。
+// Why it lives in the kernel: the member list is something the kernel already owns
+// (m.components), and the composition root must not name any module.
 //
-// 与 Start 的边界：它跑在**所有 Start 之后**，所以它读到的是一份完整的名单；
-// 它**只读**，不得用它来注册东西（注册归各自 Start，见 docs/02 的三段法则）。
+// # Why this is a phase and not a port (and why it is not invisible)
+//
+// It is delivered after Start, so it is a *write* that happens outside the
+// dependency graph — the one thing this framework otherwise refuses to do. Making
+// it a port would not work: the list is only complete after the last Start, and a
+// port value is bound before any Start. So instead of pretending it is an edge, the
+// kernel makes the delivery **visible**: every delivery is traced with the
+// component it went to, and any panic in SetCatalog is reported rather than
+// unwinding the process (a crash after all Starts would leak every listener).
+//
+// It stays read-only by contract: a module that registers things from here is
+// regressing to the two-phase assembly that was removed on 2026-09-18.
 type CatalogAware interface{ SetCatalog([]Component) }
 
-// deliverCatalog 把完整组件名单交给实现了 CatalogAware 的组件。
+// deliverCatalog hands the full component list to every provider value that
+// implements CatalogAware.
 //
-// 只 type-assert 已经 Provide 出去的值：那是「组件愿意对外暴露的那一面」，也是
-// 唯一一条**不需要组合根认识任何模块**的通道——组合根不点名谁需要它，内核按
-// 接口找。谁想要名单谁就实现这个接口，没实现就是不需要。
+// Only values a component already Provides are considered: that is the face the
+// component chose to expose, and the only channel that does not require the
+// composition root to name anyone. Who wants the list implements the interface;
+// who does not, does not need it.
 func (m *Manager) deliverCatalog() {
-	for _, values := range m.context.values {
+	catalog := m.Components()
+	for port, values := range m.context.values {
 		for _, value := range values {
-			if aware, ok := value.(CatalogAware); ok {
-				aware.SetCatalog(m.Components())
+			aware, ok := value.(CatalogAware)
+			if !ok {
+				continue
 			}
+			m.deliverOne(port, value, aware, catalog)
 		}
 	}
+}
+
+// deliverOne traces one delivery and contains a panic from it.
+func (m *Manager) deliverOne(port string, value any, aware CatalogAware, catalog []Component) {
+	name := fmt.Sprintf("%T", value)
+	defer func() {
+		if r := recover(); r != nil {
+			tracef("%s", i18n.T("catalog: {name} (port {port}) panicked in SetCatalog: {err} "+
+				"— delivery skipped; the graph is still up", i18n.A{"name": name, "port": port, "err": r}))
+		}
+	}()
+	aware.SetCatalog(catalog)
+	tracef("%s", i18n.T("catalog: delivered {count} components to {name} (port {port})",
+		i18n.A{"count": len(catalog), "name": name, "port": port}))
 }

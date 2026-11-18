@@ -322,3 +322,45 @@ func TestRollbackRunsEvenWhenStartContextIsCanceled(t *testing.T) {
 		t.Fatalf("rollback ran on a canceled context (%v) — cleanup would fail silently", stopSawErr)
 	}
 }
+
+// catalogSpy records what a delivery handed it; panicOn makes it misbehave.
+type catalogSpy struct {
+	got     int
+	panicOn bool
+}
+
+func (c *catalogSpy) SetCatalog(components []Component) {
+	if c.panicOn {
+		panic("bad consumer")
+	}
+	c.got = len(components)
+}
+
+// TestCatalogDeliveryIsVisibleAndContained：deliverCatalog 是唯一一条「Start 之后
+// 还写一次模块」的通道，所以它必须可观测，并且它的 panic 不能拖着整个进程下来
+// （那时所有监听已经起来了，panic 会让它们全漏掉）。
+func TestCatalogDeliveryIsVisibleAndContained(t *testing.T) {
+	capability := NewCapability[*catalogSpy]("spy")
+	spy := &catalogSpy{}
+	mgr, err := New(fakeLoader{components: []Component{
+		{Name: "one", Type: "test"},
+		{Name: "spyholder", Type: "test", Provides: []Provision{Provide(capability, spy)}},
+		{Name: "two", Type: "test"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+	if spy.got != 3 {
+		t.Fatalf("delivery handed %d components, want 3", spy.got)
+	}
+
+	boom := &catalogSpy{panicOn: true}
+	mgr2, err := New(fakeLoader{components: []Component{
+		{Name: "spyholder", Type: "test", Provides: []Provision{Provide(capability, boom)}},
+	}})
+	if err != nil {
+		t.Fatalf("a panicking SetCatalog must not take the process down: %v", err)
+	}
+	_ = mgr2.Stop(context.Background())
+}
