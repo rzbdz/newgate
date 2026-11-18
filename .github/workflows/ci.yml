@@ -1,43 +1,43 @@
 name: CI
 
-# 为什么要有这个文件
+# Why this file exists
 #
-# 在这之前，`go test ./...`、`go vet`、`make static`、两条零 token 端到端
-# 全靠人记得跑。这个仓库的改动密度很高（一天里网关、组件框架、模块布局都
-# 可能同时动），靠记性守不住——尤其是端到端，它锁的正是「真实现场复现出来
-# 的那几条」，单测覆盖不到。
+# Before this, `go test ./...`, `go vet`, `make static` and the two zero-token end-to-end
+# runs all relied on people remembering to run them. Change density here is high (gateway,
+# component framework and module layout can all move in one day), and memory cannot hold the
+# line -- especially the e2e, which pins the cases from a real incident that unit tests miss.
 #
-# 两档（2026-11-18 起）：
+# Two tiers (since 2026-11-18):
 #
-#   static  格式 / vet / 生成清单 / 单测      —— 秒级
-#   race    带竞态检测的单测                  —— 只跑并发相关包
+#   static  format / vet / generated manifest / unit tests      -- seconds
+#   race    unit tests with the race detector                   -- concurrency-related packages only
 #
-# 原来还有一档端到端（真二进制 + 假上游 + 假客户端）。它跟着产品模块搬走了：
-# 内核不再带网关、界面和客户端接入，它自己的二进制没有东西可以服务。每一章
-# 原来在这里跑的端到端，现在跑发行版的二进制（newgate-ext 的 mock/），因为
-# 那些模块住在那里。假上游（mock/fake_upstream.py）留在本仓库——发行版按**路径**
-# 复用它，不复制：复制品会漂移，漂移出来的绿测试什么也不证明。
+# There used to be a third tier, end-to-end (real binary + fake upstream + fake client). It moved
+# away with the product modules: the kernel ships no gateway, UI or client integration, so its
+# own binary has nothing to serve. Every chapter's e2e now runs the distribution's binary
+# (newgate-ext's mock/) since the modules live there. The fake upstream stays in this repo,
+# reused **by path**, not copied: a copy drifts, and a test green by drift proves nothing.
 #
-# ---- 触发条件：push 到 main、有人开 PR、以及手动（2026-09-20 改）----
+# ---- Triggers: push to main, someone opening a PR, and manual runs (changed 2026-09-20) ----
 #
-# 开发流程是「从 main 切分支 → 干完合回 main」，所以**只有合进 main 的那一下**
-# 需要一次权威判定。2026-09-18 因此砍到只剩 `push`：那时是
-# `push: branches: [main, "feature/**"]` **加** `pull_request:`，每推一次分支、
-# 每开一个 PR 都跑一轮，run 列表里大半是还没定稿的中间态——真正要看的「main
-# 现在绿不绿」反而被埋了。
+# The flow is "branch off main -> merge back into main", so **only the moment something lands
+# in main** needs an authoritative verdict. On 2026-09-18 it was cut down to `push` alone: at
+# the time that meant `push: branches: [main, "feature/**"]` **plus** `pull_request:`, so every
+# branch push and every PR ran a round, and most of the run list was unfinalized work in
+# progress -- what mattered, "is main green right now", got buried.
 #
-# 2026-09-20 把 `pull_request` 加回来（**不**加回 `feature/**`）：只留 PR 不会刷屏
-# ——一个 PR 一轮，新推送由下面的 concurrency 取消旧的——而本仓库的 README 现在
-# 明着招人 fork，别人提上来的 PR 不该是一句「没人检查」。
+# 2026-09-20 brought `pull_request` back (**without** re-adding `feature/**`): PRs alone do not
+# flood the list -- one round per PR, a new push cancels the old one via the concurrency block
+# below -- and this repo's README now openly invites forks, so a submitted PR should not mean
 #
-# 要说清楚它**不是门禁**。门禁 = main 上开分支保护 + 把这两个 job 设成 required，
-# 代价是以后不能直推 main（每次改动都得开 PR）。当前取舍是不那么做：直推仍是主
-# 路径，所以「推之前先本地跑 `make ci`」依然算流程的一部分——那条命令在本地复刻
-# 下面这两档（含干净 runner 的配置目录），见 Makefile 的 `ci` 目标。坏的 main 比
-# 坏的 PR 严重得多：main 一红，所有人下次拉下来都是红的。
+# To be clear, this is **not a gate**. A gate = branch protection on main + these two jobs
+# marked required, which costs direct pushes to main (every change needs a PR). The trade-off
+# now is not to do that: direct pushes stay the main path, so running `make ci` locally
+# before pushing is still part of the process -- it reproduces both tiers below (incl. a clean
+# runner config dir); see the `ci` target in the Makefile. A broken main hurts far more:
 #
-# `workflow_dispatch` 保留：偶尔需要在某个分支上手动验一次（比如动了 CI 本身），
-# 那是显式动作，不会自己堆记录。
+# `workflow_dispatch` is kept: occasionally something needs a manual check on a branch (e.g.
+# when CI itself changed), which is an explicit action that does not pile up records on its own.
 on:
   push:
     branches: [main]
@@ -45,8 +45,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# 同一分支上后一次推送取消前一次未跑完的：main 上连续合入时，中间那次的结果
-# 已经没人会看了，留着只是刷屏。
+# A later push on the same branch cancels an unfinished earlier one: when commits land in main
+# back to back, nobody will look at the middle run's result, so keeping it only floods the list.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -56,18 +56,18 @@ permissions:
 
 jobs:
   static:
-    name: 静态检查与单测
+    name: Static checks and unit tests
     runs-on: ubuntu-latest
-    # runner 本来就是干净的，这里仍然**显式**钉住配置目录：让「测试偷偷依赖
-    # 运行它的那台机器上的配置」在任何 runner 上都必然暴露，而不是碰运气。
-    # 与本地 `make ci` 的沙箱同一个意图（那条命令就是照它写的）。
+    # The runner is clean anyway, but the config directory is still pinned **explicitly**: so a
+    # test secretly depending on the runner machine's config necessarily surfaces on any runner,
+    # not by luck. Same intent as local `make ci`'s sandbox (that command was written to mirror it).
     #
-    # 路径写成**字面量**，不用 `${{ runner.temp }}`：`runner` 上下文在
-    # workflow 级 env 里没有，在 `jobs.<id>.env` 里也没有（可用上下文只有
-    # github/needs/strategy/matrix/vars/secrets/inputs），只有 step 级才有。
-    # 2026-09-18 实测：顶层和 job 级各写一次，两次都让 GitHub 直接拒绝整个
-    # workflow——run 0 秒失败报 "workflow file issue"，一个 job 都没起。
-    # 字面路径没有上下文依赖，最不容易再踩。
+    # The path is written as a **literal**, not `${{ runner.temp }}`: the `runner` context is not
+    # available in workflow-level env, nor in `jobs.<id>.env` (the available contexts are only
+    # github/needs/strategy/matrix/vars/secrets/inputs); only step level has it.
+    # Measured 2026-09-18: written once at top level and once at job level, both made GitHub
+    # reject the entire workflow -- the run failed in 0 seconds with "workflow file issue", no
+    # job started. A literal path has no context dependency and is hardest to trip over again.
     env:
       NEWGATE_HOME: /tmp/newgate-ci
     steps:
@@ -75,12 +75,12 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          # 跟 go.mod 走，不写死版本——否则升级 toolchain 时这里会静默落后。
+          # Follow go.mod and do not hardcode the version -- otherwise this silently lags behind when the toolchain is upgraded.
           go-version-file: go.mod
-          # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
-          # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
-          # 都报 "Some specified paths were not resolved, unable to cache
-          # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
+          # Point at go.mod, not go.sum: this module **has no third-party dependencies**, so the
+          # repo has no go.sum at all. Pointed at a nonexistent file, setup-go cannot compute a
+          # cache key and every time reports "Some specified paths were not resolved, unable to
+          # cache dependencies" and degrades to no caching (measured 2026-09-18, once in each of three jobs).
           cache-dependency-path: go.mod
 
       - name: gofmt
@@ -89,26 +89,26 @@ jobs:
       - name: vet
         run: make vet
 
-      - name: 装配清单是否过期
+      - name: Is the assembly manifest stale
         run: make check-generate
 
-      # 本地化：账本是否过期、译文占位符是否对得上、有没有孤儿键、
-      # 源码里还剩多少中文未迁移。全部离线、不花钱——要调 LLM 的翻译
-      # （tools/i18n sync）只在开发者本地跑，不进 CI。
-      - name: 本地化（账本与目录）
+      # Localization: whether the ledger is stale, whether translation placeholders match,
+      # whether there are orphan keys, how much Chinese remains unmigrated in the source. All
+      # offline and free -- LLM translation (tools/i18n sync) runs locally only, never in CI.
+      - name: Localization (ledger and catalogs)
         run: make check-i18n
 
-      # GOPROXY=off 把「内核的构建与测试完全离线」变成 CI 会红的事实，而不是
-      # 一句承诺（2026-09-20 起成立：清单只扫本仓库的 modules/，发行版是另一个
-      # Go module，不再有构建期 clone）。哪天有人塞回一个构建期外部依赖，
-      # 它会在这里以「no required module provides package」现形。
-      - name: 单测（离线：内核构建不该出网）
+      # GOPROXY=off turns "the kernel builds and tests fully offline" into a fact that goes red
+      # in CI, not a promise (true since 2026-09-20: the manifest scans only this repo's
+      # modules/, and the distribution is another Go module, no build-time clone). If a
+      # build-time external dependency creeps back in, it surfaces here as "no required module provides package".
+      - name: Unit tests (offline: the kernel build should not go to the network)
         run: GOPROXY=off go test ./...
 
   race:
-    name: 竞态检测
+    name: Race detector
     runs-on: ubuntu-latest
-    # 与 static 同一个理由（见那里的注释）：钉住配置目录，别让 runner 状态漏进来。
+    # Same reason as static (see the comment there): pin the config directory so runner state
     env:
       NEWGATE_HOME: /tmp/newgate-ci
     steps:
@@ -116,10 +116,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          # 指 go.mod 而不是 go.sum：这个模块**没有第三方依赖**，所以仓库里
-          # 根本没有 go.sum。指着一个不存在的文件时 setup-go 算不出缓存键，每次
-          # 都报 "Some specified paths were not resolved, unable to cache
-          # dependencies" 并退化成不缓存（2026-09-18 实测，三个 job 各报一次）。
+          # Point at go.mod, not go.sum: this module **has no third-party dependencies**, so the
+          # repo has no go.sum at all. Pointed at a nonexistent file, setup-go cannot compute a
+          # cache key and every time reports "Some specified paths were not resolved, unable to
+          # cache dependencies" and degrades to no caching (measured 2026-09-18, once in each of three jobs).
           cache-dependency-path: go.mod
 
       - run: go test -race ./...

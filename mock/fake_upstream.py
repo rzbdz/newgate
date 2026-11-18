@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""假上游：冒充 your-gateway 网关，零 token。
+"""Fake upstream: impersonates the your-gateway gateway, zero tokens.
 
-记录收到的一切，好让我们断言 newgate 到底改写成了什么模型、带了哪个 key。
+Records everything it receives, so we can assert what model newgate actually rewrote it to and
 
   python3 mock/fake_upstream.py --port 18080 [--log requests.jsonl]
 
-路由：
-  POST /v1/chat/completions   openai 方言（支持 stream）
-  POST /v1/messages           anthropic 方言（支持 stream）
-  POST /v1/responses          responses 方言（codex 走的那条，支持 stream）
-  GET  /__mock/requests       返回收到的全部请求（JSON）
-  POST /__mock/reset          清空记录
-  GET  /__mock/fail?code=429  下一个请求返回该状态码
+Routes:
+  POST /v1/chat/completions   openai dialect (streaming supported)
+  POST /v1/messages           anthropic dialect (streaming supported)
+  POST /v1/responses          responses dialect (the one codex uses; streaming supported)
+  GET  /__mock/requests       returns every request received (JSON)
+  POST /__mock/reset          clears the records
+  GET  /__mock/fail?code=429  makes the next request return that status code
 """
 import argparse, json, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,22 +20,22 @@ from urllib.parse import urlparse, parse_qs
 RECORDED = []
 NEXT_FAIL = {"code": None}
 
-# 上游那条 400 的真实判据。**2026-09-18 按实测重写**：原来这里照抄的是官方文档
-# 口径（「带 tools 且思考开着时，历史里每条 assistant 都必须回传非空推理」），
-# 那条口径在真实上游上根本不成立——打真实 smt-deepseek/deepseek-flash 逐格实测
-# （每格 3/3，见 modules/deepseek/st-reasoning.go 文件头与 docs/06-reasoning.md §2b）：
+# The real criterion for that upstream 400. **Rewritten from measurement on 2026-09-18**: this
+# used to copy the official docs, which say a history with tools and thinking on must pass
+# non-empty reasoning back on every assistant turn. That does not hold on the real upstream --
+# tested cell by cell against the real smt-deepseek/deepseek-flash (3/3 per cell;
 #
-#   reasoning_content 的形态（真实原文 / 省略字段 / 空串 / 占位符）**全都不影响结果**
-#   唯一起作用的是**尾部形状**：
-#     最后一条 user 消息的 content[] 全是 tool_result 块  → 400
-#     同一个 content[] 里多一个非空 text 块（哪怕只有一个空格）→ 200
+#   reasoning_content's shape (real text / omitted field / empty string / placeholder)
+#   **makes no difference at all**; the only thing that matters is the **tail shape**:
+#     the last user message's content[] is all tool_result blocks  -> 400
+#     the same content[] has one extra non-empty text block (even a single space) -> 200
 #
-# 报错文案仍是上游那句：它把「你这轮没有新指令」报成了「推理没回传」。文案与
-# 真实原因不一致，是这个上游最坑的地方，也是这条检查必须按形状写而不是按文案写
-# 的原因。
+# The error text is still the upstream's: it reports "no new instruction this turn" as
+# "reasoning was not passed back". That mismatch between text and real cause is the nastiest
+# thing about this upstream, and why this check must go by shape, not by text.
 #
-# 另外两条实测到、但本函数**故意不模拟**的：text 块空串会得到 `missing field
-# text`；数组以 assistant 收尾是另一条规则。插件不修这两族，假上游也就不拦。
+# Two more measured behaviors this function **deliberately does not simulate**: an empty text
+# block gives `missing field text`; ending the array with assistant is another rule. The plugin fixes neither family, so neither is blocked.
 STRICT_REASONING_ERR = {
     "type": "error",
     "error": {
@@ -47,7 +47,7 @@ STRICT_REASONING_ERR = {
 
 
 def strict_reasoning_violation(body):
-    """有违规返回 True。判据是**尾部形状**，不是推理字段——见上面那段实测记录。"""
+    """True on violation. The criterion is the **tail shape**, not the reasoning field -- see the measurement notes above."""
     if not isinstance(body, dict):
         return False
     messages = body.get("messages")
@@ -61,34 +61,34 @@ def strict_reasoning_violation(body):
         return False
     blocks = last_user.get("content")
     if not isinstance(blocks, list) or not blocks:
-        return False  # content 是字符串 = 本来就有文字，放行
+        return False  # content is a string = there is text already, so let it through
     return all(isinstance(b, dict) and b.get("type") == "tool_result"
                for b in blocks)
 
 
-# Responses 方言（codex 走的那条）对 custom 工具的两句 400。**2026-09-21 按实测写**：
-# 打真实 smt-deepseek/deepseek-flash，把 custom 工具放进工具树里逐格试过——
+# The Responses dialect's (the one codex uses) two 400s for custom tools. **Written from
+# measurement on 2026-09-21** against the real smt-deepseek/deepseek-flash, trying custom tools in the tool tree:
 #
-#   挂在顶层       → Unsupported custom tool: 'exec'. Only 'apply_patch' is supported.
-#   挂在 namespace 里 → Currently custom tools are not allowed inside a namespace.
+#   at top level        -> Unsupported custom tool: 'exec'. Only 'apply_patch' is supported.
+#   inside a namespace  -> Currently custom tools are not allowed inside a namespace.
 #                      Found custom tool 'exec' in tools[1].tools[0].
 #
-# 两句都是**请求形状**问题（apply_patch 是这一家唯一认的 custom），所以这里照实拦：
-# 假上游要复刻的是真实上游的判据，替它容错就等于把这条 e2e 变成绿的假测试。
+# Both are **request-shape** problems (apply_patch is the only custom this vendor accepts), so
+# block them faithfully: a lenient fake upstream would make this e2e a green fake test.
 #
-# 两句的**信封**在真实上游上并不一致（同一家不同的后端节点给过两种 code 与措辞
-# 尾巴），所以这里只逐字复刻那句**话**——话是判据，信封不是。
+# The two **envelopes** are not consistent on the real upstream (different backend nodes of the
+# same vendor gave two codes and wordings), so only the **sentence** is verbatim -- it is the criterion, not the envelope.
 #
-# 一格按同族推、没有实测：namespace 里的 apply_patch。本函数按「放行」处理（与顶层
-# 一致）。这一格在产品侧不可达（降级会把非 apply_patch 的 custom 全改掉，而
-# apply_patch 本来也不该被塞进 namespace），留着只是为了别把「不确定」写成假的确定。
+# One cell is inferred from its family, not measured: apply_patch inside a namespace. This
+# function lets it through (consistent with top level). That cell is unreachable on the product
+# side (degradation rewrites every non-apply_patch custom, and it should never sit in a namespace); kept only so "uncertain" is not written as certainty.
 RESPONSES_CUSTOM_TOOL_ERR = "Unsupported custom tool: '{name}'. Only 'apply_patch' is supported."
 RESPONSES_NESTED_CUSTOM_ERR = ("Currently custom tools are not allowed inside a "
                                "namespace. Found custom tool '{name}' in tools[{i}].tools[{j}].")
 
 
 def responses_custom_violation(body):
-    """有违规返回那句 400 的文案，没有返回 None。判据 = 真实上游那两句（见上）。"""
+    """Returns the text of that 400 on violation, None otherwise. Criterion = the real upstream's two sentences (see above)."""
     if not isinstance(body, dict):
         return None
     tools = body.get("tools")
@@ -113,33 +113,33 @@ def responses_custom_violation(body):
     return None
 
 
-# OpenAI Responses 的 `reasoning.effort` 白名单：这一家**始终思考**，只收这三档。
+# The `reasoning.effort` allowlist for OpenAI Responses: this vendor **always thinks** and
 #
-# 现场（2026-09-22，打真实 smt-glm/glm-5.3，`POST /v1/responses` 逐格实测）：
+# Field notes (2026-09-22, against the real smt-glm/glm-5.3, `POST /v1/responses` cell by cell):
 #
 #   effort = low | high | max      → 200
-#   effort = medium | minimal | none → 400「该模型始终思考，不支持关闭思考；
-#                                      请使用 low、high 或 max。」
-#   reasoning 字段缺席 / {} / {"effort": null} / {"summary":"auto"} → 200
+#   effort = medium | minimal | none -> 400 (verbatim upstream text: "该模型始终思考，不支持关闭思考；
+#                                      请使用 low、high 或 max。")
+#   reasoning field absent / {} / {"effort": null} / {"summary":"auto"} -> 200
 #
-# 另外两条实测到的形状（假上游**必须**照做，否则 e2e 会锁在错的形状上）：
-#   * 嵌套优先：`reasoning.effort` 压过顶层的 `effort`，两者都看顶层是错的；
-#   * 只在 `stream=true` 时，这条 400 **不走 HTTP 状态码**——先 200 开流，再把
-#     失败塞进流里（`response.failed`），客户端看到的原话是
-#     「stream disconnected before completion」，即用户报的那句。
+# Two more measured shapes (the fake upstream **must** follow them, or the e2e pins the wrong
+# shape): nested wins: `reasoning.effort` overrides the top-level `effort`, so reading both at
+# top level is wrong; and only with `stream=true` does this 400 **skip the HTTP status code** --
+# it opens the stream with 200, then stuffs the failure into it (`response.failed`); what the
+# client sees verbatim is "stream disconnected before completion", the user's exact words.
 #
-# 报错原文一字不改：它是 newgate 那个补丁的**匹配判据**之一，也是这条 e2e 断言
-# 「上游真的会这么拒」的证据。翻译或改写它等于把判据换掉。
+# The error text is kept verbatim: it is one of the **match criteria** for that newgate patch,
+# and the evidence that "the upstream really does reject it this way". Rewording it swaps the criterion out.
 RESPONSES_REASONING_EFFORT_ERR = (
     "该模型始终思考，不支持关闭思考；请使用 low、high 或 max。")
 RESPONSES_ACCEPTED_EFFORTS = ("low", "high", "max")
 
 
 def responses_effort_violation(body):
-    """这个 reasoning.effort 会被上游 400 吗？是则返回 True。
+    """Would this reasoning.effort get a 400 from the upstream? True if so.
 
-    只看**嵌套**那一层（`reasoning.effort`）——顶层 `effort` 不是这一家的读取位置，
-    把它当判据会造出一个真实上游不存在的 400。
+    Only the **nested** level (`reasoning.effort`) is read -- the top-level `effort` is not where
+    this vendor looks, and treating it as the criterion would invent a 400 the real upstream does not have.
     """
     if not isinstance(body, dict):
         return False
@@ -147,7 +147,7 @@ def responses_effort_violation(body):
     if not isinstance(reasoning, dict):
         return False
     effort = reasoning.get("effort")
-    if effort is None:  # 字段在但值是 null：实测 200（不思考的诉求落空了，但不报错）
+    if effort is None:  # field present but value null: measured 200 (the request not to think was dropped, but no error)
         return False
     return effort not in RESPONSES_ACCEPTED_EFFORTS
 
@@ -156,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *a):
-        pass  # 安静
+        pass  # quiet
 
     # ---------- helpers ----------
     def _json(self, code, obj, ensure_ascii=True):
@@ -219,9 +219,9 @@ class Handler(BaseHTTPRequestHandler):
             code, NEXT_FAIL["code"] = NEXT_FAIL["code"], None
             return self._json(code, {"error": {"message": f"mock forced {code}"}})
 
-        # anthropic 方言的私有端点：原生 anthropic 上游有、聚合器不一定有
-        # （api.rvcompute.com 实测 404）。newgate 按上游能力决定转发拿真值
-        # 还是本地粗估——mock 实现它，让 e2e 验证转发路径。
+        # A private endpoint of the anthropic dialect: native anthropic upstreams have it, aggregators
+        # may not (api.rvcompute.com measured 404). newgate decides by upstream capability whether to
+        # forward for the real value or estimate locally -- the mock implements it so the e2e checks that path.
         if u.path.endswith("/count_tokens"):
             return self._json(200, {"input_tokens": 42})
 
@@ -234,8 +234,8 @@ class Handler(BaseHTTPRequestHandler):
         responses = u.path.endswith("/responses")
 
         if responses:
-            # Responses 方言（codex）。custom 工具那两句 400 按真实判据拦——
-            # 那份判据见 responses_custom_violation 上面的实测记录。
+            # The Responses dialect (codex). The two custom-tool 400s are blocked by the real
+            # criterion -- see the measurement notes above responses_custom_violation.
             message = responses_custom_violation(body)
             if message:
                 print(f"[upstream] CUSTOM-TOOL 400: {u.path}", flush=True)
@@ -244,20 +244,20 @@ class Handler(BaseHTTPRequestHandler):
                                                   "code": "invalid_request_error"}})
             if responses_effort_violation(body):
                 print(f"[upstream] EFFORT 400: {u.path}", flush=True)
-                # 信封照实测复刻：同一个上游的不同节点给过两种（一个 `code` 是
-                # "invalid_request_error"、话是一句；另一个 `code` 是 "400001"、
-                # 话外面裹着 "The request is invalid: …. Please check …"）。
-                # **话里的判据一字不改**——newgate 的签名匹配 `bytes.Contains`
-                # 那句话，改了信封不会让 e2e 变绿（判据不在信封上），但改了话就会。
-                # 现场：dump/err-400-req000870.meta.txt（route normal ->
+                # The envelope is reproduced from measurement: nodes of the same upstream gave two kinds. One `code`
+                # is "invalid_request_error" with a single sentence; the other `code` is "400001", the
+                # sentence wrapped in "The request is invalid: .... Please check ...". **The criterion
+                # inside the sentence is unchanged** -- newgate's signature match runs `bytes.Contains` on
+                # that sentence; changing the envelope does not make the e2e green (the criterion is
+                # not in the envelope). Field notes: dump/err-400-req000870.meta.txt (route normal -> smt-glm/glm-5.3, codex_cli_rs/0.155.1).
                 # smt-glm/glm-5.3，codex_cli_rs/0.155.1）。
                 err = {"error": {"message": RESPONSES_REASONING_EFFORT_ERR,
                                  "type": "invalid_request_error",
                                  "param": "", "code": "400001"}}
                 if body.get("stream"):
-                    # 流式那一支**先 200 开流**，再把失败塞进事件流——真实上游就是
-                    # 这样，客户端报的那句「stream disconnected before completion」
-                    # 正是从这里来的。走 HTTP 状态码是错形状（见上面那段实测）。
+                    # The streaming branch **opens the stream with 200 first**, then stuffs the
+                    # failure into the event stream -- that is exactly what the real upstream does,
+                    # and the client's "stream disconnected before completion" comes from here;
                     return self._responses_failed(model, body, err["error"]["message"])
                 return self._json(400, err, ensure_ascii=False)
             if body.get("stream"):
@@ -265,14 +265,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self._responses_body(model, body))
 
         if body.get("stream"):
-            # mock_slow：把块间隔拉长——e2e 用它让一条流跨过 restart 窗口，
-            # 验证优雅交接不掐在途请求
+            # mock_slow: stretch the gap between chunks -- the e2e uses it to carry a stream
+            # across the restart window, verifying graceful handover does not cut in-flight requests
             return self._stream(model, anthropic,
                                 slow=bool(body.get("mock_slow")),
                                 tools=bool(body.get("tools")))
         if anthropic:
-            # 思考内容 + tool_use：让 newgate 的 thinkcache 有东西可记
-            # （tool_use 只在请求带了 tools 时给，id 固定，方便 e2e 断言回填）。
+            # Thinking content + tool_use: so newgate's thinkcache has something to record
+            # (tool_use is only given when the request carries tools, with a fixed id, so the e2e can assert the backfill).
             content = [{"type": "thinking",
                         "thinking": "MOCK-THINKING-ORIGINAL",
                         "signature": "mock-sig"}]
@@ -296,11 +296,11 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _stream(self, model, anthropic, slow=False, tools=False):
-        """逐块吐，每块之间留间隔——用来验证代理没有缓冲整个响应。
+        """Emits chunk by chunk with a gap in between -- used to verify the proxy does not buffer the whole response.
 
-        Anthropic 方言按 Claude Code 的真实形态吐块：thinking 块在前、
-        tools 请求加 tool_use 块——thinkcache 观察者靠这两个块的相邻关系
-        把推理内容和 tool id 关联起来（e2e 第 8 章的回填断言依赖它）。
+        The Anthropic dialect emits chunks in Claude Code's real shape: thinking blocks first,
+        and tool-carrying requests add a tool_use block -- the thinkcache observer uses the
+        adjacency of these two blocks to associate the reasoning with the tool id (the e2e's chapter 8 backfill assertion depends on it).
         """
         delay = 0.5 if slow else 0.05
         self.send_response(200)
@@ -344,36 +344,36 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
 
-    # ---------- Responses 方言（codex 走的那条） ----------
+    # ---------- The Responses dialect (the one codex uses) ----------
     #
-    # 逐字节复刻的是**实测到的形状**（2026-09-21，打真实 smt-deepseek/deepseek-flash，
-    # 两种工具各抓了一次全流）：
+    # What is reproduced byte for byte is the **measured shape** (2026-09-21, against the real
+    # smt-deepseek/deepseek-flash, capturing the full stream once for each of two tool kinds):
     #
-    #   * 每条事件都是 `event: <type>` + `data: {...}` 两行——load-bearing：出站改写
-    #     按 `data:` 行定位载荷，事件名那行必须原样留着；
-    #   * 一个 reasoning item 在前，工具调用从 output_index 1 起（不是 0！出站改写
-    #     按 output_index 记账，这条顺序正是那个键存在的理由）；
-    #   * 参数是**一串 delta** 吐出来的，收尾那条事件带完整原文；
-    #   * **没有 `data: [DONE]`**——流以 response.completed 结束（这与另外两种方言
-    #     不同，也是出站改写器必须处理「最后一个事件不带结尾空行」的现场来源）。
+    #   * every event is two lines, `event: <type>` + `data: {...}` -- load-bearing: the outbound
+    #     rewrite locates the payload by the `data:` line, so the event-name line must stay verbatim;
+    #   * one reasoning item comes first, so tool calls start at output_index 1 (not 0! the outbound
+    #     rewrite accounts by output_index, and this ordering is exactly why that key exists);
+    #   * arguments come out as **a series of deltas**, and the closing event carries the full text;
+    #   * **there is no `data: [DONE]`** -- the stream ends with response.completed (this differs
+    #     from the other two dialects, and is why the rewriter must handle "the last event has no trailing blank line").
     #
-    # 只发 e2e 依赖的那些事件（真实上游还夹着 content_part.* / reasoning_text.done
-    # 这类纯展示事件，出站改写对它们一律返回 nil）。少发的那部分不改变任何判据，
-    # 但**上面五条必须对**——它们每一条都对应改写器里一处实现细节。
+    # Only the events the e2e depends on are sent (the real upstream also interleaves purely
+    # presentational events like content_part.* / reasoning_text.done, which the outbound rewrite
+    # always returns nil for). Omitting them changes no criterion, but **the five points above must be right** -- each maps to one rewriter detail.
 
     def _responses_calls(self, body):
-        """按请求里的工具树造 function_call 列表（名字, 参数原文）。
+        """Builds the function_call list from the request's tool tree (name, raw arguments).
 
-        真实上游按模型意图挑；这里**每个 function 工具都调一次**（模型本来就能并行
-        调用），理由与 anthropic 那侧「带 tools 就给一个 tool_use」相同：让下游的
-        断言有东西可咬。**namespace 里的也照调**——实测过（2026-09-21，真实
-        deepseek-flash）模型真的会调用 namespace 里的函数，事件里报的是**裸名字**
-        （`name: "spawn_agent"`，不带 namespace 前缀）。
+        The real upstream picks by model intent; here **every function tool is called once**
+        (models can call in parallel anyway), for the same reason as on the anthropic side:
+        "give one tool_use when tools are present" -- so downstream assertions have something
+        to bite on. **Namespaced functions are called too** -- measured (2026-09-21, real
+        deepseek-flash): it really does call them, reporting the **bare name** (`name: "spawn_agent"`, no prefix).
 
-        参数按工具自己声明的**第一个**属性名造。降级出来的那条工具只有 `input`
-        （见 lift.go 的 freeformParams），原生工具是它自己的（`cmd` 之类）——于是
-        同一条流上同时出现「客户端该收到 custom_tool_call 的」与「一个字节都不许
-        动的」两种调用，这正是 e2e 要分开验的那件事。
+        Arguments are built from the **first** property the tool itself declares. A degraded tool has only `input`
+        (see freeformParams in lift.go); a native tool has its own (`cmd` and the like) -- so one
+        stream carries both "the call the client should get as custom_tool_call" and "the one no
+        byte of which may change"; the e2e checks those separately.
         """
         calls = []
         for name, params in self._responses_functions(body.get("tools")):
@@ -387,7 +387,7 @@ class Handler(BaseHTTPRequestHandler):
         return calls
 
     def _responses_functions(self, tools):
-        """工具树里的 function 叶子，深度优先（namespace 递归进去）。"""
+        """The function leaves of the tool tree, depth first (namespaces are recursed into)."""
         found = []
         if not isinstance(tools, list):
             return found
@@ -401,7 +401,7 @@ class Handler(BaseHTTPRequestHandler):
         return found
 
     def _responses_body(self, model, body):
-        """非流式：一个 response 对象，形状与 response.completed 里那个一致。"""
+        """Non-streaming: a single response object, shaped like the one inside response.completed."""
         output = [self._responses_reasoning_item()]
         for i, (name, args) in enumerate(self._responses_calls(body), start=1):
             output.append({"type": "function_call", "id": f"item_mock_{i}",
@@ -420,12 +420,12 @@ class Handler(BaseHTTPRequestHandler):
                              "text": "MOCK-REASONING-ORIGINAL"}]}
 
     def _responses_failed(self, model, body, message):
-        """**流式**的拒绝：先 200 开流，再把失败塞进事件流。
+        """A **streaming** rejection: open with 200 first, then stuff the failure into the event stream.
 
-        这是 responses 这条路上最坑的形状，也是这条 e2e 非要有它不可的理由：按
-        HTTP 状态码写的探针/补丁在流式路径上**完全看不到**这个失败（状态码是
-        200，连接也是正常建起来的），客户端看到的只是一句
-        「stream disconnected before completion」——用户 2026-09-22 报的就是这句。
+        This is the nastiest shape on the responses path, and the reason this e2e cannot do
+        without it: a probe or patch written against the HTTP status code **never sees** this
+        failure on the streaming path (the status is 200 and the connection is established
+        normally); the client just sees "stream disconnected before completion" -- what the user reported on 2026-09-22.
         """
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -456,8 +456,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         def send(ev):
-            # 事件名 = 载荷的 type（真实上游每一条都是这样）。**两行都要发**：
-            # 出站改写定位 data 行，但事件名那行是客户端分派的依据。
+            # Event name = the payload's type (so it is on every real upstream event). **Both lines
+            # must be sent**: the rewriter locates the data line, but the event name is what the client dispatches by.
             self.wfile.write(
                 f"event: {ev['type']}\ndata: {json.dumps(ev)}\n\n".encode())
             self.wfile.flush()
@@ -467,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
               "response": {"id": "resp_mock", "object": "response", "status": "in_progress",
                            "model": model, "output": []}})
 
-        # reasoning item 占 output_index 0——工具调用因此从 1 起。
+        # The reasoning item takes output_index 0 -- tool calls therefore start at 1.
         item = dict(reasoning)
         item["status"] = "in_progress"
         item.pop("content", None)
@@ -486,8 +486,8 @@ class Handler(BaseHTTPRequestHandler):
                   "item": {"type": "function_call", "id": item_id,
                            "status": "in_progress", "name": name,
                            "call_id": call_id, "arguments": ""}})
-            # 参数拆成几段 delta 吐——这是真实形态，也是出站改写必须**攒**参数的
-            # 原因（收尾那条单独看也可能为空，见 st-tools.go 的 degradedCall）。
+            # Arguments are emitted as several deltas -- the real shape, and why the outbound
+            # rewrite must **accumulate** arguments (the closing one can look empty alone; see degradedCall in st-tools.go).
             for at in range(0, len(args), 4):
                 send({"type": "response.function_call_arguments.delta",
                       "output_index": i, "item_id": item_id, "delta": args[at:at + 4]})
