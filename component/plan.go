@@ -112,12 +112,7 @@ func Resolve(loaders ...Loader) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	providedBy := map[string][]string{}
-	for _, c := range components {
-		for _, prov := range c.Provides {
-			providedBy[prov.spec.name] = append(providedBy[prov.spec.name], c.Name)
-		}
-	}
+	providedBy := providersOf(components)
 	if err := checkOrder(components, providedBy); err != nil {
 		return nil, err
 	}
@@ -261,9 +256,9 @@ func Ordered(components []Component) ([]Component, error) {
 		for _, requirement := range component.Requires {
 			indexes := providers[requirement.spec.name]
 			if len(indexes) == 0 {
-				// Absent Need/Optional is checked by checkOrder on the result; here absence only
-				// means "no edge". Saying it out loud belongs to the caller's trace, not to a pure
-				// function whose output is one slice.
+				// No edge: an absent Optional is legal, and an absent Need is reported by the
+				// checkOrder at the end (with the position it would have had, which is the more
+				// useful sentence of the two).
 				continue
 			}
 			for _, provider := range indexes {
@@ -321,9 +316,30 @@ func Ordered(components []Component) ([]Component, error) {
 			i18n.A{"names": strings.Join(stuck, " ")}))
 		return nil, fmt.Errorf("component capability dependency cycle")
 	}
+	// The last word is the same verification every assembly gets: an order is only worth
+	// something if a Need it cannot satisfy is reported **here**, where the order is being
+	// written down. Without this line the generator would happily freeze a spec that cannot
+	// start, and the failure would surface on somebody's first command instead of the build.
+	if err := checkOrder(ordered, providersOf(ordered)); err != nil {
+		return nil, err
+	}
 	tracef("%s", i18n.T("graph: {count} components, {edges} ordering edges — order computed",
 		i18n.A{"count": len(components), "edges": edgeTotal}))
 	return ordered, nil
+}
+
+// providersOf maps each port to its provider names, in the slice's order.
+//
+// Shared by both entries so "who provides what" is derived in one place: the two of them
+// disagreeing about a provider would be the same class of bug as two orderings.
+func providersOf(components []Component) map[string][]string {
+	out := make(map[string][]string, len(components))
+	for _, c := range components {
+		for _, prov := range c.Provides {
+			out[prov.spec.name] = append(out[prov.spec.name], c.Name)
+		}
+	}
+	return out
 }
 
 // reportMultipleProviders names every port with more than one provider.

@@ -27,6 +27,7 @@ remote design — see the distribution's `docs/`.
 | Capability | A typed port identity components use to reach each other |
 | Provision / Requirement | Static declaration that a component provides / needs a port (`Need` hard, `Optional` weak) |
 | Plan | The validated graph: order fixed (it came with the declaration), no `Start` run |
-| Selection | The table a composition root hands the kernel: which components to install |
+| Loader | The table a composition root hands the kernel: which components, **in start order** |
+| Ordered | The one function that computes that order (build-time generator, testkit) |
 | Entry | The process-entry contract (`component/entry`): who claims this invocation |
 | Release | Undo handle for a runtime registration (`Register*` on an owner service) |

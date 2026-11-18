@@ -4,14 +4,6 @@
       "reviewed": true,
       "text": "  弱依赖缺席 {consumer} 需要 {provider} —— 没有提供者，跳过（不影响启动）"
     },
-    " needs=[{list}]": {
-      "reviewed": true,
-      "text": " 需要=[{list}]"
-    },
-    " provides=[{list}]": {
-      "reviewed": true,
-      "text": " 提供=[{list}]"
-    },
     "(nobody registered)": {
       "reviewed": true,
       "text": "（无人申报）"

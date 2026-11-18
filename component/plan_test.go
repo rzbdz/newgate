@@ -224,6 +224,21 @@ func TestOrderedComputesADependencyOrder(t *testing.T) {
 	}
 }
 
+// TestOrderedRejectsAMissingNeed: computing an order must not be a weaker check than
+// verifying one. The generator freezes whatever Ordered returns, and build/build.sh does not run
+// tests, so a Need nobody provides has to be reported **here** -- otherwise the binary ships with
+// a graph that fails on every command, and the message shows up on a user's first run.
+func TestOrderedRejectsAMissingNeed(t *testing.T) {
+	_, err := Ordered([]Component{{
+		Name:     "consumer",
+		Type:     "test",
+		Requires: []Requirement{Need(NewCapability[struct{}]("nobody-provides-this"))},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "nobody-provides-this") {
+		t.Fatalf("a Need with no provider must be reported by Ordered, naming the port; got: %v", err)
+	}
+}
+
 // TestOrderedRejectsACycle: a cycle cannot be expressed as an order, so the loudest place to
 // report it is where an order is being computed -- the generator (fails the build) rather than
 // somebody's first command.

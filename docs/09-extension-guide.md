@@ -398,7 +398,7 @@ rank 是一把阶梯，**空隙是留给将来的**（按环境分流、按配�
 | 1000 | `DefaultRank` | 兜底：`Claims` 永远为真，所以必须排在最后。内核的 `cli`、骨架发行版的 `hello` |
 
 **界面不是入口的寄存处**（2026-09-20 改）：守护进程本体（`newgate __serve`）原来
-注册成 cli 的一条命令，于是 `disable: ["cli"]` 的装配**编得出来却起不来**
+注册成 cli 的一条命令，于是「规格书里不装 cli」的装配**编得出来却起不来**
 （`no entry claimed this call`）——一个纯网页的发行版（没有终端界面，全靠浏览器）
 因此根本不成立。判断一个东西该申报入口还是该注册成界面的命令，问的是**「换个发行版
 它还在吗」的反面**：`newgate status` 换掉界面就没了（它是界面的一条命令），
@@ -547,23 +547,18 @@ Stop: func(context.Context) error { return component.ReleaseAll(releases) },
 DeepSeek 的尾部形状修补、GLM 的思维链回传、客户端×模型的交叉语义都属于第二类：
 它们是产品决策，随上游和发行版变。
 
-### 接缝：`app.Selection`
+### 接缝：`modules.Loader`
 
-组合根的装配逻辑留在内核，「装哪些」是消费者的事：
+组合根的装配逻辑留在内核，「装哪些、按什么顺序」是消费者的事：
 
 ```go
-// app/manifest.go
-type Entry struct {
-	Dir       string            // 目录名——它就是「关掉哪一个」的键
-	Component modules.Component
+// component/plan.go
+type Loader interface {
+	Load() ([]Component, error)   // **切片就是启动序**：provider 在前
 }
-func CoreModules() []Entry      // 内核自带的组件表（实现落在生成的 modules_gen.go）
-
-type Selection struct {
-	Disable []string            // 要关掉的内核模块，写**目录名**
-	Extra   []Entry             // 消费者自己的模块
-}
-func (s Selection) Load() ([]modules.Component, error)
+type Static []Component            // 「我手上就有这张表」
+func Ordered([]Component) ([]Component, error)   // 唯一的「算顺序」实现（生成器 / testkit 用）
+func Resolve(...Loader) (*Plan, error)           // 只校验，不排序
 
 // app/main.go
 type Options struct{ Loader modules.Loader; Version, BuildTime, CommitTime string }
@@ -572,21 +567,26 @@ func Main(ctx context.Context, opts Options) int   // 留痕 → 起图 → 问�
 
 发行版的 main 于是只有十几行：交出「哪张图 + 版本号」，其余交给 `app.Main`。
 
-`Disable` 写的是**目录名**（`claudecode_deepseek`）而不是组件名
-（`claudecode-deepseek`）——十四个内核模块里有三个两者不同。写错名字会在
-`Selection.Load()` 当场报错，因为「我以为关掉了，它其实还在跑」是这一层最坏的失效。
+**顺序是声明的一部分，不是运行时算出来的**（2026-11-18）。模块集合在构建期就固定，
+所以「怎么排」是编译期的事实：写声明的人（发行版的 `tools/distgen`、testkit 的临时
+组图）调一次 `Ordered`，把结果交出来；运行时 `Resolve` 只证明每个依赖的 provider
+确实排在前面。于是「两个实现各排各的」这个故障模式在框架这一层不存在——顺序只有
+一个来源。
+
+内核不再有自己的模块表（`app.Selection`、`CoreModules()`、`app/modules_gen.go`
+2026-11-18 全部删掉）：它一个模块都不带，「装哪些」没有内容。发行版的规格书是唯一
+的输入，它生成的那张表既是「装了谁」也是「按什么顺序装」。
 
 ### 发行版长什么样
 
 ```
 my-dist/
 ├── core/                 submodule：内核源码（钉在一个提交上）
-├── go/                   发行版自己的 Go module
-│   ├── go.mod            replace github.com/rzbdz/newgate => ./core
-│   ├── modules/<名字>/    发行版的模块（形态与内核 modules/ 完全一致）
-│   ├── manifest/         生成物：规格书 → Selection（进版本控制）
-│   ├── cmd/newgate/      main（十几行）
-│   └── tools/distgen/    读规格书、生成上面那份清单
+├── go.mod                replace github.com/rzbdz/newgate => ./core
+├── modules/<名字>/       发行版的模块（形态与内核 modules/ 完全一致）
+├── manifest/             生成物：规格书 → 模块表（**按启动序**，进版本控制）
+├── cmd/newgate/          main（十几行）
+├── tools/distgen/        读规格书、算顺序、生成上面那份表
 ├── dist.json             规格书
 └── build/build.sh        唯一的构建入口
 ```
@@ -595,12 +595,11 @@ my-dist/
 
 ```json
 { "distribution": "newgate-default",
-  "modules": ["hello", "deepseek", "glm"],
-  "disable": ["cli"] }
+  "modules": ["hello", "deepseek", "glm"] }
 ```
 
-`modules` = 本仓库 `modules/` 下要装的目录名（**白名单**——不在名单里的不装，
-所以同一份目录可以既放着变体模块又不进默认产品）；`disable` = 要关掉的内核模块目录名。
+`modules` = 本仓库 `modules/` 下要装的目录名，也就是全部内容（没有「关掉内核的
+哪些」这回事了；`disable` 这个键 2026-11-18 删掉，写进去是构建期报错）。
 
 **没有第二张纸。** 2026-09-20 之前内核根还有一张 `modules-ext.json`（Pin）指向发行版
 仓库、构建期把它 clone 进来；那套机制整个删掉了。理由是它让**产品决定住在内核里**，
@@ -620,38 +619,6 @@ my-dist/
 **目录名不必是 Go 标识符**：`simple-cli` 这种连字符名字合法，生成器把 import 别名
 拧成 `ext_simple_cli`——判据是 `tools/genmodules/scan.Ident`，内核与发行版两个生成器
 共用同一份实现（同一把尺子，否则同一个目录名会在两个仓库里得到两种解释）。
-
-### 关掉一个 core 模块
-
-`disable` 名单。它不需要那个模块是可选的：关掉一个被人 `Need` 的模块会在构图期
-当场失败——那是对的，说明这份规格书自相矛盾。关掉一个没人依赖的模块（如
-`pluginmanager`、`cli`）就只是少了一个功能。
-
-要**全关**（「这个发行版只要框架 + 我自己的模块」）**不要列一长串目录名**，用
-`AllCore`：
-
-```go
-app.Selection{AllCore: true, Extra: []app.Entry{{Dir: "hello", Component: hello.New()}}}
-```
-
-发行版的规格书里写 `"disable": ["*"]`，`tools/distgen` 把它编成 `AllCore: true`。
-列满名字的写法带一份**会腐坏的副本**：内核往 `CoreModules()` 里加一个模块时，那份
-名单不会跟着长，于是「我以为全关掉了」的发行版悄悄多装了一个模块——而且不报错。
-`AllCore` 跟着 `CoreModules()` 一起长，**关不掉的那个自动留在外面**（见下一段的
-边界），所以它同时是「全关」和「关得掉的全关」这两句话的同一份实现。
-`AllCore` 与 `Disable` 同时给会报错：两个说法说同一件事时，后者只会变成前者的过时副本。
-
-「只有 built-in 不可摘」是**被测试守着的**，不是一句口号：`app/matrix_test.go`
-逐个模块摘一遍，看失败的方式对不对（要么装得起来，要么因为别人硬依赖它而当场
-失败并点名那个端口）。所以想让一个模块可摘，**别让它被 MustGet 伸手拿**——
-声明 `Need` 或 `Optional`。
-
-那个唯一的 built-in 是 `modules/entry`（入口账本）。它不在任何名单上：
-`app.Selection.Load` 拒绝关掉**组合根自己要用的端口**的提供者
-（`app/manifest.go` 的 `compositionRootPorts`，今天只有入口账本一个）。
-想弄清这条边界，读两处就够：`app/manifest.go` 的 `compositionRootPorts`
-（组合根依赖什么）与 `app/matrix_test.go` 的 `TestTheOnlyBuiltinCannotBeRemoved`
-（两套说法必须指向同一个组件）。
 
 ### 造一个发行版
 

@@ -7,16 +7,6 @@
         "provider"
       ]
     },
-    " needs=[{list}]": {
-      "args": [
-        "list"
-      ]
-    },
-    " provides=[{list}]": {
-      "args": [
-        "list"
-      ]
-    },
     "(nobody registered)": {},
     "assembly complete: {count} components, took {took}": {
       "args": [

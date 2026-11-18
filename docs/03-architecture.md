@@ -72,8 +72,8 @@ provider 排在 consumer **之前**；运行时 `component.Resolve` 只校验、
 
 本仓库只是 **core**：它提供机制，不提供产品定义。「这个二进制由哪些模块组成」
 由发行版说了算——发行版是**另一个仓库、另一个 Go module**，它把 core 当依赖
-（`replace` 到自己的 `core/` submodule），并把 `app.Selection` 交给内核的组合根：
-内核自带的减去它要关掉的、加上它自己的（见 `docs/09-extension-guide.md` §8）。
+（`replace` 到自己的 `core/` submodule），并把一张 `modules.Loader` 交给内核的
+组合根：一张**已按启动序排好**的组件表（见 `docs/09-extension-guide.md` §8）。
 
 对这张图来说发行版模块**没有任何特殊**：同一张依赖图、同一套 `Provides/Requires`、
 同一套生命周期。区别只在**谁决定装**——`modules/` 按目录全装，发行版的按规格书

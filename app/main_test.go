@@ -34,6 +34,17 @@ func TestMainExitsWhenNoEntryClaims(t *testing.T) {
 	}
 }
 
+// TestMainExitsWhenNobodyProvidesTheEntryLedger: the composition root's own dependency, missing.
+//
+// It used to panic (MustGet). Since a graph can now be handed over without one -- the kernel's
+// own Loader{} is exactly that -- the sentence has to be a sentence: exit 70, and a message that
+// names the port rather than a stack trace nobody can act on.
+func TestMainExitsWhenNobodyProvidesTheEntryLedger(t *testing.T) {
+	if code := Main(context.Background(), Options{Loader: modules.Static{}}); code != 70 {
+		t.Errorf("a graph with no entry ledger returned %d, want 70", code)
+	}
+}
+
 // TestMainRunsTheTraceHookAndFailureHook locks the two seams a product plugs in,
 // so a distribution's main only has to say "which graph, where the record goes".
 func TestMainRunsTheTraceHookAndFailureHook(t *testing.T) {
