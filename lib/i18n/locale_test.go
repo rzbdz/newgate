@@ -153,6 +153,27 @@ func TestPlural(t *testing.T) {
 	}
 }
 
+// A translation without plural forms still gets the count: the catalog only needs `other` for
+// Chinese, and that entry is `Text`, not `Other` - so this is the shape every translated
+// i18n.N(...) takes in practice. Before 2026-11-19 this branch skipped withN and the rendered
+// line carried a literal `{n}` (seen live: "backfilled … on {n} assistant messages").
+func TestPluralWithASingleFormTranslation(t *testing.T) {
+	install(t, "zh-Hans", Catalog{
+		Language: "zh-Hans",
+		Source:   SourceLang,
+		Messages: map[string]Entry{
+			"Saved {n} file": {Text: "已保存 {n} 个文件"},
+		},
+	})
+	if got := N("Saved {n} file", "Saved {n} files", 3, nil); got != "已保存 3 个文件" {
+		t.Errorf("a single-form translation must still substitute {n}: %q", got)
+	}
+	// T() goes through the same branch with no count at all; it must not invent an `n`.
+	if got := T("Saved {n} file", A{"n": 9}); got != "已保存 9 个文件" {
+		t.Errorf("an explicitly given n must still win under T(): %q", got)
+	}
+}
+
 func TestEnglishPluralForms(t *testing.T) {
 	// When English appears as a translation (say an English user switches the language to en-GB,
 	// or someone makes a revised table for English)

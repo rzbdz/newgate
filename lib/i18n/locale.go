@@ -367,6 +367,19 @@ func Tn(msg, plural string, n int, args A) string {
 		return format(msg, args)
 	}
 	if !e.plural() {
+		// A translation with no plural forms (the common case outside Chinese, and the only case
+		// in it): the count still has to reach `{n}`. Leaving out withN here made every
+		// `i18n.N(...)` whose translation carried `{n}` print the placeholder literally - the
+		// catalog entry passes `check` (the source has the argument) and only shows up in the
+		// rendered line, so it survived until a user read `backfilled … on {n} assistant
+		// messages` in the log (2026-11-19).
+		//
+		// Guarded on `plural`: T() reaches here through Tn(msg, "", 0, args), and there is no
+		// count to inject - calling withN unconditionally would allocate a map per translated
+		// string on the hot path for nothing.
+		if plural != "" {
+			return format(e.Text, withN(args, n))
+		}
 		return format(e.Text, args)
 	}
 	if e.One == "" || isChinese(lang) {
